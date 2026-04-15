@@ -1,8 +1,12 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { Resend } from "resend";
 import { emailTemplates } from "../db/email-templates.schema";
+import { sentEmails } from "../db/sent-emails.schema";
+import { senders } from "../db/senders.schema";
 import { json200Response, json201Response } from "../lib/helpers";
+import { interpolate } from "../lib/interpolate";
 import type { Variables } from "../variables";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
@@ -171,4 +175,97 @@ emailTemplatesRouter.openapi(deleteTemplateRoute, async (c) => {
 
   await db.delete(emailTemplates).where(eq(emailTemplates.slug, slug));
   return c.json({ success: true }, 200);
+});
+
+// --- SEND ---
+const sendTemplateRoute = createRoute({
+  method: "post",
+  path: "/{slug}/send",
+  tags: ["Email Templates"],
+  description: "Send an email using a template.",
+  request: {
+    params: z.object({ slug: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            to: z.string().email(),
+            variables: z.record(z.string(), z.string()).optional().default({}),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    ...json201Response(
+      z.object({
+        id: z.string(),
+        resendId: z.string().nullable(),
+        status: z.string(),
+      }),
+      "Email sent"
+    ),
+  },
+});
+
+emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
+  const db = c.get("db");
+  const { slug } = c.req.valid("param");
+  const { to, variables } = c.req.valid("json");
+
+  // Look up template
+  const rows = await db
+    .select()
+    .from(emailTemplates)
+    .where(eq(emailTemplates.slug, slug))
+    .limit(1);
+
+  if (rows.length === 0) {
+    return c.json({ error: "Template not found" }, 404);
+  }
+
+  const template = rows[0];
+  const renderedSubject = interpolate(template.subject, variables);
+  const renderedHtml = interpolate(template.bodyHtml, variables);
+
+  // Send via Resend
+  const fromAddress = c.env.RESEND_EMAIL_FROM;
+  const resend = new Resend(c.env.RESEND_API_KEY);
+  const result = await resend.emails.send({
+    from: fromAddress,
+    to,
+    subject: renderedSubject,
+    html: renderedHtml,
+  });
+
+  // Find sender if they exist
+  const existingSender = await db
+    .select({ id: senders.id })
+    .from(senders)
+    .where(eq(senders.email, to))
+    .limit(1);
+
+  const senderId = existingSender[0]?.id ?? null;
+
+  // Store sent email
+  const id = nanoid();
+  const now = Math.floor(Date.now() / 1000);
+  await db.insert(sentEmails).values({
+    id,
+    senderId,
+    fromAddress,
+    toAddress: to,
+    subject: renderedSubject,
+    bodyHtml: renderedHtml,
+    bodyText: null,
+    resendId: result.data?.id ?? null,
+    status: result.error ? "failed" : "sent",
+    sentAt: now,
+    createdAt: now,
+  });
+
+  return c.json(
+    { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
+    201
+  );
 });
