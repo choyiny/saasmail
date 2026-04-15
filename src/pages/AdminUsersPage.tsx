@@ -46,10 +46,6 @@ export default function AdminUsersPage() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  if (session?.user?.role !== "admin") {
-    return <Navigate to="/" replace />;
-  }
-
   async function loadData() {
     setLoading(true);
     try {
@@ -64,8 +60,14 @@ export default function AdminUsersPage() {
   }
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (session?.user?.role === "admin") {
+      loadData();
+    }
+  }, [session]);
+
+  if (session?.user?.role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
 
   async function handleCreateInvite() {
     setInviteLoading(true);

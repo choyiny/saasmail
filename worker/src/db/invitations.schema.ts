@@ -7,8 +7,8 @@ export const invitations = sqliteTable("invitations", {
   role: text("role").notNull().default("member"),
   email: text("email"),
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  usedBy: text("used_by"),
+  usedBy: text("used_by").references(() => users.id, { onDelete: "set null" }),
   usedAt: integer("used_at", { mode: "timestamp" }),
-  createdBy: text("created_by").notNull(),
+  createdBy: text("created_by").notNull().references(() => users.id, { onDelete: "cascade" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
