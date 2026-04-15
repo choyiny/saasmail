@@ -17,9 +17,7 @@ export interface SequenceEmailMessage {
 /**
  * Cron handler: find due pending emails and push them onto the queue.
  */
-export async function handleScheduled(
-  env: CloudflareBindings
-): Promise<void> {
+export async function handleScheduled(env: CloudflareBindings): Promise<void> {
   const db = drizzle(env.DB, { schema });
   const now = Math.floor(Date.now() / 1000);
 
@@ -30,8 +28,8 @@ export async function handleScheduled(
     .where(
       and(
         eq(sequenceEmails.status, "pending"),
-        lte(sequenceEmails.scheduledAt, now)
-      )
+        lte(sequenceEmails.scheduledAt, now),
+      ),
     );
 
   if (dueEmails.length === 0) return;
@@ -55,7 +53,7 @@ export async function handleScheduled(
  */
 export async function handleQueueBatch(
   batch: MessageBatch<SequenceEmailMessage>,
-  env: CloudflareBindings
+  env: CloudflareBindings,
 ): Promise<void> {
   const db = drizzle(env.DB, { schema });
   const resend = new Resend(env.RESEND_API_KEY);
@@ -67,13 +65,13 @@ export async function handleQueueBatch(
         db,
         resend,
         fromAddress,
-        msg.body.sequenceEmailId
+        msg.body.sequenceEmailId,
       );
       msg.ack();
     } catch (err) {
       console.error(
         `Failed to process sequence email ${msg.body.sequenceEmailId}:`,
-        err
+        err,
       );
       msg.retry();
     }
@@ -84,7 +82,7 @@ async function processSequenceEmail(
   db: ReturnType<typeof drizzle>,
   resend: Resend,
   fromAddress: string,
-  sequenceEmailId: string
+  sequenceEmailId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -211,8 +209,8 @@ async function processSequenceEmail(
     .where(
       and(
         eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "pending")
-      )
+        eq(sequenceEmails.status, "pending"),
+      ),
     )
     .limit(1);
 
@@ -222,8 +220,8 @@ async function processSequenceEmail(
     .where(
       and(
         eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "queued")
-      )
+        eq(sequenceEmails.status, "queued"),
+      ),
     )
     .limit(1);
 

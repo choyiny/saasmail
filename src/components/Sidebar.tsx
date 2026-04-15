@@ -1,5 +1,13 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { Mail, FileText, Key, Users, PenSquare, LogOut, ListOrdered } from "lucide-react";
+import {
+  Mail,
+  FileText,
+  Key,
+  Users,
+  PenSquare,
+  LogOut,
+  ListOrdered,
+} from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import {
   DropdownMenu,
@@ -107,7 +115,11 @@ export default function Sidebar({ onCompose }: SidebarProps) {
               </div>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side="right" align="end" className="bg-card border-border-dark text-text-primary">
+          <DropdownMenuContent
+            side="right"
+            align="end"
+            className="bg-card border-border-dark text-text-primary"
+          >
             <div className="px-2 py-1.5 text-xs text-text-secondary">
               {session?.user?.email}
             </div>

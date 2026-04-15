@@ -19,7 +19,7 @@ export interface ParsedAttachment {
 }
 
 export async function parseEmail(
-  message: ForwardableEmailMessage
+  message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
   const rawEmail = await new Response(message.raw).arrayBuffer();
   const parser = new PostalMime();

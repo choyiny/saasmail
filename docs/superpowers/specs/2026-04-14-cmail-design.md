@@ -54,67 +54,67 @@ cmail/
 
 Unique sender profiles with denormalized counts for fast list queries.
 
-| Column       | Type    | Constraints              |
-|-------------|---------|--------------------------|
-| id          | TEXT    | PRIMARY KEY (nanoid)     |
-| email       | TEXT    | NOT NULL, UNIQUE         |
-| name        | TEXT    | Parsed from From header  |
+| Column        | Type    | Constraints               |
+| ------------- | ------- | ------------------------- |
+| id            | TEXT    | PRIMARY KEY (nanoid)      |
+| email         | TEXT    | NOT NULL, UNIQUE          |
+| name          | TEXT    | Parsed from From header   |
 | last_email_at | INTEGER | NOT NULL (unix timestamp) |
-| unread_count | INTEGER | NOT NULL DEFAULT 0       |
-| total_count | INTEGER | NOT NULL DEFAULT 0       |
-| created_at  | INTEGER | NOT NULL                 |
-| updated_at  | INTEGER | NOT NULL                 |
+| unread_count  | INTEGER | NOT NULL DEFAULT 0        |
+| total_count   | INTEGER | NOT NULL DEFAULT 0        |
+| created_at    | INTEGER | NOT NULL                  |
+| updated_at    | INTEGER | NOT NULL                  |
 
 ### `emails`
 
 All received inbound emails, linked to a sender.
 
-| Column      | Type    | Constraints              |
-|------------|---------|--------------------------|
-| id         | TEXT    | PRIMARY KEY (nanoid)     |
-| sender_id  | TEXT    | NOT NULL, FK → senders.id |
-| recipient  | TEXT    | NOT NULL (the To address) |
-| subject    | TEXT    |                          |
-| body_html  | TEXT    | Rich HTML version        |
-| body_text  | TEXT    | Plain text version (for future AI use) |
-| raw_headers | TEXT   | JSON blob of all headers |
-| message_id | TEXT    | UNIQUE (Message-ID header, deduplication) |
-| is_read    | INTEGER | NOT NULL DEFAULT 0       |
-| received_at | INTEGER | NOT NULL                |
-| created_at | INTEGER | NOT NULL                 |
+| Column      | Type    | Constraints                               |
+| ----------- | ------- | ----------------------------------------- |
+| id          | TEXT    | PRIMARY KEY (nanoid)                      |
+| sender_id   | TEXT    | NOT NULL, FK → senders.id                 |
+| recipient   | TEXT    | NOT NULL (the To address)                 |
+| subject     | TEXT    |                                           |
+| body_html   | TEXT    | Rich HTML version                         |
+| body_text   | TEXT    | Plain text version (for future AI use)    |
+| raw_headers | TEXT    | JSON blob of all headers                  |
+| message_id  | TEXT    | UNIQUE (Message-ID header, deduplication) |
+| is_read     | INTEGER | NOT NULL DEFAULT 0                        |
+| received_at | INTEGER | NOT NULL                                  |
+| created_at  | INTEGER | NOT NULL                                  |
 
 ### `sent_emails`
 
 Outbound emails sent via Resend.
 
-| Column       | Type    | Constraints              |
-|-------------|---------|--------------------------|
-| id          | TEXT    | PRIMARY KEY (nanoid)     |
-| sender_id   | TEXT    | FK → senders.id (nullable) |
-| from_address | TEXT   | NOT NULL (sending address) |
-| to_address  | TEXT    | NOT NULL                 |
-| subject     | TEXT    | NOT NULL                 |
-| body_html   | TEXT    |                          |
-| body_text   | TEXT    |                          |
-| in_reply_to | TEXT    | Message-ID of email being replied to |
-| resend_id   | TEXT    | Resend's message ID      |
-| status      | TEXT    | NOT NULL DEFAULT 'sent' (sent/delivered/bounced/failed) |
-| sent_at     | INTEGER | NOT NULL                 |
-| created_at  | INTEGER | NOT NULL                 |
+| Column       | Type    | Constraints                                             |
+| ------------ | ------- | ------------------------------------------------------- |
+| id           | TEXT    | PRIMARY KEY (nanoid)                                    |
+| sender_id    | TEXT    | FK → senders.id (nullable)                              |
+| from_address | TEXT    | NOT NULL (sending address)                              |
+| to_address   | TEXT    | NOT NULL                                                |
+| subject      | TEXT    | NOT NULL                                                |
+| body_html    | TEXT    |                                                         |
+| body_text    | TEXT    |                                                         |
+| in_reply_to  | TEXT    | Message-ID of email being replied to                    |
+| resend_id    | TEXT    | Resend's message ID                                     |
+| status       | TEXT    | NOT NULL DEFAULT 'sent' (sent/delivered/bounced/failed) |
+| sent_at      | INTEGER | NOT NULL                                                |
+| created_at   | INTEGER | NOT NULL                                                |
 
 ### `attachments`
 
 Metadata for files stored in R2, linked to received emails.
 
 | Column       | Type    | Constraints              |
-|-------------|---------|--------------------------|
-| id          | TEXT    | PRIMARY KEY (nanoid)     |
-| email_id   | TEXT    | NOT NULL, FK → emails.id |
-| filename   | TEXT    | NOT NULL                 |
-| content_type | TEXT   | NOT NULL                 |
-| size       | INTEGER | NOT NULL (bytes)         |
-| r2_key     | TEXT    | NOT NULL (R2 object key) |
-| created_at | INTEGER | NOT NULL                 |
+| ------------ | ------- | ------------------------ |
+| id           | TEXT    | PRIMARY KEY (nanoid)     |
+| email_id     | TEXT    | NOT NULL, FK → emails.id |
+| filename     | TEXT    | NOT NULL                 |
+| content_type | TEXT    | NOT NULL                 |
+| size         | INTEGER | NOT NULL (bytes)         |
+| r2_key       | TEXT    | NOT NULL (R2 object key) |
+| created_at   | INTEGER | NOT NULL                 |
 
 ### BetterAuth Tables
 
@@ -157,38 +157,38 @@ All routes require BetterAuth session middleware (except the email worker handle
 ### Auth
 
 | Method | Path             | Description                    |
-|--------|-----------------|--------------------------------|
-| POST   | /api/auth/*     | BetterAuth (sign in, sign out) |
-| POST   | /api/auth/invite | Admin invites a team member   |
+| ------ | ---------------- | ------------------------------ |
+| POST   | /api/auth/\*     | BetterAuth (sign in, sign out) |
+| POST   | /api/auth/invite | Admin invites a team member    |
 
 ### Senders
 
-| Method | Path              | Description                                      |
-|--------|------------------|--------------------------------------------------|
+| Method | Path             | Description                                                                                                                       |
+| ------ | ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | /api/senders     | List senders, sorted by last_email_at. Query params: `q` (search name/email), `recipient` (filter by To address), `page`, `limit` |
-| GET    | /api/senders/:id | Sender detail (name, email, counts)              |
+| GET    | /api/senders/:id | Sender detail (name, email, counts)                                                                                               |
 
 ### Emails
 
-| Method | Path                      | Description                                    |
-|--------|--------------------------|------------------------------------------------|
-| GET    | /api/senders/:id/emails  | List emails from a sender (received + sent interleaved chronologically). Query params: `q` (search subject), `page`, `limit` |
-| GET    | /api/emails/:id          | Single email detail (html, text, headers)      |
-| PATCH  | /api/emails/:id          | Mark read/unread (updates sender.unread_count) |
-| PATCH  | /api/emails/bulk         | Bulk mark read/unread                          |
-| POST   | /api/emails/send         | Compose and send a new email                   |
-| POST   | /api/emails/:id/reply    | Reply to a received email (pre-fills to, subject with Re:, in_reply_to) |
+| Method | Path                    | Description                                                                                                                  |
+| ------ | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| GET    | /api/senders/:id/emails | List emails from a sender (received + sent interleaved chronologically). Query params: `q` (search subject), `page`, `limit` |
+| GET    | /api/emails/:id         | Single email detail (html, text, headers)                                                                                    |
+| PATCH  | /api/emails/:id         | Mark read/unread (updates sender.unread_count)                                                                               |
+| PATCH  | /api/emails/bulk        | Bulk mark read/unread                                                                                                        |
+| POST   | /api/emails/send        | Compose and send a new email                                                                                                 |
+| POST   | /api/emails/:id/reply   | Reply to a received email (pre-fills to, subject with Re:, in_reply_to)                                                      |
 
 ### Attachments
 
-| Method | Path                  | Description                          |
-|--------|-----------------------|--------------------------------------|
-| GET    | /api/attachments/:id  | Generate a presigned R2 URL for download |
+| Method | Path                 | Description                              |
+| ------ | -------------------- | ---------------------------------------- |
+| GET    | /api/attachments/:id | Generate a presigned R2 URL for download |
 
 ### Stats
 
-| Method | Path        | Description                                         |
-|--------|------------|-----------------------------------------------------|
+| Method | Path       | Description                                                         |
+| ------ | ---------- | ------------------------------------------------------------------- |
 | GET    | /api/stats | Total senders, total emails, unread count. Query param: `recipient` |
 
 ## Frontend UI
@@ -250,24 +250,24 @@ wrangler.jsonc
     {
       "binding": "DB",
       "database_name": "cmail-db",
-      "database_id": "<your-database-id>"
-    }
+      "database_id": "<your-database-id>",
+    },
   ],
   "r2_buckets": [
     {
       "binding": "R2",
-      "bucket_name": "cmail-attachments"
-    }
+      "bucket_name": "cmail-attachments",
+    },
   ],
   "assets": {
-    "directory": "./dist/client"
+    "directory": "./dist/client",
   },
   "email_routing": {
-    "enabled": true
+    "enabled": true,
   },
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }
 ```
 

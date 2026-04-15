@@ -94,8 +94,12 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   }
 
   return c.json(
-    { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
-    201
+    {
+      id,
+      resendId: result.data?.id ?? null,
+      status: result.error ? "failed" : "sent",
+    },
+    201,
   );
 });
 
@@ -191,7 +195,11 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   await cancelSequencesForSender(db, orig.senderId);
 
   return c.json(
-    { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
-    201
+    {
+      id,
+      resendId: result.data?.id ?? null,
+      status: result.error ? "failed" : "sent",
+    },
+    201,
   );
 });

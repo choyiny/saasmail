@@ -12,26 +12,28 @@
 
 ## File Structure
 
-| File | Action | Responsibility |
-|------|--------|---------------|
-| `src/components/TiptapEditor.tsx` | Create | Shared Tiptap editor with toolbar |
-| `src/lib/api.ts` | Modify | Add EmailTemplate type + CRUD functions |
-| `src/pages/TemplatesPage.tsx` | Create | Template list with create/delete |
+| File                               | Action | Responsibility                          |
+| ---------------------------------- | ------ | --------------------------------------- |
+| `src/components/TiptapEditor.tsx`  | Create | Shared Tiptap editor with toolbar       |
+| `src/lib/api.ts`                   | Modify | Add EmailTemplate type + CRUD functions |
+| `src/pages/TemplatesPage.tsx`      | Create | Template list with create/delete        |
 | `src/pages/TemplateEditorPage.tsx` | Create | Full-page template editor (create/edit) |
-| `src/pages/ComposeModal.tsx` | Modify | Replace Textarea with TiptapEditor |
-| `src/pages/InboxPage.tsx` | Modify | Add Templates link to header |
-| `src/App.tsx` | Modify | Add /templates routes |
+| `src/pages/ComposeModal.tsx`       | Modify | Replace Textarea with TiptapEditor      |
+| `src/pages/InboxPage.tsx`          | Modify | Add Templates link to header            |
+| `src/App.tsx`                      | Modify | Add /templates routes                   |
 
 ---
 
 ### Task 1: Install Tiptap Dependencies
 
 **Files:**
+
 - Modify: `package.json`
 
 - [ ] **Step 1: Install tiptap packages**
 
 Run:
+
 ```bash
 npm install @tiptap/react @tiptap/starter-kit @tiptap/pm
 ```
@@ -48,6 +50,7 @@ git commit -m "chore: add tiptap dependencies"
 ### Task 2: TiptapEditor Component
 
 **Files:**
+
 - Create: `src/components/TiptapEditor.tsx`
 
 - [ ] **Step 1: Create the TiptapEditor component**
@@ -101,8 +104,7 @@ export default function TiptapEditor({
     },
     editorProps: {
       attributes: {
-        class:
-          "prose prose-sm max-w-none min-h-[200px] p-3 focus:outline-none",
+        class: "prose prose-sm max-w-none min-h-[200px] p-3 focus:outline-none",
       },
     },
   });
@@ -183,6 +185,7 @@ git commit -m "feat: add shared TiptapEditor component"
 ### Task 3: API Client — Template CRUD Functions
 
 **Files:**
+
 - Modify: `src/lib/api.ts`
 
 - [ ] **Step 1: Add template types and API functions**
@@ -223,7 +226,7 @@ export async function createTemplate(data: {
 
 export async function updateTemplate(
   slug: string,
-  data: { name?: string; subject?: string; bodyHtml?: string }
+  data: { name?: string; subject?: string; bodyHtml?: string },
 ): Promise<EmailTemplate> {
   return apiFetch(`/api/email-templates/${slug}`, {
     method: "PUT",
@@ -233,7 +236,7 @@ export async function updateTemplate(
 }
 
 export async function deleteTemplate(
-  slug: string
+  slug: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/email-templates/${slug}`, {
     method: "DELETE",
@@ -253,6 +256,7 @@ git commit -m "feat: add email template API client functions"
 ### Task 4: Templates List Page
 
 **Files:**
+
 - Create: `src/pages/TemplatesPage.tsx`
 
 - [ ] **Step 1: Create the templates list page**
@@ -288,7 +292,10 @@ export default function TemplatesPage() {
     <div className="mx-auto max-w-3xl p-6">
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/" className="text-sm text-neutral-500 hover:text-neutral-700">
+          <Link
+            to="/"
+            className="text-sm text-neutral-500 hover:text-neutral-700"
+          >
             &larr; Inbox
           </Link>
           <h1 className="text-lg font-semibold">Email Templates</h1>
@@ -352,6 +359,7 @@ git commit -m "feat: add templates list page"
 ### Task 5: Template Editor Page
 
 **Files:**
+
 - Create: `src/pages/TemplateEditorPage.tsx`
 
 - [ ] **Step 1: Create the template editor page**
@@ -365,11 +373,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import TiptapEditor from "@/components/TiptapEditor";
-import {
-  fetchTemplate,
-  createTemplate,
-  updateTemplate,
-} from "@/lib/api";
+import { fetchTemplate, createTemplate, updateTemplate } from "@/lib/api";
 
 export default function TemplateEditorPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -517,6 +521,7 @@ git commit -m "feat: add template editor page"
 ### Task 6: Update ComposeModal to Use TiptapEditor
 
 **Files:**
+
 - Modify: `src/pages/ComposeModal.tsx`
 
 - [ ] **Step 1: Replace Textarea with TiptapEditor**
@@ -568,7 +573,7 @@ export default function ComposeModal({
         setSubject(
           email.subject?.startsWith("Re: ")
             ? email.subject
-            : `Re: ${email.subject || ""}`
+            : `Re: ${email.subject || ""}`,
         );
       });
     }
@@ -659,6 +664,7 @@ git commit -m "feat: replace compose textarea with TiptapEditor"
 ### Task 7: Add Routes and Navigation
 
 **Files:**
+
 - Modify: `src/App.tsx`
 - Modify: `src/pages/InboxPage.tsx`
 
@@ -766,6 +772,7 @@ Then in the header's button group (the `div` with `className="flex items-center 
 - [ ] **Step 3: Verify build**
 
 Run:
+
 ```bash
 npx wrangler deploy --dry-run
 ```

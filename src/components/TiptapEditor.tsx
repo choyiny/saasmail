@@ -32,10 +32,7 @@ function ToolbarButton({
   );
 }
 
-export default function TiptapEditor({
-  content,
-  onUpdate,
-}: TiptapEditorProps) {
+export default function TiptapEditor({ content, onUpdate }: TiptapEditorProps) {
   const editor = useEditor({
     extensions: [StarterKit],
     content,

@@ -1,9 +1,5 @@
 import { useState, useEffect } from "react";
-import {
-  fetchSequences,
-  enrollSender,
-  type Sequence,
-} from "@/lib/api";
+import { fetchSequences, enrollSender, type Sequence } from "@/lib/api";
 
 interface EnrollSequenceModalProps {
   senderId: string;
@@ -26,9 +22,11 @@ export default function EnrollSequenceModal({
   const [selectedId, setSelectedId] = useState("");
   const [skipSteps, setSkipSteps] = useState<number[]>([]);
   const [delayOverrides, setDelayOverrides] = useState<Record<string, number>>(
-    {}
+    {},
   );
-  const [variables, setVariables] = useState<Array<{ key: string; value: string }>>([]);
+  const [variables, setVariables] = useState<
+    Array<{ key: string; value: string }>
+  >([]);
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -49,9 +47,7 @@ export default function EnrollSequenceModal({
 
   function toggleSkip(order: number) {
     setSkipSteps((prev) =>
-      prev.includes(order)
-        ? prev.filter((o) => o !== order)
-        : [...prev, order]
+      prev.includes(order) ? prev.filter((o) => o !== order) : [...prev, order],
     );
   }
 
@@ -65,7 +61,7 @@ export default function EnrollSequenceModal({
 
   function updateVariable(idx: number, field: "key" | "value", val: string) {
     setVariables(
-      variables.map((v, i) => (i === idx ? { ...v, [field]: val } : v))
+      variables.map((v, i) => (i === idx ? { ...v, [field]: val } : v)),
     );
   }
 

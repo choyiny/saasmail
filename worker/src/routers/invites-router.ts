@@ -55,7 +55,10 @@ invitesRouter.openapi(validateInviteRoute, async (c) => {
     return c.json({ valid: false }, 200);
   }
 
-  const expiresAt = invite.expiresAt instanceof Date ? invite.expiresAt : new Date((invite.expiresAt as unknown as number) * 1000);
+  const expiresAt =
+    invite.expiresAt instanceof Date
+      ? invite.expiresAt
+      : new Date((invite.expiresAt as unknown as number) * 1000);
   if (invite.usedBy || expiresAt < new Date()) {
     return c.json({ valid: false }, 200);
   }
@@ -74,7 +77,10 @@ const acceptInviteRoute = createRoute({
     },
   },
   responses: {
-    ...json200Response(z.object({ success: z.boolean(), userId: z.string() }), "Account created"),
+    ...json200Response(
+      z.object({ success: z.boolean(), userId: z.string() }),
+      "Account created",
+    ),
     400: {
       description: "Invalid or expired invite",
       content: { "application/json": { schema: ErrorSchema } },
@@ -96,7 +102,10 @@ invitesRouter.openapi(acceptInviteRoute, async (c) => {
     return c.json({ error: "Invalid invitation token" }, 400);
   }
 
-  const expiresAt = invite.expiresAt instanceof Date ? invite.expiresAt : new Date((invite.expiresAt as unknown as number) * 1000);
+  const expiresAt =
+    invite.expiresAt instanceof Date
+      ? invite.expiresAt
+      : new Date((invite.expiresAt as unknown as number) * 1000);
   if (expiresAt < new Date()) {
     return c.json({ error: "Invitation has expired" }, 400);
   }
@@ -117,7 +126,8 @@ invitesRouter.openapi(acceptInviteRoute, async (c) => {
       body: { email, password, name, role: invite.role },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Account creation failed";
+    const message =
+      err instanceof Error ? err.message : "Account creation failed";
     return c.json({ error: message }, 400);
   }
 

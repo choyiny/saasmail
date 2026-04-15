@@ -61,11 +61,19 @@ type EmailTemplate = {
   updatedAt: number;
 };
 
-function fetchTemplates(): Promise<EmailTemplate[]>
-function fetchTemplate(slug: string): Promise<EmailTemplate>
-function createTemplate(data: { slug: string; name: string; subject: string; bodyHtml: string }): Promise<EmailTemplate>
-function updateTemplate(slug: string, data: { name?: string; subject?: string; bodyHtml?: string }): Promise<EmailTemplate>
-function deleteTemplate(slug: string): Promise<{ success: boolean }>
+function fetchTemplates(): Promise<EmailTemplate[]>;
+function fetchTemplate(slug: string): Promise<EmailTemplate>;
+function createTemplate(data: {
+  slug: string;
+  name: string;
+  subject: string;
+  bodyHtml: string;
+}): Promise<EmailTemplate>;
+function updateTemplate(
+  slug: string,
+  data: { name?: string; subject?: string; bodyHtml?: string },
+): Promise<EmailTemplate>;
+function deleteTemplate(slug: string): Promise<{ success: boolean }>;
 ```
 
 ## Routing Changes
@@ -81,6 +89,7 @@ The existing `/*` catch-all for InboxPage must be reordered so these specific ro
 ## Dependencies
 
 New npm packages:
+
 - `@tiptap/react`
 - `@tiptap/starter-kit`
 - `@tiptap/pm`

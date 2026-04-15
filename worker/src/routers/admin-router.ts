@@ -111,13 +111,25 @@ const listInvitesRoute = createRoute({
 
 adminRouter.openapi(listInvitesRoute, async (c) => {
   const db = c.get("db");
-  const rows = await db.select().from(invitations).orderBy(invitations.createdAt);
+  const rows = await db
+    .select()
+    .from(invitations)
+    .orderBy(invitations.createdAt);
 
   const result = rows.map((row) => ({
     ...row,
-    expiresAt: row.expiresAt instanceof Date ? Math.floor(row.expiresAt.getTime() / 1000) : row.expiresAt,
-    createdAt: row.createdAt instanceof Date ? Math.floor(row.createdAt.getTime() / 1000) : row.createdAt,
-    usedAt: row.usedAt instanceof Date ? Math.floor(row.usedAt.getTime() / 1000) : row.usedAt,
+    expiresAt:
+      row.expiresAt instanceof Date
+        ? Math.floor(row.expiresAt.getTime() / 1000)
+        : row.expiresAt,
+    createdAt:
+      row.createdAt instanceof Date
+        ? Math.floor(row.createdAt.getTime() / 1000)
+        : row.createdAt,
+    usedAt:
+      row.usedAt instanceof Date
+        ? Math.floor(row.usedAt.getTime() / 1000)
+        : row.usedAt,
   }));
 
   return c.json(result, 200);
@@ -155,7 +167,10 @@ adminRouter.openapi(listUsersRoute, async (c) => {
     name: u.name,
     email: u.email,
     role: u.role,
-    createdAt: u.createdAt instanceof Date ? Math.floor(u.createdAt.getTime() / 1000) : u.createdAt,
+    createdAt:
+      u.createdAt instanceof Date
+        ? Math.floor(u.createdAt.getTime() / 1000)
+        : u.createdAt,
     hasPasskey: (passkeyMap.get(u.id) ?? 0) > 0,
   }));
 

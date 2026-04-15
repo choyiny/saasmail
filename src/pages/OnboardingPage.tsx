@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Status = "checking" | "available" | "unavailable";
 
@@ -78,7 +73,9 @@ export default function OnboardingPage() {
       <div className="flex min-h-screen items-center justify-center bg-main">
         <Card className="w-full max-w-sm border-border-dark bg-card">
           <CardHeader>
-            <CardTitle className="text-xl text-text-primary">Setup complete</CardTitle>
+            <CardTitle className="text-xl text-text-primary">
+              Setup complete
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-xs text-text-secondary">
@@ -103,7 +100,9 @@ export default function OnboardingPage() {
     <div className="flex min-h-screen items-center justify-center bg-main">
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
-          <CardTitle className="text-xl text-text-primary">Welcome to cmail</CardTitle>
+          <CardTitle className="text-xl text-text-primary">
+            Welcome to cmail
+          </CardTitle>
           <p className="text-xs text-text-secondary">
             Create the first administrator account to get started.
           </p>
@@ -111,20 +110,53 @@ export default function OnboardingPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" className={inputClass} />
+              <label className="text-xs font-medium text-text-secondary">
+                Name
+              </label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                autoComplete="name"
+                className={inputClass}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" className={inputClass} />
+              <label className="text-xs font-medium text-text-secondary">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                className={inputClass}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete="new-password" className={inputClass} />
-              <p className="text-[10px] text-text-tertiary">At least 8 characters.</p>
+              <label className="text-xs font-medium text-text-secondary">
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputClass}
+              />
+              <p className="text-[10px] text-text-tertiary">
+                At least 8 characters.
+              </p>
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <button type="submit" className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50" disabled={loading}>
+            <button
+              type="submit"
+              className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              disabled={loading}
+            >
               {loading ? "Creating account..." : "Create administrator"}
             </button>
           </form>

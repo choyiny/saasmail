@@ -9,6 +9,8 @@ export const invitations = sqliteTable("invitations", {
   expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
   usedBy: text("used_by").references(() => users.id, { onDelete: "set null" }),
   usedAt: integer("used_at", { mode: "timestamp" }),
-  createdBy: text("created_by").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdBy: text("created_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });

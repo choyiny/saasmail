@@ -10,15 +10,16 @@ A sequencing system that enrolls existing senders (contacts) into a series of ti
 
 Reusable sequence blueprints.
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | text (nanoid) | PK |
-| name | text | e.g., "Welcome Sequence" |
-| steps | text (JSON) | Array of `{ order, templateSlug, delayHours }` |
-| createdAt | timestamp | |
-| updatedAt | timestamp | |
+| Column    | Type          | Notes                                          |
+| --------- | ------------- | ---------------------------------------------- |
+| id        | text (nanoid) | PK                                             |
+| name      | text          | e.g., "Welcome Sequence"                       |
+| steps     | text (JSON)   | Array of `{ order, templateSlug, delayHours }` |
+| createdAt | timestamp     |                                                |
+| updatedAt | timestamp     |                                                |
 
 `steps` example:
+
 ```json
 [
   { "order": 1, "templateSlug": "intro", "delayHours": 0 },
@@ -31,30 +32,30 @@ Reusable sequence blueprints.
 
 Tracks a sender being enrolled in a sequence.
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | text (nanoid) | PK |
-| sequenceId | text | FK → sequences |
-| senderId | text | FK → senders |
-| status | text | `active`, `completed`, `cancelled` |
-| variables | text (JSON) | Custom variables provided at enrollment |
-| enrolledAt | timestamp | |
-| cancelledAt | timestamp | nullable |
+| Column      | Type          | Notes                                   |
+| ----------- | ------------- | --------------------------------------- |
+| id          | text (nanoid) | PK                                      |
+| sequenceId  | text          | FK → sequences                          |
+| senderId    | text          | FK → senders                            |
+| status      | text          | `active`, `completed`, `cancelled`      |
+| variables   | text (JSON)   | Custom variables provided at enrollment |
+| enrolledAt  | timestamp     |                                         |
+| cancelledAt | timestamp     | nullable                                |
 
 ### `sequence_emails` table (the outbox)
 
 One row per step per enrollment — the actual send schedule.
 
-| Column | Type | Notes |
-|--------|------|-------|
-| id | text (nanoid) | PK |
-| enrollmentId | text | FK → sequence_enrollments |
-| stepOrder | integer | Which step |
-| templateSlug | text | Template to send |
-| scheduledAt | timestamp | Snapped to the hour |
-| status | text | `pending`, `queued`, `sent`, `cancelled`, `failed` |
-| sentAt | timestamp | nullable |
-| sentEmailId | text | FK → sent_emails, nullable |
+| Column       | Type          | Notes                                              |
+| ------------ | ------------- | -------------------------------------------------- |
+| id           | text (nanoid) | PK                                                 |
+| enrollmentId | text          | FK → sequence_enrollments                          |
+| stepOrder    | integer       | Which step                                         |
+| templateSlug | text          | Template to send                                   |
+| scheduledAt  | timestamp     | Snapped to the hour                                |
+| status       | text          | `pending`, `queued`, `sent`, `cancelled`, `failed` |
+| sentAt       | timestamp     | nullable                                           |
+| sentEmailId  | text          | FK → sent_emails, nullable                         |
 
 ### Indexes
 
@@ -121,9 +122,17 @@ Each message processes one sequence email:
 ```jsonc
 {
   "queues": {
-    "producers": [{ "binding": "EMAIL_QUEUE", "queue": "cmail-sequence-emails" }],
-    "consumers": [{ "queue": "cmail-sequence-emails", "max_batch_size": 10, "max_retries": 3 }]
-  }
+    "producers": [
+      { "binding": "EMAIL_QUEUE", "queue": "cmail-sequence-emails" },
+    ],
+    "consumers": [
+      {
+        "queue": "cmail-sequence-emails",
+        "max_batch_size": 10,
+        "max_retries": 3,
+      },
+    ],
+  },
 }
 ```
 
@@ -134,6 +143,7 @@ Any email exchange between the cmail user and the sender cancels the sequence.
 ### Inbound email (recipient replies)
 
 In the existing `email-handler.ts`, after inserting the email, check if the sender has an active enrollment via `sequence_enrollments(senderId, status = 'active')`. If found:
+
 - Set enrollment `status = 'cancelled'`, `cancelledAt = now()`
 - Bulk update all `sequence_emails` for that enrollment where `status IN ('pending', 'queued')` to `status = 'cancelled'`
 
@@ -151,22 +161,22 @@ All routes protected by existing auth middleware.
 
 ### Sequences CRUD
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/sequences` | List all sequences |
-| POST | `/api/sequences` | Create a sequence (name + steps) |
-| GET | `/api/sequences/:id` | Get sequence with steps |
-| PUT | `/api/sequences/:id` | Update sequence (name/steps) |
+| Method | Path                 | Description                            |
+| ------ | -------------------- | -------------------------------------- |
+| GET    | `/api/sequences`     | List all sequences                     |
+| POST   | `/api/sequences`     | Create a sequence (name + steps)       |
+| GET    | `/api/sequences/:id` | Get sequence with steps                |
+| PUT    | `/api/sequences/:id` | Update sequence (name/steps)           |
 | DELETE | `/api/sequences/:id` | Delete (only if no active enrollments) |
 
 ### Enrollments
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/sequences/:id/enroll` | Enroll a sender (senderId, variables, step overrides) |
-| GET | `/api/senders/:id/enrollment` | Get active enrollment + scheduled emails for a sender |
-| DELETE | `/api/sequence-enrollments/:id` | Manually cancel an enrollment |
-| GET | `/api/sequences/:id/enrollments` | List all enrollments for a sequence |
+| Method | Path                             | Description                                           |
+| ------ | -------------------------------- | ----------------------------------------------------- |
+| POST   | `/api/sequences/:id/enroll`      | Enroll a sender (senderId, variables, step overrides) |
+| GET    | `/api/senders/:id/enrollment`    | Get active enrollment + scheduled emails for a sender |
+| DELETE | `/api/sequence-enrollments/:id`  | Manually cancel an enrollment                         |
+| GET    | `/api/sequences/:id/enrollments` | List all enrollments for a sequence                   |
 
 ## UI
 

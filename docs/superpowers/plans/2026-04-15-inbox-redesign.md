@@ -14,28 +14,29 @@
 
 ### New files
 
-| File | Responsibility |
-|------|---------------|
+| File                                | Responsibility                                      |
+| ----------------------------------- | --------------------------------------------------- |
 | `src/components/EmailHtmlModal.tsx` | Full HTML email preview modal with white background |
-| `src/components/MessageBubble.tsx` | Single chat bubble for a received or sent email |
+| `src/components/MessageBubble.tsx`  | Single chat bubble for a received or sent email     |
 
 ### Modified files
 
-| File | Change |
-|------|--------|
-| `worker/src/db/attachments.schema.ts` | Add `contentId` column |
-| `worker/src/lib/email-parser.ts` | Extract `contentId` from postal-mime attachments |
-| `worker/src/email-handler.ts` | Store contentId, rewrite CID URLs in bodyHtml |
-| `worker/src/routers/attachments-router.ts` | Add inline serving endpoint |
-| `worker/src/routers/emails-router.ts` | Add `recipient` query filter to by-sender endpoint, return attachments list |
-| `src/pages/SenderDetail.tsx` | Complete rewrite to Slack-style conversation |
-| `src/lib/api.ts` | Update `fetchSenderEmails` to accept `recipient` param, update `Attachment` type |
+| File                                       | Change                                                                           |
+| ------------------------------------------ | -------------------------------------------------------------------------------- |
+| `worker/src/db/attachments.schema.ts`      | Add `contentId` column                                                           |
+| `worker/src/lib/email-parser.ts`           | Extract `contentId` from postal-mime attachments                                 |
+| `worker/src/email-handler.ts`              | Store contentId, rewrite CID URLs in bodyHtml                                    |
+| `worker/src/routers/attachments-router.ts` | Add inline serving endpoint                                                      |
+| `worker/src/routers/emails-router.ts`      | Add `recipient` query filter to by-sender endpoint, return attachments list      |
+| `src/pages/SenderDetail.tsx`               | Complete rewrite to Slack-style conversation                                     |
+| `src/lib/api.ts`                           | Update `fetchSenderEmails` to accept `recipient` param, update `Attachment` type |
 
 ---
 
 ## Task 1: Add contentId to Attachments Schema
 
 **Files:**
+
 - Modify: `worker/src/db/attachments.schema.ts`
 
 - [ ] **Step 1: Add contentId column**
@@ -74,6 +75,7 @@ git commit -m "feat: add contentId column to attachments schema"
 ## Task 2: Extract Content-ID in Email Parser
 
 **Files:**
+
 - Modify: `worker/src/lib/email-parser.ts`
 
 - [ ] **Step 1: Add contentId to ParsedAttachment and extraction**
@@ -102,7 +104,7 @@ export interface ParsedAttachment {
 }
 
 export async function parseEmail(
-  message: ForwardableEmailMessage
+  message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
   const rawEmail = await new Response(message.raw).arrayBuffer();
   const parser = new PostalMime();
@@ -148,6 +150,7 @@ git commit -m "feat: extract contentId from parsed email attachments"
 ## Task 3: Store contentId and Rewrite CID URLs in Email Handler
 
 **Files:**
+
 - Modify: `worker/src/email-handler.ts`
 
 - [ ] **Step 1: Update the email handler**
@@ -168,7 +171,7 @@ import { cancelSequencesForSender } from "./lib/cancel-sequence";
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<void> {
   const db = drizzle(env.DB, { schema, logger: true });
   const parsed = await parseEmail(message);
@@ -256,7 +259,7 @@ export async function handleEmail(
     for (const [cid, attachmentId] of Object.entries(cidMap)) {
       bodyHtml = bodyHtml.replace(
         new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi"),
-        `/api/attachments/${attachmentId}/inline`
+        `/api/attachments/${attachmentId}/inline`,
       );
     }
   }
@@ -279,11 +282,14 @@ export async function handleEmail(
   // Cancel any active sequences for this sender
   await cancelSequencesForSender(db, actualSenderId);
 
-  console.log(`Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`);
+  console.log(
+    `Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`,
+  );
 }
 ```
 
 Key changes from the original:
+
 - Process attachments BEFORE inserting the email (need attachment IDs for CID rewriting)
 - Build a `cidMap` of Content-ID → attachment ID
 - Strip angle brackets from Content-ID values
@@ -302,6 +308,7 @@ git commit -m "feat: store contentId and rewrite CID URLs in email handler"
 ## Task 4: Add Inline Attachment Serving Endpoint
 
 **Files:**
+
 - Modify: `worker/src/routers/attachments-router.ts`
 
 - [ ] **Step 1: Add the inline endpoint**
@@ -416,6 +423,7 @@ git commit -m "feat: add inline attachment serving endpoint for CID images"
 ## Task 5: Add Recipient Filter to Emails-by-Sender Endpoint
 
 **Files:**
+
 - Modify: `worker/src/routers/emails-router.ts`
 - Modify: `src/lib/api.ts`
 
@@ -447,26 +455,31 @@ To:
 In the handler (line 49+), after extracting query params, add recipient to the destructured params:
 
 Change line 52:
+
 ```typescript
-  const { q, page, limit } = c.req.valid("query");
+const { q, page, limit } = c.req.valid("query");
 ```
+
 To:
+
 ```typescript
-  const { q, recipient, page, limit } = c.req.valid("query");
+const { q, recipient, page, limit } = c.req.valid("query");
 ```
 
 Add recipient condition to received emails (after line 58):
+
 ```typescript
-  if (recipient) {
-    receivedConditions.push(eq(emails.recipient, recipient));
-  }
+if (recipient) {
+  receivedConditions.push(eq(emails.recipient, recipient));
+}
 ```
 
 Add recipient condition to sent emails (after line 78):
+
 ```typescript
-  if (recipient) {
-    sentConditions.push(eq(sentEmails.toAddress, recipient));
-  }
+if (recipient) {
+  sentConditions.push(eq(sentEmails.toAddress, recipient));
+}
 ```
 
 - [ ] **Step 3: Also return attachments list for received emails**
@@ -474,31 +487,36 @@ Add recipient condition to sent emails (after line 78):
 In the handler, after the attachment counts section (after line 146), add a query to fetch actual attachment records for the paginated received emails:
 
 ```typescript
-  // Fetch attachment details for received emails (excluding inline)
-  let attachmentDetails: Record<string, any[]> = {};
-  if (receivedIds.length > 0) {
-    const attRows = await db
-      .select()
-      .from(attachments)
-      .where(sql`${attachments.emailId} IN (${sql.join(receivedIds.map(id => sql`${id}`), sql`,`)})`);
+// Fetch attachment details for received emails (excluding inline)
+let attachmentDetails: Record<string, any[]> = {};
+if (receivedIds.length > 0) {
+  const attRows = await db
+    .select()
+    .from(attachments)
+    .where(
+      sql`${attachments.emailId} IN (${sql.join(
+        receivedIds.map((id) => sql`${id}`),
+        sql`,`,
+      )})`,
+    );
 
-    for (const att of attRows) {
-      if (!attachmentDetails[att.emailId]) {
-        attachmentDetails[att.emailId] = [];
-      }
-      attachmentDetails[att.emailId].push(att);
+  for (const att of attRows) {
+    if (!attachmentDetails[att.emailId]) {
+      attachmentDetails[att.emailId] = [];
     }
+    attachmentDetails[att.emailId].push(att);
   }
+}
 ```
 
 Then update the result mapping (line 148-151) to include attachments:
 
 ```typescript
-  const result = paginated.map((e) => ({
-    ...e,
-    attachmentCount: attachmentCounts[e.id] ?? 0,
-    attachments: attachmentDetails[e.id] ?? [],
-  }));
+const result = paginated.map((e) => ({
+  ...e,
+  attachmentCount: attachmentCounts[e.id] ?? 0,
+  attachments: attachmentDetails[e.id] ?? [],
+}));
 ```
 
 - [ ] **Step 4: Update frontend API client**
@@ -506,6 +524,7 @@ Then update the result mapping (line 148-151) to include attachments:
 In `src/lib/api.ts`, update `fetchSenderEmails` to accept `recipient`:
 
 Change:
+
 ```typescript
 export async function fetchSenderEmails(
   senderId: string,
@@ -514,6 +533,7 @@ export async function fetchSenderEmails(
 ```
 
 To:
+
 ```typescript
 export async function fetchSenderEmails(
   senderId: string,
@@ -522,11 +542,13 @@ export async function fetchSenderEmails(
 ```
 
 And add the recipient param to the query string builder:
+
 ```typescript
-  if (params?.recipient) qs.set("recipient", params.recipient);
+if (params?.recipient) qs.set("recipient", params.recipient);
 ```
 
 Also update the `Attachment` interface to include `contentId`:
+
 ```typescript
 export interface Attachment {
   id: string;
@@ -550,6 +572,7 @@ git commit -m "feat: add recipient filter and attachment details to emails endpo
 ## Task 6: Email HTML Preview Modal Component
 
 **Files:**
+
 - Create: `src/components/EmailHtmlModal.tsx`
 
 - [ ] **Step 1: Create the modal**
@@ -570,13 +593,17 @@ interface EmailHtmlModalProps {
   onClose: () => void;
 }
 
-export default function EmailHtmlModal({ email, open, onClose }: EmailHtmlModalProps) {
+export default function EmailHtmlModal({
+  email,
+  open,
+  onClose,
+}: EmailHtmlModalProps) {
   if (!email) return null;
 
   const senderLabel =
     email.type === "sent"
       ? `You → ${email.toAddress}`
-      : email.fromAddress ?? email.recipient ?? "Unknown";
+      : (email.fromAddress ?? email.recipient ?? "Unknown");
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -590,7 +617,10 @@ export default function EmailHtmlModal({ email, open, onClose }: EmailHtmlModalP
             {new Date(email.timestamp * 1000).toLocaleString()}
           </p>
         </DialogHeader>
-        <div className="overflow-auto" style={{ maxHeight: "calc(90vh - 120px)" }}>
+        <div
+          className="overflow-auto"
+          style={{ maxHeight: "calc(90vh - 120px)" }}
+        >
           {email.bodyHtml ? (
             <div
               className="prose prose-sm max-w-none bg-white p-6 text-black"
@@ -625,6 +655,7 @@ git commit -m "feat: add email HTML preview modal with white background"
 ## Task 7: Message Bubble Component
 
 **Files:**
+
 - Create: `src/components/MessageBubble.tsx`
 
 - [ ] **Step 1: Create the bubble component**
@@ -679,7 +710,7 @@ export default function MessageBubble({
 
   // Filter to non-inline attachments only
   const downloadableAttachments = (email.attachments ?? []).filter(
-    (att) => !att.contentId
+    (att) => !att.contentId,
   );
 
   function handleBubbleClick() {
@@ -704,20 +735,22 @@ export default function MessageBubble({
       >
         {/* Attribution + time */}
         <div className="mb-1 flex items-center gap-2">
-          <span className={`text-[11px] ${isUnread ? "font-semibold text-accent" : "text-text-tertiary"}`}>
+          <span
+            className={`text-[11px] ${isUnread ? "font-semibold text-accent" : "text-text-tertiary"}`}
+          >
             {attribution}
           </span>
           <span className="text-[10px] text-text-tertiary">
             {dateStr} {timeStr}
           </span>
-          {isUnread && (
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-          )}
+          {isUnread && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
         </div>
 
         {/* Subject */}
         {email.subject && (
-          <p className={`mb-1 text-xs ${isUnread ? "font-semibold" : "font-medium"} text-text-primary`}>
+          <p
+            className={`mb-1 text-xs ${isUnread ? "font-semibold" : "font-medium"} text-text-primary`}
+          >
             {email.subject}
           </p>
         )}
@@ -805,6 +838,7 @@ git commit -m "feat: add Slack-style message bubble component"
 ## Task 8: Rewrite SenderDetail as Conversation View
 
 **Files:**
+
 - Modify: `src/pages/SenderDetail.tsx`
 
 - [ ] **Step 1: Replace the entire SenderDetail component**
@@ -840,7 +874,8 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
-  const [enrollmentInfo, setEnrollmentInfo] = useState<SenderEnrollmentInfo | null>(null);
+  const [enrollmentInfo, setEnrollmentInfo] =
+    useState<SenderEnrollmentInfo | null>(null);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
   const [recipientFilter, setRecipientFilter] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -849,11 +884,9 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
   const recipients = Array.from(
     new Set(
       emails
-        .map((e) =>
-          e.type === "received" ? e.recipient : e.toAddress
-        )
-        .filter(Boolean) as string[]
-    )
+        .map((e) => (e.type === "received" ? e.recipient : e.toAddress))
+        .filter(Boolean) as string[],
+    ),
   );
 
   useEffect(() => {
@@ -889,7 +922,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
     if (email.type !== "received" || email.isRead !== 0) return;
     await markEmailRead(email.id, true);
     setEmails((prev) =>
-      prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e))
+      prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e)),
     );
   }
 
@@ -1030,6 +1063,7 @@ Expected: Build succeeds with no TypeScript errors.
 - [ ] **Step 2: Fix any build errors**
 
 Common issues:
+
 - The `Attachment` type in `api.ts` needs `contentId` field to match what `MessageBubble` checks
 - The `like` import may be needed in `emails-router.ts` if not already imported
 - Radix Dialog may need to be checked for the EmailHtmlModal

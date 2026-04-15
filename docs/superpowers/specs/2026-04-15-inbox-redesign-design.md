@@ -9,6 +9,7 @@ Three changes to the email display experience: fix inline attachments (CID image
 ### Problem
 
 Inline images (`<img src="cid:image001.png">`) don't display because:
+
 - The `attachments` table has no `contentId` column to map CID references
 - The email handler doesn't extract Content-ID from parsed attachments
 - The HTML body isn't rewritten to replace `cid:` URLs with serveable URLs

@@ -38,8 +38,12 @@ export default function SequenceEditorPage() {
   }, [id]);
 
   function addStep() {
-    const maxOrder = steps.length > 0 ? Math.max(...steps.map((s) => s.order)) : 0;
-    setSteps([...steps, { order: maxOrder + 1, templateSlug: "", delayHours: 24 }]);
+    const maxOrder =
+      steps.length > 0 ? Math.max(...steps.map((s) => s.order)) : 0;
+    setSteps([
+      ...steps,
+      { order: maxOrder + 1, templateSlug: "", delayHours: 24 },
+    ]);
   }
 
   function removeStep(order: number) {
@@ -49,7 +53,7 @@ export default function SequenceEditorPage() {
 
   function updateStep(order: number, field: keyof SequenceStep, value: any) {
     setSteps(
-      steps.map((s) => (s.order === order ? { ...s, [field]: value } : s))
+      steps.map((s) => (s.order === order ? { ...s, [field]: value } : s)),
     );
   }
 
@@ -138,7 +142,7 @@ export default function SequenceEditorPage() {
                       updateStep(
                         step.order,
                         "delayHours",
-                        parseInt(e.target.value) || 0
+                        parseInt(e.target.value) || 0,
                       )
                     }
                     className="w-20 rounded-md border border-border-dark bg-main px-2 py-1.5 text-sm text-text-primary"

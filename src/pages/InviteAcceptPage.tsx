@@ -2,16 +2,13 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
 import { validateInvite, acceptInvite } from "@/lib/api";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function InviteAcceptPage() {
   const { token } = useParams<{ token: string }>();
-  const [status, setStatus] = useState<"loading" | "valid" | "invalid">("loading");
+  const [status, setStatus] = useState<"loading" | "valid" | "invalid">(
+    "loading",
+  );
   const [inviteEmail, setInviteEmail] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -84,11 +81,14 @@ export default function InviteAcceptPage() {
       <div className="flex min-h-screen items-center justify-center bg-main">
         <Card className="w-full max-w-sm border-border-dark bg-card">
           <CardHeader>
-            <CardTitle className="text-xl text-text-primary">Invalid Invitation</CardTitle>
+            <CardTitle className="text-xl text-text-primary">
+              Invalid Invitation
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-text-secondary">
-              This invitation link is invalid, expired, or has already been used.
+              This invitation link is invalid, expired, or has already been
+              used.
             </p>
           </CardContent>
         </Card>
@@ -103,7 +103,9 @@ export default function InviteAcceptPage() {
     <div className="flex min-h-screen items-center justify-center bg-main">
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
-          <CardTitle className="text-xl text-text-primary">Join cmail</CardTitle>
+          <CardTitle className="text-xl text-text-primary">
+            Join cmail
+          </CardTitle>
           <p className="text-xs text-text-secondary">
             Create your account to get started.
           </p>
@@ -111,20 +113,54 @@ export default function InviteAcceptPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" className={inputClass} />
+              <label className="text-xs font-medium text-text-secondary">
+                Name
+              </label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                autoComplete="name"
+                className={inputClass}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" disabled={!!inviteEmail} className={inputClass + (inviteEmail ? " opacity-50" : "")} />
+              <label className="text-xs font-medium text-text-secondary">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                disabled={!!inviteEmail}
+                className={inputClass + (inviteEmail ? " opacity-50" : "")}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete="new-password" className={inputClass} />
-              <p className="text-[10px] text-text-tertiary">At least 8 characters.</p>
+              <label className="text-xs font-medium text-text-secondary">
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputClass}
+              />
+              <p className="text-[10px] text-text-tertiary">
+                At least 8 characters.
+              </p>
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <button type="submit" className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50" disabled={loading}>
+            <button
+              type="submit"
+              className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              disabled={loading}
+            >
               {loading ? "Creating account..." : "Create account"}
             </button>
           </form>

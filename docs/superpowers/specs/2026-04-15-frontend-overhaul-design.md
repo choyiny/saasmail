@@ -20,18 +20,18 @@ Fixed-width column with icon buttons and tooltips on hover.
 
 **Navigation items (top):**
 
-| Icon | Tooltip | Route | Condition |
-|------|---------|-------|-----------|
-| Mail | Inbox | `/` | Always |
-| FileText | Templates | `/templates` | Always |
-| Key | API | `/api-keys` | Always |
-| Users | Users | `/admin/users` | Admin only |
+| Icon     | Tooltip   | Route          | Condition  |
+| -------- | --------- | -------------- | ---------- |
+| Mail     | Inbox     | `/`            | Always     |
+| FileText | Templates | `/templates`   | Always     |
+| Key      | API       | `/api-keys`    | Always     |
+| Users    | Users     | `/admin/users` | Admin only |
 
 **Action items (bottom):**
 
-| Icon | Tooltip | Action |
-|------|---------|--------|
-| Pen | Compose | Opens compose modal |
+| Icon   | Tooltip    | Action                            |
+| ------ | ---------- | --------------------------------- |
+| Pen    | Compose    | Opens compose modal               |
 | Avatar | User email | Dropdown: email display, sign out |
 
 Active icon: `#2a2d3e` background, white icon color. Inactive: `#6b7280` icon color. Icons from lucide-react, 20px. Sidebar items are 48px square buttons centered in the 64px rail.
@@ -40,22 +40,22 @@ Active icon: `#2a2d3e` background, white icon color. Inactive: `#6b7280` icon co
 
 CSS custom properties in `index.css`:
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--bg-sidebar` | `#0f1117` | Icon sidebar |
-| `--bg-panel` | `#141720` | Middle panel |
-| `--bg-main` | `#1a1d2e` | Right panel / main content |
-| `--bg-hover` | `#2a2d3e` | Hover states, active sidebar icon |
-| `--bg-card` | `#1e2235` | Cards, elevated surfaces |
-| `--bg-input` | `#141720` | Input fields |
-| `--border` | `#2a2d3e` | Borders, dividers |
-| `--text-primary` | `#f0f0f0` | Primary text |
-| `--text-secondary` | `#8b8fa3` | Secondary/muted text |
-| `--text-tertiary` | `#5a5e70` | Timestamps, metadata |
-| `--accent` | `#4f6ef7` | Active states, links, primary buttons |
-| `--accent-hover` | `#6180f9` | Accent hover |
-| `--destructive` | `#e5484d` | Delete/revoke actions |
-| `--unread` | `#4f6ef7` | Unread badges |
+| Token              | Value     | Usage                                 |
+| ------------------ | --------- | ------------------------------------- |
+| `--bg-sidebar`     | `#0f1117` | Icon sidebar                          |
+| `--bg-panel`       | `#141720` | Middle panel                          |
+| `--bg-main`        | `#1a1d2e` | Right panel / main content            |
+| `--bg-hover`       | `#2a2d3e` | Hover states, active sidebar icon     |
+| `--bg-card`        | `#1e2235` | Cards, elevated surfaces              |
+| `--bg-input`       | `#141720` | Input fields                          |
+| `--border`         | `#2a2d3e` | Borders, dividers                     |
+| `--text-primary`   | `#f0f0f0` | Primary text                          |
+| `--text-secondary` | `#8b8fa3` | Secondary/muted text                  |
+| `--text-tertiary`  | `#5a5e70` | Timestamps, metadata                  |
+| `--accent`         | `#4f6ef7` | Active states, links, primary buttons |
+| `--accent-hover`   | `#6180f9` | Accent hover                          |
+| `--destructive`    | `#e5484d` | Delete/revoke actions                 |
+| `--unread`         | `#4f6ef7` | Unread badges                         |
 
 ## Compact Typography
 

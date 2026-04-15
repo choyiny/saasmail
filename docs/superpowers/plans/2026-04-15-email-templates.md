@@ -12,20 +12,21 @@
 
 ## File Structure
 
-| File | Action | Responsibility |
-|------|--------|---------------|
-| `worker/src/db/email-templates.schema.ts` | Create | Drizzle schema for `email_templates` table |
-| `worker/src/db/schema.ts` | Modify | Add `emailTemplates` to schema object |
-| `worker/src/db/index.ts` | Modify | Re-export new schema |
-| `worker/src/lib/interpolate.ts` | Create | `{{var}}` interpolation utility |
-| `worker/src/routers/email-templates-router.ts` | Create | CRUD + send endpoints |
-| `worker/src/index.ts` | Modify | Mount the new router |
+| File                                           | Action | Responsibility                             |
+| ---------------------------------------------- | ------ | ------------------------------------------ |
+| `worker/src/db/email-templates.schema.ts`      | Create | Drizzle schema for `email_templates` table |
+| `worker/src/db/schema.ts`                      | Modify | Add `emailTemplates` to schema object      |
+| `worker/src/db/index.ts`                       | Modify | Re-export new schema                       |
+| `worker/src/lib/interpolate.ts`                | Create | `{{var}}` interpolation utility            |
+| `worker/src/routers/email-templates-router.ts` | Create | CRUD + send endpoints                      |
+| `worker/src/index.ts`                          | Modify | Mount the new router                       |
 
 ---
 
 ### Task 1: Database Schema
 
 **Files:**
+
 - Create: `worker/src/db/email-templates.schema.ts`
 - Modify: `worker/src/db/schema.ts`
 - Modify: `worker/src/db/index.ts`
@@ -76,6 +77,7 @@ export * from "./email-templates.schema";
 - [ ] **Step 4: Generate and apply migration**
 
 Run:
+
 ```bash
 npx drizzle-kit generate
 npx wrangler d1 migrations apply cmail-db --local
@@ -95,6 +97,7 @@ git commit -m "feat: add email_templates database schema"
 ### Task 2: Interpolation Utility
 
 **Files:**
+
 - Create: `worker/src/lib/interpolate.ts`
 
 - [ ] **Step 1: Create the interpolation utility**
@@ -108,7 +111,7 @@ Create `worker/src/lib/interpolate.ts`:
  */
 export function interpolate(
   template: string,
-  variables: Record<string, string>
+  variables: Record<string, string>,
 ): string {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => {
     return key in variables ? variables[key] : match;
@@ -128,6 +131,7 @@ git commit -m "feat: add template interpolation utility"
 ### Task 3: Email Templates Router — CRUD Endpoints
 
 **Files:**
+
 - Create: `worker/src/routers/email-templates-router.ts`
 
 - [ ] **Step 1: Create router with CRUD routes**
@@ -168,7 +172,12 @@ const createTemplateRoute = createRoute({
       content: {
         "application/json": {
           schema: z.object({
-            slug: z.string().regex(/^[a-z0-9-]+$/, "Slug must be lowercase alphanumeric with hyphens"),
+            slug: z
+              .string()
+              .regex(
+                /^[a-z0-9-]+$/,
+                "Slug must be lowercase alphanumeric with hyphens",
+              ),
             name: z.string(),
             subject: z.string(),
             bodyHtml: z.string(),
@@ -359,6 +368,7 @@ git commit -m "feat: add email templates CRUD router"
 ### Task 4: Send Templated Email Endpoint
 
 **Files:**
+
 - Modify: `worker/src/routers/email-templates-router.ts`
 
 - [ ] **Step 1: Add the send route to the email templates router**
@@ -366,6 +376,7 @@ git commit -m "feat: add email templates CRUD router"
 Add the following to the bottom of `worker/src/routers/email-templates-router.ts` (add the necessary imports at the top: `Resend`, `sentEmails`, `senders`, `interpolate`):
 
 New imports at top of file:
+
 ```ts
 import { Resend } from "resend";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -374,6 +385,7 @@ import { interpolate } from "../lib/interpolate";
 ```
 
 Send route:
+
 ```ts
 // --- SEND ---
 const sendTemplateRoute = createRoute({
@@ -401,7 +413,7 @@ const sendTemplateRoute = createRoute({
         resendId: z.string().nullable(),
         status: z.string(),
       }),
-      "Email sent"
+      "Email sent",
     ),
   },
 });
@@ -463,8 +475,12 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   });
 
   return c.json(
-    { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
-    201
+    {
+      id,
+      resendId: result.data?.id ?? null,
+      status: result.error ? "failed" : "sent",
+    },
+    201,
   );
 });
 ```
@@ -481,6 +497,7 @@ git commit -m "feat: add send-via-template endpoint"
 ### Task 5: Mount Router and Verify Build
 
 **Files:**
+
 - Modify: `worker/src/index.ts`
 
 - [ ] **Step 1: Mount the email templates router**
@@ -500,6 +517,7 @@ app.route("/api/email-templates", emailTemplatesRouter);
 - [ ] **Step 2: Verify the project builds**
 
 Run:
+
 ```bash
 npx wrangler deploy --dry-run
 ```

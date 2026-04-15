@@ -11,7 +11,7 @@ import { cancelSequencesForSender } from "./lib/cancel-sequence";
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<void> {
   const db = drizzle(env.DB, { schema, logger: true });
   const parsed = await parseEmail(message);
@@ -98,7 +98,7 @@ export async function handleEmail(
     for (const [cid, attachmentId] of Object.entries(cidMap)) {
       bodyHtml = bodyHtml.replace(
         new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi"),
-        `/api/attachments/${attachmentId}/inline`
+        `/api/attachments/${attachmentId}/inline`,
       );
     }
   }
@@ -121,5 +121,7 @@ export async function handleEmail(
   // Cancel any active sequences for this sender
   await cancelSequencesForSender(db, actualSenderId);
 
-  console.log(`Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`);
+  console.log(
+    `Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`,
+  );
 }

@@ -4,9 +4,17 @@ import path from "path";
 
 function getLocalD1DB(): string {
   const wranglerDir = path.resolve(".wrangler");
-  const d1Dir = path.join(wranglerDir, "state", "v3", "d1", "miniflare-D1DatabaseObject");
+  const d1Dir = path.join(
+    wranglerDir,
+    "state",
+    "v3",
+    "d1",
+    "miniflare-D1DatabaseObject",
+  );
   if (!fs.existsSync(d1Dir)) {
-    throw new Error(`D1 directory not found at ${d1Dir}. Run 'wrangler dev' first.`);
+    throw new Error(
+      `D1 directory not found at ${d1Dir}. Run 'wrangler dev' first.`,
+    );
   }
   const files = fs.readdirSync(d1Dir).filter((f) => f.endsWith(".sqlite"));
   if (files.length === 0) {

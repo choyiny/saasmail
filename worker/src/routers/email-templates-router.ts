@@ -99,7 +99,11 @@ const getTemplateRoute = createRoute({
 emailTemplatesRouter.openapi(getTemplateRoute, async (c) => {
   const db = c.get("db");
   const { slug } = c.req.valid("param");
-  const rows = await db.select().from(emailTemplates).where(eq(emailTemplates.slug, slug)).limit(1);
+  const rows = await db
+    .select()
+    .from(emailTemplates)
+    .where(eq(emailTemplates.slug, slug))
+    .limit(1);
   if (rows.length === 0) {
     return c.json({ error: "Template not found" }, 404);
   }
@@ -138,14 +142,25 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
   const updates = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
-  const existing = await db.select().from(emailTemplates).where(eq(emailTemplates.slug, slug)).limit(1);
+  const existing = await db
+    .select()
+    .from(emailTemplates)
+    .where(eq(emailTemplates.slug, slug))
+    .limit(1);
   if (existing.length === 0) {
     return c.json({ error: "Template not found" }, 404);
   }
 
-  await db.update(emailTemplates).set({ ...updates, updatedAt: now }).where(eq(emailTemplates.slug, slug));
+  await db
+    .update(emailTemplates)
+    .set({ ...updates, updatedAt: now })
+    .where(eq(emailTemplates.slug, slug));
 
-  const updated = await db.select().from(emailTemplates).where(eq(emailTemplates.slug, slug)).limit(1);
+  const updated = await db
+    .select()
+    .from(emailTemplates)
+    .where(eq(emailTemplates.slug, slug))
+    .limit(1);
   return c.json(updated[0], 200);
 });
 
@@ -168,7 +183,11 @@ emailTemplatesRouter.openapi(deleteTemplateRoute, async (c) => {
   const db = c.get("db");
   const { slug } = c.req.valid("param");
 
-  const existing = await db.select().from(emailTemplates).where(eq(emailTemplates.slug, slug)).limit(1);
+  const existing = await db
+    .select()
+    .from(emailTemplates)
+    .where(eq(emailTemplates.slug, slug))
+    .limit(1);
   if (existing.length === 0) {
     return c.json({ error: "Template not found" }, 404);
   }
@@ -203,7 +222,7 @@ const sendTemplateRoute = createRoute({
         resendId: z.string().nullable(),
         status: z.string(),
       }),
-      "Email sent"
+      "Email sent",
     ),
   },
 });
@@ -265,7 +284,11 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   });
 
   return c.json(
-    { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
-    201
+    {
+      id,
+      resendId: result.data?.id ?? null,
+      status: result.error ? "failed" : "sent",
+    },
+    201,
   );
 });

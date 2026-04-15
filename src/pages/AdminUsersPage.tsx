@@ -126,12 +126,16 @@ export default function AdminUsersPage() {
               </DialogTrigger>
               <DialogContent className="border-border-dark bg-card text-text-primary">
                 <DialogHeader>
-                  <DialogTitle className="text-text-primary">Create Invitation</DialogTitle>
+                  <DialogTitle className="text-text-primary">
+                    Create Invitation
+                  </DialogTitle>
                 </DialogHeader>
                 {!generatedLink ? (
                   <div className="space-y-3">
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-text-secondary">Role</label>
+                      <label className="text-xs font-medium text-text-secondary">
+                        Role
+                      </label>
                       <div className="flex gap-2">
                         <button
                           onClick={() => setInviteRole("member")}
@@ -221,8 +225,12 @@ export default function AdminUsersPage() {
                   className="flex items-center justify-between border-b border-border-dark px-4 py-2.5 last:border-b-0"
                 >
                   <div>
-                    <p className="text-xs font-medium text-text-primary">{user.name}</p>
-                    <p className="text-[11px] text-text-tertiary">{user.email}</p>
+                    <p className="text-xs font-medium text-text-primary">
+                      {user.name}
+                    </p>
+                    <p className="text-[11px] text-text-tertiary">
+                      {user.email}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span
@@ -253,12 +261,15 @@ export default function AdminUsersPage() {
                             ...
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="bg-card border-border-dark text-text-primary">
+                        <DropdownMenuContent
+                          align="end"
+                          className="bg-card border-border-dark text-text-primary"
+                        >
                           <DropdownMenuItem
                             onClick={() =>
                               handleRoleChange(
                                 user.id,
-                                user.role === "admin" ? "member" : "admin"
+                                user.role === "admin" ? "member" : "admin",
                               )
                             }
                             className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
@@ -283,11 +294,15 @@ export default function AdminUsersPage() {
 
         <div className="rounded-lg border border-border-dark bg-card">
           <div className="border-b border-border-dark px-4 py-3">
-            <h2 className="text-xs font-semibold text-text-primary">Invitations</h2>
+            <h2 className="text-xs font-semibold text-text-primary">
+              Invitations
+            </h2>
           </div>
           <div>
             {invites.length === 0 ? (
-              <p className="p-4 text-xs text-text-tertiary">No invitations yet.</p>
+              <p className="p-4 text-xs text-text-tertiary">
+                No invitations yet.
+              </p>
             ) : (
               invites.map((invite) => {
                 const st = inviteStatus(invite);
@@ -301,7 +316,8 @@ export default function AdminUsersPage() {
                         {invite.email || "Any email"}
                       </p>
                       <p className="text-[10px] text-text-tertiary">
-                        Role: {invite.role} | Expires: {formatDate(invite.expiresAt)}
+                        Role: {invite.role} | Expires:{" "}
+                        {formatDate(invite.expiresAt)}
                       </p>
                     </div>
                     <span

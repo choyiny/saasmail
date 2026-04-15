@@ -43,6 +43,7 @@ app.all("/.well-known/*", (c) => {
 ```
 
 This serves:
+
 - `GET /.well-known/openid-configuration`
 - `GET /.well-known/oauth-authorization-server`
 - `GET /.well-known/oauth-protected-resource`
@@ -67,10 +68,10 @@ This serves:
 
 ### Scopes
 
-| Scope | Description |
-|-------|-------------|
-| `email:read` | Read emails and senders |
-| `email:send` | Send and reply to emails |
+| Scope          | Description                     |
+| -------------- | ------------------------------- |
+| `email:read`   | Read emails and senders         |
+| `email:send`   | Send and reply to emails        |
 | `email:manage` | Mark read/unread, delete emails |
 
 ## MCP Server Endpoints
@@ -79,22 +80,23 @@ REST endpoints at `/mcp/*`, protected by OAuth access token verification.
 
 ### Tools
 
-| Tool | Method | Path | Description |
-|------|--------|------|-------------|
-| `list_senders` | GET | `/mcp/senders` | List senders with search/pagination |
-| `get_sender` | GET | `/mcp/senders/:id` | Get a single sender |
-| `list_emails` | GET | `/mcp/senders/:id/emails` | List emails for a sender |
-| `read_email` | GET | `/mcp/emails/:id` | Read a single email with body |
-| `send_email` | POST | `/mcp/send` | Compose and send a new email |
-| `reply_email` | POST | `/mcp/send/reply/:emailId` | Reply to an email |
-| `mark_read` | PATCH | `/mcp/emails/:id` | Mark email read/unread |
-| `delete_email` | DELETE | `/mcp/emails/:id` | Delete an email |
+| Tool           | Method | Path                       | Description                         |
+| -------------- | ------ | -------------------------- | ----------------------------------- |
+| `list_senders` | GET    | `/mcp/senders`             | List senders with search/pagination |
+| `get_sender`   | GET    | `/mcp/senders/:id`         | Get a single sender                 |
+| `list_emails`  | GET    | `/mcp/senders/:id/emails`  | List emails for a sender            |
+| `read_email`   | GET    | `/mcp/emails/:id`          | Read a single email with body       |
+| `send_email`   | POST   | `/mcp/send`                | Compose and send a new email        |
+| `reply_email`  | POST   | `/mcp/send/reply/:emailId` | Reply to an email                   |
+| `mark_read`    | PATCH  | `/mcp/emails/:id`          | Mark email read/unread              |
+| `delete_email` | DELETE | `/mcp/emails/:id`          | Delete an email                     |
 
 ### Auth middleware
 
 Verify OAuth access token using the oauth-provider's resource client. Extract the user from the token and set on the Hono context — same pattern as the existing session/API key middleware, but checking OAuth bearer tokens.
 
 The middleware applies to all `/mcp/*` routes and enforces scope checks:
+
 - `email:read` required for GET endpoints
 - `email:send` required for POST send/reply endpoints
 - `email:manage` required for PATCH and DELETE endpoints
@@ -106,9 +108,11 @@ The middleware applies to all `/mcp/*` routes and enforces scope checks:
 Rework the `/api-keys` page into two sections:
 
 #### Section 1: API Keys (existing)
+
 Keep the existing API key generate/revoke functionality unchanged.
 
 #### Section 2: MCP Connection
+
 - **Server URL**: `https://mail.givefeedback.dev/mcp`
 - **Connection config snippet** (copyable JSON for Claude Desktop):
   ```json
@@ -126,7 +130,7 @@ Keep the existing API key generate/revoke functionality unchanged.
 
 ### Backend additions
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/oauth-apps` | List OAuth clients registered for current user |
-| DELETE | `/api/oauth-apps/:clientId` | Revoke an OAuth client and its tokens |
+| Method | Path                        | Description                                    |
+| ------ | --------------------------- | ---------------------------------------------- |
+| GET    | `/api/oauth-apps`           | List OAuth clients registered for current user |
+| DELETE | `/api/oauth-apps/:clientId` | Revoke an OAuth client and its tokens          |

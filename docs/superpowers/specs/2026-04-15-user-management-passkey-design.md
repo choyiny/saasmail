@@ -6,10 +6,10 @@ Add a user management portal where admins can invite users to the cmail platform
 
 ## Roles
 
-| Role | Permissions |
-|------|-------------|
-| `admin` | Full access: inbox, compose, reply, templates, user management, invite users |
-| `member` | Inbox, compose, reply, templates. No access to user management or inviting. |
+| Role     | Permissions                                                                  |
+| -------- | ---------------------------------------------------------------------------- |
+| `admin`  | Full access: inbox, compose, reply, templates, user management, invite users |
+| `member` | Inbox, compose, reply, templates. No access to user management or inviting.  |
 
 ## User Lifecycle
 
@@ -45,6 +45,7 @@ The first admin (created via `/onboarding`) follows the same passkey requirement
 ### Frontend Gate
 
 `AuthGuard` updated to check passkey status after confirming a valid session:
+
 - Session exists + has passkey → allow access
 - Session exists + no passkey → redirect to `/setup-passkey`
 - No session → redirect to `/login`
@@ -72,17 +73,17 @@ invitations
 
 **Admin-only (behind `requireAdmin` middleware):**
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/admin/invites` | Create invite. Body: `{ role, email?, expiresInDays }`. Returns invite with token and full URL. |
-| GET | `/api/admin/invites` | List all invites with status (pending/used/expired). |
+| Method | Path                 | Description                                                                                     |
+| ------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| POST   | `/api/admin/invites` | Create invite. Body: `{ role, email?, expiresInDays }`. Returns invite with token and full URL. |
+| GET    | `/api/admin/invites` | List all invites with status (pending/used/expired).                                            |
 
 **Public:**
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/invites/:token` | Check invite validity. Returns `{ valid, role, email? }` or error. |
-| POST | `/api/invites/accept` | Accept invite. Body: `{ token, name, email, password }`. Creates user, marks invite used, auto-signs in. Returns session. |
+| Method | Path                  | Description                                                                                                               |
+| ------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/invites/:token` | Check invite validity. Returns `{ valid, role, email? }` or error.                                                        |
+| POST   | `/api/invites/accept` | Accept invite. Body: `{ token, name, email, password }`. Creates user, marks invite used, auto-signs in. Returns session. |
 
 ### Invite Acceptance Logic
 
@@ -97,11 +98,11 @@ invitations
 
 ### API Endpoints (admin-only)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/admin/users` | List all users: id, name, email, role, createdAt, hasPasskey |
-| PATCH | `/api/admin/users/:id/role` | Update role. Body: `{ role }`. Admin cannot change own role. |
-| DELETE | `/api/admin/users/:id` | Delete user. Admin cannot delete themselves. |
+| Method | Path                        | Description                                                  |
+| ------ | --------------------------- | ------------------------------------------------------------ |
+| GET    | `/api/admin/users`          | List all users: id, name, email, role, createdAt, hasPasskey |
+| PATCH  | `/api/admin/users/:id/role` | Update role. Body: `{ role }`. Admin cannot change own role. |
+| DELETE | `/api/admin/users/:id`      | Delete user. Admin cannot delete themselves.                 |
 
 ### Frontend — `/admin/users`
 
@@ -144,27 +145,27 @@ invitations
 
 ### New Files
 
-| File | Purpose |
-|------|---------|
-| `worker/src/routers/admin-router.ts` | Invite + user management API endpoints |
-| `worker/src/routers/user-router.ts` | Passkey status endpoint |
-| `worker/src/db/invitations.schema.ts` | Custom invitations table schema |
-| `src/pages/AdminUsersPage.tsx` | User management portal page |
-| `src/pages/InviteAcceptPage.tsx` | Invite acceptance/registration page |
-| `src/pages/SetupPasskeyPage.tsx` | Passkey registration interstitial |
+| File                                  | Purpose                                |
+| ------------------------------------- | -------------------------------------- |
+| `worker/src/routers/admin-router.ts`  | Invite + user management API endpoints |
+| `worker/src/routers/user-router.ts`   | Passkey status endpoint                |
+| `worker/src/db/invitations.schema.ts` | Custom invitations table schema        |
+| `src/pages/AdminUsersPage.tsx`        | User management portal page            |
+| `src/pages/InviteAcceptPage.tsx`      | Invite acceptance/registration page    |
+| `src/pages/SetupPasskeyPage.tsx`      | Passkey registration interstitial      |
 
 ### Modified Files
 
-| File | Change |
-|------|--------|
-| `worker/src/auth/index.ts` | Add `passkey()` plugin |
-| `worker/src/index.ts` | Mount admin router, user router, add `requireAdmin` middleware |
-| `worker/src/db/auth.schema.ts` | Regenerate to include passkey tables |
-| `worker/src/db/index.ts` | Export invitations schema |
-| `src/lib/auth-client.ts` | Add `passkeyClient()` plugin |
-| `src/lib/api.ts` | Add invite, user management, passkey status API functions |
-| `src/App.tsx` | Add routes (`/invite/:token`, `/setup-passkey`, `/admin/users`), update `AuthGuard` |
-| `src/pages/LoginPage.tsx` | Replace email/password form with passkey-only login |
-| `src/pages/OnboardingPage.tsx` | Redirect to `/setup-passkey` after first admin creation |
-| `src/pages/InboxPage.tsx` | Add "Users" nav link for admins |
-| New migration file | Invitations table + passkey schema |
+| File                           | Change                                                                              |
+| ------------------------------ | ----------------------------------------------------------------------------------- |
+| `worker/src/auth/index.ts`     | Add `passkey()` plugin                                                              |
+| `worker/src/index.ts`          | Mount admin router, user router, add `requireAdmin` middleware                      |
+| `worker/src/db/auth.schema.ts` | Regenerate to include passkey tables                                                |
+| `worker/src/db/index.ts`       | Export invitations schema                                                           |
+| `src/lib/auth-client.ts`       | Add `passkeyClient()` plugin                                                        |
+| `src/lib/api.ts`               | Add invite, user management, passkey status API functions                           |
+| `src/App.tsx`                  | Add routes (`/invite/:token`, `/setup-passkey`, `/admin/users`), update `AuthGuard` |
+| `src/pages/LoginPage.tsx`      | Replace email/password form with passkey-only login                                 |
+| `src/pages/OnboardingPage.tsx` | Redirect to `/setup-passkey` after first admin creation                             |
+| `src/pages/InboxPage.tsx`      | Add "Users" nav link for admins                                                     |
+| New migration file             | Invitations table + passkey schema                                                  |

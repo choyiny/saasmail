@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function LoginPage() {
   const [error, setError] = useState("");
@@ -87,9 +82,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">cmail</CardTitle>
-          <p className="text-xs text-text-secondary">
-            Sign in to continue.
-          </p>
+          <p className="text-xs text-text-secondary">Sign in to continue.</p>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && <p className="text-xs text-destructive">{error}</p>}
@@ -104,7 +97,10 @@ export default function LoginPage() {
               </button>
               <button
                 className="w-full text-xs text-text-secondary hover:text-text-primary"
-                onClick={() => { setError(""); setMode("password"); }}
+                onClick={() => {
+                  setError("");
+                  setMode("password");
+                }}
                 type="button"
               >
                 Sign in with email instead
@@ -137,7 +133,10 @@ export default function LoginPage() {
               </button>
               <button
                 className="w-full text-xs text-text-secondary hover:text-text-primary"
-                onClick={() => { setError(""); setMode("passkey"); }}
+                onClick={() => {
+                  setError("");
+                  setMode("passkey");
+                }}
                 type="button"
               >
                 Sign in with passkey instead

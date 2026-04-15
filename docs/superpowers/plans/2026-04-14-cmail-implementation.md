@@ -75,6 +75,7 @@ cmail/
 ## Task 1: Project Scaffolding
 
 **Files:**
+
 - Create: `package.json`
 - Create: `tsconfig.json`
 - Create: `tsconfig.app.json`
@@ -147,12 +148,11 @@ cmail/
 - [ ] **Step 2: Create TypeScript configs**
 
 `tsconfig.json`:
+
 ```json
 {
   "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" }
-  ],
+  "references": [{ "path": "./tsconfig.app.json" }],
   "compilerOptions": {
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] },
@@ -164,6 +164,7 @@ cmail/
 ```
 
 `tsconfig.app.json`:
+
 ```json
 {
   "compilerOptions": {
@@ -184,6 +185,7 @@ cmail/
 ```
 
 `worker/tsconfig.json`:
+
 ```json
 {
   "compilerOptions": {
@@ -215,6 +217,7 @@ wrangler.jsonc
 - [ ] **Step 4: Create wrangler.jsonc.example and .dev.vars.example**
 
 `wrangler.jsonc.example`:
+
 ```jsonc
 {
   // Copy this file to wrangler.jsonc and fill in your values.
@@ -227,30 +230,31 @@ wrangler.jsonc
     {
       "binding": "DB",
       "database_name": "cmail-db",
-      "database_id": "<your-database-id>"
-    }
+      "database_id": "<your-database-id>",
+    },
   ],
   "r2_buckets": [
     {
       "binding": "R2",
-      "bucket_name": "cmail-attachments"
-    }
+      "bucket_name": "cmail-attachments",
+    },
   ],
   "assets": {
     "directory": "./dist/client",
     "not_found_handling": "single-page-application",
-    "run_worker_first": true
+    "run_worker_first": true,
   },
   "email_routing": {
-    "enabled": true
+    "enabled": true,
   },
   "observability": {
-    "enabled": true
-  }
+    "enabled": true,
+  },
 }
 ```
 
 `.dev.vars.example`:
+
 ```
 RESEND_API_KEY=re_xxxx
 RESEND_EMAIL_FROM=noreply@yourdomain.com
@@ -289,9 +293,17 @@ import path from "path";
 
 function getLocalD1DB(): string {
   const wranglerDir = path.resolve(".wrangler");
-  const d1Dir = path.join(wranglerDir, "state", "v3", "d1", "miniflare-D1DatabaseObject");
+  const d1Dir = path.join(
+    wranglerDir,
+    "state",
+    "v3",
+    "d1",
+    "miniflare-D1DatabaseObject",
+  );
   if (!fs.existsSync(d1Dir)) {
-    throw new Error(`D1 directory not found at ${d1Dir}. Run 'wrangler dev' first.`);
+    throw new Error(
+      `D1 directory not found at ${d1Dir}. Run 'wrangler dev' first.`,
+    );
   }
   const files = fs.readdirSync(d1Dir).filter((f) => f.endsWith(".sqlite"));
   if (files.length === 0) {
@@ -324,6 +336,7 @@ export default defineConfig({
 - [ ] **Step 7: Create postcss.config.js and tailwind.config.ts**
 
 `postcss.config.js`:
+
 ```javascript
 export default {
   plugins: {
@@ -334,6 +347,7 @@ export default {
 ```
 
 `tailwind.config.ts`:
+
 ```typescript
 import type { Config } from "tailwindcss";
 
@@ -453,6 +467,7 @@ git commit -m "feat: project scaffolding with Vite, Tailwind, Hono, Drizzle conf
 ## Task 2: Database Schemas
 
 **Files:**
+
 - Create: `worker/src/db/senders.schema.ts`
 - Create: `worker/src/db/emails.schema.ts`
 - Create: `worker/src/db/sent-emails.schema.ts`
@@ -464,6 +479,7 @@ git commit -m "feat: project scaffolding with Vite, Tailwind, Hono, Drizzle conf
 - [ ] **Step 1: Create senders schema**
 
 `worker/src/db/senders.schema.ts`:
+
 ```typescript
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
@@ -482,6 +498,7 @@ export const senders = sqliteTable("senders", {
 - [ ] **Step 2: Create emails schema**
 
 `worker/src/db/emails.schema.ts`:
+
 ```typescript
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
@@ -502,14 +519,18 @@ export const emails = sqliteTable(
   },
   (table) => [
     index("emails_sender_received_idx").on(table.senderId, table.receivedAt),
-    index("emails_recipient_received_idx").on(table.recipient, table.receivedAt),
-  ]
+    index("emails_recipient_received_idx").on(
+      table.recipient,
+      table.receivedAt,
+    ),
+  ],
 );
 ```
 
 - [ ] **Step 3: Create sent_emails schema**
 
 `worker/src/db/sent-emails.schema.ts`:
+
 ```typescript
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
@@ -531,13 +552,14 @@ export const sentEmails = sqliteTable(
   },
   (table) => [
     index("sent_emails_sender_sent_idx").on(table.senderId, table.sentAt),
-  ]
+  ],
 );
 ```
 
 - [ ] **Step 4: Create attachments schema**
 
 `worker/src/db/attachments.schema.ts`:
+
 ```typescript
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
@@ -555,6 +577,7 @@ export const attachments = sqliteTable("attachments", {
 - [ ] **Step 5: Create schema.ts and index.ts**
 
 `worker/src/db/schema.ts`:
+
 ```typescript
 import { senders } from "./senders.schema";
 import { emails } from "./emails.schema";
@@ -570,6 +593,7 @@ export const schema = {
 ```
 
 `worker/src/db/index.ts`:
+
 ```typescript
 export * from "drizzle-orm";
 export * from "./senders.schema";
@@ -582,6 +606,7 @@ export * from "./schema";
 - [ ] **Step 6: Create DB middleware**
 
 `worker/src/db/middleware.ts`:
+
 ```typescript
 import { drizzle } from "drizzle-orm/d1";
 import type { Context, Next } from "hono";
@@ -611,6 +636,7 @@ git commit -m "feat: database schemas for senders, emails, sent_emails, attachme
 ## Task 3: BetterAuth Setup
 
 **Files:**
+
 - Create: `worker/src/auth/index.ts`
 - Create: `worker/src/db/auth.schema.ts`
 - Create: `src/lib/auth-client.ts`
@@ -618,6 +644,7 @@ git commit -m "feat: database schemas for senders, emails, sent_emails, attachme
 - [ ] **Step 1: Create BetterAuth server config**
 
 `worker/src/auth/index.ts`:
+
 ```typescript
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -658,9 +685,7 @@ export function createAuth(env?: CloudflareBindings) {
       cookiePrefix: "cmail",
       defaultCookieAttributes: { sameSite: "lax", secure: true },
     },
-    trustedOrigins: [
-      "http://localhost:8080",
-    ],
+    trustedOrigins: ["http://localhost:8080"],
   });
 }
 
@@ -675,6 +700,7 @@ Expected: `worker/src/db/auth.schema.ts` is created with users, sessions, accoun
 - [ ] **Step 3: Update schema.ts to include auth schema**
 
 Update `worker/src/db/schema.ts`:
+
 ```typescript
 import * as authSchema from "./auth.schema";
 import { senders } from "./senders.schema";
@@ -692,6 +718,7 @@ export const schema = {
 ```
 
 Update `worker/src/db/index.ts` to add:
+
 ```typescript
 export * from "./auth.schema";
 ```
@@ -699,6 +726,7 @@ export * from "./auth.schema";
 - [ ] **Step 4: Create BetterAuth React client**
 
 `src/lib/auth-client.ts`:
+
 ```typescript
 import { createAuthClient } from "better-auth/react";
 import { adminClient, invitationClient } from "better-auth/client/plugins";
@@ -728,6 +756,7 @@ git commit -m "feat: BetterAuth with invite-only access and email/password auth"
 ## Task 4: Worker Entry Point & Middleware
 
 **Files:**
+
 - Create: `worker/src/variables.ts`
 - Create: `worker/src/lib/helpers.ts`
 - Create: `worker/src/index.ts`
@@ -735,6 +764,7 @@ git commit -m "feat: BetterAuth with invite-only access and email/password auth"
 - [ ] **Step 1: Create variables type**
 
 `worker/src/variables.ts`:
+
 ```typescript
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
@@ -747,6 +777,7 @@ export type Variables = {
 - [ ] **Step 2: Create API helpers**
 
 `worker/src/lib/helpers.ts`:
+
 ```typescript
 import { z } from "zod";
 
@@ -780,6 +811,7 @@ export function json201Response(schema: z.ZodType, description: string) {
 - [ ] **Step 3: Create worker entry point**
 
 `worker/src/index.ts`:
+
 ```typescript
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -808,7 +840,7 @@ app.use(
   cors({
     origin: ["http://localhost:8080"],
     credentials: true,
-  })
+  }),
 );
 
 // BetterAuth handler
@@ -864,11 +896,12 @@ export default {
 - [ ] **Step 4: Create placeholder email handler**
 
 `worker/src/email-handler.ts`:
+
 ```typescript
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<void> {
   // Will be implemented in Task 5
   console.log(`Received email from ${message.from} to ${message.to}`);
@@ -880,6 +913,7 @@ export async function handleEmail(
 Create empty routers so the entry point compiles. Each file follows this pattern:
 
 `worker/src/routers/senders-router.ts`:
+
 ```typescript
 import { OpenAPIHono } from "@hono/zod-openapi";
 import type { Variables } from "../variables";
@@ -915,12 +949,14 @@ git commit -m "feat: Hono worker entry point with auth, middleware, and route sk
 ## Task 5: Email Worker Handler
 
 **Files:**
+
 - Create: `worker/src/lib/email-parser.ts`
 - Modify: `worker/src/email-handler.ts`
 
 - [ ] **Step 1: Create email parser wrapper**
 
 `worker/src/lib/email-parser.ts`:
+
 ```typescript
 import PostalMime from "postal-mime";
 
@@ -942,7 +978,7 @@ export interface ParsedAttachment {
 }
 
 export async function parseEmail(
-  message: ForwardableEmailMessage
+  message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
   const rawEmail = await new Response(message.raw).arrayBuffer();
   const parser = new PostalMime();
@@ -978,6 +1014,7 @@ export async function parseEmail(
 - [ ] **Step 2: Implement email handler**
 
 `worker/src/email-handler.ts`:
+
 ```typescript
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -991,7 +1028,7 @@ import { parseEmail } from "./lib/email-parser";
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
-  ctx: ExecutionContext
+  ctx: ExecutionContext,
 ): Promise<void> {
   const db = drizzle(env.DB, { schema, logger: true });
   const parsed = await parseEmail(message);
@@ -1081,7 +1118,9 @@ export async function handleEmail(
     });
   }
 
-  console.log(`Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`);
+  console.log(
+    `Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`,
+  );
 }
 ```
 
@@ -1097,11 +1136,13 @@ git commit -m "feat: email worker handler with MIME parsing, sender upsert, R2 a
 ## Task 6: Senders API Router
 
 **Files:**
+
 - Modify: `worker/src/routers/senders-router.ts`
 
 - [ ] **Step 1: Implement senders router**
 
 `worker/src/routers/senders-router.ts`:
+
 ```typescript
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { desc, like, or, eq, sql } from "drizzle-orm";
@@ -1132,8 +1173,14 @@ const listSendersRoute = createRoute({
   description: "List senders sorted by most recent email.",
   request: {
     query: z.object({
-      q: z.string().optional().openapi({ description: "Search sender name/email" }),
-      recipient: z.string().optional().openapi({ description: "Filter by recipient address" }),
+      q: z
+        .string()
+        .optional()
+        .openapi({ description: "Search sender name/email" }),
+      recipient: z
+        .string()
+        .optional()
+        .openapi({ description: "Filter by recipient address" }),
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(50),
     }),
@@ -1153,7 +1200,7 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
   if (q) {
     const pattern = `%${q}%`;
     conditions.push(
-      or(like(senders.email, pattern), like(senders.name, pattern))
+      or(like(senders.email, pattern), like(senders.name, pattern)),
     );
   }
 
@@ -1163,13 +1210,14 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
       sql`${senders.id} IN (
         SELECT DISTINCT ${emails.senderId} FROM ${emails}
         WHERE ${emails.recipient} = ${recipient}
-      )`
+      )`,
     );
   }
 
-  const where = conditions.length > 0
-    ? sql`${sql.join(conditions, sql` AND `)}`
-    : undefined;
+  const where =
+    conditions.length > 0
+      ? sql`${sql.join(conditions, sql` AND `)}`
+      : undefined;
 
   const rows = await db
     .select({
@@ -1199,7 +1247,7 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
         ...sender,
         latestSubject: latest[0]?.subject ?? null,
       };
-    })
+    }),
   );
 
   return c.json(result, 200);
@@ -1250,11 +1298,13 @@ git commit -m "feat: senders API with list, search, recipient filter, and detail
 ## Task 7: Emails API Router
 
 **Files:**
+
 - Modify: `worker/src/routers/emails-router.ts`
 
 - [ ] **Step 1: Implement emails router**
 
 `worker/src/routers/emails-router.ts`:
+
 ```typescript
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, desc, like, and, sql } from "drizzle-orm";
@@ -1290,7 +1340,8 @@ const listSenderEmailsRoute = createRoute({
   method: "get",
   path: "/by-sender/{senderId}",
   tags: ["Emails"],
-  description: "List all emails for a sender (received and sent, interleaved chronologically).",
+  description:
+    "List all emails for a sender (received and sent, interleaved chronologically).",
   request: {
     params: z.object({ senderId: z.string() }),
     query: z.object({
@@ -1395,7 +1446,12 @@ emailsRouter.openapi(listSenderEmailsRoute, async (c) => {
         count: sql<number>`COUNT(*)`,
       })
       .from(attachments)
-      .where(sql`${attachments.emailId} IN (${sql.join(receivedIds.map(id => sql`${id}`), sql`,`)})`)
+      .where(
+        sql`${attachments.emailId} IN (${sql.join(
+          receivedIds.map((id) => sql`${id}`),
+          sql`,`,
+        )})`,
+      )
       .groupBy(attachments.emailId);
 
     for (const row of counts) {
@@ -1429,11 +1485,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
 
-  const row = await db
-    .select()
-    .from(emails)
-    .where(eq(emails.id, id))
-    .limit(1);
+  const row = await db.select().from(emails).where(eq(emails.id, id)).limit(1);
 
   if (row.length === 0) {
     return c.json({ error: "Email not found" }, 404);
@@ -1444,14 +1496,17 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
     .from(attachments)
     .where(eq(attachments.emailId, id));
 
-  return c.json({
-    ...row[0],
-    type: "received",
-    timestamp: row[0].receivedAt,
-    fromAddress: null,
-    toAddress: null,
-    attachments: atts,
-  }, 200);
+  return c.json(
+    {
+      ...row[0],
+      type: "received",
+      timestamp: row[0].receivedAt,
+      fromAddress: null,
+      toAddress: null,
+      attachments: atts,
+    },
+    200,
+  );
 });
 
 // Mark email read/unread
@@ -1581,11 +1636,13 @@ git commit -m "feat: emails API with sender history, read/unread toggle, and bul
 ## Task 8: Send Email Router
 
 **Files:**
+
 - Modify: `worker/src/routers/send-router.ts`
 
 - [ ] **Step 1: Implement send router**
 
 `worker/src/routers/send-router.ts`:
+
 ```typescript
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
@@ -1677,8 +1734,12 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   });
 
   return c.json(
-    { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
-    201
+    {
+      id,
+      resendId: result.data?.id ?? null,
+      status: result.error ? "failed" : "sent",
+    },
+    201,
   );
 });
 
@@ -1771,8 +1832,12 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   });
 
   return c.json(
-    { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
-    201
+    {
+      id,
+      resendId: result.data?.id ?? null,
+      status: result.error ? "failed" : "sent",
+    },
+    201,
   );
 });
 ```
@@ -1789,12 +1854,14 @@ git commit -m "feat: send and reply email routes via Resend"
 ## Task 9: Attachments & Stats Routers
 
 **Files:**
+
 - Modify: `worker/src/routers/attachments-router.ts`
 - Modify: `worker/src/routers/stats-router.ts`
 
 - [ ] **Step 1: Implement attachments router**
 
 `worker/src/routers/attachments-router.ts`:
+
 ```typescript
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
@@ -1851,6 +1918,7 @@ attachmentsRouter.openapi(downloadRoute, async (c) => {
 - [ ] **Step 2: Implement stats router**
 
 `worker/src/routers/stats-router.ts`:
+
 ```typescript
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { sql } from "drizzle-orm";
@@ -1878,7 +1946,10 @@ const statsRoute = createRoute({
   description: "Get inbox statistics.",
   request: {
     query: z.object({
-      recipient: z.string().optional().openapi({ description: "Filter by recipient address" }),
+      recipient: z
+        .string()
+        .optional()
+        .openapi({ description: "Filter by recipient address" }),
     }),
   },
   responses: {
@@ -1931,7 +2002,7 @@ statsRouter.openapi(statsRoute, async (c) => {
       unreadCount,
       recipients: recipientRows.map((r) => r.recipient),
     },
-    200
+    200,
   );
 });
 ```
@@ -1948,6 +2019,7 @@ git commit -m "feat: attachments download and inbox stats API routes"
 ## Task 10: Frontend - Auth & Shell
 
 **Files:**
+
 - Create: `src/pages/LoginPage.tsx`
 - Modify: `src/App.tsx`
 - Create: `src/lib/api.ts`
@@ -1960,6 +2032,7 @@ Expected: Components installed to `src/components/ui/`.
 - [ ] **Step 2: Create API client**
 
 `src/lib/api.ts`:
+
 ```typescript
 export interface Sender {
   id: string;
@@ -2033,7 +2106,7 @@ export async function fetchSender(id: string): Promise<Sender> {
 
 export async function fetchSenderEmails(
   senderId: string,
-  params?: { q?: string; page?: number; limit?: number }
+  params?: { q?: string; page?: number; limit?: number },
 ): Promise<Email[]> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set("q", params.q);
@@ -2046,7 +2119,10 @@ export async function fetchEmail(id: string): Promise<Email> {
   return apiFetch(`/api/emails/${id}`);
 }
 
-export async function markEmailRead(id: string, isRead: boolean): Promise<void> {
+export async function markEmailRead(
+  id: string,
+  isRead: boolean,
+): Promise<void> {
   await apiFetch(`/api/emails/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -2069,7 +2145,7 @@ export async function sendEmail(data: {
 
 export async function replyToEmail(
   emailId: string,
-  data: { bodyHtml: string; bodyText?: string }
+  data: { bodyHtml: string; bodyText?: string },
 ): Promise<{ id: string }> {
   return apiFetch(`/api/send/reply/${emailId}`, {
     method: "POST",
@@ -2087,6 +2163,7 @@ export async function fetchStats(recipient?: string): Promise<Stats> {
 - [ ] **Step 3: Create LoginPage**
 
 `src/pages/LoginPage.tsx`:
+
 ```tsx
 import { useState } from "react";
 import { signIn } from "@/lib/auth-client";
@@ -2162,6 +2239,7 @@ export default function LoginPage() {
 - [ ] **Step 4: Update App.tsx with routing and auth guard**
 
 `src/App.tsx`:
+
 ```tsx
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -2215,6 +2293,7 @@ export default App;
 - [ ] **Step 5: Create placeholder InboxPage**
 
 `src/pages/InboxPage.tsx`:
+
 ```tsx
 export default function InboxPage() {
   return <div className="flex h-screen">Inbox coming soon</div>;
@@ -2233,12 +2312,14 @@ git commit -m "feat: auth flow, API client, login page, and app routing"
 ## Task 11: Frontend - Sender List (Left Panel)
 
 **Files:**
+
 - Create: `src/pages/SenderList.tsx`
 - Modify: `src/pages/InboxPage.tsx`
 
 - [ ] **Step 1: Create SenderList component**
 
 `src/pages/SenderList.tsx`:
+
 ```tsx
 import { useState, useEffect } from "react";
 import { Input } from "@/components/ui/input";
@@ -2258,7 +2339,10 @@ interface SenderListProps {
   onSelectSender: (sender: Sender) => void;
 }
 
-export default function SenderList({ selectedSenderId, onSelectSender }: SenderListProps) {
+export default function SenderList({
+  selectedSenderId,
+  onSelectSender,
+}: SenderListProps) {
   const [senders, setSenders] = useState<Sender[]>([]);
   const [search, setSearch] = useState("");
   const [recipient, setRecipient] = useState<string>("");
@@ -2286,7 +2370,10 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
     const date = new Date(ts * 1000);
     const now = new Date();
     if (date.toDateString() === now.toDateString()) {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     }
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
   }
@@ -2302,7 +2389,11 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
         {recipients.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full justify-start text-sm">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full justify-start text-sm"
+              >
                 {recipient || "All addresses"}
               </Button>
             </DropdownMenuTrigger>
@@ -2323,7 +2414,9 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
         {loading ? (
           <p className="p-4 text-center text-sm text-neutral-500">Loading...</p>
         ) : senders.length === 0 ? (
-          <p className="p-4 text-center text-sm text-neutral-500">No senders found</p>
+          <p className="p-4 text-center text-sm text-neutral-500">
+            No senders found
+          </p>
         ) : (
           senders.map((sender) => (
             <button
@@ -2347,7 +2440,9 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
               </div>
               <div className="flex items-center justify-between">
                 {sender.name && (
-                  <span className="truncate text-xs text-neutral-500">{sender.email}</span>
+                  <span className="truncate text-xs text-neutral-500">
+                    {sender.email}
+                  </span>
                 )}
               </div>
               <div className="mt-1 flex items-center justify-between">
@@ -2372,6 +2467,7 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
 - [ ] **Step 2: Update InboxPage with two-panel layout**
 
 `src/pages/InboxPage.tsx`:
+
 ```tsx
 import { useState } from "react";
 import { signOut, useSession } from "@/lib/auth-client";
@@ -2460,6 +2556,7 @@ export default function InboxPage() {
 - [ ] **Step 3: Create placeholder SenderDetail and ComposeModal**
 
 `src/pages/SenderDetail.tsx`:
+
 ```tsx
 import type { Sender } from "@/lib/api";
 
@@ -2469,11 +2566,16 @@ interface SenderDetailProps {
 }
 
 export default function SenderDetail({ sender }: SenderDetailProps) {
-  return <div className="p-4">Emails from {sender.name || sender.email} — coming next</div>;
+  return (
+    <div className="p-4">
+      Emails from {sender.name || sender.email} — coming next
+    </div>
+  );
 }
 ```
 
 `src/pages/ComposeModal.tsx`:
+
 ```tsx
 interface ComposeModalProps {
   open: boolean;
@@ -2499,11 +2601,13 @@ git commit -m "feat: sender list panel with search, recipient filter, and inbox 
 ## Task 12: Frontend - Sender Detail (Right Panel)
 
 **Files:**
+
 - Modify: `src/pages/SenderDetail.tsx`
 
 - [ ] **Step 1: Implement SenderDetail with email history**
 
 `src/pages/SenderDetail.tsx`:
+
 ```tsx
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -2545,7 +2649,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
     if (email.type === "received" && email.isRead === 0) {
       await markEmailRead(email.id, true);
       setEmails((prev) =>
-        prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e))
+        prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e)),
       );
     }
   }
@@ -2557,8 +2661,8 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
     await markEmailRead(email.id, newIsRead);
     setEmails((prev) =>
       prev.map((em) =>
-        em.id === email.id ? { ...em, isRead: newIsRead ? 1 : 0 } : em
-      )
+        em.id === email.id ? { ...em, isRead: newIsRead ? 1 : 0 } : em,
+      ),
     );
   }
 
@@ -2578,9 +2682,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
     <div className="flex h-full flex-col">
       {/* Sender header */}
       <div className="border-b px-6 py-4">
-        <h2 className="text-lg font-semibold">
-          {sender.name || sender.email}
-        </h2>
+        <h2 className="text-lg font-semibold">{sender.name || sender.email}</h2>
         {sender.name && (
           <p className="text-sm text-neutral-500">{sender.email}</p>
         )}
@@ -2614,11 +2716,13 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
                 >
                   {email.subject || "(no subject)"}
                 </span>
-                {email.type === "received" && (email.attachmentCount ?? 0) > 0 && (
-                  <span className="text-xs text-neutral-400">
-                    {email.attachmentCount} file{email.attachmentCount !== 1 ? "s" : ""}
-                  </span>
-                )}
+                {email.type === "received" &&
+                  (email.attachmentCount ?? 0) > 0 && (
+                    <span className="text-xs text-neutral-400">
+                      {email.attachmentCount} file
+                      {email.attachmentCount !== 1 ? "s" : ""}
+                    </span>
+                  )}
                 <span className="shrink-0 text-xs text-neutral-400">
                   {formatDate(email.timestamp)}
                 </span>
@@ -2713,11 +2817,13 @@ git commit -m "feat: sender detail panel with email history, expand, read/unread
 ## Task 13: Frontend - Compose & Reply Modal
 
 **Files:**
+
 - Modify: `src/pages/ComposeModal.tsx`
 
 - [ ] **Step 1: Implement ComposeModal**
 
 `src/pages/ComposeModal.tsx`:
+
 ```tsx
 import { useState, useEffect } from "react";
 import {
@@ -2763,7 +2869,7 @@ export default function ComposeModal({
         setSubject(
           email.subject?.startsWith("Re: ")
             ? email.subject
-            : `Re: ${email.subject || ""}`
+            : `Re: ${email.subject || ""}`,
         );
       });
     }
@@ -2862,6 +2968,7 @@ git commit -m "feat: compose and reply email modal"
 ## Task 14: Final Wiring & Cleanup
 
 **Files:**
+
 - Verify all imports and routes compile
 - Update CORS origins in worker entry if needed
 
@@ -2892,6 +2999,7 @@ curl -X POST http://localhost:8080/api/auth/sign-up/email \
 ```
 
 Then promote to admin via D1:
+
 ```bash
 wrangler d1 execute cmail-db --local --command "UPDATE users SET role = 'admin' WHERE email = 'admin@example.com'"
 ```

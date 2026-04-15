@@ -46,7 +46,7 @@ app.use(
       return trusted.includes(origin) ? origin : trusted[0];
     },
     credentials: true,
-  })
+  }),
 );
 
 // BetterAuth handler
@@ -163,10 +163,17 @@ app.all("*", async (c) => {
 export default {
   fetch: app.fetch,
   email: handleEmail,
-  async scheduled(event: ScheduledEvent, env: CloudflareBindings, ctx: ExecutionContext) {
+  async scheduled(
+    event: ScheduledEvent,
+    env: CloudflareBindings,
+    ctx: ExecutionContext,
+  ) {
     ctx.waitUntil(handleScheduled(env));
   },
-  async queue(batch: MessageBatch<SequenceEmailMessage>, env: CloudflareBindings) {
+  async queue(
+    batch: MessageBatch<SequenceEmailMessage>,
+    env: CloudflareBindings,
+  ) {
     await handleQueueBatch(batch, env);
   },
 };

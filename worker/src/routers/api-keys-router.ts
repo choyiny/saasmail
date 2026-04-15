@@ -25,7 +25,8 @@ const getKeyRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["API Keys"],
-  description: "Get the current user's API key info (prefix and creation date), or null if none exists.",
+  description:
+    "Get the current user's API key info (prefix and creation date), or null if none exists.",
   responses: {
     ...json200Response(
       z.object({
@@ -36,7 +37,7 @@ const getKeyRoute = createRoute({
           })
           .nullable(),
       }),
-      "API key info"
+      "API key info",
     ),
   },
 });
@@ -65,7 +66,7 @@ const createKeyRoute = createRoute({
         prefix: z.string(),
         createdAt: z.number(),
       }),
-      "Generated API key (shown only once)"
+      "Generated API key (shown only once)",
     ),
   },
 });
@@ -100,10 +101,7 @@ const deleteKeyRoute = createRoute({
   tags: ["API Keys"],
   description: "Revoke the current user's API key.",
   responses: {
-    ...json200Response(
-      z.object({ success: z.boolean() }),
-      "Key revoked"
-    ),
+    ...json200Response(z.object({ success: z.boolean() }), "Key revoked"),
   },
 });
 

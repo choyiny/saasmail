@@ -29,7 +29,7 @@ export default function SequenceStatus({
   const sent = info.scheduledEmails.filter((e) => e.status === "sent").length;
   const total = info.scheduledEmails.length;
   const nextPending = info.scheduledEmails.find(
-    (e) => e.status === "pending" || e.status === "queued"
+    (e) => e.status === "pending" || e.status === "queued",
   );
 
   async function handleCancel() {
@@ -37,7 +37,12 @@ export default function SequenceStatus({
     if (!confirm("Cancel this sequence?")) return;
     await cancelEnrollment(info.enrollment.id);
     onStatusChange();
-    setInfo({ ...info, enrollment: null, scheduledEmails: [], sequenceName: null });
+    setInfo({
+      ...info,
+      enrollment: null,
+      scheduledEmails: [],
+      sequenceName: null,
+    });
   }
 
   return (

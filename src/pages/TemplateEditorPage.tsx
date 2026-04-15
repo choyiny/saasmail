@@ -1,11 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import TiptapEditor from "@/components/TiptapEditor";
-import {
-  fetchTemplate,
-  createTemplate,
-  updateTemplate,
-} from "@/lib/api";
+import { fetchTemplate, createTemplate, updateTemplate } from "@/lib/api";
 
 export default function TemplateEditorPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -77,7 +73,9 @@ export default function TemplateEditorPage() {
 
         <form onSubmit={handleSave} className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Name</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Name
+            </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -88,7 +86,9 @@ export default function TemplateEditorPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Slug</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Slug
+            </label>
             <input
               value={slugValue}
               onChange={(e) => setSlugValue(e.target.value)}
@@ -102,7 +102,9 @@ export default function TemplateEditorPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Subject</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Subject
+            </label>
             <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -113,7 +115,9 @@ export default function TemplateEditorPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Body</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Body
+            </label>
             <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
           </div>
 

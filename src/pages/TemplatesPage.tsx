@@ -24,7 +24,9 @@ export default function TemplatesPage() {
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-sm font-semibold text-text-primary">Email Templates</h1>
+          <h1 className="text-sm font-semibold text-text-primary">
+            Email Templates
+          </h1>
           <button
             onClick={() => navigate("/templates/new")}
             className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
@@ -45,7 +47,9 @@ export default function TemplatesPage() {
                 className="flex items-center justify-between rounded-lg border border-border-dark bg-card px-4 py-3"
               >
                 <div>
-                  <p className="text-xs font-medium text-text-primary">{t.name}</p>
+                  <p className="text-xs font-medium text-text-primary">
+                    {t.name}
+                  </p>
                   <p className="text-[11px] text-text-tertiary">
                     {t.slug} &middot; {t.subject}
                   </p>

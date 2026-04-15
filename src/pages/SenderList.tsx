@@ -13,7 +13,10 @@ interface SenderListProps {
   onSelectSender: (sender: Sender) => void;
 }
 
-export default function SenderList({ selectedSenderId, onSelectSender }: SenderListProps) {
+export default function SenderList({
+  selectedSenderId,
+  onSelectSender,
+}: SenderListProps) {
   const [senders, setSenders] = useState<Sender[]>([]);
   const [search, setSearch] = useState("");
   const [recipient, setRecipient] = useState<string>("");
@@ -41,7 +44,10 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
     const date = new Date(ts * 1000);
     const now = new Date();
     if (date.toDateString() === now.toDateString()) {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     }
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
   }
@@ -85,9 +91,13 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
       </div>
       <ScrollArea className="flex-1">
         {loading ? (
-          <p className="p-4 text-center text-xs text-text-tertiary">Loading...</p>
+          <p className="p-4 text-center text-xs text-text-tertiary">
+            Loading...
+          </p>
         ) : senders.length === 0 ? (
-          <p className="p-4 text-center text-xs text-text-tertiary">No senders found</p>
+          <p className="p-4 text-center text-xs text-text-tertiary">
+            No senders found
+          </p>
         ) : (
           senders.map((sender) => (
             <button

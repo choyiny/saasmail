@@ -28,7 +28,8 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
-  const [enrollmentInfo, setEnrollmentInfo] = useState<SenderEnrollmentInfo | null>(null);
+  const [enrollmentInfo, setEnrollmentInfo] =
+    useState<SenderEnrollmentInfo | null>(null);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
   const [recipientFilter, setRecipientFilter] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -37,11 +38,9 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
   const recipients = Array.from(
     new Set(
       emails
-        .map((e) =>
-          e.type === "received" ? e.recipient : e.toAddress
-        )
-        .filter(Boolean) as string[]
-    )
+        .map((e) => (e.type === "received" ? e.recipient : e.toAddress))
+        .filter(Boolean) as string[],
+    ),
   );
 
   useEffect(() => {
@@ -77,7 +76,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
     if (email.type !== "received" || email.isRead !== 0) return;
     await markEmailRead(email.id, true);
     setEmails((prev) =>
-      prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e))
+      prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e)),
     );
   }
 

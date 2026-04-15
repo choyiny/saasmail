@@ -34,7 +34,7 @@ export default function ApiKeysPage() {
       },
     },
     null,
-    2
+    2,
   );
 
   useEffect(() => {
@@ -87,7 +87,9 @@ export default function ApiKeysPage() {
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-2xl">
-        <h1 className="mb-6 text-sm font-semibold text-text-primary">API Access</h1>
+        <h1 className="mb-6 text-sm font-semibold text-text-primary">
+          API Access
+        </h1>
 
         {/* --- API Keys Section --- */}
         {newKey && (
@@ -121,7 +123,9 @@ export default function ApiKeysPage() {
           <div className="mb-6 rounded-lg border border-border-dark bg-card px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-mono text-xs text-text-primary">{keyInfo.prefix}</p>
+                <p className="font-mono text-xs text-text-primary">
+                  {keyInfo.prefix}
+                </p>
                 <p className="text-[11px] text-text-tertiary">
                   Created{" "}
                   {new Date(keyInfo.createdAt * 1000).toLocaleDateString()}
@@ -160,17 +164,23 @@ export default function ApiKeysPage() {
         )}
 
         <div className="mb-6 rounded-lg border border-border-dark bg-card p-4">
-          <h2 className="mb-2 text-xs font-semibold text-text-primary">API Key Usage</h2>
+          <h2 className="mb-2 text-xs font-semibold text-text-primary">
+            API Key Usage
+          </h2>
           <p className="mb-2 text-xs text-text-secondary">
-            Include your API key in the <code className="text-accent">Authorization</code> header:
+            Include your API key in the{" "}
+            <code className="text-accent">Authorization</code> header:
           </p>
           <pre className="rounded bg-sidebar p-3 text-[11px] text-text-secondary">
-{`curl -H "Authorization: Bearer sk_..." \\
+            {`curl -H "Authorization: Bearer sk_..." \\
   ${window.location.origin}/api/senders`}
           </pre>
           <p className="mt-2 text-xs text-text-secondary">
             The key grants full access to the API as your user account. See{" "}
-            <a href="/swagger-ui" className="text-accent hover:text-accent-hover">
+            <a
+              href="/swagger-ui"
+              className="text-accent hover:text-accent-hover"
+            >
               API docs
             </a>{" "}
             for available endpoints.
@@ -196,7 +206,8 @@ export default function ApiKeysPage() {
             Claude Desktop Configuration
           </h3>
           <p className="mb-2 text-xs text-text-secondary">
-            Add this to your <code className="text-accent">claude_desktop_config.json</code>:
+            Add this to your{" "}
+            <code className="text-accent">claude_desktop_config.json</code>:
           </p>
           <div className="relative">
             <pre className="rounded bg-sidebar p-3 text-[11px] text-text-secondary">
@@ -274,9 +285,7 @@ export default function ApiKeysPage() {
               </button>
               <button
                 onClick={
-                  confirmAction === "regenerate"
-                    ? handleGenerate
-                    : handleRevoke
+                  confirmAction === "regenerate" ? handleGenerate : handleRevoke
                 }
                 className={`rounded-md px-3 py-1.5 text-xs font-medium text-white ${
                   confirmAction === "revoke"

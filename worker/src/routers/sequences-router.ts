@@ -159,7 +159,7 @@ sequencesRouter.openapi(createSequenceRoute, async (c) => {
     if (tmpl.length === 0) {
       return c.json(
         { error: `Template "${step.templateSlug}" not found` },
-        400
+        400,
       );
     }
   }
@@ -228,7 +228,7 @@ sequencesRouter.openapi(updateRoute, async (c) => {
       if (tmpl.length === 0) {
         return c.json(
           { error: `Template "${step.templateSlug}" not found` },
-          400
+          400,
         );
       }
     }
@@ -274,15 +274,15 @@ sequencesRouter.openapi(deleteRoute, async (c) => {
     .where(
       and(
         eq(sequenceEnrollments.sequenceId, id),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     )
     .limit(1);
 
   if (active.length > 0) {
     return c.json(
       { error: "Cannot delete sequence with active enrollments" },
-      400
+      400,
     );
   }
 
@@ -311,7 +311,7 @@ const enrollRoute = createRoute({
         enrollment: EnrollmentSchema,
         scheduledEmails: z.array(SequenceEmailSchema),
       }),
-      "Sender enrolled"
+      "Sender enrolled",
     ),
   },
 });
@@ -352,16 +352,13 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
     .where(
       and(
         eq(sequenceEnrollments.senderId, senderId),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     )
     .limit(1);
 
   if (existingEnrollment.length > 0) {
-    return c.json(
-      { error: "Sender is already in an active sequence" },
-      400
-    );
+    return c.json({ error: "Sender is already in an active sequence" }, 400);
   }
 
   const steps: Array<{
@@ -374,7 +371,10 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
   const activeSteps = steps.filter((s) => !skipSteps.includes(s.order));
 
   if (activeSteps.length === 0) {
-    return c.json({ error: "At least one step must remain after skipping" }, 400);
+    return c.json(
+      { error: "At least one step must remain after skipping" },
+      400,
+    );
   }
 
   // Create enrollment
@@ -417,7 +417,7 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
       enrollment: { ...enrollment, variables },
       scheduledEmails,
     },
-    201
+    201,
   );
 });
 
@@ -437,7 +437,7 @@ const getEnrollmentRoute = createRoute({
         scheduledEmails: z.array(SequenceEmailSchema),
         sequenceName: z.string().nullable(),
       }),
-      "Enrollment details"
+      "Enrollment details",
     ),
   },
 });
@@ -452,15 +452,15 @@ sequencesRouter.openapi(getEnrollmentRoute, async (c) => {
     .where(
       and(
         eq(sequenceEnrollments.senderId, senderId),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     )
     .limit(1);
 
   if (enrollments.length === 0) {
     return c.json(
       { enrollment: null, scheduledEmails: [], sequenceName: null },
-      200
+      200,
     );
   }
 
@@ -488,7 +488,7 @@ sequencesRouter.openapi(getEnrollmentRoute, async (c) => {
       scheduledEmails: emails,
       sequenceName: seqRow[0]?.name ?? null,
     },
-    200
+    200,
   );
 });
 
@@ -504,7 +504,7 @@ const cancelEnrollmentRoute = createRoute({
   responses: {
     ...json200Response(
       z.object({ success: z.boolean() }),
-      "Enrollment cancelled"
+      "Enrollment cancelled",
     ),
   },
 });
@@ -539,8 +539,8 @@ sequencesRouter.openapi(cancelEnrollmentRoute, async (c) => {
     .where(
       and(
         eq(sequenceEmails.enrollmentId, enrollmentId),
-        inArray(sequenceEmails.status, ["pending", "queued"])
-      )
+        inArray(sequenceEmails.status, ["pending", "queued"]),
+      ),
     );
 
   return c.json({ success: true }, 200);
@@ -563,9 +563,9 @@ const listEnrollmentsRoute = createRoute({
           senderName: z.string().nullable(),
           totalSteps: z.number(),
           sentSteps: z.number(),
-        })
+        }),
       ),
-      "Enrollment list"
+      "Enrollment list",
     ),
   },
 });

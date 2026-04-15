@@ -47,7 +47,7 @@ export default function MessageBubble({
 
   // Filter to non-inline attachments only
   const downloadableAttachments = (email.attachments ?? []).filter(
-    (att) => !att.contentId
+    (att) => !att.contentId,
   );
 
   function handleBubbleClick() {
@@ -72,20 +72,22 @@ export default function MessageBubble({
       >
         {/* Attribution + time */}
         <div className="mb-1 flex items-center gap-2">
-          <span className={`text-[11px] ${isUnread ? "font-semibold text-accent" : "text-text-tertiary"}`}>
+          <span
+            className={`text-[11px] ${isUnread ? "font-semibold text-accent" : "text-text-tertiary"}`}
+          >
             {attribution}
           </span>
           <span className="text-[10px] text-text-tertiary">
             {dateStr} {timeStr}
           </span>
-          {isUnread && (
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-          )}
+          {isUnread && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
         </div>
 
         {/* Subject */}
         {email.subject && (
-          <p className={`mb-1 text-xs ${isUnread ? "font-semibold" : "font-medium"} text-text-primary`}>
+          <p
+            className={`mb-1 text-xs ${isUnread ? "font-semibold" : "font-medium"} text-text-primary`}
+          >
             {email.subject}
           </p>
         )}

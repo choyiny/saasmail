@@ -105,12 +105,8 @@
           "name": "accounts_user_id_users_id_fk",
           "tableFrom": "accounts",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -190,9 +186,7 @@
       "indexes": {
         "invitations_token_unique": {
           "name": "invitations_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         }
       },
@@ -279,9 +273,7 @@
       "indexes": {
         "passkeys_credential_id_unique": {
           "name": "passkeys_credential_id_unique",
-          "columns": [
-            "credential_id"
-          ],
+          "columns": ["credential_id"],
           "isUnique": true
         }
       },
@@ -290,12 +282,8 @@
           "name": "passkeys_user_id_users_id_fk",
           "tableFrom": "passkeys",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -374,9 +362,7 @@
       "indexes": {
         "sessions_token_unique": {
           "name": "sessions_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         }
       },
@@ -385,12 +371,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -483,9 +465,7 @@
       "indexes": {
         "users_email_unique": {
           "name": "users_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         }
       },
@@ -611,16 +591,12 @@
       "indexes": {
         "senders_email_unique": {
           "name": "senders_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         },
         "senders_last_email_at_idx": {
           "name": "senders_last_email_at_idx",
-          "columns": [
-            "last_email_at"
-          ],
+          "columns": ["last_email_at"],
           "isUnique": false
         }
       },
@@ -714,25 +690,17 @@
       "indexes": {
         "emails_message_id_unique": {
           "name": "emails_message_id_unique",
-          "columns": [
-            "message_id"
-          ],
+          "columns": ["message_id"],
           "isUnique": true
         },
         "emails_sender_received_idx": {
           "name": "emails_sender_received_idx",
-          "columns": [
-            "sender_id",
-            "received_at"
-          ],
+          "columns": ["sender_id", "received_at"],
           "isUnique": false
         },
         "emails_recipient_received_idx": {
           "name": "emails_recipient_received_idx",
-          "columns": [
-            "recipient",
-            "received_at"
-          ],
+          "columns": ["recipient", "received_at"],
           "isUnique": false
         }
       },
@@ -833,10 +801,7 @@
       "indexes": {
         "sent_emails_sender_sent_idx": {
           "name": "sent_emails_sender_sent_idx",
-          "columns": [
-            "sender_id",
-            "sent_at"
-          ],
+          "columns": ["sender_id", "sent_at"],
           "isUnique": false
         }
       },
@@ -960,9 +925,7 @@
       "indexes": {
         "email_templates_slug_unique": {
           "name": "email_templates_slug_unique",
-          "columns": [
-            "slug"
-          ],
+          "columns": ["slug"],
           "isUnique": true
         }
       },

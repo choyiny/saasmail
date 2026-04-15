@@ -8,13 +8,13 @@ Allow each user to generate a personal API key for programmatic access to cmail.
 
 New table `apiKeys` in `worker/src/db/api-keys.schema.ts`:
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | text | Primary key (nanoid) |
-| `userId` | text | FK → users (cascade on delete), unique |
-| `keyHash` | text | SHA-256 hash of the full key |
-| `keyPrefix` | text | First 8 chars for display (e.g., `sk_a1b2...`) |
-| `createdAt` | integer | Unix timestamp |
+| Column      | Type    | Constraints                                    |
+| ----------- | ------- | ---------------------------------------------- |
+| `id`        | text    | Primary key (nanoid)                           |
+| `userId`    | text    | FK → users (cascade on delete), unique         |
+| `keyHash`   | text    | SHA-256 hash of the full key                   |
+| `keyPrefix` | text    | First 8 chars for display (e.g., `sk_a1b2...`) |
+| `createdAt` | integer | Unix timestamp                                 |
 
 - One key per user enforced by unique constraint on `userId`.
 - Full key is never stored — only the hash.
@@ -25,16 +25,19 @@ New table `apiKeys` in `worker/src/db/api-keys.schema.ts`:
 New router mounted at `/api/api-keys`, all requiring session auth:
 
 ### `POST /api/api-keys` — Generate key
+
 - If a key already exists for the user, delete it first (regenerate).
 - Generate a random key (`sk_<random>`), hash it, store hash + prefix.
 - Return the full key in the response (only time it's shown).
 - Response: `{ key: "sk_...", prefix: "sk_a1b2...", createdAt: 1234567890 }`
 
 ### `GET /api/api-keys` — Get key info
+
 - Return the key prefix and creation date, or null if no key exists.
 - Response: `{ prefix: "sk_a1b2...", createdAt: 1234567890 }` or `{ key: null }`
 
 ### `DELETE /api/api-keys` — Revoke key
+
 - Delete the user's key.
 - Response: `{ success: true }`
 
@@ -61,6 +64,7 @@ Accessible from header navigation, next to "Templates".
 3. **Existing key:** Key prefix (`sk_a1b2...`), creation date, "Regenerate" button (with confirmation dialog), "Revoke" button (with confirmation dialog).
 
 **Usage instructions section:** Shows example curl command:
+
 ```
 curl -H "Authorization: Bearer sk_..." https://your-domain/api/senders
 ```
@@ -76,6 +80,7 @@ Add "API" link in the inbox header (`src/pages/inbox/components/inbox-header.tsx
 ### API client functions
 
 Add to `src/lib/api.ts`:
+
 - `generateApiKey()` — POST `/api/api-keys`
 - `fetchApiKeyInfo()` — GET `/api/api-keys`
 - `revokeApiKey()` — DELETE `/api/api-keys`

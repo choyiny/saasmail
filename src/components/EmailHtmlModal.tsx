@@ -13,13 +13,17 @@ interface EmailHtmlModalProps {
   onClose: () => void;
 }
 
-export default function EmailHtmlModal({ email, open, onClose }: EmailHtmlModalProps) {
+export default function EmailHtmlModal({
+  email,
+  open,
+  onClose,
+}: EmailHtmlModalProps) {
   if (!email) return null;
 
   const senderLabel =
     email.type === "sent"
       ? `You → ${email.toAddress}`
-      : email.fromAddress ?? email.recipient ?? "Unknown";
+      : (email.fromAddress ?? email.recipient ?? "Unknown");
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -33,7 +37,10 @@ export default function EmailHtmlModal({ email, open, onClose }: EmailHtmlModalP
             {new Date(email.timestamp * 1000).toLocaleString()}
           </p>
         </DialogHeader>
-        <div className="overflow-auto" style={{ maxHeight: "calc(90vh - 120px)" }}>
+        <div
+          className="overflow-auto"
+          style={{ maxHeight: "calc(90vh - 120px)" }}
+        >
           {email.bodyHtml ? (
             <div
               className="prose prose-sm max-w-none bg-white p-6 text-black"

@@ -18,5 +18,5 @@ export const sentEmails = sqliteTable(
   },
   (table) => [
     index("sent_emails_sender_sent_idx").on(table.senderId, table.sentAt),
-  ]
+  ],
 );

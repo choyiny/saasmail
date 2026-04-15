@@ -24,7 +24,10 @@ const statsRoute = createRoute({
   description: "Get inbox statistics.",
   request: {
     query: z.object({
-      recipient: z.string().optional().openapi({ description: "Filter by recipient address" }),
+      recipient: z
+        .string()
+        .optional()
+        .openapi({ description: "Filter by recipient address" }),
     }),
   },
   responses: {
@@ -76,6 +79,6 @@ statsRouter.openapi(statsRoute, async (c) => {
       unreadCount,
       recipients: recipientRows.map((r) => r.recipient),
     },
-    200
+    200,
   );
 });

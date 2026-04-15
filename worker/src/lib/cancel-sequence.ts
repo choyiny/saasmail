@@ -9,7 +9,7 @@ import { sequenceEmails } from "../db/sequence-emails.schema";
  */
 export async function cancelSequencesForSender(
   db: DrizzleD1Database<any>,
-  senderId: string
+  senderId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -20,8 +20,8 @@ export async function cancelSequencesForSender(
     .where(
       and(
         eq(sequenceEnrollments.senderId, senderId),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     );
 
   if (activeEnrollments.length === 0) return;
@@ -44,8 +44,8 @@ export async function cancelSequencesForSender(
       .where(
         and(
           eq(sequenceEmails.enrollmentId, enrollmentId),
-          inArray(sequenceEmails.status, ["pending", "queued"])
-        )
+          inArray(sequenceEmails.status, ["pending", "queued"]),
+        ),
       );
   }
 }

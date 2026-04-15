@@ -45,8 +45,8 @@ export default function SequenceDetailPage() {
     await cancelEnrollment(enrollmentId);
     setEnrollments((prev) =>
       prev.map((e) =>
-        e.id === enrollmentId ? { ...e, status: "cancelled" } : e
-      )
+        e.id === enrollmentId ? { ...e, status: "cancelled" } : e,
+      ),
     );
   }
 

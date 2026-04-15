@@ -1,4 +1,10 @@
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  Outlet,
+} from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
 import { fetchPasskeyStatus } from "@/lib/api";
@@ -76,10 +82,16 @@ function App() {
               <Route path="/admin/users" element={<AdminUsersPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/templates/new" element={<TemplateEditorPage />} />
-              <Route path="/templates/:slug/edit" element={<TemplateEditorPage />} />
+              <Route
+                path="/templates/:slug/edit"
+                element={<TemplateEditorPage />}
+              />
               <Route path="/sequences" element={<SequencesPage />} />
               <Route path="/sequences/new" element={<SequenceEditorPage />} />
-              <Route path="/sequences/:id/edit" element={<SequenceEditorPage />} />
+              <Route
+                path="/sequences/:id/edit"
+                element={<SequenceEditorPage />}
+              />
               <Route path="/sequences/:id" element={<SequenceDetailPage />} />
               <Route path="/api-keys" element={<ApiKeysPage />} />
               <Route path="/*" element={<InboxPage />} />

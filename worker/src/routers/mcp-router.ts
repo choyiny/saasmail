@@ -238,7 +238,7 @@ const sendEmailRoute = createRoute({
   responses: {
     ...json201Response(
       z.object({ id: z.string(), status: z.string() }),
-      "Email sent"
+      "Email sent",
     ),
   },
 });
@@ -310,7 +310,7 @@ const replyEmailRoute = createRoute({
   responses: {
     ...json201Response(
       z.object({ id: z.string(), status: z.string() }),
-      "Reply sent"
+      "Reply sent",
     ),
   },
 });

@@ -13,6 +13,7 @@
 ### Task 1: Dark Theme CSS
 
 **Files:**
+
 - Modify: `src/index.css`
 
 - [ ] **Step 1: Replace index.css with dark theme tokens**
@@ -64,6 +65,7 @@ git commit -m "feat: add dark theme CSS custom properties"
 ### Task 2: Sidebar Component
 
 **Files:**
+
 - Create: `src/components/Sidebar.tsx`
 
 - [ ] **Step 1: Create the Sidebar component**
@@ -179,7 +181,11 @@ export default function Sidebar({ onCompose }: SidebarProps) {
               </div>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side="right" align="end" className="bg-card border-border-dark text-text-primary">
+          <DropdownMenuContent
+            side="right"
+            align="end"
+            className="bg-card border-border-dark text-text-primary"
+          >
             <div className="px-2 py-1.5 text-xs text-text-secondary">
               {session?.user?.email}
             </div>
@@ -210,6 +216,7 @@ git commit -m "feat: add icon sidebar component"
 ### Task 3: DashboardLayout + App.tsx Routing
 
 **Files:**
+
 - Create: `src/components/DashboardLayout.tsx`
 - Modify: `src/App.tsx`
 
@@ -247,7 +254,13 @@ export default function DashboardLayout() {
 Replace the entire content of `src/App.tsx`:
 
 ```tsx
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  Outlet,
+} from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
 import { fetchPasskeyStatus } from "@/lib/api";
@@ -320,7 +333,10 @@ function App() {
               <Route path="/admin/users" element={<AdminUsersPage />} />
               <Route path="/templates" element={<TemplatesPage />} />
               <Route path="/templates/new" element={<TemplateEditorPage />} />
-              <Route path="/templates/:slug/edit" element={<TemplateEditorPage />} />
+              <Route
+                path="/templates/:slug/edit"
+                element={<TemplateEditorPage />}
+              />
               <Route path="/api-keys" element={<ApiKeysPage />} />
               <Route path="/*" element={<InboxPage />} />
             </Route>
@@ -346,6 +362,7 @@ git commit -m "feat: add DashboardLayout with sidebar and layout routes"
 ### Task 4: Restyle InboxPage
 
 **Files:**
+
 - Modify: `src/pages/InboxPage.tsx`
 
 - [ ] **Step 1: Rewrite InboxPage to remove header and use dark theme**
@@ -412,6 +429,7 @@ git commit -m "feat: restyle InboxPage for dark theme with sidebar layout"
 ### Task 5: Restyle SenderList
 
 **Files:**
+
 - Modify: `src/pages/SenderList.tsx`
 
 - [ ] **Step 1: Rewrite SenderList with dark theme and compact density**
@@ -434,7 +452,10 @@ interface SenderListProps {
   onSelectSender: (sender: Sender) => void;
 }
 
-export default function SenderList({ selectedSenderId, onSelectSender }: SenderListProps) {
+export default function SenderList({
+  selectedSenderId,
+  onSelectSender,
+}: SenderListProps) {
   const [senders, setSenders] = useState<Sender[]>([]);
   const [search, setSearch] = useState("");
   const [recipient, setRecipient] = useState<string>("");
@@ -462,7 +483,10 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
     const date = new Date(ts * 1000);
     const now = new Date();
     if (date.toDateString() === now.toDateString()) {
-      return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     }
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
   }
@@ -506,9 +530,13 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
       </div>
       <ScrollArea className="flex-1">
         {loading ? (
-          <p className="p-4 text-center text-xs text-text-tertiary">Loading...</p>
+          <p className="p-4 text-center text-xs text-text-tertiary">
+            Loading...
+          </p>
         ) : senders.length === 0 ? (
-          <p className="p-4 text-center text-xs text-text-tertiary">No senders found</p>
+          <p className="p-4 text-center text-xs text-text-tertiary">
+            No senders found
+          </p>
         ) : (
           senders.map((sender) => (
             <button
@@ -568,6 +596,7 @@ git commit -m "feat: restyle SenderList for dark theme with compact density"
 ### Task 6: Restyle SenderDetail
 
 **Files:**
+
 - Modify: `src/pages/SenderDetail.tsx`
 
 - [ ] **Step 1: Rewrite SenderDetail with dark theme**
@@ -612,7 +641,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
     if (email.type === "received" && email.isRead === 0) {
       await markEmailRead(email.id, true);
       setEmails((prev) =>
-        prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e))
+        prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e)),
       );
     }
   }
@@ -624,8 +653,8 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
     await markEmailRead(email.id, newIsRead);
     setEmails((prev) =>
       prev.map((em) =>
-        em.id === email.id ? { ...em, isRead: newIsRead ? 1 : 0 } : em
-      )
+        em.id === email.id ? { ...em, isRead: newIsRead ? 1 : 0 } : em,
+      ),
     );
   }
 
@@ -679,11 +708,13 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
                 >
                   {email.subject || "(no subject)"}
                 </span>
-                {email.type === "received" && (email.attachmentCount ?? 0) > 0 && (
-                  <span className="text-[11px] text-text-tertiary">
-                    {email.attachmentCount} file{email.attachmentCount !== 1 ? "s" : ""}
-                  </span>
-                )}
+                {email.type === "received" &&
+                  (email.attachmentCount ?? 0) > 0 && (
+                    <span className="text-[11px] text-text-tertiary">
+                      {email.attachmentCount} file
+                      {email.attachmentCount !== 1 ? "s" : ""}
+                    </span>
+                  )}
                 <span className="shrink-0 text-[11px] text-text-tertiary">
                   {formatDate(email.timestamp)}
                 </span>
@@ -775,6 +806,7 @@ git commit -m "feat: restyle SenderDetail for dark theme"
 ### Task 7: Restyle ComposeModal
 
 **Files:**
+
 - Modify: `src/pages/ComposeModal.tsx`
 
 - [ ] **Step 1: Rewrite ComposeModal with dark theme**
@@ -823,7 +855,7 @@ export default function ComposeModal({
         setSubject(
           email.subject?.startsWith("Re: ")
             ? email.subject
-            : `Re: ${email.subject || ""}`
+            : `Re: ${email.subject || ""}`,
         );
       });
     }
@@ -858,7 +890,9 @@ export default function ComposeModal({
         <form onSubmit={handleSend} className="space-y-3">
           {!isReply && (
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">To</label>
+              <label className="text-xs font-medium text-text-secondary">
+                To
+              </label>
               <input
                 type="email"
                 value={to}
@@ -869,7 +903,9 @@ export default function ComposeModal({
             </div>
           )}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Subject</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Subject
+            </label>
             <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -879,7 +915,9 @@ export default function ComposeModal({
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Message</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Message
+            </label>
             <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
@@ -918,6 +956,7 @@ git commit -m "feat: restyle ComposeModal for dark theme"
 ### Task 8: Restyle TiptapEditor
 
 **Files:**
+
 - Modify: `src/components/TiptapEditor.tsx`
 
 - [ ] **Step 1: Rewrite TiptapEditor with dark theme**
@@ -959,10 +998,7 @@ function ToolbarButton({
   );
 }
 
-export default function TiptapEditor({
-  content,
-  onUpdate,
-}: TiptapEditorProps) {
+export default function TiptapEditor({ content, onUpdate }: TiptapEditorProps) {
   const editor = useEditor({
     extensions: [StarterKit],
     content,
@@ -1053,6 +1089,7 @@ git commit -m "feat: restyle TiptapEditor for dark theme"
 ### Task 9: Restyle TemplatesPage and TemplateEditorPage
 
 **Files:**
+
 - Modify: `src/pages/TemplatesPage.tsx`
 - Modify: `src/pages/TemplateEditorPage.tsx`
 
@@ -1087,7 +1124,9 @@ export default function TemplatesPage() {
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-sm font-semibold text-text-primary">Email Templates</h1>
+          <h1 className="text-sm font-semibold text-text-primary">
+            Email Templates
+          </h1>
           <button
             onClick={() => navigate("/templates/new")}
             className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
@@ -1108,7 +1147,9 @@ export default function TemplatesPage() {
                 className="flex items-center justify-between rounded-lg border border-border-dark bg-card px-4 py-3"
               >
                 <div>
-                  <p className="text-xs font-medium text-text-primary">{t.name}</p>
+                  <p className="text-xs font-medium text-text-primary">
+                    {t.name}
+                  </p>
                   <p className="text-[11px] text-text-tertiary">
                     {t.slug} &middot; {t.subject}
                   </p>
@@ -1145,11 +1186,7 @@ Replace the entire content of `src/pages/TemplateEditorPage.tsx`:
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import TiptapEditor from "@/components/TiptapEditor";
-import {
-  fetchTemplate,
-  createTemplate,
-  updateTemplate,
-} from "@/lib/api";
+import { fetchTemplate, createTemplate, updateTemplate } from "@/lib/api";
 
 export default function TemplateEditorPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -1221,7 +1258,9 @@ export default function TemplateEditorPage() {
 
         <form onSubmit={handleSave} className="space-y-3">
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Name</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Name
+            </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -1232,7 +1271,9 @@ export default function TemplateEditorPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Slug</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Slug
+            </label>
             <input
               value={slugValue}
               onChange={(e) => setSlugValue(e.target.value)}
@@ -1246,7 +1287,9 @@ export default function TemplateEditorPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Subject</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Subject
+            </label>
             <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -1257,7 +1300,9 @@ export default function TemplateEditorPage() {
           </div>
 
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Body</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Body
+            </label>
             <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
           </div>
 
@@ -1298,6 +1343,7 @@ git commit -m "feat: restyle Templates pages for dark theme"
 ### Task 10: Restyle ApiKeysPage
 
 **Files:**
+
 - Modify: `src/pages/ApiKeysPage.tsx`
 
 - [ ] **Step 1: Rewrite ApiKeysPage with dark theme**
@@ -1312,11 +1358,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  fetchApiKeyInfo,
-  generateApiKey,
-  revokeApiKey,
-} from "@/lib/api";
+import { fetchApiKeyInfo, generateApiKey, revokeApiKey } from "@/lib/api";
 import type { ApiKeyInfo } from "@/lib/api";
 
 export default function ApiKeysPage() {
@@ -1362,7 +1404,9 @@ export default function ApiKeysPage() {
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-2xl">
-        <h1 className="mb-6 text-sm font-semibold text-text-primary">API Access</h1>
+        <h1 className="mb-6 text-sm font-semibold text-text-primary">
+          API Access
+        </h1>
 
         {/* Newly generated key */}
         {newKey && (
@@ -1397,7 +1441,9 @@ export default function ApiKeysPage() {
           <div className="mb-6 rounded-lg border border-border-dark bg-card px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-mono text-xs text-text-primary">{keyInfo.prefix}</p>
+                <p className="font-mono text-xs text-text-primary">
+                  {keyInfo.prefix}
+                </p>
                 <p className="text-[11px] text-text-tertiary">
                   Created{" "}
                   {new Date(keyInfo.createdAt * 1000).toLocaleDateString()}
@@ -1438,17 +1484,23 @@ export default function ApiKeysPage() {
 
         {/* Usage */}
         <div className="rounded-lg border border-border-dark bg-card p-4">
-          <h2 className="mb-2 text-xs font-semibold text-text-primary">Usage</h2>
+          <h2 className="mb-2 text-xs font-semibold text-text-primary">
+            Usage
+          </h2>
           <p className="mb-2 text-xs text-text-secondary">
-            Include your API key in the <code className="text-accent">Authorization</code> header:
+            Include your API key in the{" "}
+            <code className="text-accent">Authorization</code> header:
           </p>
           <pre className="rounded bg-sidebar p-3 text-[11px] text-text-secondary">
-{`curl -H "Authorization: Bearer sk_..." \\
+            {`curl -H "Authorization: Bearer sk_..." \\
   https://your-domain/api/senders`}
           </pre>
           <p className="mt-2 text-xs text-text-secondary">
             The key grants full access to the API as your user account. See{" "}
-            <a href="/swagger-ui" className="text-accent hover:text-accent-hover">
+            <a
+              href="/swagger-ui"
+              className="text-accent hover:text-accent-hover"
+            >
               API docs
             </a>{" "}
             for available endpoints.
@@ -1482,9 +1534,7 @@ export default function ApiKeysPage() {
               </button>
               <button
                 onClick={
-                  confirmAction === "regenerate"
-                    ? handleGenerate
-                    : handleRevoke
+                  confirmAction === "regenerate" ? handleGenerate : handleRevoke
                 }
                 className={`rounded-md px-3 py-1.5 text-xs font-medium text-white ${
                   confirmAction === "revoke"
@@ -1515,6 +1565,7 @@ git commit -m "feat: restyle ApiKeysPage for dark theme"
 ### Task 11: Restyle AdminUsersPage
 
 **Files:**
+
 - Modify: `src/pages/AdminUsersPage.tsx`
 
 - [ ] **Step 1: Rewrite AdminUsersPage with dark theme**
@@ -1651,12 +1702,16 @@ export default function AdminUsersPage() {
               </DialogTrigger>
               <DialogContent className="border-border-dark bg-card text-text-primary">
                 <DialogHeader>
-                  <DialogTitle className="text-text-primary">Create Invitation</DialogTitle>
+                  <DialogTitle className="text-text-primary">
+                    Create Invitation
+                  </DialogTitle>
                 </DialogHeader>
                 {!generatedLink ? (
                   <div className="space-y-3">
                     <div className="space-y-1">
-                      <label className="text-xs font-medium text-text-secondary">Role</label>
+                      <label className="text-xs font-medium text-text-secondary">
+                        Role
+                      </label>
                       <div className="flex gap-2">
                         <button
                           onClick={() => setInviteRole("member")}
@@ -1746,8 +1801,12 @@ export default function AdminUsersPage() {
                   className="flex items-center justify-between border-b border-border-dark px-4 py-2.5 last:border-b-0"
                 >
                   <div>
-                    <p className="text-xs font-medium text-text-primary">{user.name}</p>
-                    <p className="text-[11px] text-text-tertiary">{user.email}</p>
+                    <p className="text-xs font-medium text-text-primary">
+                      {user.name}
+                    </p>
+                    <p className="text-[11px] text-text-tertiary">
+                      {user.email}
+                    </p>
                   </div>
                   <div className="flex items-center gap-2">
                     <span
@@ -1778,12 +1837,15 @@ export default function AdminUsersPage() {
                             ...
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="bg-card border-border-dark text-text-primary">
+                        <DropdownMenuContent
+                          align="end"
+                          className="bg-card border-border-dark text-text-primary"
+                        >
                           <DropdownMenuItem
                             onClick={() =>
                               handleRoleChange(
                                 user.id,
-                                user.role === "admin" ? "member" : "admin"
+                                user.role === "admin" ? "member" : "admin",
                               )
                             }
                             className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
@@ -1809,11 +1871,15 @@ export default function AdminUsersPage() {
         {/* Invitations */}
         <div className="rounded-lg border border-border-dark bg-card">
           <div className="border-b border-border-dark px-4 py-3">
-            <h2 className="text-xs font-semibold text-text-primary">Invitations</h2>
+            <h2 className="text-xs font-semibold text-text-primary">
+              Invitations
+            </h2>
           </div>
           <div>
             {invites.length === 0 ? (
-              <p className="p-4 text-xs text-text-tertiary">No invitations yet.</p>
+              <p className="p-4 text-xs text-text-tertiary">
+                No invitations yet.
+              </p>
             ) : (
               invites.map((invite) => {
                 const st = inviteStatus(invite);
@@ -1827,7 +1893,8 @@ export default function AdminUsersPage() {
                         {invite.email || "Any email"}
                       </p>
                       <p className="text-[10px] text-text-tertiary">
-                        Role: {invite.role} | Expires: {formatDate(invite.expiresAt)}
+                        Role: {invite.role} | Expires:{" "}
+                        {formatDate(invite.expiresAt)}
                       </p>
                     </div>
                     <span
@@ -1865,6 +1932,7 @@ git commit -m "feat: restyle AdminUsersPage for dark theme"
 ### Task 12: Restyle Unauthenticated Pages
 
 **Files:**
+
 - Modify: `src/pages/LoginPage.tsx`
 - Modify: `src/pages/OnboardingPage.tsx`
 - Modify: `src/pages/SetupPasskeyPage.tsx`
@@ -1883,12 +1951,7 @@ import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function LoginPage() {
   const [error, setError] = useState("");
@@ -1973,12 +2036,7 @@ Replace the entire content of `src/pages/OnboardingPage.tsx`:
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Status = "checking" | "available" | "unavailable";
 
@@ -2050,7 +2108,9 @@ export default function OnboardingPage() {
       <div className="flex min-h-screen items-center justify-center bg-main">
         <Card className="w-full max-w-sm border-border-dark bg-card">
           <CardHeader>
-            <CardTitle className="text-xl text-text-primary">Setup complete</CardTitle>
+            <CardTitle className="text-xl text-text-primary">
+              Setup complete
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-xs text-text-secondary">
@@ -2075,7 +2135,9 @@ export default function OnboardingPage() {
     <div className="flex min-h-screen items-center justify-center bg-main">
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
-          <CardTitle className="text-xl text-text-primary">Welcome to cmail</CardTitle>
+          <CardTitle className="text-xl text-text-primary">
+            Welcome to cmail
+          </CardTitle>
           <p className="text-xs text-text-secondary">
             Create the first administrator account to get started.
           </p>
@@ -2083,20 +2145,53 @@ export default function OnboardingPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" className={inputClass} />
+              <label className="text-xs font-medium text-text-secondary">
+                Name
+              </label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                autoComplete="name"
+                className={inputClass}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" className={inputClass} />
+              <label className="text-xs font-medium text-text-secondary">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                className={inputClass}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete="new-password" className={inputClass} />
-              <p className="text-[10px] text-text-tertiary">At least 8 characters.</p>
+              <label className="text-xs font-medium text-text-secondary">
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputClass}
+              />
+              <p className="text-[10px] text-text-tertiary">
+                At least 8 characters.
+              </p>
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <button type="submit" className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50" disabled={loading}>
+            <button
+              type="submit"
+              className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              disabled={loading}
+            >
               {loading ? "Creating account..." : "Create administrator"}
             </button>
           </form>
@@ -2114,12 +2209,7 @@ Replace the entire content of `src/pages/SetupPasskeyPage.tsx`:
 ```tsx
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function SetupPasskeyPage() {
   const [error, setError] = useState("");
@@ -2146,7 +2236,9 @@ export default function SetupPasskeyPage() {
     <div className="flex min-h-screen items-center justify-center bg-main">
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
-          <CardTitle className="text-xl text-text-primary">Register a Passkey</CardTitle>
+          <CardTitle className="text-xl text-text-primary">
+            Register a Passkey
+          </CardTitle>
           <p className="text-xs text-text-secondary">
             For security, you must register a passkey before accessing cmail.
           </p>
@@ -2176,16 +2268,13 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
 import { validateInvite, acceptInvite } from "@/lib/api";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function InviteAcceptPage() {
   const { token } = useParams<{ token: string }>();
-  const [status, setStatus] = useState<"loading" | "valid" | "invalid">("loading");
+  const [status, setStatus] = useState<"loading" | "valid" | "invalid">(
+    "loading",
+  );
   const [inviteEmail, setInviteEmail] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -2258,11 +2347,14 @@ export default function InviteAcceptPage() {
       <div className="flex min-h-screen items-center justify-center bg-main">
         <Card className="w-full max-w-sm border-border-dark bg-card">
           <CardHeader>
-            <CardTitle className="text-xl text-text-primary">Invalid Invitation</CardTitle>
+            <CardTitle className="text-xl text-text-primary">
+              Invalid Invitation
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-text-secondary">
-              This invitation link is invalid, expired, or has already been used.
+              This invitation link is invalid, expired, or has already been
+              used.
             </p>
           </CardContent>
         </Card>
@@ -2277,7 +2369,9 @@ export default function InviteAcceptPage() {
     <div className="flex min-h-screen items-center justify-center bg-main">
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
-          <CardTitle className="text-xl text-text-primary">Join cmail</CardTitle>
+          <CardTitle className="text-xl text-text-primary">
+            Join cmail
+          </CardTitle>
           <p className="text-xs text-text-secondary">
             Create your account to get started.
           </p>
@@ -2285,20 +2379,54 @@ export default function InviteAcceptPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="name" className={inputClass} />
+              <label className="text-xs font-medium text-text-secondary">
+                Name
+              </label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+                autoComplete="name"
+                className={inputClass}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoComplete="email" disabled={!!inviteEmail} className={inputClass + (inviteEmail ? " opacity-50" : "")} />
+              <label className="text-xs font-medium text-text-secondary">
+                Email
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                disabled={!!inviteEmail}
+                className={inputClass + (inviteEmail ? " opacity-50" : "")}
+              />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoComplete="new-password" className={inputClass} />
-              <p className="text-[10px] text-text-tertiary">At least 8 characters.</p>
+              <label className="text-xs font-medium text-text-secondary">
+                Password
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={8}
+                autoComplete="new-password"
+                className={inputClass}
+              />
+              <p className="text-[10px] text-text-tertiary">
+                At least 8 characters.
+              </p>
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
-            <button type="submit" className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50" disabled={loading}>
+            <button
+              type="submit"
+              className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+              disabled={loading}
+            >
               {loading ? "Creating account..." : "Create account"}
             </button>
           </form>
@@ -2335,6 +2463,7 @@ npx wrangler dev
 ```
 
 Navigate through all pages:
+
 1. `/login` — dark card on dark background
 2. `/` (inbox) — sidebar + sender list + email detail, all dark
 3. `/templates` — dark template list

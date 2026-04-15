@@ -12,7 +12,5 @@ export const senders = sqliteTable(
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (table) => [
-    index("senders_last_email_at_idx").on(table.lastEmailAt),
-  ]
+  (table) => [index("senders_last_email_at_idx").on(table.lastEmailAt)],
 );

@@ -29,9 +29,7 @@ const ErrorSchema = z.object({
 });
 
 async function countUsers(db: Variables["db"]): Promise<number> {
-  const result = await db
-    .select({ count: sql<number>`COUNT(*)` })
-    .from(users);
+  const result = await db.select({ count: sql<number>`COUNT(*)` }).from(users);
   return result[0]?.count ?? 0;
 }
 

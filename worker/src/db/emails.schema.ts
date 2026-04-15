@@ -17,6 +17,9 @@ export const emails = sqliteTable(
   },
   (table) => [
     index("emails_sender_received_idx").on(table.senderId, table.receivedAt),
-    index("emails_recipient_received_idx").on(table.recipient, table.receivedAt),
-  ]
+    index("emails_recipient_received_idx").on(
+      table.recipient,
+      table.receivedAt,
+    ),
+  ],
 );

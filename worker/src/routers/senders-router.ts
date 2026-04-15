@@ -27,8 +27,14 @@ const listSendersRoute = createRoute({
   description: "List senders sorted by most recent email.",
   request: {
     query: z.object({
-      q: z.string().optional().openapi({ description: "Search sender name/email" }),
-      recipient: z.string().optional().openapi({ description: "Filter by recipient address" }),
+      q: z
+        .string()
+        .optional()
+        .openapi({ description: "Search sender name/email" }),
+      recipient: z
+        .string()
+        .optional()
+        .openapi({ description: "Filter by recipient address" }),
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(50),
     }),
@@ -48,7 +54,7 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
   if (q) {
     const pattern = `%${q}%`;
     conditions.push(
-      or(like(senders.email, pattern), like(senders.name, pattern))
+      or(like(senders.email, pattern), like(senders.name, pattern)),
     );
   }
 
@@ -57,13 +63,14 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
       sql`${senders.id} IN (
         SELECT DISTINCT ${emails.senderId} FROM ${emails}
         WHERE ${emails.recipient} = ${recipient}
-      )`
+      )`,
     );
   }
 
-  const where = conditions.length > 0
-    ? sql`${sql.join(conditions, sql` AND `)}`
-    : undefined;
+  const where =
+    conditions.length > 0
+      ? sql`${sql.join(conditions, sql` AND `)}`
+      : undefined;
 
   const rows = await db
     .select({
@@ -92,7 +99,7 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
         ...sender,
         latestSubject: latest[0]?.subject ?? null,
       };
-    })
+    }),
   );
 
   return c.json(result, 200);

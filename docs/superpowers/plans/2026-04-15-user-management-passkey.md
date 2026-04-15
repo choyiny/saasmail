@@ -12,37 +12,39 @@
 
 ## File Structure
 
-| File | Responsibility |
-|------|---------------|
-| `worker/src/auth/index.ts` | Add passkey plugin to BetterAuth config |
-| `worker/src/db/auth.schema.ts` | Regenerated — adds passkeys table |
-| `worker/src/db/invitations.schema.ts` | Custom invitations table (replaces BetterAuth-generated one) |
-| `worker/src/db/schema.ts` | Export invitations schema |
-| `worker/src/db/index.ts` | Re-export invitations |
-| `worker/src/routers/admin-router.ts` | Admin-only endpoints: invite CRUD, user list/delete/role |
-| `worker/src/routers/invites-router.ts` | Public endpoints: validate invite, accept invite |
-| `worker/src/routers/user-router.ts` | Authenticated user endpoint: passkey status |
-| `worker/src/index.ts` | Mount new routers, add requireAdmin middleware |
-| `src/lib/auth-client.ts` | Add passkeyClient plugin |
-| `src/lib/api.ts` | Add invite, user management, passkey status API functions |
-| `src/App.tsx` | Add routes, update AuthGuard with passkey check |
-| `src/pages/LoginPage.tsx` | Replace with passkey-only login |
-| `src/pages/OnboardingPage.tsx` | Redirect to /setup-passkey after setup |
-| `src/pages/InboxPage.tsx` | Add "Users" nav link for admins |
-| `src/pages/SetupPasskeyPage.tsx` | Passkey registration interstitial |
-| `src/pages/InviteAcceptPage.tsx` | Invite acceptance + registration form |
-| `src/pages/AdminUsersPage.tsx` | User management portal |
+| File                                   | Responsibility                                               |
+| -------------------------------------- | ------------------------------------------------------------ |
+| `worker/src/auth/index.ts`             | Add passkey plugin to BetterAuth config                      |
+| `worker/src/db/auth.schema.ts`         | Regenerated — adds passkeys table                            |
+| `worker/src/db/invitations.schema.ts`  | Custom invitations table (replaces BetterAuth-generated one) |
+| `worker/src/db/schema.ts`              | Export invitations schema                                    |
+| `worker/src/db/index.ts`               | Re-export invitations                                        |
+| `worker/src/routers/admin-router.ts`   | Admin-only endpoints: invite CRUD, user list/delete/role     |
+| `worker/src/routers/invites-router.ts` | Public endpoints: validate invite, accept invite             |
+| `worker/src/routers/user-router.ts`    | Authenticated user endpoint: passkey status                  |
+| `worker/src/index.ts`                  | Mount new routers, add requireAdmin middleware               |
+| `src/lib/auth-client.ts`               | Add passkeyClient plugin                                     |
+| `src/lib/api.ts`                       | Add invite, user management, passkey status API functions    |
+| `src/App.tsx`                          | Add routes, update AuthGuard with passkey check              |
+| `src/pages/LoginPage.tsx`              | Replace with passkey-only login                              |
+| `src/pages/OnboardingPage.tsx`         | Redirect to /setup-passkey after setup                       |
+| `src/pages/InboxPage.tsx`              | Add "Users" nav link for admins                              |
+| `src/pages/SetupPasskeyPage.tsx`       | Passkey registration interstitial                            |
+| `src/pages/InviteAcceptPage.tsx`       | Invite acceptance + registration form                        |
+| `src/pages/AdminUsersPage.tsx`         | User management portal                                       |
 
 ---
 
 ### Task 1: Install passkey dependency
 
 **Files:**
+
 - Modify: `package.json`
 
 - [ ] **Step 1: Install @better-auth/passkey**
 
 Run:
+
 ```bash
 npm install @better-auth/passkey
 ```
@@ -50,9 +52,11 @@ npm install @better-auth/passkey
 - [ ] **Step 2: Verify installation**
 
 Run:
+
 ```bash
 node -e "require('@better-auth/passkey')" && echo "OK"
 ```
+
 Expected: `OK`
 
 - [ ] **Step 3: Commit**
@@ -67,6 +71,7 @@ git commit -m "chore: install @better-auth/passkey"
 ### Task 2: Add passkey plugin to BetterAuth server config
 
 **Files:**
+
 - Modify: `worker/src/auth/index.ts`
 
 - [ ] **Step 1: Update auth config to include passkey plugin**
@@ -93,19 +98,12 @@ export function createAuth(env?: CloudflareBindings) {
       enabled: true,
       disableSignUp: true,
     },
-    plugins: [
-      admin(),
-      openAPI(),
-      passkey(),
-    ],
+    plugins: [admin(), openAPI(), passkey()],
     advanced: {
       cookiePrefix: "cmail",
       defaultCookieAttributes: { sameSite: "lax", secure: true },
     },
-    trustedOrigins: [
-      "http://localhost:8080",
-      "https://mail.givefeedback.dev",
-    ],
+    trustedOrigins: ["http://localhost:8080", "https://mail.givefeedback.dev"],
   });
 }
 
@@ -115,6 +113,7 @@ export const auth = createAuth();
 - [ ] **Step 2: Regenerate auth schema to include passkeys table**
 
 Run:
+
 ```bash
 npx @better-auth/cli generate --config ./worker/src/auth/index.ts --output ./worker/src/db/auth.schema.ts
 ```
@@ -141,6 +140,7 @@ export const passkeys = sqliteTable("passkeys", {
 - [ ] **Step 3: Generate database migration**
 
 Run:
+
 ```bash
 npx drizzle-kit generate
 ```
@@ -148,6 +148,7 @@ npx drizzle-kit generate
 - [ ] **Step 4: Apply migration locally**
 
 Run:
+
 ```bash
 npx wrangler d1 migrations apply cmail-db --local
 ```
@@ -164,6 +165,7 @@ git commit -m "feat: add passkey plugin to BetterAuth config"
 ### Task 3: Create custom invitations schema
 
 **Files:**
+
 - Create: `worker/src/db/invitations.schema.ts`
 - Modify: `worker/src/db/auth.schema.ts` (remove old invitations table)
 - Modify: `worker/src/db/schema.ts`
@@ -252,6 +254,7 @@ export * from "./schema";
 - [ ] **Step 5: Generate and apply migration for the new invitations table**
 
 Run:
+
 ```bash
 npx drizzle-kit generate
 npx wrangler d1 migrations apply cmail-db --local
@@ -269,6 +272,7 @@ git commit -m "feat: replace BetterAuth invitations with custom invitations sche
 ### Task 4: Create admin router (invite + user management API)
 
 **Files:**
+
 - Create: `worker/src/routers/admin-router.ts`
 
 - [ ] **Step 1: Create the admin router with invite and user management endpoints**
@@ -389,13 +393,25 @@ const listInvitesRoute = createRoute({
 
 adminRouter.openapi(listInvitesRoute, async (c) => {
   const db = c.get("db");
-  const rows = await db.select().from(invitations).orderBy(invitations.createdAt);
+  const rows = await db
+    .select()
+    .from(invitations)
+    .orderBy(invitations.createdAt);
 
   const result = rows.map((row) => ({
     ...row,
-    expiresAt: row.expiresAt instanceof Date ? Math.floor(row.expiresAt.getTime() / 1000) : row.expiresAt,
-    createdAt: row.createdAt instanceof Date ? Math.floor(row.createdAt.getTime() / 1000) : row.createdAt,
-    usedAt: row.usedAt instanceof Date ? Math.floor(row.usedAt.getTime() / 1000) : row.usedAt,
+    expiresAt:
+      row.expiresAt instanceof Date
+        ? Math.floor(row.expiresAt.getTime() / 1000)
+        : row.expiresAt,
+    createdAt:
+      row.createdAt instanceof Date
+        ? Math.floor(row.createdAt.getTime() / 1000)
+        : row.createdAt,
+    usedAt:
+      row.usedAt instanceof Date
+        ? Math.floor(row.usedAt.getTime() / 1000)
+        : row.usedAt,
   }));
 
   return c.json(result, 200);
@@ -433,7 +449,10 @@ adminRouter.openapi(listUsersRoute, async (c) => {
     name: u.name,
     email: u.email,
     role: u.role,
-    createdAt: u.createdAt instanceof Date ? Math.floor(u.createdAt.getTime() / 1000) : u.createdAt,
+    createdAt:
+      u.createdAt instanceof Date
+        ? Math.floor(u.createdAt.getTime() / 1000)
+        : u.createdAt,
     hasPasskey: (passkeyMap.get(u.id) ?? 0) > 0,
   }));
 
@@ -526,6 +545,7 @@ adminRouter.openapi(deleteUserRoute, async (c) => {
 - [ ] **Step 2: Verify the file compiles**
 
 Run:
+
 ```bash
 npx tsc --noEmit --project worker/tsconfig.json
 ```
@@ -542,6 +562,7 @@ git commit -m "feat: add admin router with invite and user management endpoints"
 ### Task 5: Create public invites router (validate + accept)
 
 **Files:**
+
 - Create: `worker/src/routers/invites-router.ts`
 
 - [ ] **Step 1: Create the public invites router**
@@ -606,7 +627,10 @@ invitesRouter.openapi(validateInviteRoute, async (c) => {
     return c.json({ valid: false }, 200);
   }
 
-  const expiresAt = invite.expiresAt instanceof Date ? invite.expiresAt : new Date(invite.expiresAt as unknown as number * 1000);
+  const expiresAt =
+    invite.expiresAt instanceof Date
+      ? invite.expiresAt
+      : new Date((invite.expiresAt as unknown as number) * 1000);
   if (invite.usedBy || expiresAt < new Date()) {
     return c.json({ valid: false }, 200);
   }
@@ -625,7 +649,10 @@ const acceptInviteRoute = createRoute({
     },
   },
   responses: {
-    ...json200Response(z.object({ success: z.boolean(), userId: z.string() }), "Account created"),
+    ...json200Response(
+      z.object({ success: z.boolean(), userId: z.string() }),
+      "Account created",
+    ),
     400: {
       description: "Invalid or expired invite",
       content: { "application/json": { schema: ErrorSchema } },
@@ -647,7 +674,10 @@ invitesRouter.openapi(acceptInviteRoute, async (c) => {
     return c.json({ error: "Invalid invitation token" }, 400);
   }
 
-  const expiresAt = invite.expiresAt instanceof Date ? invite.expiresAt : new Date(invite.expiresAt as unknown as number * 1000);
+  const expiresAt =
+    invite.expiresAt instanceof Date
+      ? invite.expiresAt
+      : new Date((invite.expiresAt as unknown as number) * 1000);
   if (expiresAt < new Date()) {
     return c.json({ error: "Invitation has expired" }, 400);
   }
@@ -668,7 +698,8 @@ invitesRouter.openapi(acceptInviteRoute, async (c) => {
       body: { email, password, name, role: invite.role },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Account creation failed";
+    const message =
+      err instanceof Error ? err.message : "Account creation failed";
     return c.json({ error: message }, 400);
   }
 
@@ -693,6 +724,7 @@ git commit -m "feat: add public invites router for invite validation and accepta
 ### Task 6: Create user router (passkey status endpoint)
 
 **Files:**
+
 - Create: `worker/src/routers/user-router.ts`
 
 - [ ] **Step 1: Create the user router**
@@ -751,6 +783,7 @@ git commit -m "feat: add user router with passkey status endpoint"
 ### Task 7: Mount new routers and add requireAdmin middleware
 
 **Files:**
+
 - Modify: `worker/src/index.ts`
 
 - [ ] **Step 1: Update index.ts to mount the new routers**
@@ -791,7 +824,7 @@ app.use(
   cors({
     origin: ["http://localhost:8080", "https://mail.givefeedback.dev"],
     credentials: true,
-  })
+  }),
 );
 
 // BetterAuth handler
@@ -870,6 +903,7 @@ export default {
 ```
 
 Key changes:
+
 - Added imports for adminRouter, invitesRouter, userRouter
 - Added `/api/invites` to the session bypass list (public endpoints)
 - Added `requireAdmin` middleware
@@ -878,6 +912,7 @@ Key changes:
 - [ ] **Step 2: Verify the build**
 
 Run:
+
 ```bash
 npx tsc --noEmit --project worker/tsconfig.json
 ```
@@ -894,6 +929,7 @@ git commit -m "feat: mount admin, invites, and user routers with requireAdmin mi
 ### Task 8: Update frontend auth client with passkey plugin
 
 **Files:**
+
 - Modify: `src/lib/auth-client.ts`
 
 - [ ] **Step 1: Add passkeyClient to the auth client**
@@ -925,6 +961,7 @@ git commit -m "feat: add passkeyClient plugin to frontend auth client"
 ### Task 9: Add frontend API functions for invites, users, and passkey status
 
 **Files:**
+
 - Modify: `src/lib/api.ts`
 
 - [ ] **Step 1: Add new types and API functions to the end of api.ts**
@@ -1038,6 +1075,7 @@ git commit -m "feat: add invite, user management, and passkey status API functio
 ### Task 10: Create SetupPasskeyPage
 
 **Files:**
+
 - Create: `src/pages/SetupPasskeyPage.tsx`
 
 - [ ] **Step 1: Create the passkey registration interstitial page**
@@ -1049,12 +1087,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function SetupPasskeyPage() {
   const navigate = useNavigate();
@@ -1116,6 +1149,7 @@ git commit -m "feat: add SetupPasskeyPage for mandatory passkey registration"
 ### Task 11: Create InviteAcceptPage
 
 **Files:**
+
 - Create: `src/pages/InviteAcceptPage.tsx`
 
 - [ ] **Step 1: Create the invite acceptance page**
@@ -1129,12 +1163,7 @@ import { signIn } from "@/lib/auth-client";
 import { validateInvite, acceptInvite } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 
 export default function InviteAcceptPage() {
@@ -1299,6 +1328,7 @@ git commit -m "feat: add InviteAcceptPage for invite acceptance and registration
 ### Task 12: Create AdminUsersPage
 
 **Files:**
+
 - Create: `src/pages/AdminUsersPage.tsx`
 
 - [ ] **Step 1: Create the user management portal page**
@@ -1321,12 +1351,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -1530,7 +1555,11 @@ export default function AdminUsersPage() {
                       </p>
                       <div className="flex gap-2">
                         <Input value={generatedLink} readOnly />
-                        <Button size="sm" variant="outline" onClick={handleCopy}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={handleCopy}
+                        >
                           {copied ? "Copied!" : "Copy"}
                         </Button>
                       </div>
@@ -1555,9 +1584,7 @@ export default function AdminUsersPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge
-                          variant={
-                            user.hasPasskey ? "default" : "secondary"
-                          }
+                          variant={user.hasPasskey ? "default" : "secondary"}
                         >
                           {user.hasPasskey ? "Passkey" : "No passkey"}
                         </Badge>
@@ -1670,6 +1697,7 @@ git commit -m "feat: add AdminUsersPage with user management and invite UI"
 ### Task 13: Update LoginPage to passkey-only login
 
 **Files:**
+
 - Modify: `src/pages/LoginPage.tsx`
 
 - [ ] **Step 1: Replace LoginPage with passkey-only login**
@@ -1681,12 +1709,7 @@ import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default function LoginPage() {
   const [error, setError] = useState("");
@@ -1775,6 +1798,7 @@ git commit -m "feat: replace email/password login with passkey-only login"
 ### Task 14: Update OnboardingPage to redirect to passkey setup
 
 **Files:**
+
 - Modify: `src/pages/OnboardingPage.tsx`
 
 - [ ] **Step 1: Change the redirect after onboarding**
@@ -1782,13 +1806,15 @@ git commit -m "feat: replace email/password login with passkey-only login"
 In `src/pages/OnboardingPage.tsx`, change the success redirect from `window.location.href = "/"` to `window.location.href = "/setup-passkey"` (line 59).
 
 Find:
+
 ```typescript
-      window.location.href = "/";
+window.location.href = "/";
 ```
 
 Replace with:
+
 ```typescript
-      window.location.href = "/setup-passkey";
+window.location.href = "/setup-passkey";
 ```
 
 - [ ] **Step 2: Commit**
@@ -1803,6 +1829,7 @@ git commit -m "feat: redirect onboarding to passkey setup instead of inbox"
 ### Task 15: Update App.tsx routes and AuthGuard with passkey check
 
 **Files:**
+
 - Modify: `src/App.tsx`
 
 - [ ] **Step 1: Replace App.tsx with updated routes and passkey-aware AuthGuard**
@@ -1833,12 +1860,16 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    fetchPasskeyStatus().then((res) => {
-      if (!cancelled) setPasskeyStatus(res.hasPasskey);
-    }).catch(() => {
-      if (!cancelled) setPasskeyStatus(false);
-    });
-    return () => { cancelled = true; };
+    fetchPasskeyStatus()
+      .then((res) => {
+        if (!cancelled) setPasskeyStatus(res.hasPasskey);
+      })
+      .catch(() => {
+        if (!cancelled) setPasskeyStatus(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [session]);
 
   if (isPending) {
@@ -1927,6 +1958,7 @@ export default App;
 ```
 
 Key changes:
+
 - `AuthGuard` now checks passkey status — if no passkey, redirects to `/setup-passkey`
 - New routes: `/invite/:token`, `/setup-passkey`, `/admin/users`
 - Added imports for new pages
@@ -1943,6 +1975,7 @@ git commit -m "feat: update routes and AuthGuard with passkey enforcement"
 ### Task 16: Add "Users" nav link for admins in InboxPage
 
 **Files:**
+
 - Modify: `src/pages/InboxPage.tsx`
 
 - [ ] **Step 1: Add Users link to the header, visible only to admins**
@@ -1950,31 +1983,33 @@ git commit -m "feat: update routes and AuthGuard with passkey enforcement"
 In `src/pages/InboxPage.tsx`, add a "Users" link right before the "Templates" link. Find:
 
 ```tsx
-          <Link
-            to="/templates"
-            className="text-sm text-neutral-500 hover:text-neutral-700"
-          >
-            Templates
-          </Link>
+<Link
+  to="/templates"
+  className="text-sm text-neutral-500 hover:text-neutral-700"
+>
+  Templates
+</Link>
 ```
 
 Replace with:
 
 ```tsx
-          {session?.user?.role === "admin" && (
-            <Link
-              to="/admin/users"
-              className="text-sm text-neutral-500 hover:text-neutral-700"
-            >
-              Users
-            </Link>
-          )}
-          <Link
-            to="/templates"
-            className="text-sm text-neutral-500 hover:text-neutral-700"
-          >
-            Templates
-          </Link>
+{
+  session?.user?.role === "admin" && (
+    <Link
+      to="/admin/users"
+      className="text-sm text-neutral-500 hover:text-neutral-700"
+    >
+      Users
+    </Link>
+  );
+}
+<Link
+  to="/templates"
+  className="text-sm text-neutral-500 hover:text-neutral-700"
+>
+  Templates
+</Link>;
 ```
 
 - [ ] **Step 2: Commit**
@@ -1989,11 +2024,13 @@ git commit -m "feat: add Users nav link for admins in inbox header"
 ### Task 17: Install shadcn dialog component (if missing)
 
 **Files:**
+
 - Possibly modify: `src/components/ui/dialog.tsx`
 
 - [ ] **Step 1: Check if Dialog component exists**
 
 Run:
+
 ```bash
 ls src/components/ui/dialog.tsx 2>/dev/null && echo "EXISTS" || echo "MISSING"
 ```
@@ -2001,6 +2038,7 @@ ls src/components/ui/dialog.tsx 2>/dev/null && echo "EXISTS" || echo "MISSING"
 - [ ] **Step 2: If MISSING, add the Dialog component**
 
 Run:
+
 ```bash
 npx shadcn@latest add dialog
 ```
@@ -2023,35 +2061,43 @@ git commit -m "chore: add shadcn dialog component"
 - [ ] **Step 1: Type-check the backend**
 
 Run:
+
 ```bash
 npx tsc --noEmit --project worker/tsconfig.json
 ```
+
 Expected: No errors
 
 - [ ] **Step 2: Type-check the frontend**
 
 Run:
+
 ```bash
 npx tsc --noEmit
 ```
+
 Expected: No errors
 
 - [ ] **Step 3: Build the frontend**
 
 Run:
+
 ```bash
 npm run build
 ```
+
 Expected: Successful build
 
 - [ ] **Step 4: Start the dev server and verify routes load**
 
 Run:
+
 ```bash
 npm run dev
 ```
 
 Manually verify:
+
 1. `/login` shows passkey-only sign-in button
 2. `/onboarding` still shows admin setup form (if no users exist)
 3. `/invite/fake-token` shows "Invalid Invitation" message
@@ -2060,6 +2106,7 @@ Manually verify:
 - [ ] **Step 5: Apply migrations to remote (when ready to deploy)**
 
 Run:
+
 ```bash
 npx wrangler d1 migrations apply cmail-db --remote
 ```

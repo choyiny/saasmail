@@ -8,13 +8,13 @@ Add API-managed email templates identified by a slug, with `{{variable}}` interp
 
 New `email_templates` table in D1:
 
-| Column | Type | Constraints |
-|--------|------|-------------|
-| `id` | text | PK (nanoid) |
-| `slug` | text | unique, not null |
-| `name` | text | not null |
-| `subject` | text | not null |
-| `bodyHtml` | text | not null |
+| Column      | Type    | Constraints           |
+| ----------- | ------- | --------------------- |
+| `id`        | text    | PK (nanoid)           |
+| `slug`      | text    | unique, not null      |
+| `name`      | text    | not null              |
+| `subject`   | text    | not null              |
+| `bodyHtml`  | text    | not null              |
 | `createdAt` | integer | not null, default now |
 | `updatedAt` | integer | not null, default now |
 
@@ -27,13 +27,13 @@ All endpoints are auth-protected and follow existing Hono + Zod OpenAPI patterns
 
 ### CRUD
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/api/email-templates` | Create a template |
-| `GET` | `/api/email-templates` | List all templates |
-| `GET` | `/api/email-templates/:slug` | Get template by slug |
-| `PUT` | `/api/email-templates/:slug` | Update template |
-| `DELETE` | `/api/email-templates/:slug` | Delete template |
+| Method   | Path                         | Description          |
+| -------- | ---------------------------- | -------------------- |
+| `POST`   | `/api/email-templates`       | Create a template    |
+| `GET`    | `/api/email-templates`       | List all templates   |
+| `GET`    | `/api/email-templates/:slug` | Get template by slug |
+| `PUT`    | `/api/email-templates/:slug` | Update template      |
+| `DELETE` | `/api/email-templates/:slug` | Delete template      |
 
 #### Create/Update Request Body
 
@@ -60,6 +60,7 @@ For updates, `slug` in the body is omitted (identified by URL param). All fields
 ```
 
 **Behavior:**
+
 1. Look up template by slug (404 if not found).
 2. Interpolate `{{variableName}}` in both `subject` and `bodyHtml` using provided variables.
 3. Send via Resend using existing `RESEND_EMAIL_FROM` as the `from` address.

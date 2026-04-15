@@ -39,7 +39,7 @@ export default function ComposeModal({
         setSubject(
           email.subject?.startsWith("Re: ")
             ? email.subject
-            : `Re: ${email.subject || ""}`
+            : `Re: ${email.subject || ""}`,
         );
       });
     }
@@ -74,7 +74,9 @@ export default function ComposeModal({
         <form onSubmit={handleSend} className="space-y-3">
           {!isReply && (
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">To</label>
+              <label className="text-xs font-medium text-text-secondary">
+                To
+              </label>
               <input
                 type="email"
                 value={to}
@@ -85,7 +87,9 @@ export default function ComposeModal({
             </div>
           )}
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Subject</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Subject
+            </label>
             <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -95,7 +99,9 @@ export default function ComposeModal({
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">Message</label>
+            <label className="text-xs font-medium text-text-secondary">
+              Message
+            </label>
             <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}

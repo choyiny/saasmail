@@ -13,6 +13,9 @@ export const sequenceEmails = sqliteTable(
     sentEmailId: text("sent_email_id"),
   },
   (table) => [
-    index("seq_emails_status_scheduled_idx").on(table.status, table.scheduledAt),
-  ]
+    index("seq_emails_status_scheduled_idx").on(
+      table.status,
+      table.scheduledAt,
+    ),
+  ],
 );

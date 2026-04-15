@@ -14,41 +14,42 @@
 
 ### New files
 
-| File | Responsibility |
-|------|---------------|
-| `worker/src/db/sequences.schema.ts` | `sequences` table definition |
-| `worker/src/db/sequence-enrollments.schema.ts` | `sequence_enrollments` table definition |
-| `worker/src/db/sequence-emails.schema.ts` | `sequence_emails` outbox table definition |
-| `worker/src/routers/sequences-router.ts` | CRUD routes for sequences + enrollment |
-| `worker/src/lib/cancel-sequence.ts` | Shared cancellation logic |
-| `worker/src/lib/sequence-processor.ts` | Cron handler + queue consumer logic |
-| `migrations/0007_email_sequencing.sql` | Migration for new tables |
-| `src/pages/SequencesPage.tsx` | Sequences list page |
-| `src/pages/SequenceDetailPage.tsx` | Sequence detail + enrollments view |
-| `src/pages/SequenceEditorPage.tsx` | Create/edit sequence form |
-| `src/components/EnrollSequenceModal.tsx` | Enrollment modal for sender detail |
-| `src/components/SequenceStatus.tsx` | Active sequence status display for sender detail |
+| File                                           | Responsibility                                   |
+| ---------------------------------------------- | ------------------------------------------------ |
+| `worker/src/db/sequences.schema.ts`            | `sequences` table definition                     |
+| `worker/src/db/sequence-enrollments.schema.ts` | `sequence_enrollments` table definition          |
+| `worker/src/db/sequence-emails.schema.ts`      | `sequence_emails` outbox table definition        |
+| `worker/src/routers/sequences-router.ts`       | CRUD routes for sequences + enrollment           |
+| `worker/src/lib/cancel-sequence.ts`            | Shared cancellation logic                        |
+| `worker/src/lib/sequence-processor.ts`         | Cron handler + queue consumer logic              |
+| `migrations/0007_email_sequencing.sql`         | Migration for new tables                         |
+| `src/pages/SequencesPage.tsx`                  | Sequences list page                              |
+| `src/pages/SequenceDetailPage.tsx`             | Sequence detail + enrollments view               |
+| `src/pages/SequenceEditorPage.tsx`             | Create/edit sequence form                        |
+| `src/components/EnrollSequenceModal.tsx`       | Enrollment modal for sender detail               |
+| `src/components/SequenceStatus.tsx`            | Active sequence status display for sender detail |
 
 ### Modified files
 
-| File | Change |
-|------|--------|
-| `worker/src/db/schema.ts` | Add new tables to schema aggregate |
-| `worker/src/db/index.ts` | Export new schema files |
-| `worker/src/index.ts` | Register sequences router, add scheduled + queue handlers |
-| `worker/src/email-handler.ts` | Add cancellation check after email insert |
-| `worker/src/routers/send-router.ts` | Add cancellation check after send/reply |
-| `wrangler.jsonc` | Add queue bindings + cron trigger |
-| `src/lib/api.ts` | Add sequence/enrollment API functions |
-| `src/components/Sidebar.tsx` | Add Sequences nav item |
-| `src/App.tsx` | Add sequence routes |
-| `src/pages/SenderDetail.tsx` | Add sequence status + enroll button |
+| File                                | Change                                                    |
+| ----------------------------------- | --------------------------------------------------------- |
+| `worker/src/db/schema.ts`           | Add new tables to schema aggregate                        |
+| `worker/src/db/index.ts`            | Export new schema files                                   |
+| `worker/src/index.ts`               | Register sequences router, add scheduled + queue handlers |
+| `worker/src/email-handler.ts`       | Add cancellation check after email insert                 |
+| `worker/src/routers/send-router.ts` | Add cancellation check after send/reply                   |
+| `wrangler.jsonc`                    | Add queue bindings + cron trigger                         |
+| `src/lib/api.ts`                    | Add sequence/enrollment API functions                     |
+| `src/components/Sidebar.tsx`        | Add Sequences nav item                                    |
+| `src/App.tsx`                       | Add sequence routes                                       |
+| `src/pages/SenderDetail.tsx`        | Add sequence status + enroll button                       |
 
 ---
 
 ## Task 1: Database Schema — Sequences Table
 
 **Files:**
+
 - Create: `worker/src/db/sequences.schema.ts`
 
 - [ ] **Step 1: Create the sequences schema file**
@@ -78,6 +79,7 @@ git commit -m "feat: add sequences table schema"
 ## Task 2: Database Schema — Sequence Enrollments Table
 
 **Files:**
+
 - Create: `worker/src/db/sequence-enrollments.schema.ts`
 
 - [ ] **Step 1: Create the sequence enrollments schema file**
@@ -99,7 +101,7 @@ export const sequenceEnrollments = sqliteTable(
   },
   (table) => [
     index("enrollments_sender_status_idx").on(table.senderId, table.status),
-  ]
+  ],
 );
 ```
 
@@ -115,6 +117,7 @@ git commit -m "feat: add sequence_enrollments table schema"
 ## Task 3: Database Schema — Sequence Emails (Outbox) Table
 
 **Files:**
+
 - Create: `worker/src/db/sequence-emails.schema.ts`
 
 - [ ] **Step 1: Create the sequence emails outbox schema file**
@@ -136,8 +139,11 @@ export const sequenceEmails = sqliteTable(
     sentEmailId: text("sent_email_id"),
   },
   (table) => [
-    index("seq_emails_status_scheduled_idx").on(table.status, table.scheduledAt),
-  ]
+    index("seq_emails_status_scheduled_idx").on(
+      table.status,
+      table.scheduledAt,
+    ),
+  ],
 );
 ```
 
@@ -153,6 +159,7 @@ git commit -m "feat: add sequence_emails outbox table schema"
 ## Task 4: Register Schemas in Barrel Exports
 
 **Files:**
+
 - Modify: `worker/src/db/index.ts`
 - Modify: `worker/src/db/schema.ts`
 
@@ -206,6 +213,7 @@ git commit -m "feat: register sequence schemas in barrel exports"
 ## Task 5: Generate and Apply Migration
 
 **Files:**
+
 - Create: `migrations/0007_email_sequencing.sql` (generated by drizzle-kit)
 
 - [ ] **Step 1: Generate the migration**
@@ -236,6 +244,7 @@ git commit -m "feat: add migration for sequence tables"
 ## Task 6: Cancellation Helper
 
 **Files:**
+
 - Create: `worker/src/lib/cancel-sequence.ts`
 
 - [ ] **Step 1: Create the shared cancellation function**
@@ -253,7 +262,7 @@ import { sequenceEmails } from "../db/sequence-emails.schema";
  */
 export async function cancelSequencesForSender(
   db: DrizzleD1Database<any>,
-  senderId: string
+  senderId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -264,8 +273,8 @@ export async function cancelSequencesForSender(
     .where(
       and(
         eq(sequenceEnrollments.senderId, senderId),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     );
 
   if (activeEnrollments.length === 0) return;
@@ -288,8 +297,8 @@ export async function cancelSequencesForSender(
       .where(
         and(
           eq(sequenceEmails.enrollmentId, enrollmentId),
-          inArray(sequenceEmails.status, ["pending", "queued"])
-        )
+          inArray(sequenceEmails.status, ["pending", "queued"]),
+        ),
       );
   }
 }
@@ -307,6 +316,7 @@ git commit -m "feat: add shared sequence cancellation helper"
 ## Task 7: Add Cancellation to Email Handler (Inbound)
 
 **Files:**
+
 - Modify: `worker/src/email-handler.ts`
 
 - [ ] **Step 1: Add cancellation check after email insert**
@@ -320,8 +330,8 @@ import { cancelSequencesForSender } from "./lib/cancel-sequence";
 Add after the email insert block (after line 79, before the attachments loop), using `actualSenderId` which is already resolved:
 
 ```typescript
-  // Cancel any active sequences for this sender
-  await cancelSequencesForSender(db, actualSenderId);
+// Cancel any active sequences for this sender
+await cancelSequencesForSender(db, actualSenderId);
 ```
 
 - [ ] **Step 2: Commit**
@@ -336,6 +346,7 @@ git commit -m "feat: cancel sequences on inbound email"
 ## Task 8: Add Cancellation to Send Router (Outbound)
 
 **Files:**
+
 - Modify: `worker/src/routers/send-router.ts`
 
 - [ ] **Step 1: Add cancellation check to compose-send handler**
@@ -349,10 +360,10 @@ import { cancelSequencesForSender } from "../lib/cancel-sequence";
 In the `sendEmailRoute` handler, after storing the sent email (after line 88), add:
 
 ```typescript
-  // Cancel any active sequences for this recipient
-  if (senderId) {
-    await cancelSequencesForSender(db, senderId);
-  }
+// Cancel any active sequences for this recipient
+if (senderId) {
+  await cancelSequencesForSender(db, senderId);
+}
 ```
 
 Note: `senderId` is the variable already declared on line 72 as `existingSender[0]?.id ?? null`.
@@ -362,8 +373,8 @@ Note: `senderId` is the variable already declared on line 72 as `existingSender[
 In the `replyEmailRoute` handler, after storing the sent email (after line 182), add:
 
 ```typescript
-  // Cancel any active sequences for this sender
-  await cancelSequencesForSender(db, orig.senderId);
+// Cancel any active sequences for this sender
+await cancelSequencesForSender(db, orig.senderId);
 ```
 
 `orig.senderId` is the sender ID from the original email being replied to.
@@ -380,6 +391,7 @@ git commit -m "feat: cancel sequences on outbound email"
 ## Task 9: Sequences CRUD Router
 
 **Files:**
+
 - Create: `worker/src/routers/sequences-router.ts`
 
 - [ ] **Step 1: Create the router with sequence CRUD and enrollment endpoints**
@@ -547,7 +559,7 @@ sequencesRouter.openapi(createSequenceRoute, async (c) => {
     if (tmpl.length === 0) {
       return c.json(
         { error: `Template "${step.templateSlug}" not found` },
-        400
+        400,
       );
     }
   }
@@ -616,7 +628,7 @@ sequencesRouter.openapi(updateRoute, async (c) => {
       if (tmpl.length === 0) {
         return c.json(
           { error: `Template "${step.templateSlug}" not found` },
-          400
+          400,
         );
       }
     }
@@ -662,15 +674,15 @@ sequencesRouter.openapi(deleteRoute, async (c) => {
     .where(
       and(
         eq(sequenceEnrollments.sequenceId, id),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     )
     .limit(1);
 
   if (active.length > 0) {
     return c.json(
       { error: "Cannot delete sequence with active enrollments" },
-      400
+      400,
     );
   }
 
@@ -699,7 +711,7 @@ const enrollRoute = createRoute({
         enrollment: EnrollmentSchema,
         scheduledEmails: z.array(SequenceEmailSchema),
       }),
-      "Sender enrolled"
+      "Sender enrolled",
     ),
   },
 });
@@ -740,16 +752,13 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
     .where(
       and(
         eq(sequenceEnrollments.senderId, senderId),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     )
     .limit(1);
 
   if (existingEnrollment.length > 0) {
-    return c.json(
-      { error: "Sender is already in an active sequence" },
-      400
-    );
+    return c.json({ error: "Sender is already in an active sequence" }, 400);
   }
 
   const steps: Array<{
@@ -762,7 +771,10 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
   const activeSteps = steps.filter((s) => !skipSteps.includes(s.order));
 
   if (activeSteps.length === 0) {
-    return c.json({ error: "At least one step must remain after skipping" }, 400);
+    return c.json(
+      { error: "At least one step must remain after skipping" },
+      400,
+    );
   }
 
   // Create enrollment
@@ -811,7 +823,7 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
       enrollment: { ...enrollment, variables },
       scheduledEmails,
     },
-    201
+    201,
   );
 });
 
@@ -831,7 +843,7 @@ const getEnrollmentRoute = createRoute({
         scheduledEmails: z.array(SequenceEmailSchema),
         sequenceName: z.string().nullable(),
       }),
-      "Enrollment details"
+      "Enrollment details",
     ),
   },
 });
@@ -846,15 +858,15 @@ sequencesRouter.openapi(getEnrollmentRoute, async (c) => {
     .where(
       and(
         eq(sequenceEnrollments.senderId, senderId),
-        eq(sequenceEnrollments.status, "active")
-      )
+        eq(sequenceEnrollments.status, "active"),
+      ),
     )
     .limit(1);
 
   if (enrollments.length === 0) {
     return c.json(
       { enrollment: null, scheduledEmails: [], sequenceName: null },
-      200
+      200,
     );
   }
 
@@ -882,7 +894,7 @@ sequencesRouter.openapi(getEnrollmentRoute, async (c) => {
       scheduledEmails: emails,
       sequenceName: seqRow[0]?.name ?? null,
     },
-    200
+    200,
   );
 });
 
@@ -898,7 +910,7 @@ const cancelEnrollmentRoute = createRoute({
   responses: {
     ...json200Response(
       z.object({ success: z.boolean() }),
-      "Enrollment cancelled"
+      "Enrollment cancelled",
     ),
   },
 });
@@ -933,8 +945,8 @@ sequencesRouter.openapi(cancelEnrollmentRoute, async (c) => {
     .where(
       and(
         eq(sequenceEmails.enrollmentId, enrollmentId),
-        inArray(sequenceEmails.status, ["pending", "queued"])
-      )
+        inArray(sequenceEmails.status, ["pending", "queued"]),
+      ),
     );
 
   return c.json({ success: true }, 200);
@@ -957,9 +969,9 @@ const listEnrollmentsRoute = createRoute({
           senderName: z.string().nullable(),
           totalSteps: z.number(),
           sentSteps: z.number(),
-        })
+        }),
       ),
-      "Enrollment list"
+      "Enrollment list",
     ),
   },
 });
@@ -1021,6 +1033,7 @@ git commit -m "feat: add sequences CRUD and enrollment router"
 ## Task 10: Sequence Processor (Cron + Queue Consumer)
 
 **Files:**
+
 - Create: `worker/src/lib/sequence-processor.ts`
 
 - [ ] **Step 1: Create the cron handler and queue consumer**
@@ -1046,9 +1059,7 @@ export interface SequenceEmailMessage {
 /**
  * Cron handler: find due pending emails and push them onto the queue.
  */
-export async function handleScheduled(
-  env: CloudflareBindings
-): Promise<void> {
+export async function handleScheduled(env: CloudflareBindings): Promise<void> {
   const db = drizzle(env.DB, { schema });
   const now = Math.floor(Date.now() / 1000);
 
@@ -1059,8 +1070,8 @@ export async function handleScheduled(
     .where(
       and(
         eq(sequenceEmails.status, "pending"),
-        lte(sequenceEmails.scheduledAt, now)
-      )
+        lte(sequenceEmails.scheduledAt, now),
+      ),
     );
 
   if (dueEmails.length === 0) return;
@@ -1084,7 +1095,7 @@ export async function handleScheduled(
  */
 export async function handleQueueBatch(
   batch: MessageBatch<SequenceEmailMessage>,
-  env: CloudflareBindings
+  env: CloudflareBindings,
 ): Promise<void> {
   const db = drizzle(env.DB, { schema });
   const resend = new Resend(env.RESEND_API_KEY);
@@ -1096,13 +1107,13 @@ export async function handleQueueBatch(
         db,
         resend,
         fromAddress,
-        msg.body.sequenceEmailId
+        msg.body.sequenceEmailId,
       );
       msg.ack();
     } catch (err) {
       console.error(
         `Failed to process sequence email ${msg.body.sequenceEmailId}:`,
-        err
+        err,
       );
       msg.retry();
     }
@@ -1113,7 +1124,7 @@ async function processSequenceEmail(
   db: ReturnType<typeof drizzle>,
   resend: Resend,
   fromAddress: string,
-  sequenceEmailId: string
+  sequenceEmailId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
 
@@ -1240,8 +1251,8 @@ async function processSequenceEmail(
     .where(
       and(
         eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "pending")
-      )
+        eq(sequenceEmails.status, "pending"),
+      ),
     )
     .limit(1);
 
@@ -1252,8 +1263,8 @@ async function processSequenceEmail(
     .where(
       and(
         eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "queued")
-      )
+        eq(sequenceEmails.status, "queued"),
+      ),
     )
     .limit(1);
 
@@ -1278,6 +1289,7 @@ git commit -m "feat: add sequence cron handler and queue consumer"
 ## Task 11: Register Router and Export Handlers in Worker Entry
 
 **Files:**
+
 - Modify: `worker/src/index.ts`
 
 - [ ] **Step 1: Add imports**
@@ -1306,10 +1318,17 @@ Replace the export block (lines 142-145) with:
 export default {
   fetch: app.fetch,
   email: handleEmail,
-  async scheduled(event: ScheduledEvent, env: CloudflareBindings, ctx: ExecutionContext) {
+  async scheduled(
+    event: ScheduledEvent,
+    env: CloudflareBindings,
+    ctx: ExecutionContext,
+  ) {
     ctx.waitUntil(handleScheduled(env));
   },
-  async queue(batch: MessageBatch<SequenceEmailMessage>, env: CloudflareBindings) {
+  async queue(
+    batch: MessageBatch<SequenceEmailMessage>,
+    env: CloudflareBindings,
+  ) {
     await handleQueueBatch(batch, env);
   },
 };
@@ -1327,6 +1346,7 @@ git commit -m "feat: register sequences router and export cron/queue handlers"
 ## Task 12: Configure Wrangler — Queue Bindings and Cron Trigger
 
 **Files:**
+
 - Modify: `wrangler.jsonc`
 
 - [ ] **Step 1: Add queue and cron configuration**
@@ -1366,6 +1386,7 @@ git commit -m "feat: add queue bindings and hourly cron trigger to wrangler conf
 ## Task 13: Frontend API Client — Sequence Functions
 
 **Files:**
+
 - Modify: `src/lib/api.ts`
 
 - [ ] **Step 1: Add types and API functions for sequences**
@@ -1444,7 +1465,7 @@ export async function createSequence(data: {
 
 export async function updateSequence(
   id: string,
-  data: { name?: string; steps?: SequenceStep[] }
+  data: { name?: string; steps?: SequenceStep[] },
 ): Promise<Sequence> {
   return apiFetch(`/api/sequences/${id}`, {
     method: "PUT",
@@ -1454,7 +1475,7 @@ export async function updateSequence(
 }
 
 export async function deleteSequence(
-  id: string
+  id: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/sequences/${id}`, { method: "DELETE" });
 }
@@ -1466,7 +1487,7 @@ export async function enrollSender(
     variables?: Record<string, string>;
     skipSteps?: number[];
     delayOverrides?: Record<string, number>;
-  }
+  },
 ): Promise<{
   enrollment: SequenceEnrollment;
   scheduledEmails: SequenceEmail[];
@@ -1479,13 +1500,13 @@ export async function enrollSender(
 }
 
 export async function fetchSenderEnrollment(
-  senderId: string
+  senderId: string,
 ): Promise<SenderEnrollmentInfo> {
   return apiFetch(`/api/sequences/senders/${senderId}/enrollment`);
 }
 
 export async function cancelEnrollment(
-  enrollmentId: string
+  enrollmentId: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/sequences/enrollments/${enrollmentId}`, {
     method: "DELETE",
@@ -1493,7 +1514,7 @@ export async function cancelEnrollment(
 }
 
 export async function fetchSequenceEnrollments(
-  sequenceId: string
+  sequenceId: string,
 ): Promise<EnrollmentWithDetails[]> {
   return apiFetch(`/api/sequences/${sequenceId}/enrollments`);
 }
@@ -1511,6 +1532,7 @@ git commit -m "feat: add sequence API client functions"
 ## Task 14: Sidebar Navigation — Add Sequences
 
 **Files:**
+
 - Modify: `src/components/Sidebar.tsx`
 
 - [ ] **Step 1: Add Sequences nav item**
@@ -1518,7 +1540,15 @@ git commit -m "feat: add sequence API client functions"
 Add `ListOrdered` to the lucide-react import on line 2:
 
 ```typescript
-import { Mail, FileText, Key, Users, PenSquare, LogOut, ListOrdered } from "lucide-react";
+import {
+  Mail,
+  FileText,
+  Key,
+  Users,
+  PenSquare,
+  LogOut,
+  ListOrdered,
+} from "lucide-react";
 ```
 
 Add to the `navItems` array (after the Templates entry, before API):
@@ -1539,6 +1569,7 @@ git commit -m "feat: add sequences to sidebar navigation"
 ## Task 15: React Router — Add Sequence Routes
 
 **Files:**
+
 - Modify: `src/App.tsx`
 
 - [ ] **Step 1: Add imports for sequence pages**
@@ -1574,6 +1605,7 @@ git commit -m "feat: add sequence page routes"
 ## Task 16: Sequences List Page
 
 **Files:**
+
 - Create: `src/pages/SequencesPage.tsx`
 
 - [ ] **Step 1: Create the sequences list page**
@@ -1672,6 +1704,7 @@ git commit -m "feat: add sequences list page"
 ## Task 17: Sequence Editor Page (Create/Edit)
 
 **Files:**
+
 - Create: `src/pages/SequenceEditorPage.tsx`
 
 - [ ] **Step 1: Create the sequence editor page**
@@ -1718,8 +1751,12 @@ export default function SequenceEditorPage() {
   }, [id]);
 
   function addStep() {
-    const maxOrder = steps.length > 0 ? Math.max(...steps.map((s) => s.order)) : 0;
-    setSteps([...steps, { order: maxOrder + 1, templateSlug: "", delayHours: 24 }]);
+    const maxOrder =
+      steps.length > 0 ? Math.max(...steps.map((s) => s.order)) : 0;
+    setSteps([
+      ...steps,
+      { order: maxOrder + 1, templateSlug: "", delayHours: 24 },
+    ]);
   }
 
   function removeStep(order: number) {
@@ -1729,7 +1766,7 @@ export default function SequenceEditorPage() {
 
   function updateStep(order: number, field: keyof SequenceStep, value: any) {
     setSteps(
-      steps.map((s) => (s.order === order ? { ...s, [field]: value } : s))
+      steps.map((s) => (s.order === order ? { ...s, [field]: value } : s)),
     );
   }
 
@@ -1818,7 +1855,7 @@ export default function SequenceEditorPage() {
                       updateStep(
                         step.order,
                         "delayHours",
-                        parseInt(e.target.value) || 0
+                        parseInt(e.target.value) || 0,
                       )
                     }
                     className="w-20 rounded-md border border-border-dark bg-main px-2 py-1.5 text-sm text-text-primary"
@@ -1879,6 +1916,7 @@ git commit -m "feat: add sequence editor page (create/edit)"
 ## Task 18: Sequence Detail Page (Enrollments View)
 
 **Files:**
+
 - Create: `src/pages/SequenceDetailPage.tsx`
 
 - [ ] **Step 1: Create the sequence detail page**
@@ -1932,8 +1970,8 @@ export default function SequenceDetailPage() {
     await cancelEnrollment(enrollmentId);
     setEnrollments((prev) =>
       prev.map((e) =>
-        e.id === enrollmentId ? { ...e, status: "cancelled" } : e
-      )
+        e.id === enrollmentId ? { ...e, status: "cancelled" } : e,
+      ),
     );
   }
 
@@ -2039,6 +2077,7 @@ git commit -m "feat: add sequence detail page with enrollments view"
 ## Task 19: Enrollment Modal Component
 
 **Files:**
+
 - Create: `src/components/EnrollSequenceModal.tsx`
 
 - [ ] **Step 1: Create the enrollment modal**
@@ -2074,9 +2113,11 @@ export default function EnrollSequenceModal({
   const [selectedId, setSelectedId] = useState("");
   const [skipSteps, setSkipSteps] = useState<number[]>([]);
   const [delayOverrides, setDelayOverrides] = useState<Record<string, number>>(
-    {}
+    {},
   );
-  const [variables, setVariables] = useState<Array<{ key: string; value: string }>>([]);
+  const [variables, setVariables] = useState<
+    Array<{ key: string; value: string }>
+  >([]);
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -2097,9 +2138,7 @@ export default function EnrollSequenceModal({
 
   function toggleSkip(order: number) {
     setSkipSteps((prev) =>
-      prev.includes(order)
-        ? prev.filter((o) => o !== order)
-        : [...prev, order]
+      prev.includes(order) ? prev.filter((o) => o !== order) : [...prev, order],
     );
   }
 
@@ -2113,7 +2152,7 @@ export default function EnrollSequenceModal({
 
   function updateVariable(idx: number, field: "key" | "value", val: string) {
     setVariables(
-      variables.map((v, i) => (i === idx ? { ...v, [field]: val } : v))
+      variables.map((v, i) => (i === idx ? { ...v, [field]: val } : v)),
     );
   }
 
@@ -2305,6 +2344,7 @@ git commit -m "feat: add enrollment modal component"
 ## Task 20: Sequence Status Component
 
 **Files:**
+
 - Create: `src/components/SequenceStatus.tsx`
 
 - [ ] **Step 1: Create the sequence status display**
@@ -2342,7 +2382,7 @@ export default function SequenceStatus({
   const sent = info.scheduledEmails.filter((e) => e.status === "sent").length;
   const total = info.scheduledEmails.length;
   const nextPending = info.scheduledEmails.find(
-    (e) => e.status === "pending" || e.status === "queued"
+    (e) => e.status === "pending" || e.status === "queued",
   );
 
   async function handleCancel() {
@@ -2350,7 +2390,12 @@ export default function SequenceStatus({
     if (!confirm("Cancel this sequence?")) return;
     await cancelEnrollment(info.enrollment.id);
     onStatusChange();
-    setInfo({ ...info, enrollment: null, scheduledEmails: [], sequenceName: null });
+    setInfo({
+      ...info,
+      enrollment: null,
+      scheduledEmails: [],
+      sequenceName: null,
+    });
   }
 
   return (
@@ -2388,6 +2433,7 @@ git commit -m "feat: add sequence status component for sender detail"
 ## Task 21: Integrate Sequence UI into Sender Detail
 
 **Files:**
+
 - Modify: `src/pages/SenderDetail.tsx`
 
 - [ ] **Step 1: Add imports**
@@ -2405,8 +2451,9 @@ import { fetchSenderEnrollment, type SenderEnrollmentInfo } from "@/lib/api";
 Inside the `SenderDetail` component, add after the existing state declarations:
 
 ```typescript
-  const [enrollModalOpen, setEnrollModalOpen] = useState(false);
-  const [enrollmentInfo, setEnrollmentInfo] = useState<SenderEnrollmentInfo | null>(null);
+const [enrollModalOpen, setEnrollModalOpen] = useState(false);
+const [enrollmentInfo, setEnrollmentInfo] =
+  useState<SenderEnrollmentInfo | null>(null);
 ```
 
 - [ ] **Step 3: Add effect to load enrollment status**
@@ -2414,13 +2461,13 @@ Inside the `SenderDetail` component, add after the existing state declarations:
 Add after the existing useEffect:
 
 ```typescript
-  useEffect(() => {
-    fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
-  }, [sender.id]);
+useEffect(() => {
+  fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
+}, [sender.id]);
 
-  function refreshEnrollment() {
-    fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
-  }
+function refreshEnrollment() {
+  fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
+}
 ```
 
 - [ ] **Step 4: Add sequence UI to the sender detail header area**
@@ -2428,22 +2475,21 @@ Add after the existing useEffect:
 Find the header/toolbar area of SenderDetail (the section showing the sender's name and email at the top). Add after it:
 
 ```tsx
-      {/* Sequence status or enroll button */}
-      <div className="px-4 py-2">
-        {enrollmentInfo?.enrollment ? (
-          <SequenceStatus
-            senderId={sender.id}
-            onStatusChange={refreshEnrollment}
-          />
-        ) : (
-          <button
-            onClick={() => setEnrollModalOpen(true)}
-            className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
-          >
-            Add to Sequence
-          </button>
-        )}
-      </div>
+{
+  /* Sequence status or enroll button */
+}
+<div className="px-4 py-2">
+  {enrollmentInfo?.enrollment ? (
+    <SequenceStatus senderId={sender.id} onStatusChange={refreshEnrollment} />
+  ) : (
+    <button
+      onClick={() => setEnrollModalOpen(true)}
+      className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
+    >
+      Add to Sequence
+    </button>
+  )}
+</div>;
 ```
 
 - [ ] **Step 5: Add the enrollment modal**
@@ -2451,14 +2497,14 @@ Find the header/toolbar area of SenderDetail (the section showing the sender's n
 Add before the closing fragment or at the end of the component JSX:
 
 ```tsx
-      <EnrollSequenceModal
-        senderId={sender.id}
-        senderName={sender.name}
-        senderEmail={sender.email}
-        open={enrollModalOpen}
-        onClose={() => setEnrollModalOpen(false)}
-        onEnrolled={refreshEnrollment}
-      />
+<EnrollSequenceModal
+  senderId={sender.id}
+  senderName={sender.name}
+  senderEmail={sender.email}
+  open={enrollModalOpen}
+  onClose={() => setEnrollModalOpen(false)}
+  onEnrolled={refreshEnrollment}
+/>
 ```
 
 - [ ] **Step 6: Commit**
@@ -2481,6 +2527,7 @@ Expected: Build succeeds with no TypeScript errors.
 - [ ] **Step 2: Fix any build errors**
 
 If there are errors, fix them and re-run. Common issues:
+
 - Missing `inArray` import in sequences-router (should be imported from `drizzle-orm`)
 - CloudflareBindings type may need `EMAIL_QUEUE` added — check if there's a `worker-configuration.d.ts` or similar type file that auto-generates from wrangler.jsonc
 

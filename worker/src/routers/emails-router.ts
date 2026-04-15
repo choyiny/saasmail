@@ -32,12 +32,16 @@ const listSenderEmailsRoute = createRoute({
   method: "get",
   path: "/by-sender/{senderId}",
   tags: ["Emails"],
-  description: "List all emails for a sender (received and sent, interleaved chronologically).",
+  description:
+    "List all emails for a sender (received and sent, interleaved chronologically).",
   request: {
     params: z.object({ senderId: z.string() }),
     query: z.object({
       q: z.string().optional().openapi({ description: "Search by subject" }),
-      recipient: z.string().optional().openapi({ description: "Filter by recipient address" }),
+      recipient: z
+        .string()
+        .optional()
+        .openapi({ description: "Filter by recipient address" }),
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(50),
     }),
@@ -144,7 +148,12 @@ emailsRouter.openapi(listSenderEmailsRoute, async (c) => {
         count: sql<number>`COUNT(*)`,
       })
       .from(attachments)
-      .where(sql`${attachments.emailId} IN (${sql.join(receivedIds.map(id => sql`${id}`), sql`,`)})`)
+      .where(
+        sql`${attachments.emailId} IN (${sql.join(
+          receivedIds.map((id) => sql`${id}`),
+          sql`,`,
+        )})`,
+      )
       .groupBy(attachments.emailId);
 
     for (const row of counts) {
@@ -158,7 +167,12 @@ emailsRouter.openapi(listSenderEmailsRoute, async (c) => {
     const attRows = await db
       .select()
       .from(attachments)
-      .where(sql`${attachments.emailId} IN (${sql.join(receivedIds.map(id => sql`${id}`), sql`,`)})`);
+      .where(
+        sql`${attachments.emailId} IN (${sql.join(
+          receivedIds.map((id) => sql`${id}`),
+          sql`,`,
+        )})`,
+      );
 
     for (const att of attRows) {
       if (!attachmentDetails[att.emailId]) {
@@ -195,11 +209,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
 
-  const row = await db
-    .select()
-    .from(emails)
-    .where(eq(emails.id, id))
-    .limit(1);
+  const row = await db.select().from(emails).where(eq(emails.id, id)).limit(1);
 
   if (row.length === 0) {
     return c.json({ error: "Email not found" }, 404);
@@ -210,14 +220,17 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
     .from(attachments)
     .where(eq(attachments.emailId, id));
 
-  return c.json({
-    ...row[0],
-    type: "received",
-    timestamp: row[0].receivedAt,
-    fromAddress: null,
-    toAddress: null,
-    attachments: atts,
-  }, 200);
+  return c.json(
+    {
+      ...row[0],
+      type: "received",
+      timestamp: row[0].receivedAt,
+      fromAddress: null,
+      toAddress: null,
+      attachments: atts,
+    },
+    200,
+  );
 });
 
 // Mark email read/unread

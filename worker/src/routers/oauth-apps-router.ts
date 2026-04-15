@@ -1,6 +1,11 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, and } from "drizzle-orm";
-import { oauthClients, oauthConsents, oauthAccessTokens, oauthRefreshTokens } from "../db/auth.schema";
+import {
+  oauthClients,
+  oauthConsents,
+  oauthAccessTokens,
+  oauthRefreshTokens,
+} from "../db/auth.schema";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 
@@ -86,8 +91,8 @@ oauthAppsRouter.openapi(revokeRoute, async (c) => {
     .where(
       and(
         eq(oauthConsents.userId, user.id),
-        eq(oauthConsents.clientId, clientId)
-      )
+        eq(oauthConsents.clientId, clientId),
+      ),
     );
 
   // Delete access tokens for this user + client
@@ -96,8 +101,8 @@ oauthAppsRouter.openapi(revokeRoute, async (c) => {
     .where(
       and(
         eq(oauthAccessTokens.userId, user.id),
-        eq(oauthAccessTokens.clientId, clientId)
-      )
+        eq(oauthAccessTokens.clientId, clientId),
+      ),
     );
 
   // Delete refresh tokens for this user + client
@@ -106,8 +111,8 @@ oauthAppsRouter.openapi(revokeRoute, async (c) => {
     .where(
       and(
         eq(oauthRefreshTokens.userId, user.id),
-        eq(oauthRefreshTokens.clientId, clientId)
-      )
+        eq(oauthRefreshTokens.clientId, clientId),
+      ),
     );
 
   return c.json({ success: true }, 200);

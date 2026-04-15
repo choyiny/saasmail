@@ -13,5 +13,5 @@ export const sequenceEnrollments = sqliteTable(
   },
   (table) => [
     index("enrollments_sender_status_idx").on(table.senderId, table.status),
-  ]
+  ],
 );

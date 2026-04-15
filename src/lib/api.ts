@@ -71,7 +71,7 @@ export async function fetchSender(id: string): Promise<Sender> {
 
 export async function fetchSenderEmails(
   senderId: string,
-  params?: { q?: string; recipient?: string; page?: number; limit?: number }
+  params?: { q?: string; recipient?: string; page?: number; limit?: number },
 ): Promise<Email[]> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set("q", params.q);
@@ -85,7 +85,10 @@ export async function fetchEmail(id: string): Promise<Email> {
   return apiFetch(`/api/emails/${id}`);
 }
 
-export async function markEmailRead(id: string, isRead: boolean): Promise<void> {
+export async function markEmailRead(
+  id: string,
+  isRead: boolean,
+): Promise<void> {
   await apiFetch(`/api/emails/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -108,7 +111,7 @@ export async function sendEmail(data: {
 
 export async function replyToEmail(
   emailId: string,
-  data: { bodyHtml: string; bodyText?: string }
+  data: { bodyHtml: string; bodyText?: string },
 ): Promise<{ id: string }> {
   return apiFetch(`/api/send/reply/${emailId}`, {
     method: "POST",
@@ -155,7 +158,7 @@ export async function createTemplate(data: {
 
 export async function updateTemplate(
   slug: string,
-  data: { name?: string; subject?: string; bodyHtml?: string }
+  data: { name?: string; subject?: string; bodyHtml?: string },
 ): Promise<EmailTemplate> {
   return apiFetch(`/api/email-templates/${slug}`, {
     method: "PUT",
@@ -165,7 +168,7 @@ export async function updateTemplate(
 }
 
 export async function deleteTemplate(
-  slug: string
+  slug: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/email-templates/${slug}`, {
     method: "DELETE",
@@ -359,7 +362,7 @@ export async function createSequence(data: {
 
 export async function updateSequence(
   id: string,
-  data: { name?: string; steps?: SequenceStep[] }
+  data: { name?: string; steps?: SequenceStep[] },
 ): Promise<Sequence> {
   return apiFetch(`/api/sequences/${id}`, {
     method: "PUT",
@@ -369,7 +372,7 @@ export async function updateSequence(
 }
 
 export async function deleteSequence(
-  id: string
+  id: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/sequences/${id}`, { method: "DELETE" });
 }
@@ -381,7 +384,7 @@ export async function enrollSender(
     variables?: Record<string, string>;
     skipSteps?: number[];
     delayOverrides?: Record<string, number>;
-  }
+  },
 ): Promise<{
   enrollment: SequenceEnrollment;
   scheduledEmails: SequenceEmail[];
@@ -394,13 +397,13 @@ export async function enrollSender(
 }
 
 export async function fetchSenderEnrollment(
-  senderId: string
+  senderId: string,
 ): Promise<SenderEnrollmentInfo> {
   return apiFetch(`/api/sequences/senders/${senderId}/enrollment`);
 }
 
 export async function cancelEnrollment(
-  enrollmentId: string
+  enrollmentId: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/sequences/enrollments/${enrollmentId}`, {
     method: "DELETE",
@@ -408,7 +411,7 @@ export async function cancelEnrollment(
 }
 
 export async function fetchSequenceEnrollments(
-  sequenceId: string
+  sequenceId: string,
 ): Promise<EnrollmentWithDetails[]> {
   return apiFetch(`/api/sequences/${sequenceId}/enrollments`);
 }
@@ -426,7 +429,7 @@ export async function fetchOAuthApps(): Promise<OAuthApp[]> {
 }
 
 export async function revokeOAuthApp(
-  clientId: string
+  clientId: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/oauth-apps/${clientId}`, { method: "DELETE" });
 }
