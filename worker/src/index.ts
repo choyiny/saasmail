@@ -21,6 +21,8 @@ import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
+import { mcpRouter } from "./routers/mcp-router";
+import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import type { Variables } from "./variables";
@@ -128,6 +130,7 @@ app.route("/api/user", userRouter);
 app.route("/api/api-keys", apiKeysRouter);
 app.route("/api/invites", invitesRouter);
 app.route("/api/sequences", sequencesRouter);
+app.route("/api/oauth-apps", oauthAppsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
@@ -141,6 +144,15 @@ app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
 app.doc("/doc", {
   openapi: "3.0.0",
   info: { title: "cmail API", version: "1.0.0" },
+});
+
+// MCP endpoints (OAuth-protected, not under /api/*)
+app.route("/mcp", mcpRouter);
+
+// Well-known OAuth/OIDC discovery endpoints
+app.all("/.well-known/*", (c) => {
+  const auth = createAuth(c.env);
+  return auth.handler(c.req.raw);
 });
 
 // SPA fallback
