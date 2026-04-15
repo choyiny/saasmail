@@ -21,6 +21,101 @@ const SenderSchema = z.object({
   latestSubject: z.string().nullable().optional(),
 });
 
+// Grouped senders (unique senders, aggregated across all recipients)
+const GroupedSenderSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string().nullable(),
+  lastEmailAt: z.number(),
+  unreadCount: z.number(),
+  totalCount: z.number(),
+  recipientCount: z.number(),
+});
+
+const listGroupedSendersRoute = createRoute({
+  method: "get",
+  path: "/grouped",
+  tags: ["Senders"],
+  description: "List senders grouped by sender (aggregated across all recipients).",
+  request: {
+    query: z.object({
+      q: z
+        .string()
+        .optional()
+        .openapi({ description: "Search sender name/email" }),
+      page: z.coerce.number().optional().default(1),
+      limit: z.coerce.number().optional().default(50),
+    }),
+  },
+  responses: {
+    ...json200Response(
+      z.object({
+        data: z.array(GroupedSenderSchema),
+        total: z.number(),
+        page: z.number(),
+        limit: z.number(),
+      }),
+      "Paginated list of grouped senders",
+    ),
+  },
+});
+
+sendersRouter.openapi(listGroupedSendersRoute, async (c) => {
+  const db = c.get("db");
+  const { q, page, limit } = c.req.valid("query");
+  const offset = (page - 1) * limit;
+
+  const conditions: any[] = [];
+  if (q) {
+    const pattern = `%${q}%`;
+    conditions.push(
+      sql`(${senders.email} LIKE ${pattern} OR ${senders.name} LIKE ${pattern})`,
+    );
+  }
+
+  const whereClause =
+    conditions.length > 0
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``;
+
+  const rows = await db.all<{
+    id: string;
+    email: string;
+    name: string | null;
+    lastEmailAt: number;
+    unreadCount: number;
+    totalCount: number;
+    recipientCount: number;
+  }>(sql`
+    SELECT
+      s.id,
+      s.email,
+      s.name,
+      MAX(e.received_at) AS lastEmailAt,
+      SUM(CASE WHEN e.is_read = 0 THEN 1 ELSE 0 END) AS unreadCount,
+      COUNT(*) AS totalCount,
+      COUNT(DISTINCT e.recipient) AS recipientCount
+    FROM ${emails} e
+    JOIN ${senders} s ON s.id = e.sender_id
+    ${whereClause}
+    GROUP BY s.id
+    ORDER BY lastEmailAt DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `);
+
+  const countResult = await db.all<{ count: number }>(sql`
+    SELECT COUNT(*) AS count FROM (
+      SELECT 1 FROM ${emails} e
+      JOIN ${senders} s ON s.id = e.sender_id
+      ${whereClause}
+      GROUP BY s.id
+    )
+  `);
+  const total = countResult[0]?.count ?? 0;
+
+  return c.json({ data: rows, total, page, limit }, 200);
+});
+
 const listSendersRoute = createRoute({
   method: "get",
   path: "/",
@@ -36,6 +131,10 @@ const listSendersRoute = createRoute({
         .string()
         .optional()
         .openapi({ description: "Filter by recipient address" }),
+      senderId: z
+        .string()
+        .optional()
+        .openapi({ description: "Filter by sender ID" }),
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(50),
     }),
@@ -55,7 +154,7 @@ const listSendersRoute = createRoute({
 
 sendersRouter.openapi(listSendersRoute, async (c) => {
   const db = c.get("db");
-  const { q, recipient, page, limit } = c.req.valid("query");
+  const { q, recipient, senderId, page, limit } = c.req.valid("query");
   const offset = (page - 1) * limit;
 
   // Build WHERE conditions for the emails table
@@ -70,6 +169,10 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
 
   if (recipient) {
     conditions.push(sql`${emails.recipient} = ${recipient}`);
+  }
+
+  if (senderId) {
+    conditions.push(sql`s.id = ${senderId}`);
   }
 
   const whereClause =

@@ -9,6 +9,23 @@ export interface Sender {
   latestSubject?: string | null;
 }
 
+export interface GroupedSender {
+  id: string;
+  email: string;
+  name: string | null;
+  lastEmailAt: number;
+  unreadCount: number;
+  totalCount: number;
+  recipientCount: number;
+}
+
+export interface PaginatedGroupedSenders {
+  data: GroupedSender[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface Email {
   id: string;
   type: "received" | "sent";
@@ -59,15 +76,29 @@ export interface PaginatedSenders {
   limit: number;
 }
 
+export async function fetchGroupedSenders(params?: {
+  q?: string;
+  page?: number;
+  limit?: number;
+}): Promise<PaginatedGroupedSenders> {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set("q", params.q);
+  if (params?.page) qs.set("page", params.page.toString());
+  if (params?.limit) qs.set("limit", params.limit.toString());
+  return apiFetch(`/api/senders/grouped?${qs}`);
+}
+
 export async function fetchSenders(params?: {
   q?: string;
   recipient?: string;
+  senderId?: string;
   page?: number;
   limit?: number;
 }): Promise<PaginatedSenders> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set("q", params.q);
   if (params?.recipient) qs.set("recipient", params.recipient);
+  if (params?.senderId) qs.set("senderId", params.senderId);
   if (params?.page) qs.set("page", params.page.toString());
   if (params?.limit) qs.set("limit", params.limit.toString());
   return apiFetch(`/api/senders?${qs}`);
