@@ -6,6 +6,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { senders } from "../db/senders.schema";
 import { emails } from "../db/emails.schema";
 import { json201Response } from "../lib/helpers";
+import { cancelSequencesForSender } from "../lib/cancel-sequence";
 import type { Variables } from "../variables";
 
 export const sendRouter = new OpenAPIHono<{
@@ -86,6 +87,11 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     sentAt: now,
     createdAt: now,
   });
+
+  // Cancel any active sequences for this recipient
+  if (senderId) {
+    await cancelSequencesForSender(db, senderId);
+  }
 
   return c.json(
     { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },
@@ -180,6 +186,9 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     sentAt: now,
     createdAt: now,
   });
+
+  // Cancel any active sequences for this sender
+  await cancelSequencesForSender(db, orig.senderId);
 
   return c.json(
     { id, resendId: result.data?.id ?? null, status: result.error ? "failed" : "sent" },

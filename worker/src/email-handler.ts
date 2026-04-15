@@ -6,6 +6,7 @@ import { senders } from "./db/senders.schema";
 import { emails } from "./db/emails.schema";
 import { attachments } from "./db/attachments.schema";
 import { parseEmail } from "./lib/email-parser";
+import { cancelSequencesForSender } from "./lib/cancel-sequence";
 
 export async function handleEmail(
   message: ForwardableEmailMessage,
@@ -77,6 +78,9 @@ export async function handleEmail(
     receivedAt: now,
     createdAt: now,
   });
+
+  // Cancel any active sequences for this sender
+  await cancelSequencesForSender(db, actualSenderId);
 
   // Process attachments
   for (const att of parsed.attachments) {
