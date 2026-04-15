@@ -56,7 +56,7 @@ export default function OnboardingPage() {
         navigate("/login", { replace: true });
         return;
       }
-      window.location.href = "/";
+      window.location.href = "/setup-passkey";
     } catch {
       setError("Setup failed");
     } finally {
