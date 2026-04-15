@@ -9,6 +9,7 @@ import {
 import {
   fetchSenderEmails,
   markEmailRead,
+  deleteEmail,
   fetchSenderEnrollment,
   type Sender,
   type Email,
@@ -86,6 +87,12 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
     setEmails((prev) =>
       prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e)),
     );
+  }
+
+  async function handleDelete(emailId: string) {
+    if (!confirm("Permanently delete this email and all its attachments? This cannot be undone.")) return;
+    await deleteEmail(emailId);
+    setEmails((prev) => prev.filter((e) => e.id !== emailId));
   }
 
   if (loading) {
@@ -178,6 +185,7 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
                 onOpenHtml={setHtmlPreviewEmail}
                 onMarkRead={handleMarkRead}
                 onReply={setReplyToEmailId}
+                onDelete={handleDelete}
               />
             ))
           )}

@@ -18,6 +18,83 @@ export interface ParsedAttachment {
   contentId: string | null;
 }
 
+/**
+ * Trim quoted reply content from plain text email bodies.
+ * Removes lines starting with ">" and common quote headers like
+ * "On Mon, Jan 1, 2024 at 10:00 AM ... wrote:" that email clients
+ * append when replying.
+ */
+export function trimQuotedText(text: string): string {
+  const lines = text.split("\n");
+  let cutIndex = lines.length;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    // Line starts with ">" — quoted content
+    if (line.startsWith(">")) {
+      // Check if previous non-empty line is a quote header like "On ... wrote:"
+      if (i > 0 && /^On .+ wrote:$/i.test(lines[i - 1].trim())) {
+        cutIndex = i - 1;
+      } else {
+        cutIndex = i;
+      }
+      break;
+    }
+
+    // Gmail/Apple-style separator
+    if (
+      /^On .+ wrote:$/i.test(line) ||
+      /^-{2,}\s*Original Message\s*-{2,}$/i.test(line) ||
+      /^-{2,}\s*Forwarded message\s*-{2,}$/i.test(line) ||
+      line === "________________________________________"
+    ) {
+      cutIndex = i;
+      break;
+    }
+  }
+
+  return lines
+    .slice(0, cutIndex)
+    .join("\n")
+    .trimEnd();
+}
+
+/**
+ * Trim quoted reply content from HTML email bodies.
+ * Removes common wrapper elements that email clients use:
+ * - Gmail: <div class="gmail_quote">
+ * - Apple Mail / Outlook: <blockquote>
+ * - Generic: elements with class containing "quote" or "moz-cite-prefix"
+ */
+export function trimQuotedHtml(html: string): string {
+  // Gmail quote block
+  let trimmed = html.replace(
+    /<div\s+class="gmail_quote"[\s\S]*$/i,
+    "",
+  );
+
+  // Yahoo quote header + blockquote
+  trimmed = trimmed.replace(
+    /<div\s+id="yahoo_quoted_[\s\S]*$/i,
+    "",
+  );
+
+  // Outlook-style "Original Message" separator and everything after
+  trimmed = trimmed.replace(
+    /<div\s[^>]*style="border:none;border-top:solid #[A-Fa-f0-9]+ 1\.0pt[\s\S]*$/i,
+    "",
+  );
+
+  // Generic blockquote at the end (Apple Mail, Thunderbird)
+  trimmed = trimmed.replace(
+    /<div\s+class="moz-cite-prefix"[\s\S]*$/i,
+    "",
+  );
+
+  return trimmed.trimEnd();
+}
+
 export async function parseEmail(
   message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
@@ -32,6 +109,9 @@ export async function parseEmail(
     }
   }
 
+  const bodyText = parsed.text || null;
+  const bodyHtml = parsed.html || null;
+
   return {
     from: {
       address: parsed.from?.address || message.from,
@@ -39,8 +119,8 @@ export async function parseEmail(
     },
     to: message.to,
     subject: parsed.subject || "",
-    bodyHtml: parsed.html || null,
-    bodyText: parsed.text || null,
+    bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
+    bodyText: bodyText ? trimQuotedText(bodyText) : null,
     messageId: parsed.messageId || null,
     headers,
     attachments: (parsed.attachments || []).map((att) => ({

@@ -186,6 +186,30 @@ export default function SequenceEditorPage() {
           </button>
         </div>
       </form>
+
+      {/* API usage example (only shown when editing an existing sequence) */}
+      {isEditing && id && (
+        <div className="mt-8 max-w-2xl">
+          <h2 className="mb-2 text-sm font-semibold text-text-primary">
+            Enroll via API
+          </h2>
+          <p className="mb-2 text-xs text-text-secondary">
+            Use this endpoint to programmatically enroll a sender into this
+            sequence:
+          </p>
+          <pre className="overflow-x-auto rounded-lg border border-border-dark bg-main p-4 text-xs text-text-secondary">
+{`curl -X POST ${window.location.origin}/api/sequences/${id}/enroll \\
+  -H "Authorization: Bearer <API_KEY>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+  "senderId": "<SENDER_ID>",
+  "variables": { "name": "Alice" },
+  "skipSteps": [],
+  "delayOverrides": {}
+}'`}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }

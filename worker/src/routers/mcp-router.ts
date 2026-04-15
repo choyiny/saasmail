@@ -7,6 +7,7 @@ import { senders } from "../db/senders.schema";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { cancelSequencesForSender } from "../lib/cancel-sequence";
+import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { injectDb } from "../db/middleware";
 import type { Variables } from "../variables";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -465,31 +466,17 @@ async function markEmail(db: Db, args: Record<string, unknown>) {
   return { success: true };
 }
 
-async function deleteEmail(db: Db, args: Record<string, unknown>) {
+async function deleteEmail(
+  db: Db,
+  env: CloudflareBindings,
+  args: Record<string, unknown>,
+) {
   const id = args.email_id as string;
   if (!id) throw new McpToolError("email_id is required");
 
-  const received = await db
-    .select({ id: emails.id })
-    .from(emails)
-    .where(eq(emails.id, id))
-    .limit(1);
-  if (received.length > 0) {
-    await db.delete(emails).where(eq(emails.id, id));
-    return { success: true };
-  }
-
-  const sent = await db
-    .select({ id: sentEmails.id })
-    .from(sentEmails)
-    .where(eq(sentEmails.id, id))
-    .limit(1);
-  if (sent.length > 0) {
-    await db.delete(sentEmails).where(eq(sentEmails.id, id));
-    return { success: true };
-  }
-
-  throw new McpToolError("Email not found");
+  const result = await deleteEmailWithAttachments(db, env.R2, id);
+  if (!result) throw new McpToolError("Email not found");
+  return result;
 }
 
 async function callTool(
@@ -514,7 +501,7 @@ async function callTool(
     case "cmail_mark_email":
       return markEmail(db, args);
     case "cmail_delete_email":
-      return deleteEmail(db, args);
+      return deleteEmail(db, env, args);
     default:
       throw new McpToolError(`Unknown tool: ${name}`);
   }

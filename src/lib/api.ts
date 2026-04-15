@@ -96,6 +96,12 @@ export async function markEmailRead(
   });
 }
 
+export async function deleteEmail(
+  id: string,
+): Promise<{ success: boolean; attachmentsDeleted: number }> {
+  return apiFetch(`/api/emails/${id}`, { method: "DELETE" });
+}
+
 export async function sendEmail(data: {
   to: string;
   subject: string;

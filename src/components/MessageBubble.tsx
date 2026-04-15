@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Maximize2, Paperclip } from "lucide-react";
+import { Maximize2, Paperclip, Trash2 } from "lucide-react";
 import type { Email } from "@/lib/api";
 
 interface MessageBubbleProps {
@@ -8,6 +8,7 @@ interface MessageBubbleProps {
   onOpenHtml: (email: Email) => void;
   onMarkRead: (email: Email) => void;
   onReply: (emailId: string) => void;
+  onDelete: (emailId: string) => void;
 }
 
 const MAX_LINES = 4;
@@ -20,6 +21,7 @@ export default function MessageBubble({
   onOpenHtml,
   onMarkRead,
   onReply,
+  onDelete,
 }: MessageBubbleProps) {
   const [expanded, setExpanded] = useState(false);
   const isSent = email.type === "sent";
@@ -163,6 +165,17 @@ export default function MessageBubble({
             Reply
           </button>
         )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(email.id);
+          }}
+          className="flex items-center gap-1 text-[11px] text-text-tertiary hover:text-red-400"
+          title="Delete email"
+        >
+          <Trash2 size={12} />
+          Delete
+        </button>
       </div>
     </div>
   );

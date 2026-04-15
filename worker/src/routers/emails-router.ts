@@ -5,6 +5,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { senders } from "../db/senders.schema";
 import { json200Response } from "../lib/helpers";
+import { deleteEmailWithAttachments } from "../lib/delete-email";
 import type { Variables } from "../variables";
 
 export const emailsRouter = new OpenAPIHono<{
@@ -345,4 +346,35 @@ emailsRouter.openapi(bulkPatchRoute, async (c) => {
   }
 
   return c.json({ success: true }, 200);
+});
+
+// --- DELETE email (hard delete with R2 attachment cleanup) ---
+const deleteEmailRoute = createRoute({
+  method: "delete",
+  path: "/{id}",
+  tags: ["Emails"],
+  description:
+    "Hard delete an email and all associated R2 attachments. Works for both received and sent emails.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    ...json200Response(
+      z.object({ success: z.boolean(), attachmentsDeleted: z.number() }),
+      "Email deleted",
+    ),
+  },
+});
+
+emailsRouter.openapi(deleteEmailRoute, async (c) => {
+  const db = c.get("db");
+  const r2 = c.env.R2;
+  const { id } = c.req.valid("param");
+
+  const result = await deleteEmailWithAttachments(db, r2, id);
+  if (!result) {
+    return c.json({ error: "Email not found" }, 404);
+  }
+
+  return c.json(result, 200);
 });
