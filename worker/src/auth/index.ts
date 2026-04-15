@@ -24,6 +24,7 @@ export function createAuth(env?: CloudflareBindings) {
     },
     trustedOrigins: [
       "http://localhost:8080",
+      "https://mail.givefeedback.dev",
     ],
   });
 }

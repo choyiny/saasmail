@@ -23,7 +23,7 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
-    origin: ["http://localhost:8080"],
+    origin: ["http://localhost:8080", "https://mail.givefeedback.dev"],
     credentials: true,
   })
 );
