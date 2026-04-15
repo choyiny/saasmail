@@ -1,0 +1,3 @@
+RESEND_API_KEY=re_xxxx
+RESEND_EMAIL_FROM=noreply@yourdomain.com
+BETTER_AUTH_SECRET=generate-a-random-secret

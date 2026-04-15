@@ -1,0 +1,32 @@
+{
+  // Copy this file to wrangler.jsonc and fill in your values.
+  // wrangler.jsonc is gitignored so each deployer has their own config.
+  "name": "cmail",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-04-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cmail-db",
+      "database_id": "<your-database-id>"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "cmail-attachments"
+    }
+  ],
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "email_routing": {
+    "enabled": true
+  },
+  "observability": {
+    "enabled": true
+  }
+}
