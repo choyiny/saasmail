@@ -1,8 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useParams, useNavigate } from "react-router-dom";
 import TiptapEditor from "@/components/TiptapEditor";
 import {
   fetchTemplate,
@@ -45,12 +42,7 @@ export default function TemplateEditorPage() {
       if (isEdit) {
         await updateTemplate(slug!, { name, subject, bodyHtml });
       } else {
-        await createTemplate({
-          slug: slugValue,
-          name,
-          subject,
-          bodyHtml,
-        });
+        await createTemplate({ slug: slugValue, name, subject, bodyHtml });
       }
       navigate("/templates");
     } catch {
@@ -62,83 +54,89 @@ export default function TemplateEditorPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-3xl p-6">
-        <p className="text-neutral-500">Loading...</p>
+      <div className="flex-1 p-6">
+        <p className="text-xs text-text-tertiary">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <div className="mb-6">
-        <Link
-          to="/templates"
-          className="text-sm text-neutral-500 hover:text-neutral-700"
-        >
-          &larr; Templates
-        </Link>
-        <h1 className="mt-2 text-lg font-semibold">
-          {isEdit ? "Edit Template" : "New Template"}
-        </h1>
-      </div>
-
-      <form onSubmit={handleSave} className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="name">Name</Label>
-          <Input
-            id="name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Welcome Email"
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="slug">Slug</Label>
-          <Input
-            id="slug"
-            value={slugValue}
-            onChange={(e) => setSlugValue(e.target.value)}
-            placeholder="welcome-email"
-            pattern="[a-z0-9-]+"
-            title="Lowercase letters, numbers, and hyphens only"
-            disabled={isEdit}
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="subject">Subject</Label>
-          <Input
-            id="subject"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            placeholder="Welcome, {{name}}!"
-            required
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Body</Label>
-          <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
-        </div>
-
-        {error && <p className="text-sm text-red-500">{error}</p>}
-
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="ghost"
+    <div className="flex-1 overflow-auto p-6">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6">
+          <button
             onClick={() => navigate("/templates")}
+            className="text-xs text-text-tertiary hover:text-text-secondary"
           >
-            Cancel
-          </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </Button>
+            &larr; Templates
+          </button>
+          <h1 className="mt-2 text-sm font-semibold text-text-primary">
+            {isEdit ? "Edit Template" : "New Template"}
+          </h1>
         </div>
-      </form>
+
+        <form onSubmit={handleSave} className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Welcome Email"
+              required
+              className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Slug</label>
+            <input
+              value={slugValue}
+              onChange={(e) => setSlugValue(e.target.value)}
+              placeholder="welcome-email"
+              pattern="[a-z0-9-]+"
+              title="Lowercase letters, numbers, and hyphens only"
+              disabled={isEdit}
+              required
+              className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Subject</label>
+            <input
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              placeholder="Welcome, {{name}}!"
+              required
+              className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Body</label>
+            <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
+          </div>
+
+          {error && <p className="text-xs text-destructive">{error}</p>}
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => navigate("/templates")}
+              className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

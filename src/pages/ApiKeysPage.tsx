@@ -1,13 +1,7 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -52,160 +46,146 @@ export default function ApiKeysPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-2xl p-6">
-        <p className="text-neutral-500">Loading...</p>
+      <div className="flex-1 p-6">
+        <p className="text-xs text-text-tertiary">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-2xl p-6">
-      <div className="mb-6 flex items-center gap-4">
-        <Link
-          to="/"
-          className="text-sm text-neutral-500 hover:text-neutral-700"
-        >
-          &larr; Inbox
-        </Link>
-        <h1 className="text-lg font-semibold">API Access</h1>
-      </div>
+    <div className="flex-1 overflow-auto p-6">
+      <div className="mx-auto max-w-2xl">
+        <h1 className="mb-6 text-sm font-semibold text-text-primary">API Access</h1>
 
-      {/* Newly generated key — show once */}
-      {newKey && (
-        <Card className="mb-6 border-amber-300 bg-amber-50">
-          <CardContent className="py-4">
-            <p className="mb-2 text-sm font-medium text-amber-800">
+        {newKey && (
+          <div className="mb-6 rounded-lg border border-warning-border bg-warning-bg px-4 py-3">
+            <p className="mb-2 text-xs font-medium text-warning-text">
               Your API key (copy it now — it won't be shown again):
             </p>
             <div className="flex items-center gap-2">
-              <Input
+              <input
                 readOnly
                 value={newKey}
-                className="font-mono text-sm"
+                className="h-8 flex-1 rounded-md border border-border-dark bg-input-bg px-3 font-mono text-xs text-text-primary focus:outline-none"
               />
-              <Button size="sm" variant="outline" onClick={handleCopy}>
+              <button
+                onClick={handleCopy}
+                className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+              >
                 Copy
-              </Button>
+              </button>
             </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="mt-3"
+            <button
               onClick={() => setNewKey(null)}
+              className="mt-2 text-xs text-text-tertiary hover:text-text-secondary"
             >
               Done
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+            </button>
+          </div>
+        )}
 
-      {/* Current key info */}
-      {keyInfo && !newKey && (
-        <Card className="mb-6">
-          <CardContent className="py-4">
+        {keyInfo && !newKey && (
+          <div className="mb-6 rounded-lg border border-border-dark bg-card px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-mono text-sm">{keyInfo.prefix}</p>
-                <p className="text-xs text-neutral-500">
+                <p className="font-mono text-xs text-text-primary">{keyInfo.prefix}</p>
+                <p className="text-[11px] text-text-tertiary">
                   Created{" "}
                   {new Date(keyInfo.createdAt * 1000).toLocaleDateString()}
                 </p>
               </div>
               <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
+                <button
                   onClick={() => setConfirmAction("regenerate")}
+                  className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
                 >
                   Regenerate
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-red-500 hover:text-red-700"
+                </button>
+                <button
                   onClick={() => setConfirmAction("revoke")}
+                  className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-destructive hover:bg-hover"
                 >
                   Revoke
-                </Button>
+                </button>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
 
-      {/* No key yet */}
-      {!keyInfo && !newKey && (
-        <Card className="mb-6">
-          <CardContent className="py-4 text-center">
-            <p className="mb-3 text-sm text-neutral-500">
+        {!keyInfo && !newKey && (
+          <div className="mb-6 rounded-lg border border-border-dark bg-card px-4 py-4 text-center">
+            <p className="mb-3 text-xs text-text-tertiary">
               No API key generated yet.
             </p>
-            <Button size="sm" onClick={handleGenerate}>
+            <button
+              onClick={handleGenerate}
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+            >
               Generate API Key
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+            </button>
+          </div>
+        )}
 
-      {/* Usage instructions */}
-      <div className="rounded-lg border p-4">
-        <h2 className="mb-2 text-sm font-semibold">Usage</h2>
-        <p className="mb-2 text-sm text-neutral-600">
-          Include your API key in the <code>Authorization</code> header:
-        </p>
-        <pre className="rounded bg-neutral-100 p-3 text-xs">
+        <div className="rounded-lg border border-border-dark bg-card p-4">
+          <h2 className="mb-2 text-xs font-semibold text-text-primary">Usage</h2>
+          <p className="mb-2 text-xs text-text-secondary">
+            Include your API key in the <code className="text-accent">Authorization</code> header:
+          </p>
+          <pre className="rounded bg-sidebar p-3 text-[11px] text-text-secondary">
 {`curl -H "Authorization: Bearer sk_..." \\
   https://your-domain/api/senders`}
-        </pre>
-        <p className="mt-2 text-sm text-neutral-600">
-          The key grants full access to the API as your user account. See{" "}
-          <a href="/swagger-ui" className="text-blue-600 hover:underline">
-            API docs
-          </a>{" "}
-          for available endpoints.
-        </p>
-      </div>
+          </pre>
+          <p className="mt-2 text-xs text-text-secondary">
+            The key grants full access to the API as your user account. See{" "}
+            <a href="/swagger-ui" className="text-accent hover:text-accent-hover">
+              API docs
+            </a>{" "}
+            for available endpoints.
+          </p>
+        </div>
 
-      {/* Confirmation dialog */}
-      <Dialog
-        open={confirmAction !== null}
-        onOpenChange={() => setConfirmAction(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {confirmAction === "regenerate"
-                ? "Regenerate API Key?"
-                : "Revoke API Key?"}
-            </DialogTitle>
-            <DialogDescription>
+        <Dialog
+          open={confirmAction !== null}
+          onOpenChange={() => setConfirmAction(null)}
+        >
+          <DialogContent className="border-border-dark bg-card text-text-primary">
+            <DialogHeader>
+              <DialogTitle className="text-text-primary">
+                {confirmAction === "regenerate"
+                  ? "Regenerate API Key?"
+                  : "Revoke API Key?"}
+              </DialogTitle>
+            </DialogHeader>
+            <p className="text-xs text-text-secondary">
               {confirmAction === "regenerate"
                 ? "This will invalidate your current key and generate a new one. Any integrations using the old key will stop working."
                 : "This will permanently delete your API key. Any integrations using it will stop working."}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setConfirmAction(null)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant={
-                confirmAction === "revoke" ? "destructive" : "default"
-              }
-              onClick={
-                confirmAction === "regenerate"
-                  ? handleGenerate
-                  : handleRevoke
-              }
-            >
-              {confirmAction === "regenerate" ? "Regenerate" : "Revoke"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmAction(null)}
+                className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={
+                  confirmAction === "regenerate"
+                    ? handleGenerate
+                    : handleRevoke
+                }
+                className={`rounded-md px-3 py-1.5 text-xs font-medium text-white ${
+                  confirmAction === "revoke"
+                    ? "bg-destructive hover:bg-destructive/90"
+                    : "bg-accent hover:bg-accent-hover"
+                }`}
+              >
+                {confirmAction === "regenerate" ? "Regenerate" : "Revoke"}
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   );
 }

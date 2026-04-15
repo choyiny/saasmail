@@ -1,7 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { useNavigate } from "react-router-dom";
 import { fetchTemplates, deleteTemplate } from "@/lib/api";
 import type { EmailTemplate } from "@/lib/api";
 
@@ -23,56 +21,54 @@ export default function TemplatesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Link to="/" className="text-sm text-neutral-500 hover:text-neutral-700">
-            &larr; Inbox
-          </Link>
-          <h1 className="text-lg font-semibold">Email Templates</h1>
+    <div className="flex-1 overflow-auto p-6">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-6 flex items-center justify-between">
+          <h1 className="text-sm font-semibold text-text-primary">Email Templates</h1>
+          <button
+            onClick={() => navigate("/templates/new")}
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+          >
+            New Template
+          </button>
         </div>
-        <Button size="sm" onClick={() => navigate("/templates/new")}>
-          New Template
-        </Button>
-      </div>
 
-      {loading ? (
-        <p className="text-neutral-500">Loading...</p>
-      ) : templates.length === 0 ? (
-        <p className="text-neutral-500">No templates yet.</p>
-      ) : (
-        <div className="space-y-2">
-          {templates.map((t) => (
-            <Card key={t.id}>
-              <CardContent className="flex items-center justify-between py-3">
+        {loading ? (
+          <p className="text-xs text-text-tertiary">Loading...</p>
+        ) : templates.length === 0 ? (
+          <p className="text-xs text-text-tertiary">No templates yet.</p>
+        ) : (
+          <div className="space-y-1">
+            {templates.map((t) => (
+              <div
+                key={t.id}
+                className="flex items-center justify-between rounded-lg border border-border-dark bg-card px-4 py-3"
+              >
                 <div>
-                  <p className="font-medium">{t.name}</p>
-                  <p className="text-sm text-neutral-500">
+                  <p className="text-xs font-medium text-text-primary">{t.name}</p>
+                  <p className="text-[11px] text-text-tertiary">
                     {t.slug} &middot; {t.subject}
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                <div className="flex gap-1">
+                  <button
                     onClick={() => navigate(`/templates/${t.slug}/edit`)}
+                    className="rounded-md px-2.5 py-1 text-[11px] text-text-secondary hover:bg-hover hover:text-text-primary"
                   >
                     Edit
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="text-red-500 hover:text-red-700"
+                  </button>
+                  <button
                     onClick={() => handleDelete(t.slug)}
+                    className="rounded-md px-2.5 py-1 text-[11px] text-destructive hover:bg-hover"
                   >
                     Delete
-                  </Button>
+                  </button>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

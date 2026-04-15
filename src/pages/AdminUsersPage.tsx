@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { useSession } from "@/lib/auth-client";
 import {
   fetchUsers,
@@ -9,16 +9,6 @@ import {
   deleteUser,
 } from "@/lib/api";
 import type { User, Invite } from "@/lib/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -60,9 +50,7 @@ export default function AdminUsersPage() {
   }
 
   useEffect(() => {
-    if (session?.user?.role === "admin") {
-      loadData();
-    }
+    if (session?.user?.role === "admin") loadData();
   }, [session]);
 
   if (session?.user?.role !== "admin") {
@@ -77,8 +65,7 @@ export default function AdminUsersPage() {
         email: inviteEmail || undefined,
         expiresInDays: parseInt(inviteExpiry) || 7,
       });
-      const link = `${window.location.origin}/invite/${invite.token}`;
-      setGeneratedLink(link);
+      setGeneratedLink(`${window.location.origin}/invite/${invite.token}`);
       setCopied(false);
       await loadData();
     } catch {
@@ -115,234 +102,224 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="flex items-center justify-between border-b px-4 py-2">
-        <h1 className="text-lg font-semibold">
-          <Link to="/">cmail</Link>
-        </h1>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/"
-            className="text-sm text-neutral-500 hover:text-neutral-700"
-          >
-            Inbox
-          </Link>
-          <Link
-            to="/templates"
-            className="text-sm text-neutral-500 hover:text-neutral-700"
-          >
-            Templates
-          </Link>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-auto p-6">
-        <div className="mx-auto max-w-4xl space-y-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Users</CardTitle>
-              <Dialog
-                open={inviteDialogOpen}
-                onOpenChange={(open) => {
-                  setInviteDialogOpen(open);
-                  if (!open) {
-                    setGeneratedLink("");
-                    setInviteEmail("");
-                    setInviteRole("member");
-                    setInviteExpiry("7");
-                  }
-                }}
-              >
-                <DialogTrigger asChild>
-                  <Button size="sm">Invite User</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Create Invitation</DialogTitle>
-                  </DialogHeader>
-                  {!generatedLink ? (
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <Label>Role</Label>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            variant={
-                              inviteRole === "member" ? "default" : "outline"
-                            }
-                            onClick={() => setInviteRole("member")}
-                          >
-                            Member
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant={
-                              inviteRole === "admin" ? "default" : "outline"
-                            }
-                            onClick={() => setInviteRole("admin")}
-                          >
-                            Admin
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="invite-email">
-                          Email (optional — restricts who can accept)
-                        </Label>
-                        <Input
-                          id="invite-email"
-                          type="email"
-                          value={inviteEmail}
-                          onChange={(e) => setInviteEmail(e.target.value)}
-                          placeholder="user@example.com"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="invite-expiry">Expires in (days)</Label>
-                        <Input
-                          id="invite-expiry"
-                          type="number"
-                          min="1"
-                          max="30"
-                          value={inviteExpiry}
-                          onChange={(e) => setInviteExpiry(e.target.value)}
-                        />
-                      </div>
-                      <Button
-                        className="w-full"
-                        onClick={handleCreateInvite}
-                        disabled={inviteLoading}
-                      >
-                        {inviteLoading ? "Creating..." : "Create Invite"}
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <p className="text-sm text-neutral-600">
-                        Share this link with the user:
-                      </p>
+    <div className="flex-1 overflow-auto p-6">
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div className="rounded-lg border border-border-dark bg-card">
+          <div className="flex items-center justify-between border-b border-border-dark px-4 py-3">
+            <h2 className="text-xs font-semibold text-text-primary">Users</h2>
+            <Dialog
+              open={inviteDialogOpen}
+              onOpenChange={(open) => {
+                setInviteDialogOpen(open);
+                if (!open) {
+                  setGeneratedLink("");
+                  setInviteEmail("");
+                  setInviteRole("member");
+                  setInviteExpiry("7");
+                }
+              }}
+            >
+              <DialogTrigger asChild>
+                <button className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover">
+                  Invite User
+                </button>
+              </DialogTrigger>
+              <DialogContent className="border-border-dark bg-card text-text-primary">
+                <DialogHeader>
+                  <DialogTitle className="text-text-primary">Create Invitation</DialogTitle>
+                </DialogHeader>
+                {!generatedLink ? (
+                  <div className="space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-text-secondary">Role</label>
                       <div className="flex gap-2">
-                        <Input value={generatedLink} readOnly />
-                        <Button size="sm" variant="outline" onClick={handleCopy}>
-                          {copied ? "Copied!" : "Copy"}
-                        </Button>
+                        <button
+                          onClick={() => setInviteRole("member")}
+                          className={`rounded-md px-3 py-1.5 text-xs ${
+                            inviteRole === "member"
+                              ? "bg-accent text-white"
+                              : "border border-border-dark text-text-secondary hover:bg-hover"
+                          }`}
+                        >
+                          Member
+                        </button>
+                        <button
+                          onClick={() => setInviteRole("admin")}
+                          className={`rounded-md px-3 py-1.5 text-xs ${
+                            inviteRole === "admin"
+                              ? "bg-accent text-white"
+                              : "border border-border-dark text-text-secondary hover:bg-hover"
+                          }`}
+                        >
+                          Admin
+                        </button>
                       </div>
                     </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <p className="text-sm text-neutral-500">Loading...</p>
-              ) : (
-                <div className="divide-y">
-                  {users.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center justify-between py-3"
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-text-secondary">
+                        Email (optional)
+                      </label>
+                      <input
+                        type="email"
+                        value={inviteEmail}
+                        onChange={(e) => setInviteEmail(e.target.value)}
+                        placeholder="user@example.com"
+                        className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-text-secondary">
+                        Expires in (days)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="30"
+                        value={inviteExpiry}
+                        onChange={(e) => setInviteExpiry(e.target.value)}
+                        className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                      />
+                    </div>
+                    <button
+                      onClick={handleCreateInvite}
+                      disabled={inviteLoading}
+                      className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
                     >
-                      <div>
-                        <p className="font-medium">{user.name}</p>
-                        <p className="text-sm text-neutral-500">{user.email}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          variant={
-                            user.hasPasskey ? "default" : "secondary"
-                          }
-                        >
-                          {user.hasPasskey ? "Passkey" : "No passkey"}
-                        </Badge>
-                        <Badge
-                          variant={
-                            user.role === "admin" ? "default" : "outline"
-                          }
-                        >
-                          {user.role || "member"}
-                        </Badge>
-                        <span className="text-xs text-neutral-400">
-                          {formatDate(user.createdAt)}
-                        </span>
-                        {user.id !== session?.user?.id && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                ...
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem
-                                onClick={() =>
-                                  handleRoleChange(
-                                    user.id,
-                                    user.role === "admin" ? "member" : "admin",
-                                  )
-                                }
-                              >
-                                Make{" "}
-                                {user.role === "admin" ? "member" : "admin"}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleDelete(user.id)}
-                                className="text-red-600"
-                              >
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Invitations</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {invites.length === 0 ? (
-                <p className="text-sm text-neutral-500">No invitations yet.</p>
-              ) : (
-                <div className="divide-y">
-                  {invites.map((invite) => {
-                    const st = inviteStatus(invite);
-                    return (
-                      <div
-                        key={invite.id}
-                        className="flex items-center justify-between py-3"
+                      {inviteLoading ? "Creating..." : "Create Invite"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-text-secondary">
+                      Share this link with the user:
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        value={generatedLink}
+                        readOnly
+                        className="h-8 flex-1 rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary focus:outline-none"
+                      />
+                      <button
+                        onClick={handleCopy}
+                        className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
                       >
-                        <div>
-                          <p className="text-sm font-medium">
-                            {invite.email || "Any email"}
-                          </p>
-                          <p className="text-xs text-neutral-500">
-                            Role: {invite.role} | Expires:{" "}
-                            {formatDate(invite.expiresAt)}
-                          </p>
-                        </div>
-                        <Badge
-                          variant={
-                            st === "used"
-                              ? "default"
-                              : st === "expired"
-                                ? "secondary"
-                                : "outline"
-                          }
-                        >
-                          {st}
-                        </Badge>
-                      </div>
-                    );
-                  })}
+                        {copied ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </DialogContent>
+            </Dialog>
+          </div>
+          <div>
+            {loading ? (
+              <p className="p-4 text-xs text-text-tertiary">Loading...</p>
+            ) : (
+              users.map((user) => (
+                <div
+                  key={user.id}
+                  className="flex items-center justify-between border-b border-border-dark px-4 py-2.5 last:border-b-0"
+                >
+                  <div>
+                    <p className="text-xs font-medium text-text-primary">{user.name}</p>
+                    <p className="text-[11px] text-text-tertiary">{user.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        user.hasPasskey
+                          ? "bg-accent/20 text-accent"
+                          : "bg-hover text-text-tertiary"
+                      }`}
+                    >
+                      {user.hasPasskey ? "Passkey" : "No passkey"}
+                    </span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        user.role === "admin"
+                          ? "bg-accent/20 text-accent"
+                          : "border border-border-dark text-text-tertiary"
+                      }`}
+                    >
+                      {user.role || "member"}
+                    </span>
+                    <span className="text-[10px] text-text-tertiary">
+                      {formatDate(user.createdAt)}
+                    </span>
+                    {user.id !== session?.user?.id && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="rounded px-1.5 py-0.5 text-xs text-text-tertiary hover:bg-hover hover:text-text-secondary">
+                            ...
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="bg-card border-border-dark text-text-primary">
+                          <DropdownMenuItem
+                            onClick={() =>
+                              handleRoleChange(
+                                user.id,
+                                user.role === "admin" ? "member" : "admin"
+                              )
+                            }
+                            className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
+                          >
+                            Make {user.role === "admin" ? "member" : "admin"}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleDelete(user.id)}
+                            className="text-xs text-destructive focus:bg-hover"
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border-dark bg-card">
+          <div className="border-b border-border-dark px-4 py-3">
+            <h2 className="text-xs font-semibold text-text-primary">Invitations</h2>
+          </div>
+          <div>
+            {invites.length === 0 ? (
+              <p className="p-4 text-xs text-text-tertiary">No invitations yet.</p>
+            ) : (
+              invites.map((invite) => {
+                const st = inviteStatus(invite);
+                return (
+                  <div
+                    key={invite.id}
+                    className="flex items-center justify-between border-b border-border-dark px-4 py-2.5 last:border-b-0"
+                  >
+                    <div>
+                      <p className="text-xs font-medium text-text-primary">
+                        {invite.email || "Any email"}
+                      </p>
+                      <p className="text-[10px] text-text-tertiary">
+                        Role: {invite.role} | Expires: {formatDate(invite.expiresAt)}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        st === "used"
+                          ? "bg-accent/20 text-accent"
+                          : st === "expired"
+                            ? "bg-hover text-text-tertiary"
+                            : "border border-border-dark text-text-secondary"
+                      }`}
+                    >
+                      {st}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
     </div>
