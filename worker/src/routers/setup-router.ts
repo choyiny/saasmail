@@ -1,6 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { sql } from "drizzle-orm";
-import { eq } from "drizzle-orm";
 import { users } from "../db/auth.schema";
 import { createAuth } from "../auth";
 import { json200Response } from "../lib/helpers";
@@ -94,19 +93,13 @@ setupRouter.openapi(createRouteDef, async (c) => {
   const auth = createAuth(c.env);
 
   try {
-    await auth.api.signUpEmail({
-      body: { name, email, password },
+    await auth.api.createUser({
+      body: { name, email, password, role: "admin" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Signup failed";
     return c.json({ error: message }, 400);
   }
-
-  // Promote the freshly created user to admin so they can manage future users.
-  await db
-    .update(users)
-    .set({ role: "admin" })
-    .where(eq(users.email, email));
 
   return c.json({ success: true }, 200);
 });
