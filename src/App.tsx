@@ -4,6 +4,7 @@ import { useSession } from "@/lib/auth-client";
 import LoginPage from "@/pages/LoginPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import InboxPage from "@/pages/InboxPage";
+import ApiKeysPage from "@/pages/ApiKeysPage";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,14 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
+          <Route
+            path="/settings/api-keys"
+            element={
+              <AuthGuard>
+                <ApiKeysPage />
+              </AuthGuard>
+            }
+          />
           <Route
             path="/*"
             element={

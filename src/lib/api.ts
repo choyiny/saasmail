@@ -119,3 +119,38 @@ export async function fetchStats(recipient?: string): Promise<Stats> {
   const qs = recipient ? `?recipient=${recipient}` : "";
   return apiFetch(`/api/stats${qs}`);
 }
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+  expiresAt: number | null;
+  revokedAt: number | null;
+}
+
+export interface CreatedApiKey extends ApiKey {
+  key: string;
+}
+
+export async function fetchApiKeys(): Promise<ApiKey[]> {
+  return apiFetch("/api/api-keys/");
+}
+
+export async function createApiKey(data: {
+  name: string;
+  expiresInDays?: number;
+}): Promise<CreatedApiKey> {
+  return apiFetch("/api/api-keys/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function revokeApiKey(id: string): Promise<void> {
+  await apiFetch(`/api/api-keys/${id}`, {
+    method: "DELETE",
+  });
+}

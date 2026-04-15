@@ -1,10 +1,12 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { signOut, useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import SenderList from "./SenderList";
@@ -43,6 +45,10 @@ export default function InboxPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem asChild>
+                <Link to="/settings/api-keys">API keys</Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => signOut()}>
                 Sign out
               </DropdownMenuItem>
