@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,35 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/setup/status");
+        const data = (await res.json()) as { setupRequired: boolean };
+        if (!cancelled) setSetupRequired(data.setupRequired);
+      } catch {
+        if (!cancelled) setSetupRequired(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (setupRequired === null) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-neutral-500">Loading...</p>
+      </div>
+    );
+  }
+
+  if (setupRequired) {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
