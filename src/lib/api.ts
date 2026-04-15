@@ -2,6 +2,7 @@ export interface Sender {
   id: string;
   email: string;
   name: string | null;
+  recipient: string;
   lastEmailAt: number;
   unreadCount: number;
   totalCount: number;

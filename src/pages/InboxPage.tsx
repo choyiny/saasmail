@@ -19,6 +19,7 @@ export default function InboxPage() {
       >
         <SenderList
           selectedSenderId={selectedSender?.id ?? null}
+          selectedRecipient={selectedSender?.recipient ?? null}
           onSelectSender={setSelectedSender}
         />
       </div>

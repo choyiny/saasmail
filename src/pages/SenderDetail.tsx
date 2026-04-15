@@ -1,12 +1,6 @@
 import { useState, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
   fetchSenderEmails,
   markEmailRead,
   deleteEmail,
@@ -34,51 +28,27 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
   const [enrollmentInfo, setEnrollmentInfo] =
     useState<SenderEnrollmentInfo | null>(null);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
-  const [recipientFilter, setRecipientFilter] = useState("");
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [threadOpen, setThreadOpen] = useState(false);
 
-  // Collect unique recipient addresses from emails
-  const recipients = Array.from(
-    new Set(
-      emails
-        .map((e) => (e.type === "received" ? e.recipient : e.toAddress))
-        .filter(Boolean) as string[],
-    ),
-  );
-
   function refetchEmails() {
     fetchSenderEmails(sender.id, {
-      recipient: recipientFilter || undefined,
+      recipient: sender.recipient,
     }).then(setEmails);
   }
 
   useEffect(() => {
     setLoading(true);
-    setRecipientFilter("");
     setReplyToEmailId(null);
     setThreadOpen(false);
-    fetchSenderEmails(sender.id)
-      .then((data) => {
-        setEmails(data);
-      })
+    fetchSenderEmails(sender.id, { recipient: sender.recipient })
+      .then(setEmails)
       .finally(() => setLoading(false));
-  }, [sender.id]);
+  }, [sender.id, sender.recipient]);
 
   useEffect(() => {
     fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
   }, [sender.id]);
-
-  // Refetch when recipient filter changes
-  useEffect(() => {
-    if (!sender.id) return;
-    setLoading(true);
-    fetchSenderEmails(sender.id, {
-      recipient: recipientFilter || undefined,
-    })
-      .then(setEmails)
-      .finally(() => setLoading(false));
-  }, [recipientFilter, sender.id]);
 
   function refreshEnrollment() {
     fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
@@ -114,45 +84,16 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="border-b border-border-dark px-4 sm:px-6 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-text-primary">
-              {sender.name || sender.email}
-            </h2>
-            {sender.name && (
-              <p className="text-xs text-text-secondary">{sender.email}</p>
-            )}
-            <p className="text-[11px] text-text-tertiary">
-              {sender.totalCount} email{sender.totalCount !== 1 ? "s" : ""}
-            </p>
-          </div>
-          {/* Recipient filter */}
-          {recipients.length > 1 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover">
-                  {recipientFilter || "All addresses"}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="bg-card border-border-dark text-text-primary">
-                <DropdownMenuItem
-                  onClick={() => setRecipientFilter("")}
-                  className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
-                >
-                  All addresses
-                </DropdownMenuItem>
-                {recipients.map((r) => (
-                  <DropdownMenuItem
-                    key={r}
-                    onClick={() => setRecipientFilter(r)}
-                    className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
-                  >
-                    {r}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+        <div>
+          <h2 className="text-sm font-semibold text-text-primary">
+            {sender.name || sender.email}
+          </h2>
+          {sender.name && (
+            <p className="text-xs text-text-secondary">{sender.email}</p>
           )}
+          <p className="text-[11px] text-text-tertiary">
+            &rarr; {sender.recipient} &middot; {sender.totalCount} email{sender.totalCount !== 1 ? "s" : ""}
+          </p>
         </div>
       </div>
 
@@ -214,7 +155,7 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
               emailId={replyToEmailId}
               senderName={sender.name}
               senderEmail={sender.email}
-              recipients={recipients}
+              recipients={[sender.recipient]}
               onClose={() => setReplyToEmailId(null)}
               onSent={refetchEmails}
             />
@@ -247,7 +188,7 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
         senderId={sender.id}
         senderName={sender.name}
         senderEmail={sender.email}
-        recipients={recipients}
+        recipients={[sender.recipient]}
         open={enrollModalOpen}
         onClose={() => setEnrollModalOpen(false)}
         onEnrolled={refreshEnrollment}

@@ -14,6 +14,7 @@ const SenderSchema = z.object({
   id: z.string(),
   email: z.string(),
   name: z.string().nullable(),
+  recipient: z.string(),
   lastEmailAt: z.number(),
   unreadCount: z.number(),
   totalCount: z.number(),
@@ -57,67 +58,69 @@ sendersRouter.openapi(listSendersRoute, async (c) => {
   const { q, recipient, page, limit } = c.req.valid("query");
   const offset = (page - 1) * limit;
 
+  // Build WHERE conditions for the emails table
   const conditions: any[] = [];
 
   if (q) {
     const pattern = `%${q}%`;
     conditions.push(
-      or(like(senders.email, pattern), like(senders.name, pattern)),
+      sql`(${senders.email} LIKE ${pattern} OR ${senders.name} LIKE ${pattern})`,
     );
   }
 
   if (recipient) {
-    conditions.push(
-      sql`${senders.id} IN (
-        SELECT DISTINCT ${emails.senderId} FROM ${emails}
-        WHERE ${emails.recipient} = ${recipient}
-      )`,
-    );
+    conditions.push(sql`${emails.recipient} = ${recipient}`);
   }
 
-  const where =
+  const whereClause =
     conditions.length > 0
-      ? sql`${sql.join(conditions, sql` AND `)}`
-      : undefined;
+      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      : sql``;
 
-  // Get total count
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(senders)
-    .where(where);
+  // Group by (sender, recipient) to get per-thread stats
+  const rows = await db.all<{
+    id: string;
+    email: string;
+    name: string | null;
+    recipient: string;
+    lastEmailAt: number;
+    unreadCount: number;
+    totalCount: number;
+    latestSubject: string | null;
+  }>(sql`
+    SELECT
+      s.id,
+      s.email,
+      s.name,
+      e.recipient,
+      MAX(e.received_at) AS lastEmailAt,
+      SUM(CASE WHEN e.is_read = 0 THEN 1 ELSE 0 END) AS unreadCount,
+      COUNT(*) AS totalCount,
+      (
+        SELECT e2.subject FROM emails e2
+        WHERE e2.sender_id = s.id AND e2.recipient = e.recipient
+        ORDER BY e2.received_at DESC LIMIT 1
+      ) AS latestSubject
+    FROM ${emails} e
+    JOIN ${senders} s ON s.id = e.sender_id
+    ${whereClause}
+    GROUP BY s.id, e.recipient
+    ORDER BY lastEmailAt DESC
+    LIMIT ${limit} OFFSET ${offset}
+  `);
+
+  // Get total count of (sender, recipient) pairs
+  const countResult = await db.all<{ count: number }>(sql`
+    SELECT COUNT(*) AS count FROM (
+      SELECT 1 FROM ${emails} e
+      JOIN ${senders} s ON s.id = e.sender_id
+      ${whereClause}
+      GROUP BY s.id, e.recipient
+    )
+  `);
   const total = countResult[0]?.count ?? 0;
 
-  const rows = await db
-    .select({
-      id: senders.id,
-      email: senders.email,
-      name: senders.name,
-      lastEmailAt: senders.lastEmailAt,
-      unreadCount: senders.unreadCount,
-      totalCount: senders.totalCount,
-    })
-    .from(senders)
-    .where(where)
-    .orderBy(desc(senders.lastEmailAt))
-    .limit(limit)
-    .offset(offset);
-
-  const data = await Promise.all(
-    rows.map(async (sender) => {
-      const latest = await db
-        .select({ subject: emails.subject })
-        .from(emails)
-        .where(eq(emails.senderId, sender.id))
-        .orderBy(desc(emails.receivedAt))
-        .limit(1);
-      return {
-        ...sender,
-        latestSubject: latest[0]?.subject ?? null,
-      };
-    }),
-  );
-
-  return c.json({ data, total, page, limit }, 200);
+  return c.json({ data: rows, total, page, limit }, 200);
 });
 
 const getSenderRoute = createRoute({

@@ -13,11 +13,13 @@ const PAGE_SIZE = 50;
 
 interface SenderListProps {
   selectedSenderId: string | null;
+  selectedRecipient: string | null;
   onSelectSender: (sender: Sender) => void;
 }
 
 export default function SenderList({
   selectedSenderId,
+  selectedRecipient,
   onSelectSender,
 }: SenderListProps) {
   const [senders, setSenders] = useState<Sender[]>([]);
@@ -118,10 +120,10 @@ export default function SenderList({
         ) : (
           senders.map((sender) => (
             <button
-              key={sender.id}
+              key={`${sender.id}:${sender.recipient}`}
               onClick={() => onSelectSender(sender)}
               className={`w-full border-b border-border-dark px-4 py-2.5 text-left transition-colors hover:bg-hover ${
-                selectedSenderId === sender.id ? "bg-hover" : ""
+                selectedSenderId === sender.id && selectedRecipient === sender.recipient ? "bg-hover" : ""
               }`}
             >
               <div className="flex items-center justify-between">
@@ -138,11 +140,9 @@ export default function SenderList({
                   {formatTime(sender.lastEmailAt)}
                 </span>
               </div>
-              {sender.name && (
-                <div className="truncate text-[11px] text-text-tertiary">
-                  {sender.email}
-                </div>
-              )}
+              <div className="truncate text-[11px] text-text-tertiary">
+                {sender.name ? sender.email : ""} &rarr; {sender.recipient}
+              </div>
               <div className="mt-0.5 flex items-center justify-between">
                 <span className="truncate text-[11px] text-text-tertiary">
                   {sender.latestSubject || "(no subject)"}
