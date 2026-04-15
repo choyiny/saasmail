@@ -1,9 +1,6 @@
 import { useState, useEffect } from "react";
 import DOMPurify from "dompurify";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import {
   fetchSenderEmails,
   markEmailRead,
@@ -61,7 +58,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-neutral-500">
+      <div className="flex h-full items-center justify-center text-text-tertiary">
         Loading...
       </div>
     );
@@ -69,14 +66,14 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-6 py-4">
-        <h2 className="text-lg font-semibold">
+      <div className="border-b border-border-dark px-6 py-3">
+        <h2 className="text-sm font-semibold text-text-primary">
           {sender.name || sender.email}
         </h2>
         {sender.name && (
-          <p className="text-sm text-neutral-500">{sender.email}</p>
+          <p className="text-xs text-text-secondary">{sender.email}</p>
         )}
-        <p className="text-xs text-neutral-400">
+        <p className="text-[11px] text-text-tertiary">
           {sender.totalCount} email{sender.totalCount !== 1 ? "s" : ""}
         </p>
       </div>
@@ -86,84 +83,83 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
           <div key={email.id}>
             <button
               onClick={() => handleExpand(email)}
-              className={`w-full px-6 py-3 text-left transition-colors hover:bg-neutral-50 ${
-                expandedId === email.id ? "bg-neutral-50" : ""
+              className={`w-full px-6 py-2.5 text-left transition-colors hover:bg-hover ${
+                expandedId === email.id ? "bg-hover" : ""
               }`}
             >
               <div className="flex items-center gap-2">
                 {email.type === "sent" && (
-                  <Badge variant="outline" className="text-xs">
+                  <span className="rounded border border-border-dark px-1.5 py-0.5 text-[10px] text-text-tertiary">
                     Sent
-                  </Badge>
+                  </span>
                 )}
                 <span
-                  className={`flex-1 truncate text-sm ${
+                  className={`flex-1 truncate text-xs ${
                     email.type === "received" && email.isRead === 0
-                      ? "font-semibold"
-                      : ""
+                      ? "font-semibold text-text-primary"
+                      : "text-text-secondary"
                   }`}
                 >
                   {email.subject || "(no subject)"}
                 </span>
                 {email.type === "received" && (email.attachmentCount ?? 0) > 0 && (
-                  <span className="text-xs text-neutral-400">
+                  <span className="text-[11px] text-text-tertiary">
                     {email.attachmentCount} file{email.attachmentCount !== 1 ? "s" : ""}
                   </span>
                 )}
-                <span className="shrink-0 text-xs text-neutral-400">
+                <span className="shrink-0 text-[11px] text-text-tertiary">
                   {formatDate(email.timestamp)}
                 </span>
               </div>
             </button>
 
             {expandedId === email.id && (
-              <div className="border-t bg-white px-6 py-4">
+              <div className="border-t border-border-dark bg-card px-6 py-4">
                 <div className="mb-3 flex items-center gap-2">
                   {email.type === "received" && (
                     <>
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <button
                         onClick={() => onReply(email.id)}
+                        className="rounded-md border border-border-dark px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-hover hover:text-text-primary"
                       >
                         Reply
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
+                      </button>
+                      <button
                         onClick={(e) => handleToggleRead(e, email)}
+                        className="rounded-md px-3 py-1 text-xs text-text-tertiary transition-colors hover:bg-hover hover:text-text-secondary"
                       >
                         Mark {email.isRead ? "unread" : "read"}
-                      </Button>
+                      </button>
                     </>
                   )}
                   {email.type === "sent" && email.toAddress && (
-                    <span className="text-xs text-neutral-500">
+                    <span className="text-[11px] text-text-tertiary">
                       To: {email.toAddress}
                     </span>
                   )}
                   {email.type === "received" && email.recipient && (
-                    <span className="text-xs text-neutral-500">
+                    <span className="text-[11px] text-text-tertiary">
                       To: {email.recipient}
                     </span>
                   )}
                 </div>
                 {email.bodyHtml ? (
                   <div
-                    className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }}
+                    className="prose prose-sm prose-invert max-w-none text-text-secondary"
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(email.bodyHtml),
+                    }}
                   />
                 ) : (
-                  <pre className="whitespace-pre-wrap text-sm">
+                  <pre className="whitespace-pre-wrap text-xs text-text-secondary">
                     {email.bodyText || "(empty)"}
                   </pre>
                 )}
                 {email.type === "received" &&
                   email.attachments &&
                   email.attachments.length > 0 && (
-                    <div className="mt-4">
-                      <Separator className="mb-3" />
-                      <p className="mb-2 text-xs font-medium text-neutral-500">
+                    <div className="mt-4 border-t border-border-dark pt-3">
+                      <p className="mb-2 text-[11px] font-medium text-text-tertiary">
                         Attachments
                       </p>
                       <div className="flex flex-wrap gap-2">
@@ -171,7 +167,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
                           <a
                             key={att.id}
                             href={`/api/attachments/${att.id}`}
-                            className="rounded border px-3 py-1.5 text-xs text-neutral-700 hover:bg-neutral-50"
+                            className="rounded border border-border-dark px-3 py-1.5 text-[11px] text-text-secondary hover:bg-hover"
                           >
                             {att.filename} ({Math.round(att.size / 1024)}KB)
                           </a>
@@ -181,7 +177,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
                   )}
               </div>
             )}
-            <Separator />
+            <div className="h-px bg-border-dark" />
           </div>
         ))}
       </ScrollArea>

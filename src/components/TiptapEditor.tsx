@@ -1,7 +1,6 @@
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useEffect } from "react";
-import { Button } from "@/components/ui/button";
 
 interface TiptapEditorProps {
   content: string;
@@ -19,22 +18,23 @@ function ToolbarButton({
   children: React.ReactNode;
 }) {
   return (
-    <Button
+    <button
       type="button"
-      variant={active ? "secondary" : "ghost"}
-      size="sm"
-      className="h-7 px-2 text-xs"
+      className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+        active
+          ? "bg-hover text-text-primary"
+          : "text-text-tertiary hover:bg-hover hover:text-text-secondary"
+      }`}
       onClick={onClick}
     >
       {children}
-    </Button>
+    </button>
   );
 }
 
 export default function TiptapEditor({
   content,
   onUpdate,
-  placeholder,
 }: TiptapEditorProps) {
   const editor = useEditor({
     extensions: [StarterKit],
@@ -45,7 +45,7 @@ export default function TiptapEditor({
     editorProps: {
       attributes: {
         class:
-          "prose prose-sm max-w-none min-h-[200px] p-3 focus:outline-none",
+          "prose prose-sm prose-invert max-w-none min-h-[200px] p-3 focus:outline-none text-text-primary",
       },
     },
   });
@@ -59,8 +59,8 @@ export default function TiptapEditor({
   if (!editor) return null;
 
   return (
-    <div className="rounded-md border border-neutral-200">
-      <div className="flex flex-wrap gap-1 border-b border-neutral-200 p-1">
+    <div className="rounded-md border border-border-dark bg-input-bg">
+      <div className="flex flex-wrap gap-0.5 border-b border-border-dark p-1">
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           active={editor.isActive("bold")}
@@ -99,7 +99,7 @@ export default function TiptapEditor({
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
           active={editor.isActive("orderedList")}
         >
-          1. List
+          1.
         </ToolbarButton>
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBlockquote().run()}

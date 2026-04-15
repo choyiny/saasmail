@@ -1,6 +1,4 @@
 import { useState, useEffect } from "react";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   DropdownMenu,
@@ -8,7 +6,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
 import { fetchSenders, fetchStats, type Sender } from "@/lib/api";
 
 interface SenderListProps {
@@ -50,26 +47,35 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
   }
 
   return (
-    <div className="flex h-full flex-col border-r">
+    <div className="flex h-full flex-col">
       <div className="space-y-2 p-3">
-        <Input
+        <input
+          type="text"
           placeholder="Search senders..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
         />
         {recipients.length > 0 && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full justify-start text-sm">
+              <button className="flex h-7 w-full items-center justify-start rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-secondary hover:text-text-primary">
                 {recipient || "All addresses"}
-              </Button>
+              </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent>
-              <DropdownMenuItem onClick={() => setRecipient("")}>
+            <DropdownMenuContent className="bg-card border-border-dark text-text-primary">
+              <DropdownMenuItem
+                onClick={() => setRecipient("")}
+                className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
+              >
                 All addresses
               </DropdownMenuItem>
               {recipients.map((r) => (
-                <DropdownMenuItem key={r} onClick={() => setRecipient(r)}>
+                <DropdownMenuItem
+                  key={r}
+                  onClick={() => setRecipient(r)}
+                  className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
+                >
                   {r}
                 </DropdownMenuItem>
               ))}
@@ -79,43 +85,45 @@ export default function SenderList({ selectedSenderId, onSelectSender }: SenderL
       </div>
       <ScrollArea className="flex-1">
         {loading ? (
-          <p className="p-4 text-center text-sm text-neutral-500">Loading...</p>
+          <p className="p-4 text-center text-xs text-text-tertiary">Loading...</p>
         ) : senders.length === 0 ? (
-          <p className="p-4 text-center text-sm text-neutral-500">No senders found</p>
+          <p className="p-4 text-center text-xs text-text-tertiary">No senders found</p>
         ) : (
           senders.map((sender) => (
             <button
               key={sender.id}
               onClick={() => onSelectSender(sender)}
-              className={`w-full border-b px-4 py-3 text-left transition-colors hover:bg-neutral-50 ${
-                selectedSenderId === sender.id ? "bg-neutral-100" : ""
+              className={`w-full border-b border-border-dark px-4 py-2.5 text-left transition-colors hover:bg-hover ${
+                selectedSenderId === sender.id ? "bg-hover" : ""
               }`}
             >
               <div className="flex items-center justify-between">
                 <span
-                  className={`truncate text-sm ${
-                    sender.unreadCount > 0 ? "font-semibold" : ""
+                  className={`truncate text-xs ${
+                    sender.unreadCount > 0
+                      ? "font-semibold text-text-primary"
+                      : "text-text-secondary"
                   }`}
                 >
                   {sender.name || sender.email}
                 </span>
-                <span className="ml-2 shrink-0 text-xs text-neutral-400">
+                <span className="ml-2 shrink-0 text-[11px] text-text-tertiary">
                   {formatTime(sender.lastEmailAt)}
                 </span>
               </div>
-              <div className="flex items-center justify-between">
-                {sender.name && (
-                  <span className="truncate text-xs text-neutral-500">{sender.email}</span>
-                )}
-              </div>
-              <div className="mt-1 flex items-center justify-between">
-                <span className="truncate text-xs text-neutral-400">
+              {sender.name && (
+                <div className="truncate text-[11px] text-text-tertiary">
+                  {sender.email}
+                </div>
+              )}
+              <div className="mt-0.5 flex items-center justify-between">
+                <span className="truncate text-[11px] text-text-tertiary">
                   {sender.latestSubject || "(no subject)"}
                 </span>
                 {sender.unreadCount > 0 && (
-                  <Badge variant="default" className="ml-2 shrink-0 text-xs">
+                  <span className="ml-2 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-unread px-1 text-[10px] font-semibold text-white">
                     {sender.unreadCount}
-                  </Badge>
+                  </span>
                 )}
               </div>
             </button>

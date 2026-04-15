@@ -5,9 +5,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import TiptapEditor from "@/components/TiptapEditor";
 import { sendEmail, replyToEmail, fetchEmail } from "@/lib/api";
 
@@ -54,15 +51,9 @@ export default function ComposeModal({
     setError("");
     try {
       if (isReply) {
-        await replyToEmail(replyToEmailId!, {
-          bodyHtml,
-        });
+        await replyToEmail(replyToEmailId!, { bodyHtml });
       } else {
-        await sendEmail({
-          to,
-          subject,
-          bodyHtml,
-        });
+        await sendEmail({ to, subject, bodyHtml });
       }
       onClose();
     } catch {
@@ -74,45 +65,55 @@ export default function ComposeModal({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="border-border-dark bg-card text-text-primary sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isReply ? "Reply" : "Compose"}</DialogTitle>
+          <DialogTitle className="text-text-primary">
+            {isReply ? "Reply" : "Compose"}
+          </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSend} className="space-y-4">
+        <form onSubmit={handleSend} className="space-y-3">
           {!isReply && (
-            <div className="space-y-2">
-              <Label htmlFor="to">To</Label>
-              <Input
-                id="to"
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-text-secondary">To</label>
+              <input
                 type="email"
                 value={to}
                 onChange={(e) => setTo(e.target.value)}
                 required
+                className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
               />
             </div>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="subject">Subject</Label>
-            <Input
-              id="subject"
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Subject</label>
+            <input
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               required={!isReply}
               disabled={isReply}
+              className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-50"
             />
           </div>
-          <div className="space-y-2">
-            <Label>Message</Label>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Message</label>
             <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
           </div>
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={onClose}>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+            >
               Cancel
-            </Button>
-            <Button type="submit" disabled={sending}>
+            </button>
+            <button
+              type="submit"
+              disabled={sending}
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            >
               {sending ? "Sending..." : "Send"}
-            </Button>
+            </button>
           </div>
         </form>
       </DialogContent>
