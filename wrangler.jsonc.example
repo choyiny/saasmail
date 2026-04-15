@@ -3,13 +3,21 @@
   // wrangler.jsonc is gitignored so each deployer has their own config.
   "name": "cmail",
   "main": "worker/src/index.ts",
+  "account_id": "<your-cloudflare-account-id>",
   "compatibility_date": "2026-04-14",
   "compatibility_flags": ["nodejs_compat"],
+  // Uncomment and configure if using a custom domain:
+  // "routes": [
+  //   {
+  //     "pattern": "mail.yourdomain.com",
+  //     "custom_domain": true
+  //   }
+  // ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "cmail-db",
-      "database_id": "<your-database-id>"
+      "database_id": "<your-d1-database-id>"
     }
   ],
   "r2_buckets": [
@@ -20,6 +28,7 @@
   ],
   "assets": {
     "directory": "./dist/client",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": true
   },
@@ -28,5 +37,27 @@
   },
   "observability": {
     "enabled": true
+  },
+  "queues": {
+    "producers": [
+      {
+        "binding": "EMAIL_QUEUE",
+        "queue": "cmail-sequence-emails"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "cmail-sequence-emails",
+        "max_batch_size": 10,
+        "max_retries": 3
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+  "vars": {
+    "BASE_URL": "<your-deployed-url>",
+    "TRUSTED_ORIGINS": "http://localhost:8080,<your-deployed-url>"
   }
 }
