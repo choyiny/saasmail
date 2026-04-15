@@ -10,6 +10,7 @@ import { emailsRouter } from "./routers/emails-router";
 import { sendRouter } from "./routers/send-router";
 import { attachmentsRouter } from "./routers/attachments-router";
 import { statsRouter } from "./routers/stats-router";
+import { setupRouter } from "./routers/setup-router";
 import type { Variables } from "./variables";
 
 const app = new OpenAPIHono<{
@@ -36,7 +37,11 @@ app.all("/api/auth/*", (c) => {
 
 // Session resolution for all API routes
 app.use("/api/*", async (c, next) => {
-  if (c.req.path.startsWith("/api/auth") || c.req.path === "/api/health") {
+  if (
+    c.req.path.startsWith("/api/auth") ||
+    c.req.path.startsWith("/api/setup") ||
+    c.req.path === "/api/health"
+  ) {
     return next();
   }
   const auth = createAuth(c.env);
@@ -56,6 +61,7 @@ app.route("/api/emails", emailsRouter);
 app.route("/api/send", sendRouter);
 app.route("/api/attachments", attachmentsRouter);
 app.route("/api/stats", statsRouter);
+app.route("/api/setup", setupRouter);
 
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ status: "ok" }));
