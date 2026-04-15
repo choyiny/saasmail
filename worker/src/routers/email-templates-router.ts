@@ -6,7 +6,7 @@ import { emailTemplates } from "../db/email-templates.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { senders } from "../db/senders.schema";
 import { json200Response, json201Response } from "../lib/helpers";
-import { interpolate } from "../lib/interpolate";
+import { interpolate, extractVariables } from "../lib/interpolate";
 import type { Variables } from "../variables";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
@@ -196,6 +196,45 @@ emailTemplatesRouter.openapi(deleteTemplateRoute, async (c) => {
   return c.json({ success: true }, 200);
 });
 
+// --- VARIABLES ---
+const getTemplateVariablesRoute = createRoute({
+  method: "get",
+  path: "/{slug}/variables",
+  tags: ["Email Templates"],
+  description: "Get all template variables required for sending.",
+  request: {
+    params: z.object({ slug: z.string() }),
+  },
+  responses: {
+    ...json200Response(
+      z.object({ variables: z.array(z.string()) }),
+      "Template variables",
+    ),
+  },
+});
+
+emailTemplatesRouter.openapi(getTemplateVariablesRoute, async (c) => {
+  const db = c.get("db");
+  const { slug } = c.req.valid("param");
+
+  const rows = await db
+    .select()
+    .from(emailTemplates)
+    .where(eq(emailTemplates.slug, slug))
+    .limit(1);
+
+  if (rows.length === 0) {
+    return c.json({ error: "Template not found" }, 404);
+  }
+
+  const template = rows[0];
+  const subjectVars = extractVariables(template.subject);
+  const bodyVars = extractVariables(template.bodyHtml);
+  const allVars = Array.from(new Set([...subjectVars, ...bodyVars]));
+
+  return c.json({ variables: allVars }, 200);
+});
+
 // --- SEND ---
 const sendTemplateRoute = createRoute({
   method: "post",
@@ -224,6 +263,18 @@ const sendTemplateRoute = createRoute({
       }),
       "Email sent",
     ),
+    400: {
+      description: "Missing required template variables",
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+            missingVariables: z.array(z.string()),
+            requiredVariables: z.array(z.string()),
+          }),
+        },
+      },
+    },
   },
 });
 
@@ -244,6 +295,24 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   }
 
   const template = rows[0];
+
+  // Validate all required variables are provided
+  const subjectVars = extractVariables(template.subject);
+  const bodyVars = extractVariables(template.bodyHtml);
+  const requiredVars = Array.from(new Set([...subjectVars, ...bodyVars]));
+  const missingVars = requiredVars.filter((v) => !(v in variables));
+
+  if (missingVars.length > 0) {
+    return c.json(
+      {
+        error: "Missing required template variables",
+        missingVariables: missingVars,
+        requiredVariables: requiredVars,
+      },
+      400,
+    );
+  }
+
   const renderedSubject = interpolate(template.subject, variables);
   const renderedHtml = interpolate(template.bodyHtml, variables);
 
