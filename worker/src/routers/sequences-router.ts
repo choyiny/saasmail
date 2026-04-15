@@ -7,6 +7,7 @@ import { sequenceEmails } from "../db/sequence-emails.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { senders } from "../db/senders.schema";
 import { json200Response, json201Response } from "../lib/helpers";
+import type { SequenceEmailMessage } from "../lib/sequence-processor";
 import type { Variables } from "../variables";
 
 export const sequencesRouter = new OpenAPIHono<{
@@ -393,26 +394,33 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
   await db.insert(sequenceEnrollments).values(enrollment);
 
   // Create outbox emails with computed schedule
+  // First email sends immediately; subsequent emails use snapToNextHour as base
   const baseTime = snapToNextHour(now);
-  const scheduledEmails = activeSteps.map((step) => {
+  const scheduledEmails = activeSteps.map((step, index) => {
     const delayHours =
       step.order.toString() in delayOverrides
         ? delayOverrides[step.order.toString()]
         : step.delayHours;
 
+    const isFirstEmail = index === 0;
     return {
       id: nanoid(),
       enrollmentId,
       stepOrder: step.order,
       templateSlug: step.templateSlug,
-      scheduledAt: baseTime + delayHours * 3600,
-      status: "pending",
+      scheduledAt: isFirstEmail ? now : baseTime + delayHours * 3600,
+      status: isFirstEmail ? "queued" : "pending",
       sentAt: null,
       sentEmailId: null,
     };
   });
 
   await db.insert(sequenceEmails).values(scheduledEmails);
+
+  // Immediately queue the first email so it sends without waiting for cron
+  const firstEmail = scheduledEmails[0];
+  const message: SequenceEmailMessage = { sequenceEmailId: firstEmail.id };
+  await c.env.EMAIL_QUEUE.send(message);
 
   return c.json(
     {
