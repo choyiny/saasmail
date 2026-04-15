@@ -1,5 +1,5 @@
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { schema } from "./db/schema";
 import { senders } from "./db/senders.schema";
@@ -30,29 +30,10 @@ export async function handleEmail(
   }
 
   // Upsert sender
-  const existingSender = await db
-    .select()
-    .from(senders)
-    .where(eq(senders.email, parsed.from.address))
-    .limit(1);
-
-  let senderId: string;
-
-  if (existingSender.length > 0) {
-    senderId = existingSender[0].id;
-    await db
-      .update(senders)
-      .set({
-        name: parsed.from.name || existingSender[0].name,
-        lastEmailAt: now,
-        unreadCount: existingSender[0].unreadCount + 1,
-        totalCount: existingSender[0].totalCount + 1,
-        updatedAt: now,
-      })
-      .where(eq(senders.id, senderId));
-  } else {
-    senderId = nanoid();
-    await db.insert(senders).values({
+  const senderId = nanoid();
+  await db
+    .insert(senders)
+    .values({
       id: senderId,
       email: parsed.from.address,
       name: parsed.from.name || null,
@@ -61,14 +42,31 @@ export async function handleEmail(
       totalCount: 1,
       createdAt: now,
       updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: senders.email,
+      set: {
+        name: sql`COALESCE(${parsed.from.name || null}, ${senders.name})`,
+        lastEmailAt: now,
+        unreadCount: sql`${senders.unreadCount} + 1`,
+        totalCount: sql`${senders.totalCount} + 1`,
+        updatedAt: now,
+      },
     });
-  }
+
+  // Get the actual sender ID (could be existing)
+  const senderRow = await db
+    .select({ id: senders.id })
+    .from(senders)
+    .where(eq(senders.email, parsed.from.address))
+    .limit(1);
+  const actualSenderId = senderRow[0]!.id;
 
   // Insert email
   const emailId = nanoid();
   await db.insert(emails).values({
     id: emailId,
-    senderId,
+    senderId: actualSenderId,
     recipient: parsed.to,
     subject: parsed.subject,
     bodyHtml: parsed.bodyHtml,

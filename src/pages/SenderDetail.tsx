@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import DOMPurify from "dompurify";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -150,7 +151,7 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
                 {email.bodyHtml ? (
                   <div
                     className="prose prose-sm max-w-none"
-                    dangerouslySetInnerHTML={{ __html: email.bodyHtml }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(email.bodyHtml) }}
                   />
                 ) : (
                   <pre className="whitespace-pre-wrap text-sm">
