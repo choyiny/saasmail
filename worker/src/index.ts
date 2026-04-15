@@ -15,6 +15,7 @@ import { emailTemplatesRouter } from "./routers/email-templates-router";
 import { adminRouter } from "./routers/admin-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
+import { apiKeysRouter } from "./routers/api-keys-router";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 
@@ -82,6 +83,7 @@ app.route("/api/stats", statsRouter);
 app.route("/api/setup", setupRouter);
 app.route("/api/email-templates", emailTemplatesRouter);
 app.route("/api/user", userRouter);
+app.route("/api/api-keys", apiKeysRouter);
 app.route("/api/invites", invitesRouter);
 
 // Admin routes (require admin role)
