@@ -5,3 +5,4 @@ dist/
 wrangler.jsonc
 .DS_Store
 *.log
+.worktrees/
