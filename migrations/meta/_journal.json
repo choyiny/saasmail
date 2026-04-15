@@ -57,6 +57,13 @@
       "when": 1776278685663,
       "tag": "0007_faithful_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1776280478756,
+      "tag": "0008_cloudy_black_crow",
+      "breakpoints": true
     }
   ]
 }
