@@ -1,0 +1,303 @@
+# cmail Design Spec
+
+**Date:** 2026-04-14
+**Status:** Approved
+
+## Overview
+
+cmail is a sender-centric email client for teams, built on Cloudflare Workers. Unlike traditional email clients that organize by threads, cmail groups all emails by sender — giving businesses a complete view of each client's communication history. Designed for teams that need a centralized place to manage client communications, with a future path toward AI-powered agent responses.
+
+## Architecture
+
+Single-repo full-stack application following the aventuresim pattern:
+
+- **Frontend:** React + Vite + Tailwind + shadcn/ui (Radix-based)
+- **Backend:** Cloudflare Workers + Hono + Zod OpenAPI
+- **Database:** Cloudflare D1 via Drizzle ORM
+- **File Storage:** Cloudflare R2 for email attachments
+- **Auth:** BetterAuth with invite-only access
+- **Email Receiving:** Cloudflare Email Workers
+- **Email Sending:** Resend API
+- **Deployment:** Easy clone-and-configure for any Cloudflare account
+
+The worker exports both a `fetch` handler (Hono API + static assets) and an `email` handler (Cloudflare Email Worker) from the same entry point.
+
+## Project Structure
+
+```
+cmail/
+├── src/                        # React frontend
+│   ├── components/             # UI components
+│   ├── pages/                  # Page components
+│   ├── lib/                    # API client, auth client, utils
+│   └── main.tsx
+├── worker/
+│   └── src/
+│       ├── index.ts            # Hono app entry (fetch + email exports)
+│       ├── routers/            # API route handlers
+│       ├── db/                 # Drizzle schemas
+│       ├── auth/               # BetterAuth config
+│       ├── lib/                # Email parsing, R2 helpers
+│       └── email-handler.ts    # Cloudflare Email Worker handler
+├── migrations/                 # Drizzle migration files
+├── wrangler.jsonc.example      # Example config (committed)
+├── .dev.vars.example           # Example env vars (committed)
+├── drizzle.config.ts
+├── vite.config.ts
+├── package.json
+└── tsconfig.json
+```
+
+## Data Model
+
+### `senders`
+
+Unique sender profiles with denormalized counts for fast list queries.
+
+| Column       | Type    | Constraints              |
+|-------------|---------|--------------------------|
+| id          | TEXT    | PRIMARY KEY (nanoid)     |
+| email       | TEXT    | NOT NULL, UNIQUE         |
+| name        | TEXT    | Parsed from From header  |
+| last_email_at | INTEGER | NOT NULL (unix timestamp) |
+| unread_count | INTEGER | NOT NULL DEFAULT 0       |
+| total_count | INTEGER | NOT NULL DEFAULT 0       |
+| created_at  | INTEGER | NOT NULL                 |
+| updated_at  | INTEGER | NOT NULL                 |
+
+### `emails`
+
+All received inbound emails, linked to a sender.
+
+| Column      | Type    | Constraints              |
+|------------|---------|--------------------------|
+| id         | TEXT    | PRIMARY KEY (nanoid)     |
+| sender_id  | TEXT    | NOT NULL, FK → senders.id |
+| recipient  | TEXT    | NOT NULL (the To address) |
+| subject    | TEXT    |                          |
+| body_html  | TEXT    | Rich HTML version        |
+| body_text  | TEXT    | Plain text version (for future AI use) |
+| raw_headers | TEXT   | JSON blob of all headers |
+| message_id | TEXT    | UNIQUE (Message-ID header, deduplication) |
+| is_read    | INTEGER | NOT NULL DEFAULT 0       |
+| received_at | INTEGER | NOT NULL                |
+| created_at | INTEGER | NOT NULL                 |
+
+### `sent_emails`
+
+Outbound emails sent via Resend.
+
+| Column       | Type    | Constraints              |
+|-------------|---------|--------------------------|
+| id          | TEXT    | PRIMARY KEY (nanoid)     |
+| sender_id   | TEXT    | FK → senders.id (nullable) |
+| from_address | TEXT   | NOT NULL (sending address) |
+| to_address  | TEXT    | NOT NULL                 |
+| subject     | TEXT    | NOT NULL                 |
+| body_html   | TEXT    |                          |
+| body_text   | TEXT    |                          |
+| in_reply_to | TEXT    | Message-ID of email being replied to |
+| resend_id   | TEXT    | Resend's message ID      |
+| status      | TEXT    | NOT NULL DEFAULT 'sent' (sent/delivered/bounced/failed) |
+| sent_at     | INTEGER | NOT NULL                 |
+| created_at  | INTEGER | NOT NULL                 |
+
+### `attachments`
+
+Metadata for files stored in R2, linked to received emails.
+
+| Column       | Type    | Constraints              |
+|-------------|---------|--------------------------|
+| id          | TEXT    | PRIMARY KEY (nanoid)     |
+| email_id   | TEXT    | NOT NULL, FK → emails.id |
+| filename   | TEXT    | NOT NULL                 |
+| content_type | TEXT   | NOT NULL                 |
+| size       | INTEGER | NOT NULL (bytes)         |
+| r2_key     | TEXT    | NOT NULL (R2 object key) |
+| created_at | INTEGER | NOT NULL                 |
+
+### BetterAuth Tables
+
+Auto-generated by BetterAuth: `users`, `sessions`, `accounts`, `verifications`, `invitations`.
+
+### Indexes
+
+- `emails(sender_id, received_at)` — sender history view
+- `emails(recipient, received_at)` — filter by To address
+- `emails(message_id)` UNIQUE — deduplication
+- `senders(email)` UNIQUE
+- `senders(last_email_at)` — sender list sorting
+- `sent_emails(sender_id, sent_at)` — interleave with received emails
+
+## Email Worker Flow (Receiving)
+
+When an email arrives at Cloudflare Email Routing, it is forwarded to the worker's `email` handler:
+
+1. **Parse MIME message** — extract from, to, subject, html, text, headers using `postal-mime`
+2. **Deduplicate** — check `message_id` against existing emails; discard if duplicate
+3. **Upsert sender** — `INSERT OR UPDATE` on senders table (update name, last_email_at, increment unread_count and total_count)
+4. **Insert email** — store the email record in D1
+5. **Process attachments** — for each attachment:
+   - Upload binary to R2 at key `attachments/{email_id}/{filename}`
+   - Insert attachment metadata into D1
+6. **Error handling** — if D1/R2 writes fail, the handler throws. Cloudflare Email Routing retries delivery. Message-ID dedup prevents duplicates on retry.
+
+## Email Sending Flow
+
+1. User composes email or clicks "Reply" in the UI
+2. Frontend POSTs to API with to, subject, body
+3. API sends via Resend SDK
+4. API stores record in `sent_emails` table
+5. If replying to a known sender, links via `sender_id` and `in_reply_to`
+
+## API Routes
+
+All routes require BetterAuth session middleware (except the email worker handler).
+
+### Auth
+
+| Method | Path             | Description                    |
+|--------|-----------------|--------------------------------|
+| POST   | /api/auth/*     | BetterAuth (sign in, sign out) |
+| POST   | /api/auth/invite | Admin invites a team member   |
+
+### Senders
+
+| Method | Path              | Description                                      |
+|--------|------------------|--------------------------------------------------|
+| GET    | /api/senders     | List senders, sorted by last_email_at. Query params: `q` (search name/email), `recipient` (filter by To address), `page`, `limit` |
+| GET    | /api/senders/:id | Sender detail (name, email, counts)              |
+
+### Emails
+
+| Method | Path                      | Description                                    |
+|--------|--------------------------|------------------------------------------------|
+| GET    | /api/senders/:id/emails  | List emails from a sender (received + sent interleaved chronologically). Query params: `q` (search subject), `page`, `limit` |
+| GET    | /api/emails/:id          | Single email detail (html, text, headers)      |
+| PATCH  | /api/emails/:id          | Mark read/unread (updates sender.unread_count) |
+| PATCH  | /api/emails/bulk         | Bulk mark read/unread                          |
+| POST   | /api/emails/send         | Compose and send a new email                   |
+| POST   | /api/emails/:id/reply    | Reply to a received email (pre-fills to, subject with Re:, in_reply_to) |
+
+### Attachments
+
+| Method | Path                  | Description                          |
+|--------|-----------------------|--------------------------------------|
+| GET    | /api/attachments/:id  | Generate a presigned R2 URL for download |
+
+### Stats
+
+| Method | Path        | Description                                         |
+|--------|------------|-----------------------------------------------------|
+| GET    | /api/stats | Total senders, total emails, unread count. Query param: `recipient` |
+
+## Frontend UI
+
+### Layout
+
+**Two-panel layout:**
+
+- **Left panel — Sender list:**
+  - Search bar at top (searches sender name/email and email subjects)
+  - Filter dropdown for recipient address (All, support@, hello@, etc.)
+  - Each row: sender name/email, latest email subject preview, timestamp, unread badge
+  - Sorted by most recent email
+  - Infinite scroll or paginated
+  - Selected sender highlighted
+
+- **Right panel — Sender email history:**
+  - Header: sender name, email address, total email count
+  - Chronological list of all emails from that sender (newest first)
+  - Received and sent emails interleaved, visually distinguished
+  - Each email: subject, timestamp, read/unread indicator, attachment icons
+  - Click to expand and show rendered HTML body inline
+  - Attachment list with download links (presigned R2 URLs)
+  - Mark read/unread button per email
+  - Reply button on received emails
+
+### Top Navigation
+
+- App name / logo
+- Compose button (new email)
+- Unread count badge
+- User menu (sign out, invite member if admin)
+
+### Tech Stack
+
+- React + React Router
+- Tailwind CSS + shadcn/ui (Radix-based components)
+- Same component patterns as aventuresim
+
+## Configuration & Deployment
+
+### Gitignored Files
+
+```
+wrangler.jsonc
+.dev.vars
+.wrangler/
+```
+
+### `wrangler.jsonc.example` (committed)
+
+```jsonc
+{
+  "name": "cmail",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-04-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "cmail-db",
+      "database_id": "<your-database-id>"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "cmail-attachments"
+    }
+  ],
+  "assets": {
+    "directory": "./dist/client"
+  },
+  "email_routing": {
+    "enabled": true
+  },
+  "observability": {
+    "enabled": true
+  }
+}
+```
+
+### `.dev.vars.example` (committed)
+
+```
+RESEND_API_KEY=re_xxxx
+RESEND_EMAIL_FROM=noreply@yourdomain.com
+BETTER_AUTH_SECRET=generate-a-random-secret
+```
+
+### Setup Steps
+
+1. Clone the repo
+2. `cp wrangler.jsonc.example wrangler.jsonc` — fill in D1 database ID, R2 bucket name
+3. `cp .dev.vars.example .dev.vars` — fill in Resend API key, auth secret
+4. `yarn install`
+5. `yarn db:migrate` — apply migrations
+6. `yarn dev` — start local development
+7. `yarn deploy` — deploy to Cloudflare
+
+## Search
+
+Search covers sender name/email and email subjects. No full-text search on email bodies. Search is implemented via SQL `LIKE` queries on the `senders` and `emails` tables.
+
+## Key Design Decisions
+
+1. **Sender-centric, not thread-centric** — emails grouped by sender for a complete client history view
+2. **Denormalized sender counts** — `unread_count` and `total_count` on the senders table for fast list queries, kept in sync on email receive and read/unread toggle
+3. **Separate `emails` and `sent_emails` tables** — different schemas (received emails have raw_headers, message_id; sent emails have resend_id, status, from_address)
+4. **`body_text` retained** — not used for search, but preserved for future AI processing
+5. **At-least-once delivery** — email handler throws on failure, Cloudflare retries, Message-ID dedup prevents duplicates
+6. **`wrangler.jsonc` gitignored** — enables easy deployment to any Cloudflare account without config conflicts
