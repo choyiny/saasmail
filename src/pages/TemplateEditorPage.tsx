@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import TiptapEditor from "@/components/TiptapEditor";
+import HtmlCodeEditor from "@/components/HtmlCodeEditor";
 import { fetchTemplate, createTemplate, updateTemplate } from "@/lib/api";
 
 /** Extract {{variableName}} tokens from a string. */
@@ -194,7 +194,7 @@ export default function TemplateEditorPage() {
 
   return (
     <div className="flex h-full flex-col bg-main overflow-hidden">
-      {/* Top bar — full width */}
+      {/* Top bar */}
       <div className="flex items-center justify-between border-b border-border-dark px-4 sm:px-6 py-2.5 bg-panel shrink-0">
         <div className="flex items-center gap-3">
           <button
@@ -235,14 +235,14 @@ export default function TemplateEditorPage() {
         </div>
       </div>
 
-      {/* Template metadata — centered like Notion */}
-      <div className="shrink-0 w-full max-w-[720px] mx-auto px-4 sm:px-14 pt-8 pb-2">
+      {/* Template metadata */}
+      <div className="shrink-0 w-full px-4 sm:px-6 pt-4 pb-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Untitled Template"
           required
-          className="w-full bg-transparent text-3xl font-bold text-text-primary placeholder:text-text-tertiary focus:outline-none mb-3"
+          className="w-full bg-transparent text-2xl font-bold text-text-primary placeholder:text-text-tertiary focus:outline-none mb-3"
         />
         <div className="flex flex-col sm:flex-row gap-3">
           <div className="flex items-center gap-2 flex-1">
@@ -273,13 +273,16 @@ export default function TemplateEditorPage() {
             />
           </div>
         </div>
+      </div>
 
-        {variables.length > 0 && (
-          <div className="flex items-center gap-2 mt-3">
-            <span className="text-[10px] text-text-tertiary uppercase tracking-wider">
-              Variables
-            </span>
-            <div className="flex flex-wrap gap-1">
+      {/* Variable bar */}
+      <div className="shrink-0 px-4 sm:px-6 py-2 border-b border-border-dark">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-medium">
+            Variables
+          </span>
+          {variables.length > 0 ? (
+            <>
               {variables.map((v) => (
                 <span
                   key={v}
@@ -288,24 +291,51 @@ export default function TemplateEditorPage() {
                   {`{{${v}}}`}
                 </span>
               ))}
-            </div>
+              <span className="text-[10px] text-text-tertiary ml-1">
+                — use <code className="text-accent/70">{`{{variableName}}`}</code> syntax to add more
+              </span>
+            </>
+          ) : (
+            <span className="text-[10px] text-text-tertiary">
+              Use <code className="text-accent/70">{`{{variableName}}`}</code> in subject or body to add template variables
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Split editor: Code + Preview */}
+      <div className="flex-1 min-h-0 flex">
+        {/* HTML Source */}
+        <div className="flex-1 flex flex-col min-w-0 border-r border-border-dark">
+          <div className="shrink-0 px-3 py-1.5 border-b border-border-dark bg-panel">
+            <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-medium">
+              HTML Source
+            </span>
           </div>
-        )}
-      </div>
+          <div className="flex-1 min-h-0">
+            <HtmlCodeEditor
+              value={bodyHtml}
+              onChange={setBodyHtml}
+            />
+          </div>
+        </div>
 
-      {/* Divider */}
-      <div className="w-full max-w-[720px] mx-auto px-4 sm:px-14">
-        <div className="border-b border-border-dark" />
-      </div>
-
-      {/* Editor — full width with centered content */}
-      <div className="flex-1 min-h-0 overflow-auto">
-        <TiptapEditor
-          content={bodyHtml}
-          onUpdate={setBodyHtml}
-          className="h-full"
-          placeholder="Start writing your email body..."
-        />
+        {/* Preview */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="shrink-0 px-3 py-1.5 border-b border-border-dark bg-panel">
+            <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-medium">
+              Preview
+            </span>
+          </div>
+          <div className="flex-1 min-h-0">
+            <iframe
+              title="Email preview"
+              sandbox="allow-same-origin"
+              srcDoc={bodyHtml}
+              className="w-full h-full bg-white"
+            />
+          </div>
+        </div>
       </div>
 
       {/* API panel (slide-over) */}
