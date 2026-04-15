@@ -4,6 +4,8 @@ import { useSession } from "@/lib/auth-client";
 import LoginPage from "@/pages/LoginPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import InboxPage from "@/pages/InboxPage";
+import TemplatesPage from "@/pages/TemplatesPage";
+import TemplateEditorPage from "@/pages/TemplateEditorPage";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +34,30 @@ function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/onboarding" element={<OnboardingPage />} />
+          <Route
+            path="/templates"
+            element={
+              <AuthGuard>
+                <TemplatesPage />
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/templates/new"
+            element={
+              <AuthGuard>
+                <TemplateEditorPage />
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/templates/:slug/edit"
+            element={
+              <AuthGuard>
+                <TemplateEditorPage />
+              </AuthGuard>
+            }
+          />
           <Route
             path="/*"
             element={

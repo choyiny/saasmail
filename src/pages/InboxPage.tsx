@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { signOut, useSession } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +34,12 @@ export default function InboxPage() {
       <header className="flex items-center justify-between border-b px-4 py-2">
         <h1 className="text-lg font-semibold">cmail</h1>
         <div className="flex items-center gap-2">
+          <Link
+            to="/templates"
+            className="text-sm text-neutral-500 hover:text-neutral-700"
+          >
+            Templates
+          </Link>
           <Button size="sm" onClick={handleCompose}>
             Compose
           </Button>
