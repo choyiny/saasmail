@@ -59,6 +59,21 @@ export const verifications = sqliteTable("verifications", {
   updatedAt: integer("updated_at", { mode: "timestamp" }),
 });
 
+export const passkeys = sqliteTable("passkeys", {
+  id: text("id").primaryKey(),
+  name: text("name"),
+  publicKey: text("public_key").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  credentialID: text("credential_id").notNull().unique(),
+  counter: integer("counter").notNull().default(0),
+  deviceType: text("device_type"),
+  backedUp: integer("backed_up", { mode: "boolean" }),
+  transports: text("transports"),
+  createdAt: integer("created_at", { mode: "timestamp" }),
+});
+
 export const invitations = sqliteTable("invitations", {
   id: text("id").primaryKey(),
   organizationId: text("organization_id").notNull(),

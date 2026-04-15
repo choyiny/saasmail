@@ -15,6 +15,13 @@
       "when": 1776230252012,
       "tag": "0001_crazy_jack_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776268351174,
+      "tag": "0002_aromatic_morgan_stark",
+      "breakpoints": true
     }
   ]
 }
