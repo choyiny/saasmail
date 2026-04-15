@@ -12,6 +12,9 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+  const [mode, setMode] = useState<"passkey" | "password">("passkey");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -58,24 +61,89 @@ export default function LoginPage() {
     }
   }
 
+  async function handlePasswordLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const result = await authClient.signIn.email({
+        email,
+        password,
+      });
+      if (result?.error) {
+        setError(result.error.message || "Sign-in failed");
+      } else {
+        window.location.href = "/";
+      }
+    } catch {
+      setError("Sign-in failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-main">
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">cmail</CardTitle>
           <p className="text-xs text-text-secondary">
-            Sign in with your passkey to continue.
+            Sign in to continue.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && <p className="text-xs text-destructive">{error}</p>}
-          <button
-            className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
-            onClick={handlePasskeyLogin}
-            disabled={loading}
-          >
-            {loading ? "Signing in..." : "Sign in with Passkey"}
-          </button>
+          {mode === "passkey" ? (
+            <>
+              <button
+                className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+                onClick={handlePasskeyLogin}
+                disabled={loading}
+              >
+                {loading ? "Signing in..." : "Sign in with Passkey"}
+              </button>
+              <button
+                className="w-full text-xs text-text-secondary hover:text-text-primary"
+                onClick={() => { setError(""); setMode("password"); }}
+                type="button"
+              >
+                Sign in with email instead
+              </button>
+            </>
+          ) : (
+            <form onSubmit={handlePasswordLogin} className="space-y-3">
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-md border border-border-dark bg-main px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
+                required
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-md border border-border-dark bg-main px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
+                required
+              />
+              <button
+                type="submit"
+                className="w-full rounded-md bg-accent py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+                disabled={loading}
+              >
+                {loading ? "Signing in..." : "Sign in"}
+              </button>
+              <button
+                className="w-full text-xs text-text-secondary hover:text-text-primary"
+                onClick={() => { setError(""); setMode("passkey"); }}
+                type="button"
+              >
+                Sign in with passkey instead
+              </button>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>
