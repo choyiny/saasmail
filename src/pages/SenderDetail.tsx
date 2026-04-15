@@ -20,6 +20,8 @@ import SequenceStatus from "@/components/SequenceStatus";
 import MessageBubble from "@/components/MessageBubble";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import ReplyComposer from "@/components/ReplyComposer";
+import ThreadSidebar from "@/components/ThreadSidebar";
+import { MessageSquare } from "lucide-react";
 
 interface SenderDetailProps {
   sender: Sender;
@@ -35,6 +37,7 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
   const [recipientFilter, setRecipientFilter] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
+  const [threadOpen, setThreadOpen] = useState(false);
 
   // Collect unique recipient addresses from emails
   const recipients = Array.from(
@@ -55,6 +58,7 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
     setLoading(true);
     setRecipientFilter("");
     setReplyToEmailId(null);
+    setThreadOpen(false);
     fetchSenderEmails(sender.id)
       .then((data) => {
         setEmails(data);
@@ -103,8 +107,9 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
     );
   }
 
-  // Reverse emails for chronological (oldest first) display
-  const chronologicalEmails = [...emails].reverse();
+  // Latest email is first in the array (API returns newest first)
+  const latestEmail = emails[0] ?? null;
+  const threadEmails = emails.slice(1); // older emails for sidebar
 
   return (
     <div className="flex h-full flex-col">
@@ -169,40 +174,67 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
         )}
       </div>
 
-      {/* Conversation */}
-      <ScrollArea className="flex-1">
-        <div className="divide-y divide-border-dark" ref={scrollRef}>
-          {chronologicalEmails.length === 0 ? (
-            <p className="py-4 text-center text-xs text-text-tertiary">
-              No emails found.
-            </p>
-          ) : (
-            chronologicalEmails.map((email) => (
-              <MessageBubble
-                key={email.id}
-                email={email}
-                senderEmail={sender.email}
-                onOpenHtml={setHtmlPreviewEmail}
-                onMarkRead={handleMarkRead}
-                onReply={setReplyToEmailId}
-                onDelete={handleDelete}
-              />
-            ))
+      {/* Conversation — main email + thread sidebar */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Main email area */}
+        <div className="flex flex-1 flex-col min-w-0">
+          <ScrollArea className="flex-1">
+            {latestEmail ? (
+              <div className="px-4 sm:px-6 py-4">
+                {/* Thread indicator */}
+                {threadEmails.length > 0 && (
+                  <button
+                    onClick={() => setThreadOpen(!threadOpen)}
+                    className="mb-3 flex items-center gap-1.5 text-xs text-accent hover:underline"
+                  >
+                    <MessageSquare size={12} />
+                    {threadEmails.length} earlier message{threadEmails.length !== 1 ? "s" : ""}
+                  </button>
+                )}
+
+                {/* Latest email display */}
+                <MessageBubble
+                  email={latestEmail}
+                  senderEmail={sender.email}
+                  onOpenHtml={setHtmlPreviewEmail}
+                  onMarkRead={handleMarkRead}
+                  onReply={setReplyToEmailId}
+                  onDelete={handleDelete}
+                />
+              </div>
+            ) : (
+              <p className="py-4 text-center text-xs text-text-tertiary">
+                No emails found.
+              </p>
+            )}
+          </ScrollArea>
+
+          {/* Reply Composer stays in main area */}
+          {replyToEmailId && (
+            <ReplyComposer
+              emailId={replyToEmailId}
+              senderName={sender.name}
+              senderEmail={sender.email}
+              recipients={recipients}
+              onClose={() => setReplyToEmailId(null)}
+              onSent={refetchEmails}
+            />
           )}
         </div>
-      </ScrollArea>
 
-      {/* Reply Composer */}
-      {replyToEmailId && (
-        <ReplyComposer
-          emailId={replyToEmailId}
-          senderName={sender.name}
-          senderEmail={sender.email}
-          recipients={recipients}
-          onClose={() => setReplyToEmailId(null)}
-          onSent={refetchEmails}
-        />
-      )}
+        {/* Thread sidebar */}
+        {threadOpen && threadEmails.length > 0 && (
+          <ThreadSidebar
+            emails={threadEmails}
+            senderEmail={sender.email}
+            onOpenHtml={setHtmlPreviewEmail}
+            onMarkRead={handleMarkRead}
+            onReply={setReplyToEmailId}
+            onDelete={handleDelete}
+            onClose={() => setThreadOpen(false)}
+          />
+        )}
+      </div>
 
       {/* HTML Preview Modal */}
       <EmailHtmlModal
