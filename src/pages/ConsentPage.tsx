@@ -9,7 +9,6 @@ export default function ConsentPage() {
   const [result, setResult] = useState<"allowed" | "denied" | null>(null);
 
   const clientId = searchParams.get("client_id");
-  const consentCode = searchParams.get("consent_code") ?? "";
   const scope = searchParams.get("scope") ?? "";
 
   const scopeDescriptions: Record<string, string> = {
@@ -29,14 +28,16 @@ export default function ConsentPage() {
     setError(null);
 
     try {
+      // The oauthProviderClient plugin automatically injects oauth_query
+      // from window.location.search into the request body.
       const res = (await authClient.$fetch("/oauth2/consent", {
         method: "POST",
-        body: { accept, consent_code: consentCode },
-      })) as { data?: { redirectURI?: string } };
+        body: { accept },
+      })) as { data?: { redirect?: boolean; url?: string } };
 
-      if (res.data?.redirectURI) {
+      if (res.data?.url) {
         setResult(accept ? "allowed" : "denied");
-        window.location.href = res.data.redirectURI;
+        window.location.href = res.data.url;
       } else {
         setResult(accept ? "allowed" : "denied");
       }
@@ -47,7 +48,7 @@ export default function ConsentPage() {
   }
 
   // Invalid request (missing params)
-  if (!clientId || !consentCode) {
+  if (!clientId) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-main">
         <div className="w-full max-w-sm rounded-xl border border-border-dark bg-card p-6 text-center">
