@@ -10,6 +10,7 @@ import TemplatesPage from "@/pages/TemplatesPage";
 import TemplateEditorPage from "@/pages/TemplateEditorPage";
 import SetupPasskeyPage from "@/pages/SetupPasskeyPage";
 import InviteAcceptPage from "@/pages/InviteAcceptPage";
+import ConsentPage from "@/pages/ConsentPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
 import ApiKeysPage from "@/pages/ApiKeysPage";
 import DashboardLayout from "@/components/DashboardLayout";
@@ -67,6 +68,7 @@ function App() {
           <Route path="/onboarding" element={<OnboardingPage />} />
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="/setup-passkey" element={<SetupPasskeyPage />} />
+          <Route path="/consent" element={<ConsentPage />} />
 
           {/* Authenticated routes with shared layout */}
           <Route element={<AuthGuard />}>
