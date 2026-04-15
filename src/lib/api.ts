@@ -111,7 +111,13 @@ export async function sendEmail(data: {
 
 export async function replyToEmail(
   emailId: string,
-  data: { bodyHtml: string; bodyText?: string },
+  data: {
+    bodyHtml?: string;
+    bodyText?: string;
+    fromAddress?: string;
+    templateSlug?: string;
+    variables?: Record<string, string>;
+  },
 ): Promise<{ id: string }> {
   return apiFetch(`/api/send/reply/${emailId}`, {
     method: "POST",
