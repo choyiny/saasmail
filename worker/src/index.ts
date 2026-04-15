@@ -37,7 +37,12 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
-    origin: ["http://localhost:8080", "https://mail.givefeedback.dev"],
+    origin: (origin, c) => {
+      const trusted = c.env?.TRUSTED_ORIGINS
+        ? c.env.TRUSTED_ORIGINS.split(",")
+        : ["http://localhost:8080"];
+      return trusted.includes(origin) ? origin : trusted[0];
+    },
     credentials: true,
   })
 );

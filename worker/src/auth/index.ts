@@ -10,7 +10,7 @@ export function createAuth(env?: CloudflareBindings) {
   const db = env ? drizzle(env.DB, { schema, logger: true }) : ({} as any);
 
   return betterAuth({
-    baseURL: env?.BASE_URL || "https://mail.givefeedback.dev",
+    baseURL: env?.BASE_URL || "http://localhost:8080",
     database: drizzleAdapter(db, {
       provider: "sqlite",
       usePlural: true,
@@ -35,10 +35,9 @@ export function createAuth(env?: CloudflareBindings) {
       cookiePrefix: "cmail",
       defaultCookieAttributes: { sameSite: "lax", secure: true },
     },
-    trustedOrigins: [
-      "http://localhost:8080",
-      "https://mail.givefeedback.dev",
-    ],
+    trustedOrigins: env?.TRUSTED_ORIGINS
+      ? env.TRUSTED_ORIGINS.split(",")
+      : ["http://localhost:8080"],
   });
 }
 
