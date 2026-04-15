@@ -37,6 +37,7 @@ const listSenderEmailsRoute = createRoute({
     params: z.object({ senderId: z.string() }),
     query: z.object({
       q: z.string().optional().openapi({ description: "Search by subject" }),
+      recipient: z.string().optional().openapi({ description: "Filter by recipient address" }),
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(50),
     }),
@@ -49,13 +50,16 @@ const listSenderEmailsRoute = createRoute({
 emailsRouter.openapi(listSenderEmailsRoute, async (c) => {
   const db = c.get("db");
   const { senderId } = c.req.valid("param");
-  const { q, page, limit } = c.req.valid("query");
+  const { q, recipient, page, limit } = c.req.valid("query");
   const offset = (page - 1) * limit;
 
   // Build conditions for received emails
   const receivedConditions: any[] = [eq(emails.senderId, senderId)];
   if (q) {
     receivedConditions.push(like(emails.subject, `%${q}%`));
+  }
+  if (recipient) {
+    receivedConditions.push(eq(emails.recipient, recipient));
   }
 
   const received = await db
@@ -76,6 +80,9 @@ emailsRouter.openapi(listSenderEmailsRoute, async (c) => {
   const sentConditions: any[] = [eq(sentEmails.senderId, senderId)];
   if (q) {
     sentConditions.push(like(sentEmails.subject, `%${q}%`));
+  }
+  if (recipient) {
+    sentConditions.push(eq(sentEmails.toAddress, recipient));
   }
 
   const sent = await db
@@ -145,9 +152,26 @@ emailsRouter.openapi(listSenderEmailsRoute, async (c) => {
     }
   }
 
+  // Fetch attachment details for received emails
+  let attachmentDetails: Record<string, any[]> = {};
+  if (receivedIds.length > 0) {
+    const attRows = await db
+      .select()
+      .from(attachments)
+      .where(sql`${attachments.emailId} IN (${sql.join(receivedIds.map(id => sql`${id}`), sql`,`)})`);
+
+    for (const att of attRows) {
+      if (!attachmentDetails[att.emailId]) {
+        attachmentDetails[att.emailId] = [];
+      }
+      attachmentDetails[att.emailId].push(att);
+    }
+  }
+
   const result = paginated.map((e) => ({
     ...e,
     attachmentCount: attachmentCounts[e.id] ?? 0,
+    attachments: attachmentDetails[e.id] ?? [],
   }));
 
   return c.json(result, 200);

@@ -30,6 +30,7 @@ export interface Attachment {
   filename: string;
   contentType: string;
   size: number;
+  contentId: string | null;
 }
 
 export interface Stats {
@@ -70,10 +71,11 @@ export async function fetchSender(id: string): Promise<Sender> {
 
 export async function fetchSenderEmails(
   senderId: string,
-  params?: { q?: string; page?: number; limit?: number }
+  params?: { q?: string; recipient?: string; page?: number; limit?: number }
 ): Promise<Email[]> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set("q", params.q);
+  if (params?.recipient) qs.set("recipient", params.recipient);
   if (params?.page) qs.set("page", params.page.toString());
   if (params?.limit) qs.set("limit", params.limit.toString());
   return apiFetch(`/api/emails/by-sender/${senderId}?${qs}`);
