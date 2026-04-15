@@ -5,4 +5,5 @@ export * from "./emails.schema";
 export * from "./sent-emails.schema";
 export * from "./attachments.schema";
 export * from "./email-templates.schema";
+export * from "./invitations.schema";
 export * from "./schema";

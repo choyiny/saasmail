@@ -73,15 +73,3 @@ export const passkeys = sqliteTable("passkeys", {
   transports: text("transports"),
   createdAt: integer("created_at", { mode: "timestamp" }),
 });
-
-export const invitations = sqliteTable("invitations", {
-  id: text("id").primaryKey(),
-  organizationId: text("organization_id").notNull(),
-  email: text("email").notNull(),
-  role: text("role"),
-  status: text("status").notNull(),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  inviterId: text("inviter_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-});
