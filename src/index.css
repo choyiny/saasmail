@@ -28,3 +28,200 @@ body {
   background-color: #1a1d2e;
   color: #f0f0f0;
 }
+
+/* ── Notion-like Editor Styles ── */
+
+.notion-editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.notion-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border-dark);
+  background: var(--color-panel);
+}
+
+.notion-editor-content {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+  padding-left: 40px;
+}
+
+/* Main editor area */
+.notion-editor {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px;
+  color: var(--color-text-primary);
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+/* Block spacing */
+.notion-editor > * {
+  margin-top: 2px;
+  margin-bottom: 2px;
+  padding: 3px 0;
+  border-radius: 4px;
+  transition: background-color 0.1s;
+}
+
+.notion-editor > *:hover {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Headings */
+.notion-editor h1 {
+  font-size: 1.875em;
+  font-weight: 700;
+  margin-top: 1.5em;
+  margin-bottom: 0.25em;
+  line-height: 1.3;
+  color: var(--color-text-primary);
+}
+
+.notion-editor h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 1.25em;
+  margin-bottom: 0.25em;
+  line-height: 1.35;
+  color: var(--color-text-primary);
+}
+
+.notion-editor h3 {
+  font-size: 1.25em;
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.25em;
+  line-height: 1.4;
+  color: var(--color-text-primary);
+}
+
+/* Paragraphs */
+.notion-editor p {
+  margin: 0;
+  min-height: 1.5em;
+}
+
+/* Lists */
+.notion-editor ul,
+.notion-editor ol {
+  padding-left: 1.5em;
+  margin: 0.25em 0;
+}
+
+.notion-editor li {
+  margin: 2px 0;
+}
+
+.notion-editor li p {
+  margin: 0;
+}
+
+/* Blockquote */
+.notion-editor blockquote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: var(--color-text-secondary);
+}
+
+/* Code block */
+.notion-editor pre {
+  background: var(--color-sidebar);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0.5em 0;
+}
+
+.notion-editor pre code {
+  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, monospace;
+  color: var(--color-text-primary);
+}
+
+/* Inline code */
+.notion-editor code {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-size: 0.9em;
+  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, monospace;
+  color: #e06c75;
+}
+
+/* Horizontal rule */
+.notion-editor hr {
+  border: none;
+  border-top: 1px solid var(--color-border-dark);
+  margin: 1.5em 0;
+}
+
+/* Placeholder */
+.notion-editor p.is-editor-empty:first-child::before {
+  color: var(--color-text-tertiary);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ── Drag Handle ── */
+
+.drag-handle {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  cursor: grab;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  z-index: 20;
+  user-select: none;
+}
+
+.notion-editor-content:hover .drag-handle {
+  opacity: 0.5;
+}
+
+.drag-handle:hover {
+  opacity: 1 !important;
+  background: var(--color-hover);
+  color: var(--color-text-secondary);
+}
+
+.drag-handle:active,
+.drag-handle.dragging {
+  cursor: grabbing;
+  opacity: 1 !important;
+  background: var(--color-accent);
+  color: white;
+}
+
+/* ── Drop Indicator ── */
+
+.drop-indicator {
+  position: absolute;
+  height: 2px;
+  background: var(--color-accent);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 15;
+  box-shadow: 0 0 4px rgba(79, 110, 247, 0.4);
+}
