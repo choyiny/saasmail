@@ -4,9 +4,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   fetchSenderEmails,
   markEmailRead,
+  fetchSenderEnrollment,
   type Sender,
   type Email,
+  type SenderEnrollmentInfo,
 } from "@/lib/api";
+import EnrollSequenceModal from "@/components/EnrollSequenceModal";
+import SequenceStatus from "@/components/SequenceStatus";
 
 interface SenderDetailProps {
   sender: Sender;
@@ -17,6 +21,8 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [enrollModalOpen, setEnrollModalOpen] = useState(false);
+  const [enrollmentInfo, setEnrollmentInfo] = useState<SenderEnrollmentInfo | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -25,6 +31,14 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
       .then(setEmails)
       .finally(() => setLoading(false));
   }, [sender.id]);
+
+  useEffect(() => {
+    fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
+  }, [sender.id]);
+
+  function refreshEnrollment() {
+    fetchSenderEnrollment(sender.id).then(setEnrollmentInfo);
+  }
 
   async function handleExpand(email: Email) {
     if (expandedId === email.id) {
@@ -76,6 +90,23 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
         <p className="text-[11px] text-text-tertiary">
           {sender.totalCount} email{sender.totalCount !== 1 ? "s" : ""}
         </p>
+      </div>
+
+      {/* Sequence status or enroll button */}
+      <div className="border-b border-border-dark px-6 py-2">
+        {enrollmentInfo?.enrollment ? (
+          <SequenceStatus
+            senderId={sender.id}
+            onStatusChange={refreshEnrollment}
+          />
+        ) : (
+          <button
+            onClick={() => setEnrollModalOpen(true)}
+            className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
+          >
+            Add to Sequence
+          </button>
+        )}
       </div>
 
       <ScrollArea className="flex-1">
@@ -181,6 +212,14 @@ export default function SenderDetail({ sender, onReply }: SenderDetailProps) {
           </div>
         ))}
       </ScrollArea>
+      <EnrollSequenceModal
+        senderId={sender.id}
+        senderName={sender.name}
+        senderEmail={sender.email}
+        open={enrollModalOpen}
+        onClose={() => setEnrollModalOpen(false)}
+        onEnrolled={refreshEnrollment}
+      />
     </div>
   );
 }
