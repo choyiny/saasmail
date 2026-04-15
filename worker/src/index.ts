@@ -20,6 +20,9 @@ import { adminRouter } from "./routers/admin-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
+import { sequencesRouter } from "./routers/sequences-router";
+import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
+import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 
@@ -119,6 +122,7 @@ app.route("/api/email-templates", emailTemplatesRouter);
 app.route("/api/user", userRouter);
 app.route("/api/api-keys", apiKeysRouter);
 app.route("/api/invites", invitesRouter);
+app.route("/api/sequences", sequencesRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
@@ -142,4 +146,10 @@ app.all("*", async (c) => {
 export default {
   fetch: app.fetch,
   email: handleEmail,
+  async scheduled(event: ScheduledEvent, env: CloudflareBindings, ctx: ExecutionContext) {
+    ctx.waitUntil(handleScheduled(env));
+  },
+  async queue(batch: MessageBatch<SequenceEmailMessage>, env: CloudflareBindings) {
+    await handleQueueBatch(batch, env);
+  },
 };
