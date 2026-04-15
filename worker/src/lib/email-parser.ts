@@ -15,6 +15,7 @@ export interface ParsedAttachment {
   filename: string;
   contentType: string;
   content: ArrayBuffer;
+  contentId: string | null;
 }
 
 export async function parseEmail(
@@ -46,6 +47,7 @@ export async function parseEmail(
       filename: att.filename || "unnamed",
       contentType: att.mimeType || "application/octet-stream",
       content: att.content,
+      contentId: att.contentId || null,
     })),
   };
 }

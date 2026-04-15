@@ -63,26 +63,10 @@ export async function handleEmail(
     .limit(1);
   const actualSenderId = senderRow[0]!.id;
 
-  // Insert email
+  // Process attachments first (need IDs for CID rewriting)
+  const cidMap: Record<string, string> = {};
   const emailId = nanoid();
-  await db.insert(emails).values({
-    id: emailId,
-    senderId: actualSenderId,
-    recipient: parsed.to,
-    subject: parsed.subject,
-    bodyHtml: parsed.bodyHtml,
-    bodyText: parsed.bodyText,
-    rawHeaders: JSON.stringify(parsed.headers),
-    messageId: parsed.messageId,
-    isRead: 0,
-    receivedAt: now,
-    createdAt: now,
-  });
 
-  // Cancel any active sequences for this sender
-  await cancelSequencesForSender(db, actualSenderId);
-
-  // Process attachments
   for (const att of parsed.attachments) {
     const attachmentId = nanoid();
     const r2Key = `attachments/${emailId}/${att.filename}`;
@@ -98,9 +82,44 @@ export async function handleEmail(
       contentType: att.contentType,
       size: att.content.byteLength,
       r2Key,
+      contentId: att.contentId,
       createdAt: now,
     });
+
+    if (att.contentId) {
+      const cleanCid = att.contentId.replace(/^<|>$/g, "");
+      cidMap[cleanCid] = attachmentId;
+    }
   }
+
+  // Rewrite CID references in HTML body
+  let bodyHtml = parsed.bodyHtml;
+  if (bodyHtml && Object.keys(cidMap).length > 0) {
+    for (const [cid, attachmentId] of Object.entries(cidMap)) {
+      bodyHtml = bodyHtml.replace(
+        new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi"),
+        `/api/attachments/${attachmentId}/inline`
+      );
+    }
+  }
+
+  // Insert email (with rewritten HTML)
+  await db.insert(emails).values({
+    id: emailId,
+    senderId: actualSenderId,
+    recipient: parsed.to,
+    subject: parsed.subject,
+    bodyHtml,
+    bodyText: parsed.bodyText,
+    rawHeaders: JSON.stringify(parsed.headers),
+    messageId: parsed.messageId,
+    isRead: 0,
+    receivedAt: now,
+    createdAt: now,
+  });
+
+  // Cancel any active sequences for this sender
+  await cancelSequencesForSender(db, actualSenderId);
 
   console.log(`Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`);
 }

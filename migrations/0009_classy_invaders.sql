@@ -1,0 +1,1 @@
+ALTER TABLE `attachments` ADD `content_id` text;

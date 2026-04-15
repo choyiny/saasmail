@@ -64,6 +64,13 @@
       "when": 1776280478756,
       "tag": "0008_cloudy_black_crow",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1776282330266,
+      "tag": "0009_classy_invaders",
+      "breakpoints": true
     }
   ]
 }
