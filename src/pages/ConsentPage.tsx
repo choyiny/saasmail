@@ -8,6 +8,7 @@ export default function ConsentPage() {
   const [error, setError] = useState<string | null>(null);
 
   const clientId = searchParams.get("client_id");
+  const consentCode = searchParams.get("consent_code") ?? "";
   const scope = searchParams.get("scope") ?? "";
 
   const scopeDescriptions: Record<string, string> = {
@@ -27,10 +28,10 @@ export default function ConsentPage() {
     setError(null);
 
     try {
-      const res = await authClient.oauth2.consent({
-        accept,
-        scope,
-      });
+      const res = await authClient.$fetch("/oauth2/consent", {
+        method: "POST",
+        body: { accept, consent_code: consentCode },
+      }) as { data?: { redirectURI?: string } };
 
       if (res.data?.redirectURI) {
         window.location.href = res.data.redirectURI;

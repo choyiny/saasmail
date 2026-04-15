@@ -30,6 +30,8 @@ export function createAuth(env?: CloudflareBindings) {
       oauthProvider({
         loginPage: "/login",
         consentPage: "/consent",
+        requirePKCE: true,
+        allowPlainCodeChallengeMethod: false,
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
       }),

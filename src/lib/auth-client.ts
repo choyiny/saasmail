@@ -5,6 +5,7 @@ import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 
 export const authClient = createAuthClient({
   baseURL: window.location.origin,
+  basePath: "/api/auth",
   plugins: [adminClient(), passkeyClient(), oauthProviderClient()],
 });
 
