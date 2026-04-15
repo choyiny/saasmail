@@ -236,10 +236,7 @@ type Db = DrizzleD1Database<any>;
 
 class McpToolError extends Error {}
 
-async function listSenders(
-  db: Db,
-  args: Record<string, unknown>,
-) {
+async function listSenders(db: Db, args: Record<string, unknown>) {
   const q = args.q as string | undefined;
   const page = Number(args.page ?? 1);
   const limit = Number(args.limit ?? 50);
@@ -347,7 +344,9 @@ async function sendEmail(
   const fromAddress = args.from_address as string;
 
   if (!to || !subject || !bodyHtml || !fromAddress) {
-    throw new McpToolError("to, subject, body_html, and from_address are required");
+    throw new McpToolError(
+      "to, subject, body_html, and from_address are required",
+    );
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -402,7 +401,9 @@ async function replyEmail(
   const fromAddress = args.from_address as string;
 
   if (!emailId || !bodyHtml || !fromAddress) {
-    throw new McpToolError("email_id, body_html, and from_address are required");
+    throw new McpToolError(
+      "email_id, body_html, and from_address are required",
+    );
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -569,15 +570,11 @@ async function handleRpcMessage(
             env,
           );
           return jsonRpcResult(id, {
-            content: [
-              { type: "text", text: JSON.stringify(result, null, 2) },
-            ],
+            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
           });
         } catch (err) {
           const message =
-            err instanceof McpToolError
-              ? err.message
-              : "Tool execution failed";
+            err instanceof McpToolError ? err.message : "Tool execution failed";
           return jsonRpcResult(id, {
             isError: true,
             content: [{ type: "text", text: message }],
@@ -622,9 +619,7 @@ mcpRouter.post("/", async (c) => {
 
   if (Array.isArray(body)) {
     const responses = (
-      await Promise.all(
-        body.map((m) => handleRpcMessage(m, db, c.env)),
-      )
+      await Promise.all(body.map((m) => handleRpcMessage(m, db, c.env)))
     ).filter((r): r is JsonRpcResponse => r !== null);
     if (responses.length === 0) return new Response(null, { status: 202 });
     return c.json(responses);

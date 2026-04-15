@@ -78,6 +78,13 @@
       "when": 1776285900397,
       "tag": "0010_sweet_secret_warriors",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1776306171365,
+      "tag": "0011_sloppy_professor_monster",
+      "breakpoints": true
     }
   ]
 }

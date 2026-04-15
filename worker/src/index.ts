@@ -4,9 +4,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { injectDb } from "./db/middleware";
 import { createAuth } from "./auth";
-import {
-  oauthProviderAuthServerMetadata,
-} from "@better-auth/oauth-provider";
+import { oauthProviderAuthServerMetadata } from "@better-auth/oauth-provider";
 import type { Context } from "hono";
 import { apiKeys } from "./db/api-keys.schema";
 import { users } from "./db/auth.schema";
@@ -167,19 +165,23 @@ app.route("/mcp", mcpRouter);
 // RFC 9728 endpoint, so we build the response ourselves. The resource and
 // authorization_servers fields are derived from the request origin so they
 // track whichever domain the client connects to.
-async function forwardToOAuthDiscovery(c: Context<{
-  Bindings: CloudflareBindings;
-  Variables: Variables;
-}>): Promise<Response> {
+async function forwardToOAuthDiscovery(
+  c: Context<{
+    Bindings: CloudflareBindings;
+    Variables: Variables;
+  }>,
+): Promise<Response> {
   const url = new URL(c.req.raw.url);
   const auth = createAuth(c.env, undefined, url.host);
   return oauthProviderAuthServerMetadata(auth)(c.req.raw);
 }
 
-async function serveOAuthProtectedResource(c: Context<{
-  Bindings: CloudflareBindings;
-  Variables: Variables;
-}>): Promise<Response> {
+async function serveOAuthProtectedResource(
+  c: Context<{
+    Bindings: CloudflareBindings;
+    Variables: Variables;
+  }>,
+): Promise<Response> {
   const origin = new URL(c.req.raw.url).origin;
   return Response.json({
     resource: origin,
@@ -191,7 +193,10 @@ async function serveOAuthProtectedResource(c: Context<{
 
 app.get("/.well-known/oauth-authorization-server", forwardToOAuthDiscovery);
 // RFC 8414: issuer includes basePath, so clients may request this path
-app.get("/.well-known/oauth-authorization-server/api/auth", forwardToOAuthDiscovery);
+app.get(
+  "/.well-known/oauth-authorization-server/api/auth",
+  forwardToOAuthDiscovery,
+);
 app.get("/.well-known/oauth-protected-resource", serveOAuthProtectedResource);
 
 // Forward remaining well-known paths (e.g. openid-configuration) to betterauth

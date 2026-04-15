@@ -60,6 +60,7 @@ Replace the flat chronological email list in SenderDetail with a Slack-inspired 
 ### Data Flow
 
 No API changes needed. The existing `fetchSenderEmails` returns all emails for a sender. The frontend simply splits the array:
+
 - `latestEmail = emails[0]` (API returns newest first)
 - `threadEmails = emails.slice(1)` (the rest, reversed for chronological display in sidebar)
 

@@ -63,7 +63,8 @@ describe("trimQuotedHtml", () => {
   });
 
   it("preserves HTML with no quote markers", () => {
-    const html = "<div><p>Just a normal email</p><br/><p>Second paragraph</p></div>";
+    const html =
+      "<div><p>Just a normal email</p><br/><p>Second paragraph</p></div>";
     expect(trimQuotedHtml(html)).toBe(html);
   });
 });

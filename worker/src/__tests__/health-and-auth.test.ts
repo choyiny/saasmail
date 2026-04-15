@@ -1,11 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { exports } from "cloudflare:workers";
-import {
-  applyMigrations,
-  cleanDb,
-  createTestUser,
-  authFetch,
-} from "./helpers";
+import { applyMigrations, cleanDb, createTestUser, authFetch } from "./helpers";
 
 describe("health check", () => {
   beforeAll(async () => {
@@ -48,7 +43,9 @@ describe("auth middleware", () => {
   });
 
   it("skips auth for /api/setup paths", async () => {
-    const res = await exports.default.fetch("http://localhost/api/setup/status");
+    const res = await exports.default.fetch(
+      "http://localhost/api/setup/status",
+    );
     expect(res.status).toBe(200);
   });
 

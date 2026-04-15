@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "db72d717-e859-426b-8782-b2fad2e9298d",
-  "prevId": "638cbcbd-3c03-4b78-a55e-20f20933043a",
+  "id": "3d5b10e5-8eb0-461e-9bde-1d2ecd1a4aee",
+  "prevId": "db72d717-e859-426b-8782-b2fad2e9298d",
   "tables": {
     "accounts": {
       "name": "accounts",
@@ -1750,6 +1750,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'{}'"
+        },
+        "from_address": {
+          "name": "from_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
         },
         "enrolled_at": {
           "name": "enrolled_at",

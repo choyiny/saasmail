@@ -15,6 +15,7 @@ Email templates require precise HTML control — tables for layout, inline style
 A new React component wrapping CodeMirror 6.
 
 **Dependencies to add (yarn):**
+
 - `codemirror`
 - `@codemirror/lang-html`
 - `@codemirror/state`
@@ -22,11 +23,13 @@ A new React component wrapping CodeMirror 6.
 - `@codemirror/theme-one-dark` (dark theme matching app aesthetic)
 
 **Props:**
+
 - `value: string` — current HTML content
 - `onChange: (html: string) => void` — called on every edit
 - `className?: string` — optional wrapper class
 
 **Behavior:**
+
 - Dark background using the one-dark theme (matches app's dark UI)
 - HTML syntax highlighting
 - Line numbers enabled
@@ -83,17 +86,21 @@ An `<iframe>` element beside the code editor renders the HTML in real-time.
 ### Files Changed
 
 **Keep (used elsewhere):**
+
 - `src/components/TiptapEditor.tsx` — still used by `ComposeModal` and `ReplyComposer`
 - All `.notion-*` CSS rules in `src/index.css` — still needed for TiptapEditor
 
 **Add:**
+
 - `src/components/HtmlCodeEditor.tsx` — CodeMirror wrapper component
 
 **Modify:**
+
 - `src/pages/TemplateEditorPage.tsx` — new layout with split panes, CodeMirror + iframe, prominent variable bar
 - `src/index.css` — remove Notion-style CSS (lines 32–227)
 
 **Dependencies:**
+
 - Keep: `@tiptap/*` packages (still used by ComposeModal and ReplyComposer)
 - Add: `codemirror`, `@codemirror/lang-html`, `@codemirror/state`, `@codemirror/view`, `@codemirror/theme-one-dark`
 

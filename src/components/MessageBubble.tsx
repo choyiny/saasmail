@@ -29,9 +29,11 @@ export default function MessageBubble({
   const isSent = email.type === "sent";
   const isUnread = email.type === "received" && email.isRead === 0;
 
-  const text = email.bodyText
-    || (email.bodyHtml
-      ? new DOMParser().parseFromString(email.bodyHtml, "text/html").body.textContent ?? ""
+  const text =
+    email.bodyText ||
+    (email.bodyHtml
+      ? (new DOMParser().parseFromString(email.bodyHtml, "text/html").body
+          .textContent ?? "")
       : "");
   const truncateLength = compact ? 160 : TRUNCATE_LENGTH;
 
@@ -40,9 +42,7 @@ export default function MessageBubble({
     ? text.slice(0, truncateLength).trimEnd() + "..."
     : text;
 
-  const senderName = isSent
-    ? "You"
-    : senderEmail;
+  const senderName = isSent ? "You" : senderEmail;
 
   const toAddress = isSent
     ? email.toAddress || senderEmail
@@ -100,7 +100,9 @@ export default function MessageBubble({
       {email.subject && (
         <p
           className={`text-xs mb-0.5 ${
-            isUnread ? "font-semibold text-text-primary" : "font-medium text-text-secondary"
+            isUnread
+              ? "font-semibold text-text-primary"
+              : "font-medium text-text-secondary"
           }`}
         >
           {email.subject}

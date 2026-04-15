@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
-import {
-  applyMigrations,
-  cleanDb,
-  createTestUser,
-  authFetch,
-} from "./helpers";
+import { applyMigrations, cleanDb, createTestUser, authFetch } from "./helpers";
 
 describe("setup router", () => {
   beforeAll(async () => {

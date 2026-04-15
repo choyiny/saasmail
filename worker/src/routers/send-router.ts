@@ -135,7 +135,8 @@ const replyEmailRoute = createRoute({
 sendRouter.openapi(replyEmailRoute, async (c) => {
   const db = c.get("db");
   const { emailId } = c.req.valid("param");
-  const { bodyHtml, bodyText, fromAddress, templateSlug, variables } = c.req.valid("json");
+  const { bodyHtml, bodyText, fromAddress, templateSlug, variables } =
+    c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
   // Get the original email
@@ -209,7 +210,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       : `Re: ${orig.subject || ""}`;
     finalBodyHtml = bodyHtml;
   } else {
-    return c.json({ error: "Either bodyHtml or templateSlug is required" }, 400);
+    return c.json(
+      { error: "Either bodyHtml or templateSlug is required" },
+      400,
+    );
   }
 
   // Send via Resend

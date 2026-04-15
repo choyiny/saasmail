@@ -63,7 +63,12 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
   }
 
   async function handleDelete(emailId: string) {
-    if (!confirm("Permanently delete this email and all its attachments? This cannot be undone.")) return;
+    if (
+      !confirm(
+        "Permanently delete this email and all its attachments? This cannot be undone.",
+      )
+    )
+      return;
     await deleteEmail(emailId);
     setEmails((prev) => prev.filter((e) => e.id !== emailId));
   }
@@ -92,7 +97,8 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
             <p className="text-xs text-text-secondary">{sender.email}</p>
           )}
           <p className="text-[11px] text-text-tertiary">
-            &rarr; {sender.recipient} &middot; {sender.totalCount} email{sender.totalCount !== 1 ? "s" : ""}
+            &rarr; {sender.recipient} &middot; {sender.totalCount} email
+            {sender.totalCount !== 1 ? "s" : ""}
           </p>
         </div>
       </div>
@@ -128,7 +134,8 @@ export default function SenderDetail({ sender }: SenderDetailProps) {
                     className="mb-3 flex items-center gap-1.5 text-xs text-accent hover:underline"
                   >
                     <MessageSquare size={12} />
-                    {threadEmails.length} earlier message{threadEmails.length !== 1 ? "s" : ""}
+                    {threadEmails.length} earlier message
+                    {threadEmails.length !== 1 ? "s" : ""}
                   </button>
                 )}
 

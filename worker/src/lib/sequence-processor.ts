@@ -60,11 +60,7 @@ export async function handleQueueBatch(
 
   for (const msg of batch.messages) {
     try {
-      await processSequenceEmail(
-        db,
-        resend,
-        msg.body.sequenceEmailId,
-      );
+      await processSequenceEmail(db, resend, msg.body.sequenceEmailId);
       msg.ack();
     } catch (err) {
       console.error(

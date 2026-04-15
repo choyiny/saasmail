@@ -36,7 +36,8 @@ const listGroupedSendersRoute = createRoute({
   method: "get",
   path: "/grouped",
   tags: ["Senders"],
-  description: "List senders grouped by sender (aggregated across all recipients).",
+  description:
+    "List senders grouped by sender (aggregated across all recipients).",
   request: {
     query: z.object({
       q: z

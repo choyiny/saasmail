@@ -12,13 +12,13 @@
 
 ## File Map
 
-| Action | File | Responsibility |
-|--------|------|----------------|
-| Create | `src/components/ReplyComposer.tsx` | Bottom-docked reply composer with freeform/template tabs |
-| Modify | `src/pages/SenderDetail.tsx` | Own reply state locally, render ReplyComposer |
-| Modify | `src/pages/InboxPage.tsx` | Remove reply state, simplify ComposeModal usage |
-| Modify | `src/pages/ComposeModal.tsx` | Remove reply mode, compose-only |
-| Modify | `src/lib/api.ts` | Extend `replyToEmail` signature |
+| Action | File                                | Responsibility                                             |
+| ------ | ----------------------------------- | ---------------------------------------------------------- |
+| Create | `src/components/ReplyComposer.tsx`  | Bottom-docked reply composer with freeform/template tabs   |
+| Modify | `src/pages/SenderDetail.tsx`        | Own reply state locally, render ReplyComposer              |
+| Modify | `src/pages/InboxPage.tsx`           | Remove reply state, simplify ComposeModal usage            |
+| Modify | `src/pages/ComposeModal.tsx`        | Remove reply mode, compose-only                            |
+| Modify | `src/lib/api.ts`                    | Extend `replyToEmail` signature                            |
 | Modify | `worker/src/routers/send-router.ts` | Accept `fromAddress`, `templateSlug`, `variables` on reply |
 
 ---
@@ -26,6 +26,7 @@
 ### Task 1: Extend the backend reply endpoint
 
 **Files:**
+
 - Modify: `worker/src/routers/send-router.ts:107-205`
 
 - [ ] **Step 1: Update the request schema for the reply route**
@@ -66,7 +67,13 @@ Replace the handler body of `sendRouter.openapi(replyEmailRoute, ...)` (lines 13
 sendRouter.openapi(replyEmailRoute, async (c) => {
   const db = c.get("db");
   const { emailId } = c.req.valid("param");
-  const { bodyHtml, bodyText, fromAddress: requestedFrom, templateSlug, variables } = c.req.valid("json");
+  const {
+    bodyHtml,
+    bodyText,
+    fromAddress: requestedFrom,
+    templateSlug,
+    variables,
+  } = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
   // Get the original email
@@ -146,7 +153,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       : `Re: ${orig.subject || ""}`;
     finalBodyHtml = bodyHtml;
   } else {
-    return c.json({ error: "Either bodyHtml or templateSlug is required" }, 400);
+    return c.json(
+      { error: "Either bodyHtml or templateSlug is required" },
+      400,
+    );
   }
 
   // Send via Resend
@@ -208,6 +218,7 @@ git commit -m "feat: extend reply endpoint with fromAddress, templateSlug, varia
 ### Task 2: Extend the frontend API client
 
 **Files:**
+
 - Modify: `src/lib/api.ts:112-121`
 
 - [ ] **Step 1: Update the `replyToEmail` function signature**
@@ -245,6 +256,7 @@ git commit -m "feat: extend replyToEmail API with fromAddress and template param
 ### Task 3: Create the ReplyComposer component
 
 **Files:**
+
 - Create: `src/components/ReplyComposer.tsx`
 
 - [ ] **Step 1: Create the ReplyComposer component**
@@ -255,11 +267,7 @@ Create `src/components/ReplyComposer.tsx` with this content:
 import { useState, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import TiptapEditor from "@/components/TiptapEditor";
-import {
-  replyToEmail,
-  fetchTemplates,
-  type EmailTemplate,
-} from "@/lib/api";
+import { replyToEmail, fetchTemplates, type EmailTemplate } from "@/lib/api";
 
 interface ReplyComposerProps {
   emailId: string;
@@ -305,11 +313,15 @@ export default function ReplyComposer({
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState("");
 
-  const selectedTemplate = templates.find((t) => t.slug === selectedSlug) ?? null;
+  const selectedTemplate =
+    templates.find((t) => t.slug === selectedSlug) ?? null;
 
   const requiredVars = useMemo(() => {
     if (!selectedTemplate) return [];
-    return extractVariables(selectedTemplate.subject, selectedTemplate.bodyHtml);
+    return extractVariables(
+      selectedTemplate.subject,
+      selectedTemplate.bodyHtml,
+    );
   }, [selectedTemplate]);
 
   // Auto-fill variables when template or sender changes
@@ -532,6 +544,7 @@ git commit -m "feat: add ReplyComposer component with freeform and template tabs
 ### Task 4: Update SenderDetail to own reply state and render ReplyComposer
 
 **Files:**
+
 - Modify: `src/pages/SenderDetail.tsx`
 
 - [ ] **Step 1: Update imports and props**
@@ -636,36 +649,36 @@ Add after the existing `useEffect` for fetching emails on `sender.id` change (li
 Replace:
 
 ```typescript
-  useEffect(() => {
-    setLoading(true);
-    setRecipientFilter("");
-    fetchSenderEmails(sender.id)
-      .then((data) => {
-        setEmails(data);
-      })
-      .finally(() => setLoading(false));
-  }, [sender.id]);
+useEffect(() => {
+  setLoading(true);
+  setRecipientFilter("");
+  fetchSenderEmails(sender.id)
+    .then((data) => {
+      setEmails(data);
+    })
+    .finally(() => setLoading(false));
+}, [sender.id]);
 ```
 
 with:
 
 ```typescript
-  function refetchEmails() {
-    fetchSenderEmails(sender.id, {
-      recipient: recipientFilter || undefined,
-    }).then(setEmails);
-  }
+function refetchEmails() {
+  fetchSenderEmails(sender.id, {
+    recipient: recipientFilter || undefined,
+  }).then(setEmails);
+}
 
-  useEffect(() => {
-    setLoading(true);
-    setRecipientFilter("");
-    setReplyToEmailId(null);
-    fetchSenderEmails(sender.id)
-      .then((data) => {
-        setEmails(data);
-      })
-      .finally(() => setLoading(false));
-  }, [sender.id]);
+useEffect(() => {
+  setLoading(true);
+  setRecipientFilter("");
+  setReplyToEmailId(null);
+  fetchSenderEmails(sender.id)
+    .then((data) => {
+      setEmails(data);
+    })
+    .finally(() => setLoading(false));
+}, [sender.id]);
 ```
 
 - [ ] **Step 4: Update the MessageBubble onReply and add ReplyComposer to render**
@@ -675,121 +688,121 @@ Replace the `onReply` prop on `MessageBubble` and add the `ReplyComposer` below 
 Replace the entire return block (from `return (` to the closing `);`):
 
 ```tsx
-  return (
-    <div className="flex h-full flex-col">
-      {/* Header */}
-      <div className="border-b border-border-dark px-4 sm:px-6 py-3">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            <h2 className="text-sm font-semibold text-text-primary">
-              {sender.name || sender.email}
-            </h2>
-            {sender.name && (
-              <p className="text-xs text-text-secondary">{sender.email}</p>
-            )}
-            <p className="text-[11px] text-text-tertiary">
-              {sender.totalCount} email{sender.totalCount !== 1 ? "s" : ""}
-            </p>
-          </div>
-          {/* Recipient filter */}
-          {recipients.length > 1 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover">
-                  {recipientFilter || "All addresses"}
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="bg-card border-border-dark text-text-primary">
+return (
+  <div className="flex h-full flex-col">
+    {/* Header */}
+    <div className="border-b border-border-dark px-4 sm:px-6 py-3">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h2 className="text-sm font-semibold text-text-primary">
+            {sender.name || sender.email}
+          </h2>
+          {sender.name && (
+            <p className="text-xs text-text-secondary">{sender.email}</p>
+          )}
+          <p className="text-[11px] text-text-tertiary">
+            {sender.totalCount} email{sender.totalCount !== 1 ? "s" : ""}
+          </p>
+        </div>
+        {/* Recipient filter */}
+        {recipients.length > 1 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover">
+                {recipientFilter || "All addresses"}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="bg-card border-border-dark text-text-primary">
+              <DropdownMenuItem
+                onClick={() => setRecipientFilter("")}
+                className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
+              >
+                All addresses
+              </DropdownMenuItem>
+              {recipients.map((r) => (
                 <DropdownMenuItem
-                  onClick={() => setRecipientFilter("")}
+                  key={r}
+                  onClick={() => setRecipientFilter(r)}
                   className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
                 >
-                  All addresses
+                  {r}
                 </DropdownMenuItem>
-                {recipients.map((r) => (
-                  <DropdownMenuItem
-                    key={r}
-                    onClick={() => setRecipientFilter(r)}
-                    className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
-                  >
-                    {r}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      </div>
-
-      {/* Sequence status */}
-      <div className="border-b border-border-dark px-4 sm:px-6 py-2">
-        {enrollmentInfo?.enrollment ? (
-          <SequenceStatus
-            senderId={sender.id}
-            onStatusChange={refreshEnrollment}
-          />
-        ) : (
-          <button
-            onClick={() => setEnrollModalOpen(true)}
-            className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
-          >
-            Add to Sequence
-          </button>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
+    </div>
 
-      {/* Conversation */}
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="divide-y divide-border-dark" ref={scrollRef}>
-          {chronologicalEmails.length === 0 ? (
-            <p className="py-4 text-center text-xs text-text-tertiary">
-              No emails found.
-            </p>
-          ) : (
-            chronologicalEmails.map((email) => (
-              <MessageBubble
-                key={email.id}
-                email={email}
-                senderEmail={sender.email}
-                onOpenHtml={setHtmlPreviewEmail}
-                onMarkRead={handleMarkRead}
-                onReply={setReplyToEmailId}
-              />
-            ))
-          )}
-        </div>
-      </ScrollArea>
-
-      {/* Reply Composer */}
-      {replyToEmailId && (
-        <ReplyComposer
-          emailId={replyToEmailId}
-          senderName={sender.name}
-          senderEmail={sender.email}
-          recipients={recipients}
-          onClose={() => setReplyToEmailId(null)}
-          onSent={refetchEmails}
+    {/* Sequence status */}
+    <div className="border-b border-border-dark px-4 sm:px-6 py-2">
+      {enrollmentInfo?.enrollment ? (
+        <SequenceStatus
+          senderId={sender.id}
+          onStatusChange={refreshEnrollment}
         />
+      ) : (
+        <button
+          onClick={() => setEnrollModalOpen(true)}
+          className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
+        >
+          Add to Sequence
+        </button>
       )}
+    </div>
 
-      {/* HTML Preview Modal */}
-      <EmailHtmlModal
-        email={htmlPreviewEmail}
-        open={htmlPreviewEmail !== null}
-        onClose={() => setHtmlPreviewEmail(null)}
-      />
+    {/* Conversation */}
+    <ScrollArea className="flex-1 min-h-0">
+      <div className="divide-y divide-border-dark" ref={scrollRef}>
+        {chronologicalEmails.length === 0 ? (
+          <p className="py-4 text-center text-xs text-text-tertiary">
+            No emails found.
+          </p>
+        ) : (
+          chronologicalEmails.map((email) => (
+            <MessageBubble
+              key={email.id}
+              email={email}
+              senderEmail={sender.email}
+              onOpenHtml={setHtmlPreviewEmail}
+              onMarkRead={handleMarkRead}
+              onReply={setReplyToEmailId}
+            />
+          ))
+        )}
+      </div>
+    </ScrollArea>
 
-      {/* Sequence Enrollment Modal */}
-      <EnrollSequenceModal
-        senderId={sender.id}
+    {/* Reply Composer */}
+    {replyToEmailId && (
+      <ReplyComposer
+        emailId={replyToEmailId}
         senderName={sender.name}
         senderEmail={sender.email}
-        open={enrollModalOpen}
-        onClose={() => setEnrollModalOpen(false)}
-        onEnrolled={refreshEnrollment}
+        recipients={recipients}
+        onClose={() => setReplyToEmailId(null)}
+        onSent={refetchEmails}
       />
-    </div>
-  );
+    )}
+
+    {/* HTML Preview Modal */}
+    <EmailHtmlModal
+      email={htmlPreviewEmail}
+      open={htmlPreviewEmail !== null}
+      onClose={() => setHtmlPreviewEmail(null)}
+    />
+
+    {/* Sequence Enrollment Modal */}
+    <EnrollSequenceModal
+      senderId={sender.id}
+      senderName={sender.name}
+      senderEmail={sender.email}
+      open={enrollModalOpen}
+      onClose={() => setEnrollModalOpen(false)}
+      onEnrolled={refreshEnrollment}
+    />
+  </div>
+);
 ```
 
 - [ ] **Step 5: Commit**
@@ -804,6 +817,7 @@ git commit -m "feat: move reply state into SenderDetail, render ReplyComposer"
 ### Task 5: Simplify InboxPage and ComposeModal (remove reply mode)
 
 **Files:**
+
 - Modify: `src/pages/InboxPage.tsx`
 - Modify: `src/pages/ComposeModal.tsx`
 
@@ -864,10 +878,7 @@ export default function InboxPage() {
         )}
       </div>
 
-      <ComposeModal
-        open={composeOpen}
-        onClose={() => setComposeOpen(false)}
-      />
+      <ComposeModal open={composeOpen} onClose={() => setComposeOpen(false)} />
     </>
   );
 }
@@ -1004,6 +1015,7 @@ git commit -m "refactor: remove reply mode from ComposeModal and InboxPage"
 Run: `npm run dev` (or equivalent)
 
 Manual checks:
+
 1. Open inbox, select a sender with received emails
 2. Click "Reply" on a received email — bottom composer appears (not a modal)
 3. Verify "From" dropdown shows available recipient addresses

@@ -89,10 +89,9 @@ describe("emails router", () => {
         messageId: "msg-2@test.com",
       });
 
-      const res = await authFetch(
-        "/api/emails/by-sender/s1?q=Important",
-        { apiKey },
-      );
+      const res = await authFetch("/api/emails/by-sender/s1?q=Important", {
+        apiKey,
+      });
       const data = await res.json();
       expect(data).toHaveLength(1);
       expect(data[0].subject).toBe("Important Meeting");

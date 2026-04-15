@@ -20,18 +20,20 @@ Replace the reply modal (`ComposeModal` in reply mode) with an inline reply comp
 A bottom-docked composer that renders inside `SenderDetail` below the message scroll area.
 
 **Props:**
+
 ```typescript
 interface ReplyComposerProps {
-  emailId: string;           // email being replied to
+  emailId: string; // email being replied to
   senderName: string | null; // for auto-filling template variables
-  senderEmail: string;       // for auto-filling template variables
-  recipients: string[];      // available "from" addresses
-  onClose: () => void;       // dismiss the composer
-  onSent: () => void;        // callback after successful send (refresh emails)
+  senderEmail: string; // for auto-filling template variables
+  recipients: string[]; // available "from" addresses
+  onClose: () => void; // dismiss the composer
+  onSent: () => void; // callback after successful send (refresh emails)
 }
 ```
 
 **Layout (top to bottom):**
+
 1. **Header bar** — "Reply" label + close (X) button
 2. **From picker** — dropdown showing available recipient addresses, defaults to first one
 3. **Tab toggle** — two tabs: "Freeform" | "Template"
@@ -39,9 +41,11 @@ interface ReplyComposerProps {
 5. **Footer** — Send button + error display
 
 **Freeform tab:**
+
 - TiptapEditor instance for rich text editing (same as current reply)
 
 **Template tab:**
+
 - Dropdown to select a template (fetched via `fetchTemplates()`)
 - On selection: show a read-only HTML preview of the template body
 - Below preview: input fields for each detected `{{variable}}` in the template
@@ -97,10 +101,11 @@ z.object({
   fromAddress: z.string().email().optional(),
   templateSlug: z.string().optional(),
   variables: z.record(z.string()).optional(),
-})
+});
 ```
 
 **Logic changes:**
+
 - If `fromAddress` is provided, use it instead of `RESEND_EMAIL_FROM` (validate it's a known recipient address from the emails table)
 - If `templateSlug` is provided, fetch the template, render it by replacing `{{var}}` with values from `variables`, and use the rendered HTML as the body. Template subject replaces the auto-generated "Re: ..." subject.
 - If neither `templateSlug` nor `bodyHtml` is provided, return 400

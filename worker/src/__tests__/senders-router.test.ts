@@ -50,7 +50,11 @@ describe("senders router", () => {
     });
 
     it("searches by email", async () => {
-      await createTestSender({ id: "s1", email: "alice@test.com", name: "Alice" });
+      await createTestSender({
+        id: "s1",
+        email: "alice@test.com",
+        name: "Alice",
+      });
       await createTestSender({ id: "s2", email: "bob@test.com", name: "Bob" });
 
       const res = await authFetch("/api/senders?q=bob%40test", { apiKey });
@@ -99,10 +103,9 @@ describe("senders router", () => {
         messageId: "msg-2@example.com",
       });
 
-      const res = await authFetch(
-        "/api/senders?recipient=inbox%40cmail.test",
-        { apiKey },
-      );
+      const res = await authFetch("/api/senders?recipient=inbox%40cmail.test", {
+        apiKey,
+      });
       const data = await res.json();
       expect(data).toHaveLength(1);
       expect(data[0].id).toBe("s1");

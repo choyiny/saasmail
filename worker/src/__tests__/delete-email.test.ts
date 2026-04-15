@@ -43,10 +43,7 @@ describe("DELETE /api/emails/:id", () => {
 
     // Email should be gone
     const db = getDb();
-    const rows = await db
-      .select()
-      .from(emails)
-      .where(eq(emails.id, "e1"));
+    const rows = await db.select().from(emails).where(eq(emails.id, "e1"));
     expect(rows.length).toBe(0);
   });
 

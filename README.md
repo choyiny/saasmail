@@ -24,17 +24,17 @@ Build multi-step drip campaigns. Enroll a sender into a sequence and cmail will 
 
 ## Architecture
 
-| Layer | Technology |
-|-------|-----------|
-| **Receive email** | Cloudflare Email Workers |
-| **Send email** | Resend (`RESEND_API_KEY`) |
-| **Runtime** | Cloudflare Workers + Hono |
-| **Database** | Cloudflare D1 (SQLite) |
-| **File storage** | Cloudflare R2 (attachments) |
-| **Queue** | Cloudflare Queues (sequence processing) |
-| **Frontend** | React + Tailwind CSS |
-| **ORM** | Drizzle |
-| **Auth** | BetterAuth with passkey support |
+| Layer             | Technology                              |
+| ----------------- | --------------------------------------- |
+| **Receive email** | Cloudflare Email Workers                |
+| **Send email**    | Resend (`RESEND_API_KEY`)               |
+| **Runtime**       | Cloudflare Workers + Hono               |
+| **Database**      | Cloudflare D1 (SQLite)                  |
+| **File storage**  | Cloudflare R2 (attachments)             |
+| **Queue**         | Cloudflare Queues (sequence processing) |
+| **Frontend**      | React + Tailwind CSS                    |
+| **ORM**           | Drizzle                                 |
+| **Auth**          | BetterAuth with passkey support         |
 
 ## Quick Start
 
@@ -84,6 +84,7 @@ cp wrangler.jsonc.example wrangler.jsonc
 ```
 
 Edit `wrangler.jsonc`:
+
 - Set `account_id` to your Cloudflare account ID
 - Set the `database_id` in `d1_databases` to the ID from step 3
 - Set `BASE_URL` to your deployed URL
@@ -98,6 +99,7 @@ cp .dev.vars.example .dev.vars
 ```
 
 Edit `.dev.vars`:
+
 - `RESEND_API_KEY` — your Resend API key
 - `BETTER_AUTH_SECRET` — generate a random string (`openssl rand -hex 32`)
 

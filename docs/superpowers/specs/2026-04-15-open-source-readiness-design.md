@@ -40,6 +40,7 @@ Apache License 2.0 full text with copyright year 2025 and copyright holder "cmai
 ### 3. CONTRIBUTING.md
 
 Short and practical:
+
 - Fork and branch workflow
 - Local development setup (reference README)
 - PR expectations: describe what and why, keep PRs focused
@@ -48,6 +49,7 @@ Short and practical:
 ### 4. wrangler.jsonc.example (updated)
 
 Add the missing sections from the real config with placeholders:
+
 - `queues` (producers + consumers)
 - `triggers` (crons)
 - `vars` (BASE_URL, TRUSTED_ORIGINS with placeholder values)

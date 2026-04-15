@@ -198,7 +198,7 @@ export default function SequenceEditorPage() {
             sequence:
           </p>
           <pre className="overflow-x-auto rounded-lg border border-border-dark bg-main p-4 text-xs text-text-secondary">
-{`curl -X POST ${window.location.origin}/api/sequences/${id}/enroll \\
+            {`curl -X POST ${window.location.origin}/api/sequences/${id}/enroll \\
   -H "Authorization: Bearer <API_KEY>" \\
   -H "Content-Type: application/json" \\
   -d '{

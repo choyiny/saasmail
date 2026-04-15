@@ -13,7 +13,13 @@ import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { apiKeys } from "../db/api-keys.schema";
 import { invitations } from "../db/invitations.schema";
-import { passkeys, oauthClients, oauthConsents, oauthAccessTokens, oauthRefreshTokens } from "../db/auth.schema";
+import {
+  passkeys,
+  oauthClients,
+  oauthConsents,
+  oauthAccessTokens,
+  oauthRefreshTokens,
+} from "../db/auth.schema";
 import { hashKey } from "../lib/crypto";
 
 export function getDb() {
@@ -85,7 +91,10 @@ export async function createTestUser(
   });
 
   // Create API key for auth in tests (BetterAuth sessions require token hashing we can't easily replicate)
-  const rawKey = `sk_${userId.replace(/[^a-f0-9]/g, "0").padEnd(32, "0").slice(0, 32)}`;
+  const rawKey = `sk_${userId
+    .replace(/[^a-f0-9]/g, "0")
+    .padEnd(32, "0")
+    .slice(0, 32)}`;
   const keyHash = await hashKey(rawKey);
 
   await db.insert(apiKeys).values({
@@ -101,7 +110,13 @@ export async function createTestUser(
 
 /** Create a test sender. */
 export async function createTestSender(
-  opts: { id?: string; email?: string; name?: string; unreadCount?: number; totalCount?: number } = {},
+  opts: {
+    id?: string;
+    email?: string;
+    name?: string;
+    unreadCount?: number;
+    totalCount?: number;
+  } = {},
 ) {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
@@ -151,7 +166,12 @@ export async function createTestEmail(
 
 /** Create a test email template. */
 export async function createTestTemplate(
-  opts: { slug?: string; name?: string; subject?: string; bodyHtml?: string } = {},
+  opts: {
+    slug?: string;
+    name?: string;
+    subject?: string;
+    bodyHtml?: string;
+  } = {},
 ) {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);

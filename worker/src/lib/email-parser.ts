@@ -54,10 +54,7 @@ export function trimQuotedText(text: string): string {
     }
   }
 
-  return lines
-    .slice(0, cutIndex)
-    .join("\n")
-    .trimEnd();
+  return lines.slice(0, cutIndex).join("\n").trimEnd();
 }
 
 /**
@@ -69,16 +66,10 @@ export function trimQuotedText(text: string): string {
  */
 export function trimQuotedHtml(html: string): string {
   // Gmail quote block
-  let trimmed = html.replace(
-    /<div\s+class="gmail_quote"[\s\S]*$/i,
-    "",
-  );
+  let trimmed = html.replace(/<div\s+class="gmail_quote"[\s\S]*$/i, "");
 
   // Yahoo quote header + blockquote
-  trimmed = trimmed.replace(
-    /<div\s+id="yahoo_quoted_[\s\S]*$/i,
-    "",
-  );
+  trimmed = trimmed.replace(/<div\s+id="yahoo_quoted_[\s\S]*$/i, "");
 
   // Outlook-style "Original Message" separator and everything after
   trimmed = trimmed.replace(
@@ -87,10 +78,7 @@ export function trimQuotedHtml(html: string): string {
   );
 
   // Generic blockquote at the end (Apple Mail, Thunderbird)
-  trimmed = trimmed.replace(
-    /<div\s+class="moz-cite-prefix"[\s\S]*$/i,
-    "",
-  );
+  trimmed = trimmed.replace(/<div\s+class="moz-cite-prefix"[\s\S]*$/i, "");
 
   return trimmed.trimEnd();
 }

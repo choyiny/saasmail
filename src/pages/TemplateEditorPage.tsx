@@ -53,10 +53,7 @@ function ApiSamplePanel({
 
   return (
     <div className="fixed inset-y-0 right-0 z-40 flex">
-      <div
-        className="fixed inset-0 bg-black/20"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 bg-black/20" onClick={onClose} />
       <div className="relative w-80 xl:w-96 bg-panel border-l border-border-dark overflow-auto p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-text-primary">
@@ -118,8 +115,7 @@ function ApiSamplePanel({
               {JSON.stringify(
                 {
                   error: "Missing required template variables",
-                  missingVariables:
-                    variables.length > 0 ? [variables[0]] : [],
+                  missingVariables: variables.length > 0 ? [variables[0]] : [],
                   requiredVariables: variables,
                 },
                 null,
@@ -292,12 +288,15 @@ export default function TemplateEditorPage() {
                 </span>
               ))}
               <span className="text-[10px] text-text-tertiary ml-1">
-                — use <code className="text-accent/70">{`{{variableName}}`}</code> syntax to add more
+                — use{" "}
+                <code className="text-accent/70">{`{{variableName}}`}</code>{" "}
+                syntax to add more
               </span>
             </>
           ) : (
             <span className="text-[10px] text-text-tertiary">
-              Use <code className="text-accent/70">{`{{variableName}}`}</code> in subject or body to add template variables
+              Use <code className="text-accent/70">{`{{variableName}}`}</code>{" "}
+              in subject or body to add template variables
             </span>
           )}
         </div>
@@ -324,10 +323,17 @@ export default function TemplateEditorPage() {
                       const trimmed = line.trim();
                       if (!trimmed) return acc;
                       const isClosing = /^<\//.test(trimmed);
-                      const isSelfClosing = /\/>$/.test(trimmed) || /^<(br|hr|img|input|meta|link)\b/i.test(trimmed);
+                      const isSelfClosing =
+                        /\/>$/.test(trimmed) ||
+                        /^<(br|hr|img|input|meta|link)\b/i.test(trimmed);
                       if (isClosing) acc.indent = Math.max(0, acc.indent - 1);
                       acc.lines.push("  ".repeat(acc.indent) + trimmed);
-                      if (!isClosing && !isSelfClosing && /^<[^/!]/.test(trimmed)) acc.indent++;
+                      if (
+                        !isClosing &&
+                        !isSelfClosing &&
+                        /^<[^/!]/.test(trimmed)
+                      )
+                        acc.indent++;
                       return acc;
                     },
                     { lines: [], indent: 0 },
@@ -341,10 +347,7 @@ export default function TemplateEditorPage() {
             </button>
           </div>
           <div className="flex-1 min-h-0">
-            <HtmlCodeEditor
-              value={bodyHtml}
-              onChange={setBodyHtml}
-            />
+            <HtmlCodeEditor value={bodyHtml} onChange={setBodyHtml} />
           </div>
         </div>
 

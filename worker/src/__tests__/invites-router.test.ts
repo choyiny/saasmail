@@ -21,7 +21,9 @@ describe("invites router", () => {
     ({ apiKey, userId } = await createTestUser({ role: "admin" }));
   });
 
-  async function createInvite(opts: { email?: string; expired?: boolean } = {}) {
+  async function createInvite(
+    opts: { email?: string; expired?: boolean } = {},
+  ) {
     const db = getDb();
     const now = new Date();
     const expiresAt = opts.expired

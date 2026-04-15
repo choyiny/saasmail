@@ -52,9 +52,7 @@ export default function ConsentPage() {
     return (
       <div className="flex min-h-screen items-center justify-center bg-main">
         <div className="w-full max-w-sm rounded-xl border border-border-dark bg-card p-6 text-center">
-          <p className="text-sm text-red-400">
-            Invalid authorization request.
-          </p>
+          <p className="text-sm text-red-400">Invalid authorization request.</p>
           <p className="mt-2 text-xs text-text-tertiary">
             This authorization request is invalid or has expired.
           </p>

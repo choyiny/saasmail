@@ -80,10 +80,9 @@ describe("stats router", () => {
         recipient: "other@cmail.test",
       });
 
-      const res = await authFetch(
-        "/api/stats?recipient=inbox%40cmail.test",
-        { apiKey },
-      );
+      const res = await authFetch("/api/stats?recipient=inbox%40cmail.test", {
+        apiKey,
+      });
       const data = await res.json();
       expect(data.totalEmails).toBe(1);
       expect(data.unreadCount).toBe(1);

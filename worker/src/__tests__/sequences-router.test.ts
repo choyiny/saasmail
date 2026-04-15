@@ -257,12 +257,8 @@ describe("sequences router", () => {
       expect(res.status).toBe(201);
       const data = await res.json();
       // Step 2 should have 48 hours delay from base instead of 24
-      const step2 = data.scheduledEmails.find(
-        (e: any) => e.stepOrder === 2,
-      );
-      const step1 = data.scheduledEmails.find(
-        (e: any) => e.stepOrder === 1,
-      );
+      const step2 = data.scheduledEmails.find((e: any) => e.stepOrder === 2);
+      const step1 = data.scheduledEmails.find((e: any) => e.stepOrder === 1);
       const diff = step2.scheduledAt - step1.scheduledAt;
       expect(diff).toBe(48 * 3600);
     });
@@ -271,10 +267,9 @@ describe("sequences router", () => {
   describe("GET /api/sequences/senders/:senderId/enrollment", () => {
     it("returns null when no active enrollment", async () => {
       await createTestSender({ id: "s1", email: "a@test.com" });
-      const res = await authFetch(
-        "/api/sequences/senders/s1/enrollment",
-        { apiKey },
-      );
+      const res = await authFetch("/api/sequences/senders/s1/enrollment", {
+        apiKey,
+      });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.enrollment).toBeNull();
@@ -291,10 +286,9 @@ describe("sequences router", () => {
         body: JSON.stringify({ senderId: "s1" }),
       });
 
-      const res = await authFetch(
-        "/api/sequences/senders/s1/enrollment",
-        { apiKey },
-      );
+      const res = await authFetch("/api/sequences/senders/s1/enrollment", {
+        apiKey,
+      });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.enrollment).not.toBeNull();
@@ -333,10 +327,10 @@ describe("sequences router", () => {
     });
 
     it("returns 404 for nonexistent enrollment", async () => {
-      const res = await authFetch(
-        "/api/sequences/enrollments/nonexistent",
-        { apiKey, method: "DELETE" },
-      );
+      const res = await authFetch("/api/sequences/enrollments/nonexistent", {
+        apiKey,
+        method: "DELETE",
+      });
       expect(res.status).toBe(404);
     });
 

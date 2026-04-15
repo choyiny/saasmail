@@ -12,17 +12,18 @@
 
 ## File Structure
 
-| File | Action | Responsibility |
-|------|--------|---------------|
+| File                               | Action | Responsibility                                                                                     |
+| ---------------------------------- | ------ | -------------------------------------------------------------------------------------------------- |
 | `src/components/ThreadSidebar.tsx` | Create | Right sidebar panel: header with close button, scrollable list of older emails using MessageBubble |
-| `src/pages/SenderDetail.tsx` | Modify | Split emails into latest + thread, manage `threadOpen` state, render two-column layout |
-| `src/components/MessageBubble.tsx` | Modify | Add optional `compact` prop to reduce padding/hide some elements for sidebar use |
+| `src/pages/SenderDetail.tsx`       | Modify | Split emails into latest + thread, manage `threadOpen` state, render two-column layout             |
+| `src/components/MessageBubble.tsx` | Modify | Add optional `compact` prop to reduce padding/hide some elements for sidebar use                   |
 
 ---
 
 ### Task 1: Add `compact` prop to MessageBubble
 
 **Files:**
+
 - Modify: `src/components/MessageBubble.tsx`
 
 - [ ] **Step 1: Add `compact` prop to interface and component signature**
@@ -97,6 +98,7 @@ git commit -m "feat: add compact prop to MessageBubble for sidebar use"
 ### Task 2: Create ThreadSidebar component
 
 **Files:**
+
 - Create: `src/components/ThreadSidebar.tsx`
 
 - [ ] **Step 1: Create the ThreadSidebar component**
@@ -184,6 +186,7 @@ git commit -m "feat: add ThreadSidebar component for historical email thread"
 ### Task 3: Rewrite SenderDetail to use thread layout
 
 **Files:**
+
 - Modify: `src/pages/SenderDetail.tsx`
 
 - [ ] **Step 1: Add threadOpen state and split emails**
@@ -216,7 +219,9 @@ import { MessageSquare } from "lucide-react";
 Replace the entire `{/* Conversation */}` `<ScrollArea>` block (lines 173-193 in current file) with:
 
 ```tsx
-{/* Conversation — main email + thread sidebar */}
+{
+  /* Conversation — main email + thread sidebar */
+}
 <div className="flex flex-1 overflow-hidden">
   {/* Main email area */}
   <div className="flex flex-1 flex-col min-w-0">
@@ -230,7 +235,8 @@ Replace the entire `{/* Conversation */}` `<ScrollArea>` block (lines 173-193 in
               className="mb-3 flex items-center gap-1.5 text-xs text-accent hover:underline"
             >
               <MessageSquare size={12} />
-              {threadEmails.length} earlier message{threadEmails.length !== 1 ? "s" : ""}
+              {threadEmails.length} earlier message
+              {threadEmails.length !== 1 ? "s" : ""}
             </button>
           )}
 
@@ -276,7 +282,7 @@ Replace the entire `{/* Conversation */}` `<ScrollArea>` block (lines 173-193 in
       onClose={() => setThreadOpen(false)}
     />
   )}
-</div>
+</div>;
 ```
 
 - [ ] **Step 4: Remove the old ReplyComposer block**
@@ -296,6 +302,7 @@ setThreadOpen(false);
 Run: `yarn dev`
 
 Test in browser:
+
 1. Select a sender with multiple emails — confirm latest email shows prominently with "N earlier messages" button
 2. Click the thread indicator — confirm sidebar opens with older emails
 3. Click X on sidebar — confirm it closes
@@ -315,6 +322,7 @@ git commit -m "feat: replace flat email list with thread sidebar layout"
 ### Task 4: Mobile responsive behavior
 
 **Files:**
+
 - Modify: `src/pages/SenderDetail.tsx`
 - Modify: `src/components/ThreadSidebar.tsx`
 

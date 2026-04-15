@@ -31,19 +31,15 @@ describe("cancelSequencesForSender", () => {
     // Create a sequence and enrollment directly
     const now = Math.floor(Date.now() / 1000);
 
-    await db
-      .insert(
-        (await import("../db/sequences.schema")).sequences,
-      )
-      .values({
-        id: "seq-1",
-        name: "Test",
-        steps: JSON.stringify([
-          { order: 1, templateSlug: "welcome", delayHours: 0 },
-        ]),
-        createdAt: now,
-        updatedAt: now,
-      });
+    await db.insert((await import("../db/sequences.schema")).sequences).values({
+      id: "seq-1",
+      name: "Test",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
 
     await db.insert(sequenceEnrollments).values({
       id: "enr-1",
@@ -104,19 +100,15 @@ describe("cancelSequencesForSender", () => {
     await createTestTemplate({ slug: "welcome" });
     const now = Math.floor(Date.now() / 1000);
 
-    await db
-      .insert(
-        (await import("../db/sequences.schema")).sequences,
-      )
-      .values({
-        id: "seq-1",
-        name: "Test",
-        steps: JSON.stringify([
-          { order: 1, templateSlug: "welcome", delayHours: 0 },
-        ]),
-        createdAt: now,
-        updatedAt: now,
-      });
+    await db.insert((await import("../db/sequences.schema")).sequences).values({
+      id: "seq-1",
+      name: "Test",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
 
     await db.insert(sequenceEnrollments).values({
       id: "enr-1",

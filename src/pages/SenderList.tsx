@@ -256,7 +256,8 @@ export default function SenderList({
               )}
               <div className="mt-0.5 flex items-center justify-between">
                 <span className="truncate text-[11px] text-text-tertiary">
-                  {gs.recipientCount} address{gs.recipientCount !== 1 ? "es" : ""}
+                  {gs.recipientCount} address
+                  {gs.recipientCount !== 1 ? "es" : ""}
                   {" · "}
                   {gs.totalCount} email{gs.totalCount !== 1 ? "s" : ""}
                 </span>

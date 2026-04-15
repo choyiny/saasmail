@@ -51,10 +51,7 @@ export default function InboxPage() {
         )}
       </div>
 
-      <ComposeModal
-        open={composeOpen}
-        onClose={() => setComposeOpen(false)}
-      />
+      <ComposeModal open={composeOpen} onClose={() => setComposeOpen(false)} />
     </>
   );
 }

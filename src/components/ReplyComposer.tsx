@@ -1,11 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import TiptapEditor from "@/components/TiptapEditor";
-import {
-  replyToEmail,
-  fetchTemplates,
-  type EmailTemplate,
-} from "@/lib/api";
+import { replyToEmail, fetchTemplates, type EmailTemplate } from "@/lib/api";
 
 interface ReplyComposerProps {
   emailId: string;
@@ -51,11 +47,15 @@ export default function ReplyComposer({
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState("");
 
-  const selectedTemplate = templates.find((t) => t.slug === selectedSlug) ?? null;
+  const selectedTemplate =
+    templates.find((t) => t.slug === selectedSlug) ?? null;
 
   const requiredVars = useMemo(() => {
     if (!selectedTemplate) return [];
-    return extractVariables(selectedTemplate.subject, selectedTemplate.bodyHtml);
+    return extractVariables(
+      selectedTemplate.subject,
+      selectedTemplate.bodyHtml,
+    );
   }, [selectedTemplate]);
 
   // Auto-fill variables when template or sender changes

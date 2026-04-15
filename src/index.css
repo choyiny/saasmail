@@ -191,7 +191,10 @@ body {
   cursor: grab;
   color: var(--color-text-tertiary);
   opacity: 0;
-  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  transition:
+    opacity 0.15s,
+    background-color 0.15s,
+    color 0.15s;
   z-index: 20;
   user-select: none;
 }
