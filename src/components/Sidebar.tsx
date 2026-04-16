@@ -9,6 +9,7 @@ import {
   ListOrdered,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
+import { useBranding } from "@/lib/branding";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,6 +63,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ onCompose }: SidebarProps) {
+  const { logoLetter } = useBranding();
   const location = useLocation();
   const navigate = useNavigate();
   const { data: session } = useSession();
@@ -77,7 +79,7 @@ export default function Sidebar({ onCompose }: SidebarProps) {
     <div className="flex h-full w-16 flex-col items-center bg-sidebar py-3">
       {/* Logo */}
       <div className="mb-4 flex h-10 w-10 items-center justify-center text-lg font-bold text-text-primary">
-        c
+        {logoLetter}
       </div>
 
       {/* Nav items */}

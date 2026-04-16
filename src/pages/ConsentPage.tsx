@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
+import { useBranding } from "@/lib/branding";
 
 export default function ConsentPage() {
+  const { appName, logoLetter } = useBranding();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState<"allow" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -125,13 +127,13 @@ export default function ConsentPage() {
       <div className="w-full max-w-sm rounded-xl border border-border-dark bg-card p-6">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent/20 text-lg font-bold text-accent">
-            c
+            {logoLetter}
           </div>
           <h1 className="text-lg font-semibold text-text-primary">
             Authorize Application
           </h1>
           <p className="mt-1 text-xs text-text-secondary">
-            An application is requesting access to your cmail account.
+            An application is requesting access to your {appName} account.
           </p>
         </div>
 

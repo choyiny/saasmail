@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useBranding } from "@/lib/branding";
 
 export default function LoginPage() {
+  const { appName } = useBranding();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
@@ -96,7 +98,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-main">
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
-          <CardTitle className="text-xl text-text-primary">cmail</CardTitle>
+          <CardTitle className="text-xl text-text-primary">{appName}</CardTitle>
           <p className="text-xs text-text-secondary">Sign in to continue.</p>
         </CardHeader>
         <CardContent className="space-y-4">

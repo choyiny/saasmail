@@ -3,8 +3,10 @@ import { useParams } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
 import { validateInvite, acceptInvite } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useBranding } from "@/lib/branding";
 
 export default function InviteAcceptPage() {
+  const { appName } = useBranding();
   const { token } = useParams<{ token: string }>();
   const [status, setStatus] = useState<"loading" | "valid" | "invalid">(
     "loading",
@@ -104,7 +106,7 @@ export default function InviteAcceptPage() {
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">
-            Join cmail
+            Join {appName}
           </CardTitle>
           <p className="text-xs text-text-secondary">
             Create your account to get started.

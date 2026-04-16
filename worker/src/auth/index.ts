@@ -44,7 +44,7 @@ export function createAuth(
       }),
     ],
     advanced: {
-      cookiePrefix: "cmail",
+      cookiePrefix: env?.COOKIE_PREFIX || "cmail",
       defaultCookieAttributes: { sameSite: "lax", secure: true },
     },
     trustedOrigins: env?.TRUSTED_ORIGINS

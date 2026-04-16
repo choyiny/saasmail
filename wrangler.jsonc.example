@@ -58,6 +58,11 @@
   },
   "vars": {
     "BASE_URL": "<your-deployed-url>",
-    "TRUSTED_ORIGINS": "http://localhost:8080,<your-deployed-url>"
+    "TRUSTED_ORIGINS": "http://localhost:8080,<your-deployed-url>",
+
+    // Whitelabel branding — customize these to rebrand the UI
+    "APP_NAME": "cmail",          // Displayed in page title, login, sidebar, etc.
+    "APP_LOGO_LETTER": "c",       // Single character shown as the logo in sidebar/consent
+    "COOKIE_PREFIX": "cmail"      // Prefix for better-auth session cookies
   }
 }

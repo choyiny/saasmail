@@ -63,7 +63,8 @@ app.use("/api/*", async (c, next) => {
     c.req.path.startsWith("/api/auth") ||
     c.req.path.startsWith("/api/setup") ||
     c.req.path.startsWith("/api/invites") ||
-    c.req.path === "/api/health"
+    c.req.path === "/api/health" ||
+    c.req.path === "/api/config"
   ) {
     return next();
   }
@@ -140,6 +141,14 @@ app.route("/api/admin", adminRouter);
 
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+// Public branding config (no auth) — consumed by the SPA for whitelabeling
+app.get("/api/config", (c) =>
+  c.json({
+    appName: c.env.APP_NAME || "cmail",
+    logoLetter: c.env.APP_LOGO_LETTER || "c",
+  }),
+);
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));

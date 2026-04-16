@@ -13,8 +13,10 @@ import {
   revokeOAuthApp,
 } from "@/lib/api";
 import type { ApiKeyInfo, OAuthApp } from "@/lib/api";
+import { useBranding } from "@/lib/branding";
 
 export default function ApiKeysPage() {
+  const { appName } = useBranding();
   const [keyInfo, setKeyInfo] = useState<ApiKeyInfo | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -27,7 +29,7 @@ export default function ApiKeysPage() {
   const mcpConfig = JSON.stringify(
     {
       mcpServers: {
-        cmail: {
+        [appName]: {
           url: `${window.location.origin}/mcp`,
           auth: "oauth",
         },

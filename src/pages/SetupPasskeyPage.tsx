@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { authClient } from "@/lib/auth-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useBranding } from "@/lib/branding";
 
 export default function SetupPasskeyPage() {
+  const { appName } = useBranding();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -31,7 +33,7 @@ export default function SetupPasskeyPage() {
             Register a Passkey
           </CardTitle>
           <p className="text-xs text-text-secondary">
-            For security, you must register a passkey before accessing cmail.
+            For security, you must register a passkey before accessing {appName}.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">

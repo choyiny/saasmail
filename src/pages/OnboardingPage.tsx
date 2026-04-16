@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { signIn } from "@/lib/auth-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useBranding } from "@/lib/branding";
 
 type Status = "checking" | "available" | "unavailable";
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
+  const { appName } = useBranding();
   const [status, setStatus] = useState<Status>("checking");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -101,7 +103,7 @@ export default function OnboardingPage() {
       <Card className="w-full max-w-sm border-border-dark bg-card">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">
-            Welcome to cmail
+            Welcome to {appName}
           </CardTitle>
           <p className="text-xs text-text-secondary">
             Create the first administrator account to get started.
