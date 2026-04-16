@@ -224,11 +224,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
   }
 
   const allowed = c.get("allowedInboxes")!;
-  if (
-    !allowed.isAdmin &&
-    row[0].recipient &&
-    !allowed.inboxes.includes(row[0].recipient)
-  ) {
+  if (!allowed.isAdmin && !allowed.inboxes.includes(row[0].recipient)) {
     return c.json({ error: "Email not found" }, 404);
   }
 
