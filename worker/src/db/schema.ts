@@ -10,6 +10,7 @@ import { sequences } from "./sequences.schema";
 import { sequenceEnrollments } from "./sequence-enrollments.schema";
 import { sequenceEmails } from "./sequence-emails.schema";
 import { senderIdentities } from "./sender-identities.schema";
+import { inboxPermissions } from "./inbox-permissions.schema";
 
 export const schema = {
   ...authSchema,
@@ -24,4 +25,5 @@ export const schema = {
   sequenceEnrollments,
   sequenceEmails,
   senderIdentities,
+  inboxPermissions,
 } as const;
