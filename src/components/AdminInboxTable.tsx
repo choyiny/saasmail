@@ -68,7 +68,7 @@ export default function AdminInboxTable() {
       {inboxes.map((inbox) => (
         <div
           key={inbox.email}
-          className="rounded-lg border border-border-dark bg-card p-4"
+          className="rounded-lg border border-border bg-white ring-1 ring-gray-200 p-4"
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex-1">
@@ -80,7 +80,7 @@ export default function AdminInboxTable() {
                 defaultValue={inbox.displayName ?? ""}
                 placeholder="Display name (optional)"
                 onBlur={(e) => handleNameBlur(inbox, e.currentTarget.value)}
-                className="mt-1 w-full rounded bg-main px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
+                className="mt-1 w-full rounded bg-white ring-1 ring-gray-200 px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
               />
             </div>
           </div>
@@ -101,7 +101,7 @@ export default function AdminInboxTable() {
                     className={`rounded-full px-3 py-1 text-xs ${
                       on
                         ? "bg-accent text-white"
-                        : "bg-hover text-text-secondary"
+                        : "bg-bg-muted text-text-secondary"
                     }`}
                   >
                     {u.name || u.email}

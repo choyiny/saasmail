@@ -82,7 +82,7 @@ export default function SequenceDetailPage() {
           {sequence.steps.map((step, idx) => (
             <div
               key={step.order}
-              className="flex items-center gap-3 rounded border border-border-dark bg-card px-3 py-2 text-sm"
+              className="flex items-center gap-3 rounded border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-sm"
             >
               <span className="text-text-tertiary">#{idx + 1}</span>
               <span className="text-text-primary">{step.templateSlug}</span>
@@ -108,7 +108,7 @@ export default function SequenceDetailPage() {
             {enrollments.map((enr) => (
               <div
                 key={enr.id}
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-card px-4 py-3"
+                className="flex items-center justify-between rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-3"
               >
                 <div>
                   <p className="text-sm font-medium text-text-primary">

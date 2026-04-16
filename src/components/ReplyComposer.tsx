@@ -116,9 +116,9 @@ export default function ReplyComposer({
   }
 
   return (
-    <div className="border-t border-border-dark bg-panel shrink-0">
+    <div className="border-t border-border bg-white shrink-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border-dark">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
         <span className="text-xs font-semibold text-text-primary">Reply</span>
         <button
           onClick={onClose}
@@ -135,7 +135,7 @@ export default function ReplyComposer({
           <select
             value={fromAddress}
             onChange={(e) => setFromAddress(e.target.value)}
-            className="flex-1 bg-transparent border border-border-dark rounded-md px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            className="flex-1 bg-transparent border border-border rounded-md px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
           >
             {recipients.map((r) => (
               <option key={r} value={r}>
@@ -152,7 +152,7 @@ export default function ReplyComposer({
             className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
               tab === "freeform"
                 ? "bg-accent text-white"
-                : "text-text-secondary hover:bg-hover"
+                : "text-text-secondary hover:bg-bg-muted"
             }`}
           >
             Freeform
@@ -162,7 +162,7 @@ export default function ReplyComposer({
             className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
               tab === "template"
                 ? "bg-accent text-white"
-                : "text-text-secondary hover:bg-hover"
+                : "text-text-secondary hover:bg-bg-muted"
             }`}
           >
             Template
@@ -187,7 +187,7 @@ export default function ReplyComposer({
                 <select
                   value={selectedSlug}
                   onChange={(e) => setSelectedSlug(e.target.value)}
-                  className="w-full bg-transparent border border-border-dark rounded-md px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                  className="w-full bg-transparent border border-border rounded-md px-2 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
                 >
                   <option value="">Select a template...</option>
                   {templates.map((t) => (
@@ -207,7 +207,7 @@ export default function ReplyComposer({
 
                     {/* Body preview */}
                     <div
-                      className="rounded-md border border-border-dark bg-main p-3 text-xs text-text-secondary max-h-32 overflow-auto"
+                      className="rounded-md border border-border bg-white p-3 text-xs text-text-secondary max-h-32 overflow-auto"
                       dangerouslySetInnerHTML={{
                         __html: selectedTemplate.bodyHtml,
                       }}
@@ -232,7 +232,7 @@ export default function ReplyComposer({
                                   [v]: e.target.value,
                                 }))
                               }
-                              className="flex-1 bg-transparent border border-border-dark rounded-md px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                              className="flex-1 bg-transparent border border-border rounded-md px-2 py-1 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
                             />
                           </div>
                         ))}

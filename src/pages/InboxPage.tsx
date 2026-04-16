@@ -37,7 +37,7 @@ export default function InboxPage() {
     <>
       {/* Middle panel — person list (hidden on mobile when a person is selected) */}
       <div
-        className={`w-full md:w-80 shrink-0 border-r border-border-dark bg-panel ${
+        className={`w-full md:w-80 shrink-0 border-r border-border bg-bg-subtle ${
           selectedPerson ? "hidden md:block" : "block"
         }`}
       >
@@ -50,7 +50,7 @@ export default function InboxPage() {
 
       {/* Right panel — email detail (hidden on mobile when no person selected) */}
       <div
-        className={`flex-1 bg-main min-w-0 ${
+        className={`flex-1 bg-white min-w-0 ${
           selectedPerson ? "block" : "hidden md:block"
         }`}
       >
@@ -59,7 +59,7 @@ export default function InboxPage() {
             {/* Mobile back button */}
             <button
               onClick={() => setSelectedPerson(null)}
-              className="flex items-center gap-1.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary md:hidden border-b border-border-dark"
+              className="flex items-center gap-1.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary md:hidden border-b border-border"
             >
               <ArrowLeft size={14} />
               Back

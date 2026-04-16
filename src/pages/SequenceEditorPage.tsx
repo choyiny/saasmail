@@ -100,7 +100,7 @@ export default function SequenceEditorPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g., Welcome Sequence"
-            className="w-full rounded-md border border-border-dark bg-card px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none"
+            className="w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:border-accent focus:outline-none"
             required
           />
         </div>
@@ -113,7 +113,7 @@ export default function SequenceEditorPage() {
             {steps.map((step, idx) => (
               <div
                 key={step.order}
-                className="flex items-center gap-3 rounded-lg border border-border-dark bg-card p-3"
+                className="flex items-center gap-3 rounded-lg border border-border bg-white ring-1 ring-gray-200 p-3"
               >
                 <span className="text-xs font-medium text-text-tertiary">
                   #{idx + 1}
@@ -123,7 +123,7 @@ export default function SequenceEditorPage() {
                   onChange={(e) =>
                     updateStep(step.order, "templateSlug", e.target.value)
                   }
-                  className="flex-1 rounded-md border border-border-dark bg-main px-2 py-1.5 text-sm text-text-primary"
+                  className="flex-1 rounded-md border border-border bg-white ring-1 ring-gray-200 px-2 py-1.5 text-sm text-text-primary"
                   required
                 >
                   <option value="">Select template...</option>
@@ -145,7 +145,7 @@ export default function SequenceEditorPage() {
                         parseInt(e.target.value) || 0,
                       )
                     }
-                    className="w-20 rounded-md border border-border-dark bg-main px-2 py-1.5 text-sm text-text-primary"
+                    className="w-20 rounded-md border border-border bg-white ring-1 ring-gray-200 px-2 py-1.5 text-sm text-text-primary"
                   />
                   <span className="text-xs text-text-tertiary">hrs delay</span>
                 </div>
@@ -180,7 +180,7 @@ export default function SequenceEditorPage() {
           <button
             type="button"
             onClick={() => navigate("/sequences")}
-            className="rounded-md border border-border-dark px-4 py-2 text-sm text-text-secondary hover:bg-hover"
+            className="rounded-md border border-border px-4 py-2 text-sm text-text-secondary hover:bg-bg-muted"
           >
             Cancel
           </button>
@@ -200,7 +200,7 @@ export default function SequenceEditorPage() {
             <code className="text-accent">personEmail</code> (looks up or
             creates the person automatically):
           </p>
-          <pre className="overflow-x-auto rounded-lg border border-border-dark bg-main p-4 text-xs text-text-secondary">
+          <pre className="overflow-x-auto rounded-lg border border-border bg-white ring-1 ring-gray-200 p-4 text-xs text-text-secondary">
             {(() => {
               const usedSlugs = steps.map((s) => s.templateSlug).filter(Boolean);
               const usedTemplates = templates.filter((t) =>

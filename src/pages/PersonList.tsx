@@ -108,7 +108,7 @@ export default function PersonList({
     return (
       <div className="flex h-full flex-col">
         {/* Back button + person info */}
-        <div className="border-b border-border-dark p-3">
+        <div className="border-b border-border p-3">
           <button
             onClick={handleBack}
             className="mb-2 flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary"
@@ -142,10 +142,10 @@ export default function PersonList({
               <button
                 key={`${thread.id}:${thread.recipient}`}
                 onClick={() => onSelectPerson(thread)}
-                className={`w-full border-b border-border-dark px-4 py-2.5 text-left transition-colors hover:bg-hover ${
+                className={`w-full border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-bg-muted ${
                   selectedPersonId === thread.id &&
                   selectedRecipient === thread.recipient
-                    ? "bg-hover"
+                    ? "bg-bg-muted"
                     : ""
                 }`}
               >
@@ -179,11 +179,11 @@ export default function PersonList({
         </ScrollArea>
 
         {threadsTotalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-border-dark px-3 py-2">
+          <div className="flex items-center justify-between border-t border-border px-3 py-2">
             <button
               onClick={() => setThreadsPage((p) => Math.max(1, p - 1))}
               disabled={threadsPage <= 1}
-              className="rounded p-1 text-text-secondary hover:bg-hover disabled:opacity-30 disabled:hover:bg-transparent"
+              className="rounded p-1 text-text-secondary hover:bg-bg-muted disabled:opacity-30 disabled:hover:bg-transparent"
             >
               <ChevronLeft size={14} />
             </button>
@@ -195,7 +195,7 @@ export default function PersonList({
                 setThreadsPage((p) => Math.min(threadsTotalPages, p + 1))
               }
               disabled={threadsPage >= threadsTotalPages}
-              className="rounded p-1 text-text-secondary hover:bg-hover disabled:opacity-30 disabled:hover:bg-transparent"
+              className="rounded p-1 text-text-secondary hover:bg-bg-muted disabled:opacity-30 disabled:hover:bg-transparent"
             >
               <ChevronRight size={14} />
             </button>
@@ -214,7 +214,7 @@ export default function PersonList({
           placeholder="Search people..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+          className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
         />
       </div>
       <ScrollArea className="flex-1">
@@ -231,8 +231,8 @@ export default function PersonList({
             <button
               key={gp.id}
               onClick={() => handleSelectPerson(gp)}
-              className={`w-full border-b border-border-dark px-4 py-2.5 text-left transition-colors hover:bg-hover ${
-                activePerson?.id === gp.id ? "bg-hover" : ""
+              className={`w-full border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-bg-muted ${
+                activePerson?.id === gp.id ? "bg-bg-muted" : ""
               }`}
             >
               <div className="flex items-center justify-between">
@@ -273,11 +273,11 @@ export default function PersonList({
       </ScrollArea>
 
       {groupedTotalPages > 1 && (
-        <div className="flex items-center justify-between border-t border-border-dark px-3 py-2">
+        <div className="flex items-center justify-between border-t border-border px-3 py-2">
           <button
             onClick={() => setGroupedPage((p) => Math.max(1, p - 1))}
             disabled={groupedPage <= 1}
-            className="rounded p-1 text-text-secondary hover:bg-hover disabled:opacity-30 disabled:hover:bg-transparent"
+            className="rounded p-1 text-text-secondary hover:bg-bg-muted disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ChevronLeft size={14} />
           </button>
@@ -289,7 +289,7 @@ export default function PersonList({
               setGroupedPage((p) => Math.min(groupedTotalPages, p + 1))
             }
             disabled={groupedPage >= groupedTotalPages}
-            className="rounded p-1 text-text-secondary hover:bg-hover disabled:opacity-30 disabled:hover:bg-transparent"
+            className="rounded p-1 text-text-secondary hover:bg-bg-muted disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ChevronRight size={14} />
           </button>

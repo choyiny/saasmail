@@ -67,11 +67,11 @@ export default function ApiKeysPage() {
               <input
                 readOnly
                 value={newKey}
-                className="h-8 flex-1 rounded-md border border-border-dark bg-input-bg px-3 font-mono text-xs text-text-primary focus:outline-none"
+                className="h-8 flex-1 rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 font-mono text-xs text-text-primary focus:outline-none"
               />
               <button
                 onClick={handleCopy}
-                className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+                className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary"
               >
                 Copy
               </button>
@@ -86,7 +86,7 @@ export default function ApiKeysPage() {
         )}
 
         {keyInfo && !newKey && (
-          <div className="mb-6 rounded-lg border border-border-dark bg-card px-4 py-3">
+          <div className="mb-6 rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="font-mono text-xs text-text-primary">
@@ -100,13 +100,13 @@ export default function ApiKeysPage() {
               <div className="flex gap-2">
                 <button
                   onClick={() => setConfirmAction("regenerate")}
-                  className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+                  className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary"
                 >
                   Regenerate
                 </button>
                 <button
                   onClick={() => setConfirmAction("revoke")}
-                  className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-destructive hover:bg-hover"
+                  className="rounded-md border border-border px-3 py-1.5 text-xs text-destructive hover:bg-bg-muted"
                 >
                   Revoke
                 </button>
@@ -116,7 +116,7 @@ export default function ApiKeysPage() {
         )}
 
         {!keyInfo && !newKey && (
-          <div className="mb-6 rounded-lg border border-border-dark bg-card px-4 py-4 text-center">
+          <div className="mb-6 rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-4 text-center">
             <p className="mb-3 text-xs text-text-tertiary">
               No API key generated yet.
             </p>
@@ -129,7 +129,7 @@ export default function ApiKeysPage() {
           </div>
         )}
 
-        <div className="mb-6 rounded-lg border border-border-dark bg-card p-4">
+        <div className="mb-6 rounded-lg border border-border bg-white ring-1 ring-gray-200 p-4">
           <h2 className="mb-2 text-xs font-semibold text-text-primary">
             API Key Usage
           </h2>
@@ -137,7 +137,7 @@ export default function ApiKeysPage() {
             Include your API key in the{" "}
             <code className="text-accent">Authorization</code> header:
           </p>
-          <pre className="rounded bg-sidebar p-3 text-[11px] text-text-secondary">
+          <pre className="rounded bg-bg-subtle p-3 text-[11px] text-text-secondary">
             {`curl -H "Authorization: Bearer sk_..." \\
   ${window.location.origin}/api/people`}
           </pre>
@@ -158,7 +158,7 @@ export default function ApiKeysPage() {
           open={confirmAction !== null}
           onOpenChange={() => setConfirmAction(null)}
         >
-          <DialogContent className="border-border-dark bg-card text-text-primary">
+          <DialogContent className="border-border bg-white ring-1 ring-gray-200 text-text-primary">
             <DialogHeader>
               <DialogTitle className="text-text-primary">
                 {confirmAction === "regenerate"
@@ -174,7 +174,7 @@ export default function ApiKeysPage() {
             <div className="flex justify-end gap-2">
               <button
                 onClick={() => setConfirmAction(null)}
-                className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+                className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary"
               >
                 Cancel
               </button>

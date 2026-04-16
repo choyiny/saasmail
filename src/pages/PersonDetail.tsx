@@ -98,7 +98,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="border-b border-border-dark px-4 sm:px-6 py-3">
+      <div className="border-b border-border px-4 sm:px-6 py-3">
         <div>
           <h2 className="text-sm font-semibold text-text-primary">
             {person.name || person.email}
@@ -114,7 +114,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
       </div>
 
       {/* Sequence status */}
-      <div className="border-b border-border-dark px-4 sm:px-6 py-2">
+      <div className="border-b border-border px-4 sm:px-6 py-2">
         {enrollmentInfo?.enrollment ? (
           <SequenceStatus
             personId={person.id}
@@ -123,7 +123,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
         ) : (
           <button
             onClick={() => setEnrollModalOpen(true)}
-            className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover"
+            className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted"
           >
             Add to Sequence
           </button>

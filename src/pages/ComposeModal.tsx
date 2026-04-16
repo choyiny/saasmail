@@ -59,7 +59,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="border-border-dark bg-card text-text-primary sm:max-w-lg">
+      <DialogContent className="border-border bg-white text-text-primary sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-text-primary">Compose</DialogTitle>
         </DialogHeader>
@@ -72,7 +72,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
               value={fromAddress}
               onChange={(e) => setFromAddress(e.target.value)}
               required
-              className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
             >
               {recipients.map((r) => (
                 <option key={r} value={r}>
@@ -90,7 +90,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
               value={to}
               onChange={(e) => setTo(e.target.value)}
               required
-              className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+              className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
           <div className="space-y-1">
@@ -101,7 +101,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               required
-              className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+              className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
             />
           </div>
           <div className="space-y-1">
@@ -115,7 +115,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+              className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary"
             >
               Cancel
             </button>

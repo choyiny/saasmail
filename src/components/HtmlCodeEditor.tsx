@@ -3,7 +3,6 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, lineNumbers, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { html } from "@codemirror/lang-html";
-import { oneDark } from "@codemirror/theme-one-dark";
 import {
   syntaxHighlighting,
   defaultHighlightStyle,
@@ -36,7 +35,6 @@ export default function HtmlCodeEditor({
         history(),
         bracketMatching(),
         html(),
-        oneDark,
         syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.domEventHandlers({
@@ -59,8 +57,23 @@ export default function HtmlCodeEditor({
           }
         }),
         EditorView.theme({
-          "&": { height: "100%" },
+          "&": {
+            height: "100%",
+            fontSize: "13px",
+            backgroundColor: "#ffffff",
+            color: "#0f172a",
+          },
           ".cm-scroller": { overflow: "auto" },
+          ".cm-gutters": {
+            backgroundColor: "#f9fafb",
+            color: "#94a3b8",
+            border: "none",
+            borderRight: "1px solid #e5e7eb",
+          },
+          ".cm-activeLine": { backgroundColor: "#f3f4f6" },
+          ".cm-activeLineGutter": { backgroundColor: "#f3f4f6" },
+          ".cm-cursor": { borderLeftColor: "#2563eb" },
+          ".cm-selectionBackground, ::selection": { backgroundColor: "#dbeafe" },
         }),
       ],
     });

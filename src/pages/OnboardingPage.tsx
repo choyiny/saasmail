@@ -64,7 +64,7 @@ export default function OnboardingPage() {
 
   if (status === "checking") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-main">
+      <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
         <p className="text-text-secondary">Loading...</p>
       </div>
     );
@@ -72,8 +72,8 @@ export default function OnboardingPage() {
 
   if (status === "unavailable") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-main">
-        <Card className="w-full max-w-sm border-border-dark bg-card">
+      <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
+        <Card className="w-full max-w-sm border-border bg-white ring-1 ring-gray-200 rounded-xl">
           <CardHeader>
             <CardTitle className="text-xl text-text-primary">
               Setup complete
@@ -96,11 +96,11 @@ export default function OnboardingPage() {
   }
 
   const inputClass =
-    "h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent";
+    "h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-main">
-      <Card className="w-full max-w-sm border-border-dark bg-card">
+    <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
+      <Card className="w-full max-w-sm border-border bg-white ring-1 ring-gray-200 rounded-xl">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">
             Welcome to {appName}

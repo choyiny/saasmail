@@ -27,8 +27,8 @@ export default function EmailHtmlModal({
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden border-border-dark bg-card p-0 text-text-primary">
-        <DialogHeader className="border-b border-border-dark px-6 py-4">
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden border-border bg-white ring-1 ring-gray-200 p-0 text-text-primary">
+        <DialogHeader className="border-b border-border px-6 py-4">
           <DialogTitle className="text-sm text-text-primary">
             {email.subject || "(no subject)"}
           </DialogTitle>

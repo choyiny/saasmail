@@ -1,32 +1,63 @@
 @import "tailwindcss";
 
 @theme {
-  --color-sidebar: #0f1117;
-  --color-panel: #141720;
-  --color-main: #1a1d2e;
-  --color-hover: #2a2d3e;
-  --color-card: #1e2235;
-  --color-input-bg: #141720;
-  --color-border-dark: #2a2d3e;
-  --color-text-primary: #f0f0f0;
-  --color-text-secondary: #8b8fa3;
-  --color-text-tertiary: #5a5e70;
-  --color-accent: #4f6ef7;
-  --color-accent-hover: #6180f9;
-  --color-destructive: #e5484d;
-  --color-unread: #4f6ef7;
-  --color-warning-bg: #2a2010;
-  --color-warning-border: #5c4a1e;
-  --color-warning-text: #f0c050;
+  /* Surfaces */
+  --color-bg: #ffffff;
+  --color-bg-subtle: #f9fafb;
+  --color-bg-muted: #f3f4f6;
+
+  /* Borders */
+  --color-border: #e5e7eb;
+  --color-border-subtle: #f1f5f9;
+
+  /* Text */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-tertiary: #94a3b8;
+
+  /* Accent (blue-600 system) */
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-subtle: #eff6ff;
+  --color-accent-subtle-fg: #1d4ed8;
+
+  /* Semantic */
+  --color-destructive: #dc2626;
+  --color-destructive-subtle: #fee2e2;
+  --color-success: #16a34a;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fde68a;
+  --color-warning-text: #b45309;
+
+  /* Back-compat aliases for shadcn primitives (same value as primary tokens) */
+  --color-unread: #2563eb;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 }
 
 html {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 body {
-  background-color: #1a1d2e;
-  color: #f0f0f0;
+  background-color: #ffffff;
+  color: #0f172a;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    "Segoe UI",
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-feature-settings:
+    "cv11",
+    "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Notion-like Editor Styles ── */
@@ -45,8 +76,8 @@ body {
   align-items: center;
   gap: 2px;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--color-border-dark);
-  background: var(--color-panel);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
 }
 
 .notion-editor-content {
@@ -56,7 +87,6 @@ body {
   padding-left: 40px;
 }
 
-/* Main editor area */
 .notion-editor {
   max-width: 720px;
   margin: 0 auto;
@@ -66,7 +96,6 @@ body {
   font-size: 15px;
 }
 
-/* Block spacing */
 .notion-editor > * {
   margin-top: 2px;
   margin-bottom: 2px;
@@ -76,10 +105,9 @@ body {
 }
 
 .notion-editor > *:hover {
-  background-color: rgba(255, 255, 255, 0.02);
+  background-color: rgba(15, 23, 42, 0.03);
 }
 
-/* Headings */
 .notion-editor h1 {
   font-size: 1.875em;
   font-weight: 700;
@@ -107,13 +135,11 @@ body {
   color: var(--color-text-primary);
 }
 
-/* Paragraphs */
 .notion-editor p {
   margin: 0;
   min-height: 1.5em;
 }
 
-/* Lists */
 .notion-editor ul,
 .notion-editor ol {
   padding-left: 1.5em;
@@ -128,7 +154,6 @@ body {
   margin: 0;
 }
 
-/* Blockquote */
 .notion-editor blockquote {
   border-left: 3px solid var(--color-accent);
   padding-left: 1em;
@@ -136,10 +161,10 @@ body {
   color: var(--color-text-secondary);
 }
 
-/* Code block */
 .notion-editor pre {
-  background: var(--color-sidebar);
-  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
   padding: 16px;
   overflow-x: auto;
   font-size: 13px;
@@ -152,24 +177,21 @@ body {
   color: var(--color-text-primary);
 }
 
-/* Inline code */
 .notion-editor code {
-  background: rgba(255, 255, 255, 0.06);
+  background: #f1f5f9;
   border-radius: 3px;
   padding: 2px 5px;
   font-size: 0.9em;
   font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, monospace;
-  color: #e06c75;
+  color: #e11d48;
 }
 
-/* Horizontal rule */
 .notion-editor hr {
   border: none;
-  border-top: 1px solid var(--color-border-dark);
+  border-top: 1px solid var(--color-border);
   margin: 1.5em 0;
 }
 
-/* Placeholder */
 .notion-editor p.is-editor-empty:first-child::before {
   color: var(--color-text-tertiary);
   content: attr(data-placeholder);
@@ -200,12 +222,12 @@ body {
 }
 
 .notion-editor-content:hover .drag-handle {
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .drag-handle:hover {
   opacity: 1 !important;
-  background: var(--color-hover);
+  background: var(--color-bg-muted);
   color: var(--color-text-secondary);
 }
 
@@ -226,5 +248,5 @@ body {
   border-radius: 1px;
   pointer-events: none;
   z-index: 15;
-  box-shadow: 0 0 4px rgba(79, 110, 247, 0.4);
+  box-shadow: 0 0 4px rgba(37, 99, 235, 0.35);
 }

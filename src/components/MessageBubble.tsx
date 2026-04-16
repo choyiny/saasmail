@@ -71,7 +71,7 @@ export default function MessageBubble({
 
   return (
     <div
-      className={`group ${compact ? "px-3 py-1.5" : "px-4 sm:px-6 py-2"} hover:bg-hover/50 transition-colors ${
+      className={`group ${compact ? "px-3 py-1.5" : "px-4 sm:px-6 py-2"} hover:bg-bg-muted/50 transition-colors ${
         isUnread ? "bg-accent/5" : ""
       }`}
       onClick={handleClick}
@@ -139,7 +139,7 @@ export default function MessageBubble({
               key={att.id}
               href={`/api/attachments/${att.id}`}
               onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-1 rounded border border-border-dark px-2 py-1 text-[10px] text-text-secondary hover:bg-hover"
+              className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[10px] text-text-secondary hover:bg-bg-muted"
             >
               <Paperclip size={10} />
               {att.filename}

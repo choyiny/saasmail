@@ -72,7 +72,7 @@ export default function InviteAcceptPage() {
 
   if (status === "loading") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-main">
+      <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
         <p className="text-text-secondary">Validating invitation...</p>
       </div>
     );
@@ -80,8 +80,8 @@ export default function InviteAcceptPage() {
 
   if (status === "invalid") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-main">
-        <Card className="w-full max-w-sm border-border-dark bg-card">
+      <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
+        <Card className="w-full max-w-sm border-border bg-white ring-1 ring-gray-200 rounded-xl">
           <CardHeader>
             <CardTitle className="text-xl text-text-primary">
               Invalid Invitation
@@ -99,11 +99,11 @@ export default function InviteAcceptPage() {
   }
 
   const inputClass =
-    "h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent";
+    "h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-main">
-      <Card className="w-full max-w-sm border-border-dark bg-card">
+    <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
+      <Card className="w-full max-w-sm border-border bg-white ring-1 ring-gray-200 rounded-xl">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">
             Join {appName}

@@ -44,7 +44,7 @@ export default function SequencesPage() {
           {sequences.map((seq) => (
             <div
               key={seq.id}
-              className="flex items-center justify-between rounded-lg border border-border-dark bg-card px-4 py-3"
+              className="flex items-center justify-between rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-3"
             >
               <div
                 className="cursor-pointer"
@@ -58,13 +58,13 @@ export default function SequencesPage() {
               <div className="flex gap-2">
                 <button
                   onClick={() => navigate(`/sequences/${seq.id}/edit`)}
-                  className="rounded-md border border-border-dark px-2 py-1 text-xs text-text-secondary hover:bg-hover"
+                  className="rounded-md border border-border px-2 py-1 text-xs text-text-secondary hover:bg-bg-muted"
                 >
                   Edit
                 </button>
                 <button
                   onClick={() => handleDelete(seq.id)}
-                  className="rounded-md border border-border-dark px-2 py-1 text-xs text-red-400 hover:bg-hover"
+                  className="rounded-md border border-border px-2 py-1 text-xs text-red-400 hover:bg-bg-muted"
                 >
                   Delete
                 </button>

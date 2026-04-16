@@ -26,8 +26,8 @@ export default function SetupPasskeyPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-main">
-      <Card className="w-full max-w-sm border-border-dark bg-card">
+    <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
+      <Card className="w-full max-w-sm border-border bg-white ring-1 ring-gray-200 rounded-xl">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">
             Register a Passkey

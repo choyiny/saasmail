@@ -48,7 +48,7 @@ function AuthGuard() {
 
   if (isPending || (session && passkeyStatus === null)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-main">
+      <div className="flex min-h-screen items-center justify-center bg-bg">
         <p className="text-text-secondary">Loading...</p>
       </div>
     );

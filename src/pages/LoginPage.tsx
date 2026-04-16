@@ -31,7 +31,7 @@ export default function LoginPage() {
 
   if (setupRequired === null) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-main">
+      <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
         <p className="text-text-secondary">Loading...</p>
       </div>
     );
@@ -80,8 +80,8 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-main">
-      <Card className="w-full max-w-sm border-border-dark bg-card">
+    <div className="flex min-h-screen items-center justify-center bg-bg-subtle">
+      <Card className="w-full max-w-sm border-border bg-white ring-1 ring-gray-200 rounded-xl">
         <CardHeader>
           <CardTitle className="text-xl text-text-primary">{appName}</CardTitle>
           <p className="text-xs text-text-secondary">Sign in to continue.</p>
@@ -115,7 +115,7 @@ export default function LoginPage() {
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-md border border-border-dark bg-main px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
+                className="w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
                 required
               />
               <input
@@ -123,7 +123,7 @@ export default function LoginPage() {
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-md border border-border-dark bg-main px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
+                className="w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-xs text-text-primary placeholder:text-text-secondary focus:border-accent focus:outline-none"
                 required
               />
               <button

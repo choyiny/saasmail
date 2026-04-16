@@ -104,7 +104,7 @@ export default function EnrollSequenceModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-lg rounded-xl border border-border-dark bg-card p-6">
+      <div className="w-full max-w-lg rounded-xl border border-border bg-white ring-1 ring-gray-200 p-6">
         <h2 className="mb-1 text-lg font-semibold text-text-primary">
           Add to Sequence
         </h2>
@@ -123,7 +123,7 @@ export default function EnrollSequenceModal({
                 setSkipSteps([]);
                 setDelayOverrides({});
               }}
-              className="mb-4 w-full rounded-md border border-border-dark bg-main px-3 py-2 text-sm text-text-primary"
+              className="mb-4 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-sm text-text-primary"
             >
               <option value="">Select a sequence...</option>
               {sequences.map((s) => (
@@ -140,7 +140,7 @@ export default function EnrollSequenceModal({
               <select
                 value={fromAddress}
                 onChange={(e) => setFromAddress(e.target.value)}
-                className="w-full rounded-md border border-border-dark bg-main px-3 py-2 text-sm text-text-primary"
+                className="w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-sm text-text-primary"
               >
                 {recipients.map((r) => (
                   <option key={r} value={r}>
@@ -165,7 +165,7 @@ export default function EnrollSequenceModal({
                     return (
                       <div
                         key={step.order}
-                        className={`flex items-center gap-2 rounded border border-border-dark px-3 py-2 text-sm ${skipped ? "opacity-40" : ""}`}
+                        className={`flex items-center gap-2 rounded border border-border px-3 py-2 text-sm ${skipped ? "opacity-40" : ""}`}
                       >
                         <input
                           type="checkbox"
@@ -184,7 +184,7 @@ export default function EnrollSequenceModal({
                           onChange={(e) =>
                             setDelay(step.order, parseInt(e.target.value) || 0)
                           }
-                          className="w-16 rounded border border-border-dark bg-main px-1 py-0.5 text-xs text-text-primary"
+                          className="w-16 rounded border border-border bg-white ring-1 ring-gray-200 px-1 py-0.5 text-xs text-text-primary"
                           disabled={skipped}
                         />
                         <span className="text-xs text-text-tertiary">hrs</span>
@@ -211,7 +211,7 @@ export default function EnrollSequenceModal({
                     placeholder="key"
                     value={v.key}
                     onChange={(e) => updateVariable(idx, "key", e.target.value)}
-                    className="w-28 rounded border border-border-dark bg-main px-2 py-1 text-xs text-text-primary"
+                    className="w-28 rounded border border-border bg-white ring-1 ring-gray-200 px-2 py-1 text-xs text-text-primary"
                   />
                   <input
                     type="text"
@@ -220,7 +220,7 @@ export default function EnrollSequenceModal({
                     onChange={(e) =>
                       updateVariable(idx, "value", e.target.value)
                     }
-                    className="flex-1 rounded border border-border-dark bg-main px-2 py-1 text-xs text-text-primary"
+                    className="flex-1 rounded border border-border bg-white ring-1 ring-gray-200 px-2 py-1 text-xs text-text-primary"
                   />
                   <button
                     type="button"
@@ -243,7 +243,7 @@ export default function EnrollSequenceModal({
             <div className="flex justify-end gap-3">
               <button
                 onClick={onClose}
-                className="rounded-md border border-border-dark px-3 py-1.5 text-sm text-text-secondary hover:bg-hover"
+                className="rounded-md border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-muted"
               >
                 Cancel
               </button>
