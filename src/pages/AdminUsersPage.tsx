@@ -104,8 +104,8 @@ export default function AdminUsersPage() {
   return (
     <div className="flex-1 overflow-auto p-6">
       <div className="mx-auto max-w-4xl space-y-6">
-        <div className="rounded-lg border border-border-dark bg-card">
-          <div className="flex items-center justify-between border-b border-border-dark px-4 py-3">
+        <div className="rounded-lg border border-border bg-white ring-1 ring-gray-200">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <h2 className="text-xs font-semibold text-text-primary">Users</h2>
             <Dialog
               open={inviteDialogOpen}
@@ -124,7 +124,7 @@ export default function AdminUsersPage() {
                   Invite User
                 </button>
               </DialogTrigger>
-              <DialogContent className="border-border-dark bg-card text-text-primary">
+              <DialogContent className="border-border bg-white ring-1 ring-gray-200 text-text-primary">
                 <DialogHeader>
                   <DialogTitle className="text-text-primary">
                     Create Invitation
@@ -142,7 +142,7 @@ export default function AdminUsersPage() {
                           className={`rounded-md px-3 py-1.5 text-xs ${
                             inviteRole === "member"
                               ? "bg-accent text-white"
-                              : "border border-border-dark text-text-secondary hover:bg-hover"
+                              : "border border-border text-text-secondary hover:bg-bg-muted"
                           }`}
                         >
                           Member
@@ -152,7 +152,7 @@ export default function AdminUsersPage() {
                           className={`rounded-md px-3 py-1.5 text-xs ${
                             inviteRole === "admin"
                               ? "bg-accent text-white"
-                              : "border border-border-dark text-text-secondary hover:bg-hover"
+                              : "border border-border text-text-secondary hover:bg-bg-muted"
                           }`}
                         >
                           Admin
@@ -168,7 +168,7 @@ export default function AdminUsersPage() {
                         value={inviteEmail}
                         onChange={(e) => setInviteEmail(e.target.value)}
                         placeholder="user@example.com"
-                        className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                        className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
                       />
                     </div>
                     <div className="space-y-1">
@@ -181,7 +181,7 @@ export default function AdminUsersPage() {
                         max="30"
                         value={inviteExpiry}
                         onChange={(e) => setInviteExpiry(e.target.value)}
-                        className="h-8 w-full rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                        className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
                       />
                     </div>
                     <button
@@ -201,11 +201,11 @@ export default function AdminUsersPage() {
                       <input
                         value={generatedLink}
                         readOnly
-                        className="h-8 flex-1 rounded-md border border-border-dark bg-input-bg px-3 text-xs text-text-primary focus:outline-none"
+                        className="h-8 flex-1 rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary focus:outline-none"
                       />
                       <button
                         onClick={handleCopy}
-                        className="rounded-md border border-border-dark px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary"
+                        className="rounded-md border border-border px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary"
                       >
                         {copied ? "Copied!" : "Copy"}
                       </button>
@@ -222,7 +222,7 @@ export default function AdminUsersPage() {
               users.map((user) => (
                 <div
                   key={user.id}
-                  className="flex items-center justify-between border-b border-border-dark px-4 py-2.5 last:border-b-0"
+                  className="flex items-center justify-between border-b border-border px-4 py-2.5 last:border-b-0"
                 >
                   <div>
                     <p className="text-xs font-medium text-text-primary">
@@ -237,7 +237,7 @@ export default function AdminUsersPage() {
                       className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                         user.hasPasskey
                           ? "bg-accent/20 text-accent"
-                          : "bg-hover text-text-tertiary"
+                          : "bg-bg-mutedtext-text-tertiary"
                       }`}
                     >
                       {user.hasPasskey ? "Passkey" : "No passkey"}
@@ -246,7 +246,7 @@ export default function AdminUsersPage() {
                       className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
                         user.role === "admin"
                           ? "bg-accent/20 text-accent"
-                          : "border border-border-dark text-text-tertiary"
+                          : "border border-border text-text-tertiary"
                       }`}
                     >
                       {user.role || "member"}
@@ -257,13 +257,13 @@ export default function AdminUsersPage() {
                     {user.id !== session?.user?.id && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button className="rounded px-1.5 py-0.5 text-xs text-text-tertiary hover:bg-hover hover:text-text-secondary">
+                          <button className="rounded px-1.5 py-0.5 text-xs text-text-tertiary hover:bg-bg-muted hover:text-text-secondary">
                             ...
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                           align="end"
-                          className="bg-card border-border-dark text-text-primary"
+                          className="bg-white ring-1 ring-gray-200 border-border text-text-primary"
                         >
                           <DropdownMenuItem
                             onClick={() =>
@@ -272,13 +272,13 @@ export default function AdminUsersPage() {
                                 user.role === "admin" ? "member" : "admin",
                               )
                             }
-                            className="text-xs text-text-secondary focus:bg-hover focus:text-text-primary"
+                            className="text-xs text-text-secondary focus:bg-bg-mutedfocus:text-text-primary"
                           >
                             Make {user.role === "admin" ? "member" : "admin"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => handleDelete(user.id)}
-                            className="text-xs text-destructive focus:bg-hover"
+                            className="text-xs text-destructive focus:bg-bg-muted"
                           >
                             Delete
                           </DropdownMenuItem>
@@ -292,8 +292,8 @@ export default function AdminUsersPage() {
           </div>
         </div>
 
-        <div className="rounded-lg border border-border-dark bg-card">
-          <div className="border-b border-border-dark px-4 py-3">
+        <div className="rounded-lg border border-border bg-white ring-1 ring-gray-200">
+          <div className="border-b border-border px-4 py-3">
             <h2 className="text-xs font-semibold text-text-primary">
               Invitations
             </h2>
@@ -309,7 +309,7 @@ export default function AdminUsersPage() {
                 return (
                   <div
                     key={invite.id}
-                    className="flex items-center justify-between border-b border-border-dark px-4 py-2.5 last:border-b-0"
+                    className="flex items-center justify-between border-b border-border px-4 py-2.5 last:border-b-0"
                   >
                     <div>
                       <p className="text-xs font-medium text-text-primary">
@@ -325,8 +325,8 @@ export default function AdminUsersPage() {
                         st === "used"
                           ? "bg-accent/20 text-accent"
                           : st === "expired"
-                            ? "bg-hover text-text-tertiary"
-                            : "border border-border-dark text-text-secondary"
+                            ? "bg-bg-mutedtext-text-tertiary"
+                            : "border border-border text-text-secondary"
                       }`}
                     >
                       {st}
