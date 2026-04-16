@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { Resend } from "resend";
+import { createEmailSender } from "../lib/email-sender";
 import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
@@ -56,10 +56,9 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   const { to, fromAddress, subject, bodyHtml, bodyText } = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
-  // Send via Resend
-  const resend = new Resend(c.env.RESEND_API_KEY);
+  const sender = createEmailSender(c.env);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await resend.emails.send({
+  const result = await sender.send({
     from: formattedFrom,
     to,
     subject,
@@ -86,7 +85,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     subject,
     bodyHtml,
     bodyText: bodyText ?? null,
-    resendId: result.data?.id ?? null,
+    resendId: result.id,
     status: result.error ? "failed" : "sent",
     sentAt: now,
     createdAt: now,
@@ -100,7 +99,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   return c.json(
     {
       id,
-      resendId: result.data?.id ?? null,
+      resendId: result.id,
       status: result.error ? "failed" : "sent",
     },
     201,
@@ -218,10 +217,9 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     );
   }
 
-  // Send via Resend
-  const resend = new Resend(c.env.RESEND_API_KEY);
+  const sender = createEmailSender(c.env);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await resend.emails.send({
+  const result = await sender.send({
     from: formattedFrom,
     to: toAddress,
     subject: finalSubject,
@@ -241,7 +239,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     bodyHtml: finalBodyHtml,
     bodyText: bodyText ?? null,
     inReplyTo: orig.messageId,
-    resendId: result.data?.id ?? null,
+    resendId: result.id,
     status: result.error ? "failed" : "sent",
     sentAt: now,
     createdAt: now,
@@ -253,7 +251,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   return c.json(
     {
       id,
-      resendId: result.data?.id ?? null,
+      resendId: result.id,
       status: result.error ? "failed" : "sent",
     },
     201,
