@@ -1,32 +1,64 @@
 @import "tailwindcss";
 
 @theme {
-  --color-sidebar: #0f1117;
-  --color-panel: #141720;
-  --color-main: #1a1d2e;
-  --color-hover: #2a2d3e;
-  --color-card: #1e2235;
-  --color-input-bg: #141720;
-  --color-border-dark: #2a2d3e;
-  --color-text-primary: #f0f0f0;
-  --color-text-secondary: #8b8fa3;
-  --color-text-tertiary: #5a5e70;
-  --color-accent: #4f6ef7;
-  --color-accent-hover: #6180f9;
-  --color-destructive: #e5484d;
-  --color-unread: #4f6ef7;
-  --color-warning-bg: #2a2010;
-  --color-warning-border: #5c4a1e;
-  --color-warning-text: #f0c050;
+  /* Surfaces */
+  --color-bg: #ffffff;
+  --color-bg-subtle: #f9fafb;
+  --color-bg-muted: #f3f4f6;
+  --color-bg-panel: #ffffff;
+
+  /* Borders */
+  --color-border: #e5e7eb;
+  --color-border-subtle: #f1f5f9;
+
+  /* Text */
+  --color-text-primary: #0f172a;
+  --color-text-secondary: #475569;
+  --color-text-tertiary: #94a3b8;
+
+  /* Accent (blue-600 system) */
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-subtle: #eff6ff;
+  --color-accent-subtle-fg: #1d4ed8;
+
+  /* Semantic */
+  --color-destructive: #dc2626;
+  --color-destructive-subtle: #fee2e2;
+  --color-success: #16a34a;
+  --color-warning-bg: #fffbeb;
+  --color-warning-border: #fde68a;
+  --color-warning-text: #b45309;
+
+  /* Back-compat aliases for shadcn primitives (same value as primary tokens) */
+  --color-unread: #2563eb;
+
+  /* Radii */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 }
 
 html {
-  font-size: 13px;
+  font-size: 14px;
 }
 
 body {
-  background-color: #1a1d2e;
-  color: #f0f0f0;
+  background-color: #ffffff;
+  color: #0f172a;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Inter",
+    "Segoe UI",
+    Helvetica,
+    Arial,
+    sans-serif;
+  font-feature-settings:
+    "cv11",
+    "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Notion-like Editor Styles ── */
