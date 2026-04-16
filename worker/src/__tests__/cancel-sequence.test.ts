@@ -47,6 +47,7 @@ describe("cancelSequencesForPerson", () => {
       personId: "s1",
       status: "active",
       variables: "{}",
+      fromAddress: "test@test.com",
       enrolledAt: now,
     });
 
@@ -116,6 +117,7 @@ describe("cancelSequencesForPerson", () => {
       personId: "s1",
       status: "active",
       variables: "{}",
+      fromAddress: "test@test.com",
       enrolledAt: now,
     });
 

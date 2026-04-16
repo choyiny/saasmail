@@ -48,6 +48,7 @@ describe("sequence processor - handleScheduled", () => {
       personId: "s1",
       status: "active",
       variables: "{}",
+      fromAddress: "test@test.com",
       enrolledAt: now,
     });
 
@@ -95,6 +96,7 @@ describe("sequence processor - handleScheduled", () => {
       personId: "s1",
       status: "active",
       variables: "{}",
+      fromAddress: "test@test.com",
       enrolledAt: now,
     });
 
