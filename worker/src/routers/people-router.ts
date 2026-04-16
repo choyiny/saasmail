@@ -1,9 +1,17 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { desc, like, or, eq, sql } from "drizzle-orm";
+import { desc, like, or, eq, sql, and, inArray } from "drizzle-orm";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { json200Response, escapeLike } from "../lib/helpers";
 import type { Variables } from "../variables";
+import type { AllowedInboxes } from "../lib/inbox-permissions";
+
+function peopleScopeClause(allowed: AllowedInboxes) {
+  if (allowed.isAdmin) return sql``;
+  if (allowed.inboxes.length === 0)
+    return sql`AND s.id IN (SELECT NULL WHERE 0)`;
+  return sql`AND s.id IN (SELECT person_id FROM emails WHERE recipient IN ${allowed.inboxes})`;
+}
 
 export const peopleRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -74,10 +82,13 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     );
   }
 
-  const whereClause =
+  const allowed = c.get("allowedInboxes")!;
+  const scopeClause = peopleScopeClause(allowed);
+  const extraConditions =
     conditions.length > 0
-      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      ? sql`AND ${sql.join(conditions, sql` AND `)}`
       : sql``;
+  const whereClause = sql`WHERE 1=1 ${extraConditions} ${scopeClause}`;
 
   const rows = await db.all<{
     id: string;
@@ -176,10 +187,13 @@ peopleRouter.openapi(listPeopleRoute, async (c) => {
     conditions.push(sql`s.id = ${personId}`);
   }
 
-  const whereClause =
+  const allowed = c.get("allowedInboxes")!;
+  const scopeClause = peopleScopeClause(allowed);
+  const extraConditions =
     conditions.length > 0
-      ? sql`WHERE ${sql.join(conditions, sql` AND `)}`
+      ? sql`AND ${sql.join(conditions, sql` AND `)}`
       : sql``;
+  const whereClause = sql`WHERE 1=1 ${extraConditions} ${scopeClause}`;
 
   // Group by (person, recipient) to get per-thread stats
   const rows = await db.all<{
@@ -254,6 +268,26 @@ peopleRouter.openapi(getPersonRoute, async (c) => {
 
   if (rows.length === 0) {
     return c.json({ error: "Person not found" }, 404);
+  }
+
+  const allowed = c.get("allowedInboxes")!;
+  if (!allowed.isAdmin) {
+    if (allowed.inboxes.length === 0) {
+      return c.json({ error: "Person not found" }, 404);
+    }
+    const match = await db
+      .select({ id: emails.id })
+      .from(emails)
+      .where(
+        and(
+          eq(emails.personId, id),
+          inArray(emails.recipient, allowed.inboxes),
+        ),
+      )
+      .limit(1);
+    if (match.length === 0) {
+      return c.json({ error: "Person not found" }, 404);
+    }
   }
 
   return c.json(rows[0], 200);

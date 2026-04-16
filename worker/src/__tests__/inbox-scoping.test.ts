@@ -215,3 +215,48 @@ describe("emails scoping", () => {
     expect(row).toHaveLength(1);
   });
 });
+
+describe("people scoping", () => {
+  it("member people list only includes people with emails in allowed inboxes", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "u-mem",
+      role: "member",
+      email: "m@x.com",
+    });
+    await createTestPerson({ id: "p1", email: "a1@external.com" });
+    await createTestPerson({ id: "p2", email: "a2@external.com" });
+    // p1 has email to a@x.com; p2 has email only to b@x.com
+    await createTestEmail({ id: "e1", personId: "p1", recipient: "a@x.com" });
+    await createTestEmail({
+      id: "e2",
+      personId: "p2",
+      recipient: "b@x.com",
+      messageId: "m2",
+    });
+    await grantInbox(userId, "a@x.com");
+    const res = await authFetch("/api/people", { apiKey });
+    const body = (await res.json()) as { data: Array<{ id: string }> };
+    const ids = body.data.map((p) => p.id);
+    expect(ids).toEqual(["p1"]);
+  });
+
+  it("member detail GET for disallowed person returns 404", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "u-mem",
+      role: "member",
+      email: "m@x.com",
+    });
+    await createTestPerson({ id: "p1" });
+    await createTestPerson({ id: "p2", email: "a2@external.com" });
+    await createTestEmail({ id: "e1", personId: "p1", recipient: "a@x.com" });
+    await createTestEmail({
+      id: "e2",
+      personId: "p2",
+      recipient: "b@x.com",
+      messageId: "m2",
+    });
+    await grantInbox(userId, "a@x.com");
+    const res = await authFetch("/api/people/p2", { apiKey });
+    expect(res.status).toBe(404);
+  });
+});
