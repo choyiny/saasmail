@@ -1,13 +1,37 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ArrowLeft } from "lucide-react";
 import PersonList from "./PersonList";
 import PersonDetail from "./PersonDetail";
 import ComposeModal from "./ComposeModal";
-import type { Person } from "@/lib/api";
+import { fetchStats, type Person, type Stats } from "@/lib/api";
+import { useSession } from "@/lib/auth-client";
 
 export default function InboxPage() {
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const { data: session } = useSession();
+
+  useEffect(() => {
+    fetchStats().then(setStats).catch(() => {});
+  }, []);
+
+  const isAdmin = session?.user?.role === "admin";
+
+  if (stats && stats.recipients.length === 0 && !isAdmin) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-10 text-center">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">
+            No inboxes assigned yet
+          </h2>
+          <p className="mt-2 text-sm text-text-secondary">
+            Ask an admin to grant you access to an inbox.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
