@@ -20,7 +20,7 @@ export const sendRouter = new OpenAPIHono<{
 const SendEmailSchema = z.object({
   to: z.string().email(),
   fromAddress: z.string().email(),
-  subject: z.string(),
+  subject: z.string().transform((s) => s.replace(/[\r\n]+/g, " ")),
   bodyHtml: z.string(),
   bodyText: z.string().optional(),
 });

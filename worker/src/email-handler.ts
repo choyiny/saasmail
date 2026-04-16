@@ -8,6 +8,21 @@ import { attachments } from "./db/attachments.schema";
 import { parseEmail } from "./lib/email-parser";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 
+const MAX_ATTACHMENTS = 50;
+const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+
+/**
+ * Strip path traversal sequences and dangerous characters from filenames.
+ */
+function sanitizeFilename(filename: string): string {
+  return filename
+    .replace(/\.\.[/\\]/g, "") // strip path traversal
+    .replace(/[/\\]/g, "_") // replace path separators
+    .replace(/[\x00-\x1f]/g, "") // strip control characters
+    .slice(0, 255) // limit length
+    || "unnamed";
+}
+
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
@@ -30,7 +45,12 @@ export async function handleEmail(
     }
   }
 
-  // Upsert person
+  const senderAuthenticated =
+    parsed.auth.spf === "pass" ||
+    parsed.auth.dkim === "pass" ||
+    parsed.auth.dmarc === "pass";
+
+  // Upsert person — only update name if sender passes authentication
   const personId = nanoid();
   await db
     .insert(people)
@@ -47,7 +67,9 @@ export async function handleEmail(
     .onConflictDoUpdate({
       target: people.email,
       set: {
-        name: sql`COALESCE(${parsed.from.name || null}, ${people.name})`,
+        ...(senderAuthenticated
+          ? { name: sql`COALESCE(${parsed.from.name || null}, ${people.name})` }
+          : {}),
         lastEmailAt: now,
         unreadCount: sql`${people.unreadCount} + 1`,
         totalCount: sql`${people.totalCount} + 1`,
@@ -67,9 +89,22 @@ export async function handleEmail(
   const cidMap: Record<string, string> = {};
   const emailId = nanoid();
 
-  for (const att of parsed.attachments) {
+  // Enforce attachment limits
+  const cappedAttachments = parsed.attachments.slice(0, MAX_ATTACHMENTS);
+  let totalAttachmentBytes = 0;
+
+  for (const att of cappedAttachments) {
+    totalAttachmentBytes += att.content.byteLength;
+    if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
+      console.log(
+        `Attachment size limit exceeded for email from ${parsed.from.address}, skipping remaining attachments`,
+      );
+      break;
+    }
+
+    const safeFilename = sanitizeFilename(att.filename);
     const attachmentId = nanoid();
-    const r2Key = `attachments/${emailId}/${att.filename}`;
+    const r2Key = `attachments/${emailId}/${attachmentId}/${safeFilename}`;
 
     await env.R2.put(r2Key, att.content, {
       httpMetadata: { contentType: att.contentType },
@@ -78,7 +113,7 @@ export async function handleEmail(
     await db.insert(attachments).values({
       id: attachmentId,
       emailId,
-      filename: att.filename,
+      filename: safeFilename,
       contentType: att.contentType,
       size: att.content.byteLength,
       r2Key,
@@ -103,7 +138,7 @@ export async function handleEmail(
     }
   }
 
-  // Insert email (with rewritten HTML)
+  // Insert email (with rewritten HTML and auth results)
   await db.insert(emails).values({
     id: emailId,
     personId: actualPersonId,
@@ -113,6 +148,9 @@ export async function handleEmail(
     bodyText: parsed.bodyText,
     rawHeaders: JSON.stringify(parsed.headers),
     messageId: parsed.messageId,
+    spf: parsed.auth.spf,
+    dkim: parsed.auth.dkim,
+    dmarc: parsed.auth.dmarc,
     isRead: 0,
     receivedAt: now,
     createdAt: now,

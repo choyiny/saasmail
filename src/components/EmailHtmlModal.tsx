@@ -46,7 +46,6 @@ export default function EmailHtmlModal({
               className="prose prose-sm max-w-none bg-white p-6 text-black"
               dangerouslySetInnerHTML={{
                 __html: DOMPurify.sanitize(email.bodyHtml, {
-                  ADD_TAGS: ["style"],
                   ADD_ATTR: ["target"],
                 }),
               }}

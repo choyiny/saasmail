@@ -1,5 +1,11 @@
 import PostalMime from "postal-mime";
 
+export interface AuthResults {
+  spf: string | null;
+  dkim: string | null;
+  dmarc: string | null;
+}
+
 export interface ParsedEmail {
   from: { address: string; name: string };
   to: string;
@@ -9,6 +15,7 @@ export interface ParsedEmail {
   messageId: string | null;
   headers: Record<string, string>;
   attachments: ParsedAttachment[];
+  auth: AuthResults;
 }
 
 export interface ParsedAttachment {
@@ -83,6 +90,29 @@ export function trimQuotedHtml(html: string): string {
   return trimmed.trimEnd();
 }
 
+/**
+ * Parse Authentication-Results header for SPF, DKIM, and DMARC verdicts.
+ * Returns the verdict string (e.g. "pass", "fail", "none") or null if absent.
+ */
+function parseAuthResults(headers: Record<string, string>): AuthResults {
+  const raw =
+    headers["authentication-results"] ||
+    headers["Authentication-Results"] ||
+    "";
+  if (!raw) return { spf: null, dkim: null, dmarc: null };
+
+  const extract = (key: string): string | null => {
+    const match = raw.match(new RegExp(`${key}=([a-zA-Z]+)`));
+    return match ? match[1].toLowerCase() : null;
+  };
+
+  return {
+    spf: extract("spf"),
+    dkim: extract("dkim"),
+    dmarc: extract("dmarc"),
+  };
+}
+
 export async function parseEmail(
   message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
@@ -117,5 +147,6 @@ export async function parseEmail(
       content: att.content,
       contentId: att.contentId || null,
     })),
+    auth: parseAuthResults(headers),
   };
 }
