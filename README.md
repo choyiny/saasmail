@@ -2,7 +2,21 @@
 
 Self-hosted email server on Cloudflare Workers.
 
-Receive email with **Cloudflare Email Workers**. Send email with **Resend**. Manage everything through a dark-themed web UI.
+Receive email with **Cloudflare Email Workers**. Send email with **Cloudflare Email Sending** or **Resend**. Manage everything through a dark-themed web UI.
+
+## Provider Matrix
+
+|               | Cloudflare         | Resend |
+| ------------- | ------------------ | ------ |
+| **Sending**   | ✅                 | ✅     |
+| **Receiving** | ✅                 | ❌     |
+
+Pick one outbound provider at deploy time:
+
+- **Cloudflare Email Sending** — add a `send_email` binding (`EMAIL`) in `wrangler.jsonc` and onboard your domain at [Email Service](https://dash.cloudflare.com/?to=/:account/email-service).
+- **Resend** — set `RESEND_API_KEY` as a secret.
+
+If `RESEND_API_KEY` is set it takes precedence; otherwise the `EMAIL` binding is used. If neither is configured, send attempts return a "No email provider configured" error.
 
 ## Features
 
@@ -23,7 +37,7 @@ Build multi-step drip campaigns. Enroll a sender into a sequence and cmail will 
 | Layer             | Technology                              |
 | ----------------- | --------------------------------------- |
 | **Receive email** | Cloudflare Email Workers                |
-| **Send email**    | Resend (`RESEND_API_KEY`)               |
+| **Send email**    | Cloudflare Email Sending or Resend      |
 | **Runtime**       | Cloudflare Workers + Hono               |
 | **Database**      | Cloudflare D1 (SQLite)                  |
 | **File storage**  | Cloudflare R2 (attachments)             |
