@@ -1,4 +1,5 @@
 import { useState } from "react";
+import DOMPurify from "dompurify";
 import { Maximize2, Paperclip, Trash2 } from "lucide-react";
 import type { Email } from "@/lib/api";
 
@@ -10,6 +11,7 @@ interface MessageBubbleProps {
   onReply: (emailId: string) => void;
   onDelete: (emailId: string) => void;
   compact?: boolean;
+  renderHtml?: boolean;
 }
 
 const MAX_LINES = 4;
@@ -24,6 +26,7 @@ export default function MessageBubble({
   onReply,
   onDelete,
   compact = false,
+  renderHtml = false,
 }: MessageBubbleProps) {
   const [expanded, setExpanded] = useState(false);
   const isSent = email.type === "sent";
@@ -109,8 +112,17 @@ export default function MessageBubble({
         </p>
       )}
 
-      {/* Text body */}
-      {displayText ? (
+      {/* Body */}
+      {renderHtml && email.bodyHtml ? (
+        <div
+          className="prose prose-sm max-w-none text-xs text-text-secondary leading-relaxed"
+          dangerouslySetInnerHTML={{
+            __html: DOMPurify.sanitize(email.bodyHtml, {
+              ADD_ATTR: ["target"],
+            }),
+          }}
+        />
+      ) : displayText ? (
         <p className="whitespace-pre-wrap text-xs text-text-secondary leading-relaxed">
           {displayText}
         </p>
@@ -119,7 +131,7 @@ export default function MessageBubble({
       )}
 
       {/* Show more / less */}
-      {text.length > truncateLength && (
+      {!renderHtml && text.length > truncateLength && (
         <button
           onClick={(e) => {
             e.stopPropagation();

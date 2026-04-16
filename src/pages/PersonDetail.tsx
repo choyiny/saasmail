@@ -157,6 +157,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
                   onMarkRead={handleMarkRead}
                   onReply={setReplyToEmailId}
                   onDelete={handleDelete}
+                  renderHtml
                 />
               </div>
             ) : (
