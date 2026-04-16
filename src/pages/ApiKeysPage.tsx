@@ -5,45 +5,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  fetchApiKeyInfo,
-  generateApiKey,
-  revokeApiKey,
-  fetchOAuthApps,
-  revokeOAuthApp,
-} from "@/lib/api";
-import type { ApiKeyInfo, OAuthApp } from "@/lib/api";
-import { useBranding } from "@/lib/branding";
+import { fetchApiKeyInfo, generateApiKey, revokeApiKey } from "@/lib/api";
+import type { ApiKeyInfo } from "@/lib/api";
 
 export default function ApiKeysPage() {
-  const { appName } = useBranding();
   const [keyInfo, setKeyInfo] = useState<ApiKeyInfo | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmAction, setConfirmAction] = useState<
     "regenerate" | "revoke" | null
   >(null);
-  const [oauthApps, setOauthApps] = useState<OAuthApp[]>([]);
-  const [copied, setCopied] = useState(false);
-
-  const mcpConfig = JSON.stringify(
-    {
-      mcpServers: {
-        [appName]: {
-          url: `${window.location.origin}/mcp`,
-          auth: "oauth",
-        },
-      },
-    },
-    null,
-    2,
-  );
 
   useEffect(() => {
-    Promise.all([fetchApiKeyInfo(), fetchOAuthApps()])
-      .then(([keyRes, apps]) => {
+    fetchApiKeyInfo()
+      .then((keyRes) => {
         setKeyInfo(keyRes.key);
-        setOauthApps(apps);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -64,18 +40,6 @@ export default function ApiKeysPage() {
 
   function handleCopy() {
     if (newKey) navigator.clipboard.writeText(newKey);
-  }
-
-  function handleCopyConfig() {
-    navigator.clipboard.writeText(mcpConfig);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }
-
-  async function handleRevokeApp(clientId: string) {
-    if (!confirm("Revoke this application's access?")) return;
-    await revokeOAuthApp(clientId);
-    setOauthApps((prev) => prev.filter((a) => a.clientId !== clientId));
   }
 
   if (loading) {
@@ -175,7 +139,7 @@ export default function ApiKeysPage() {
           </p>
           <pre className="rounded bg-sidebar p-3 text-[11px] text-text-secondary">
             {`curl -H "Authorization: Bearer sk_..." \\
-  ${window.location.origin}/api/senders`}
+  ${window.location.origin}/api/people`}
           </pre>
           <p className="mt-2 text-xs text-text-secondary">
             The key grants full access to the API as your user account. See{" "}
@@ -187,77 +151,6 @@ export default function ApiKeysPage() {
             </a>{" "}
             for available endpoints.
           </p>
-        </div>
-
-        {/* --- MCP Connection Section --- */}
-        <h2 className="mb-4 mt-8 text-sm font-semibold text-text-primary">
-          MCP Connection
-        </h2>
-
-        <div className="mb-6 rounded-lg border border-border-dark bg-card p-4">
-          <h3 className="mb-2 text-xs font-semibold text-text-primary">
-            Server URL
-          </h3>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 rounded bg-sidebar px-3 py-2 text-xs text-text-primary">
-              {window.location.origin}/mcp
-            </code>
-          </div>
-
-          <h3 className="mb-2 mt-4 text-xs font-semibold text-text-primary">
-            Claude Desktop Configuration
-          </h3>
-          <p className="mb-2 text-xs text-text-secondary">
-            Add this to your{" "}
-            <code className="text-accent">claude_desktop_config.json</code>:
-          </p>
-          <div className="relative">
-            <pre className="rounded bg-sidebar p-3 text-[11px] text-text-secondary">
-              {mcpConfig}
-            </pre>
-            <button
-              onClick={handleCopyConfig}
-              className="absolute right-2 top-2 rounded border border-border-dark px-2 py-1 text-[10px] text-text-tertiary hover:bg-hover hover:text-text-secondary"
-            >
-              {copied ? "Copied!" : "Copy"}
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-border-dark bg-card p-4">
-          <h3 className="mb-3 text-xs font-semibold text-text-primary">
-            Connected Applications
-          </h3>
-          {oauthApps.length === 0 ? (
-            <p className="text-xs text-text-tertiary">
-              Connect an MCP client using the URL above. Apps will appear here
-              after authorization.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {oauthApps.map((app) => (
-                <div
-                  key={app.clientId}
-                  className="flex items-center justify-between rounded-md border border-border-dark px-3 py-2"
-                >
-                  <div>
-                    <p className="text-xs font-medium text-text-primary">
-                      {app.name ?? "MCP Client"}
-                    </p>
-                    <p className="text-[11px] text-text-tertiary">
-                      {app.clientId}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleRevokeApp(app.clientId)}
-                    className="rounded-md border border-border-dark px-2 py-1 text-xs text-red-400 hover:bg-hover"
-                  >
-                    Revoke
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Confirmation Dialog */}

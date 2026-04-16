@@ -2,17 +2,13 @@
 
 Self-hosted email server on Cloudflare Workers.
 
-Receive email with **Cloudflare Email Workers**. Send email with **Resend**. Manage everything through a dark-themed web UI or an MCP server for AI integrations.
+Receive email with **Cloudflare Email Workers**. Send email with **Resend**. Manage everything through a dark-themed web UI.
 
 ## Features
 
 ### Consolidated Inbox
 
 All incoming email lands in one place. Senders are grouped and sorted by recency with unread counts. Click a sender to see the latest message, then open the thread sidebar to browse the full conversation history.
-
-### MCP Server
-
-A JSON-RPC 2.0 MCP server with OAuth authentication. Connect it to Claude, ChatGPT, or any MCP-compatible AI tool to list senders, read emails, compose and reply, and manage templates — all through natural language.
 
 ### Email Templates
 

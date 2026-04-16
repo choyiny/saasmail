@@ -2,7 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { desc, like, or, eq, sql } from "drizzle-orm";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
-import { json200Response } from "../lib/helpers";
+import { json200Response, escapeLike } from "../lib/helpers";
 import type { Variables } from "../variables";
 
 export const peopleRouter = new OpenAPIHono<{
@@ -68,9 +68,9 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
 
   const conditions: any[] = [];
   if (q) {
-    const pattern = `%${q}%`;
+    const pattern = `%${escapeLike(q)}%`;
     conditions.push(
-      sql`(s.email LIKE ${pattern} OR s.name LIKE ${pattern})`,
+      sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\')`,
     );
   }
 
@@ -162,9 +162,9 @@ peopleRouter.openapi(listPeopleRoute, async (c) => {
   const conditions: any[] = [];
 
   if (q) {
-    const pattern = `%${q}%`;
+    const pattern = `%${escapeLike(q)}%`;
     conditions.push(
-      sql`(s.email LIKE ${pattern} OR s.name LIKE ${pattern})`,
+      sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\')`,
     );
   }
 

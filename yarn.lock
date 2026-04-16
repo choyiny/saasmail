@@ -45,14 +45,6 @@
   resolved "https://registry.npmjs.org/@better-auth/mongo-adapter/-/mongo-adapter-1.6.3.tgz"
   integrity sha512-xer3hjuYaqcx/qMdZMXTUQz4ROLeS14Knas6OSY2gK8jgAidZO7twcb+wLgTbtJYmoXZqKFzSxoWuf6LxVvZCw==
 
-"@better-auth/oauth-provider@^1.6.4":
-  version "1.6.4"
-  resolved "https://registry.npmjs.org/@better-auth/oauth-provider/-/oauth-provider-1.6.4.tgz"
-  integrity sha512-2iYDU26nkFqoBkktSQSaST0iuf1nNFjZdtJo/uE1Nw4zL1VJhqe82vQ5p2lOVhZBS8ecn0BY+fDUvP/tU+c2vQ==
-  dependencies:
-    jose "^6.1.3"
-    zod "^4.3.6"
-
 "@better-auth/passkey@^1.6.4":
   version "1.6.4"
   resolved "https://registry.npmjs.org/@better-auth/passkey/-/passkey-1.6.4.tgz"

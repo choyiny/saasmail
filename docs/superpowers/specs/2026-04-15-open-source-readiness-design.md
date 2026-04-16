@@ -6,7 +6,7 @@ Make cmail a legit open source project with proper documentation, licensing, con
 
 ## What cmail Is
 
-An open-source email server built on Cloudflare Workers. Receives email via Cloudflare Email Workers, sends via Resend. Features a consolidated inbox UI, MCP server for AI integrations, HTML email templates with variable interpolation, and email sequencing (drip campaigns).
+An open-source email server built on Cloudflare Workers. Receives email via Cloudflare Email Workers, sends via Resend. Features a consolidated inbox UI, HTML email templates with variable interpolation, and email sequencing (drip campaigns).
 
 ## Components
 
@@ -17,7 +17,6 @@ Sections in order:
 - **Header:** Project name, one-liner ("Self-hosted email server on Cloudflare Workers"), tech stack badges (Cloudflare Workers, Hono, Drizzle, React, TypeScript)
 - **Features:**
   - Consolidated inbox — all incoming email in one dark-themed UI with sender grouping and thread sidebar
-  - MCP server — JSON-RPC 2.0 MCP server with OAuth for AI tool integrations (list senders, read/send/reply, manage templates)
   - Email templates — HTML editor with `{{variable}}` interpolation, send templates via API
   - Email sequencing — multi-step drip campaigns with enrollment, step skipping, delay overrides, automatic cancellation on reply
 - **Architecture:**

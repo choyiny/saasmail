@@ -4,7 +4,7 @@ import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
-import { json200Response } from "../lib/helpers";
+import { json200Response, escapeLike } from "../lib/helpers";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import type { Variables } from "../variables";
 
@@ -61,7 +61,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
   // Build conditions for received emails
   const receivedConditions: any[] = [eq(emails.personId, personId)];
   if (q) {
-    receivedConditions.push(like(emails.subject, `%${q}%`));
+    receivedConditions.push(like(emails.subject, `%${escapeLike(q)}%`));
   }
   if (recipient) {
     receivedConditions.push(eq(emails.recipient, recipient));
@@ -84,7 +84,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
   // Build conditions for sent emails
   const sentConditions: any[] = [eq(sentEmails.personId, personId)];
   if (q) {
-    sentConditions.push(like(sentEmails.subject, `%${q}%`));
+    sentConditions.push(like(sentEmails.subject, `%${escapeLike(q)}%`));
   }
   if (recipient) {
     sentConditions.push(eq(sentEmails.fromAddress, recipient));

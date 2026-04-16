@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useSearchParams } from "react-router-dom";
+import { Navigate } from "react-router-dom";
 import { authClient } from "@/lib/auth-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useBranding } from "@/lib/branding";
@@ -12,21 +12,6 @@ export default function LoginPage() {
   const [mode, setMode] = useState<"passkey" | "password">("passkey");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [searchParams] = useSearchParams();
-
-  // If the login page was opened as part of an OAuth authorize flow, Better
-  // Auth passes the original authorize params (response_type, client_id, etc.)
-  // as query parameters. After a successful login we need to redirect back to
-  // the authorize endpoint with those params so the flow can continue.
-  function getPostLoginRedirect(): string {
-    const responseType = searchParams.get("response_type");
-    if (responseType) {
-      // Rebuild the authorize URL with all query params
-      const params = new URLSearchParams(searchParams);
-      return `/api/auth/oauth2/authorize?${params.toString()}`;
-    }
-    return "/";
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -64,7 +49,7 @@ export default function LoginPage() {
       if (result?.error) {
         setError(result.error.message || "Passkey sign-in failed");
       } else {
-        window.location.href = getPostLoginRedirect();
+        window.location.href = "/";
       }
     } catch {
       setError("Passkey sign-in failed. Please try again.");
@@ -85,7 +70,7 @@ export default function LoginPage() {
       if (result?.error) {
         setError(result.error.message || "Sign-in failed");
       } else {
-        window.location.href = getPostLoginRedirect();
+        window.location.href = "/";
       }
     } catch {
       setError("Sign-in failed. Please try again.");
