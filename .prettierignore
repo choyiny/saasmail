@@ -1,0 +1,8 @@
+node_modules
+dist
+.wrangler
+.vite
+worker-configuration.d.ts
+worker/src/db/auth.schema.ts
+yarn.lock
+package-lock.json
