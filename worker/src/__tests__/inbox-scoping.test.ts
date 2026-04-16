@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   applyMigrations,
@@ -277,6 +277,34 @@ describe("send scoping", () => {
         fromAddress: "b@x.com",
         subject: "hi",
         bodyHtml: "<p>hi</p>",
+      }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("sequences scoping", () => {
+  it("member cannot enroll person using disallowed fromAddress", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "u-mem",
+      role: "member",
+      email: "m@x.com",
+    });
+    await grantInbox(userId, "a@x.com");
+    // Seed a sequence and a person.
+    await createTestPerson({ id: "p1" });
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.run(sql`
+      INSERT INTO sequences (id, name, steps, created_at, updated_at)
+      VALUES ('s1', 'seq', '[]', ${now}, ${now})
+    `);
+    const res = await authFetch("/api/sequences/s1/enroll", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        personId: "p1",
+        fromAddress: "b@x.com",
       }),
     });
     expect(res.status).toBe(403);

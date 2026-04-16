@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, and, inArray } from "drizzle-orm";
+import { assertInboxAllowed, inboxFilter } from "../lib/inbox-permissions";
 import { nanoid } from "nanoid";
 import { sequences } from "../db/sequences.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
@@ -336,6 +337,10 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
   } = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
+  // Check inbox permission before any other work
+  const allowed = c.get("allowedInboxes")!;
+  assertInboxAllowed(allowed, fromAddress);
+
   // Validate sequence exists
   const seqRows = await db
     .select()
@@ -492,6 +497,7 @@ const getEnrollmentRoute = createRoute({
 sequencesRouter.openapi(getEnrollmentRoute, async (c) => {
   const db = c.get("db");
   const { personId } = c.req.valid("param");
+  const allowed = c.get("allowedInboxes")!;
 
   const enrollments = await db
     .select()
@@ -500,6 +506,7 @@ sequencesRouter.openapi(getEnrollmentRoute, async (c) => {
       and(
         eq(sequenceEnrollments.personId, personId),
         eq(sequenceEnrollments.status, "active"),
+        inboxFilter(allowed, sequenceEnrollments.fromAddress),
       ),
     )
     .limit(1);
@@ -620,11 +627,17 @@ const listEnrollmentsRoute = createRoute({
 sequencesRouter.openapi(listEnrollmentsRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
+  const allowed = c.get("allowedInboxes")!;
 
   const enrollments = await db
     .select()
     .from(sequenceEnrollments)
-    .where(eq(sequenceEnrollments.sequenceId, id))
+    .where(
+      and(
+        eq(sequenceEnrollments.sequenceId, id),
+        inboxFilter(allowed, sequenceEnrollments.fromAddress),
+      ),
+    )
     .orderBy(sequenceEnrollments.enrolledAt);
 
   const result = [];
