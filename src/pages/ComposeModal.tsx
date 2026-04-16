@@ -17,6 +17,9 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
   const [to, setTo] = useState("");
   const [fromAddress, setFromAddress] = useState("");
   const [recipients, setRecipients] = useState<string[]>([]);
+  const [senderIdentities, setSenderIdentities] = useState<
+    Array<{ email: string; displayName: string }>
+  >([]);
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");
   const [sending, setSending] = useState(false);
@@ -26,6 +29,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
     if (open) {
       fetchStats().then((stats) => {
         setRecipients(stats.recipients);
+        setSenderIdentities(stats.senderIdentities ?? []);
         if (!fromAddress && stats.recipients.length > 0) {
           setFromAddress(stats.recipients[0]);
         }
@@ -37,6 +41,11 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
       setError("");
     }
   }, [open]);
+
+  function getFromLabel(email: string): string {
+    const identity = senderIdentities.find((s) => s.email === email);
+    return identity ? `${identity.displayName} <${email}>` : email;
+  }
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
@@ -71,7 +80,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
             >
               {recipients.map((r) => (
                 <option key={r} value={r}>
-                  {r}
+                  {getFromLabel(r)}
                 </option>
               ))}
             </select>

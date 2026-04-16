@@ -5,6 +5,7 @@ import {
   markEmailRead,
   deleteEmail,
   fetchPersonEnrollment,
+  fetchStats,
   type Person,
   type Email,
   type PersonEnrollmentInfo,
@@ -30,6 +31,9 @@ export default function PersonDetail({ person }: PersonDetailProps) {
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [threadOpen, setThreadOpen] = useState(false);
+  const [senderIdentities, setSenderIdentities] = useState<
+    Array<{ email: string; displayName: string }>
+  >([]);
 
   function refetchEmails() {
     fetchPersonEmails(person.id, {
@@ -49,6 +53,12 @@ export default function PersonDetail({ person }: PersonDetailProps) {
   useEffect(() => {
     fetchPersonEnrollment(person.id).then(setEnrollmentInfo);
   }, [person.id]);
+
+  useEffect(() => {
+    fetchStats().then((stats) => {
+      setSenderIdentities(stats.senderIdentities ?? []);
+    });
+  }, []);
 
   function refreshEnrollment() {
     fetchPersonEnrollment(person.id).then(setEnrollmentInfo);
@@ -163,6 +173,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
               personName={person.name}
               personEmail={person.email}
               recipients={[person.recipient]}
+              senderIdentities={senderIdentities}
               onClose={() => setReplyToEmailId(null)}
               onSent={refetchEmails}
             />

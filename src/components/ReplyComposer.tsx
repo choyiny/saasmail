@@ -8,6 +8,7 @@ interface ReplyComposerProps {
   personName: string | null;
   personEmail: string;
   recipients: string[];
+  senderIdentities: Array<{ email: string; displayName: string }>;
   onClose: () => void;
   onSent: () => void;
 }
@@ -31,9 +32,15 @@ export default function ReplyComposer({
   personName,
   personEmail,
   recipients,
+  senderIdentities,
   onClose,
   onSent,
 }: ReplyComposerProps) {
+  function getFromLabel(email: string): string {
+    const identity = senderIdentities.find((s) => s.email === email);
+    return identity ? `${identity.displayName} <${email}>` : email;
+  }
+
   const [tab, setTab] = useState<Tab>("freeform");
   const [fromAddress, setFromAddress] = useState(recipients[0] ?? "");
   const [bodyHtml, setBodyHtml] = useState("");
@@ -136,7 +143,7 @@ export default function ReplyComposer({
           >
             {recipients.map((r) => (
               <option key={r} value={r}>
-                {r}
+                {getFromLabel(r)}
               </option>
             ))}
           </select>
