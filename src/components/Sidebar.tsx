@@ -3,6 +3,7 @@ import {
   Mail,
   FileText,
   Key,
+  Settings,
   Users,
   PenSquare,
   LogOut,
@@ -29,6 +30,7 @@ const navItems: NavItem[] = [
   { icon: FileText, label: "Templates", path: "/templates" },
   { icon: ListOrdered, label: "Sequences", path: "/sequences" },
   { icon: Key, label: "API", path: "/api-keys" },
+  { icon: Settings, label: "Settings", path: "/settings" },
   { icon: Users, label: "Users", path: "/admin/users", adminOnly: true },
 ];
 

@@ -470,3 +470,35 @@ export async function fetchSequenceEnrollments(
   return apiFetch(`/api/sequences/${sequenceId}/enrollments`);
 }
 
+// --- Sender Identities ---
+
+export interface SenderIdentity {
+  email: string;
+  displayName: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchSenderIdentities(): Promise<SenderIdentity[]> {
+  return apiFetch("/api/sender-identities");
+}
+
+export async function upsertSenderIdentity(
+  email: string,
+  displayName: string,
+): Promise<SenderIdentity> {
+  return apiFetch(`/api/sender-identities/${encodeURIComponent(email)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName }),
+  });
+}
+
+export async function deleteSenderIdentity(
+  email: string,
+): Promise<{ success: boolean }> {
+  return apiFetch(`/api/sender-identities/${encodeURIComponent(email)}`, {
+    method: "DELETE",
+  });
+}
+
