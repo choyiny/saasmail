@@ -192,6 +192,11 @@ export default function EnrollSequenceModal({
                     );
                   })}
                 </div>
+                {activeStepCount === 0 && (
+                  <p className="mt-1 text-xs text-red-400">
+                    At least one step must be selected.
+                  </p>
+                )}
               </div>
             )}
 
