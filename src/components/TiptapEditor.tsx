@@ -549,7 +549,7 @@ function ToolbarButton({
       className={`flex items-center justify-center rounded px-2 py-1.5 text-[11px] font-medium transition-colors ${
         active
           ? "bg-accent/15 text-accent"
-          : "text-text-tertiary hover:bg-hover hover:text-text-secondary"
+          : "text-text-tertiary hover:bg-bg-muted hover:text-text-secondary"
       }`}
       onClick={onClick}
     >
@@ -559,5 +559,5 @@ function ToolbarButton({
 }
 
 function Separator() {
-  return <div className="mx-0.5 h-4 w-px bg-border-dark" />;
+  return <div className="mx-0.5 h-4 w-px bg-border" />;
 }
