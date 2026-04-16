@@ -26,6 +26,7 @@ import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
+import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
 
 const app = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -93,6 +94,20 @@ app.use("/api/*", async (c, next) => {
   }
 
   return c.json({ error: "Unauthorized" }, 401);
+});
+
+// Inject allowed inboxes for all authenticated API routes
+app.use("/api/*", async (c, next) => {
+  if (
+    c.req.path.startsWith("/api/auth") ||
+    c.req.path.startsWith("/api/setup") ||
+    c.req.path.startsWith("/api/invites") ||
+    c.req.path === "/api/health" ||
+    c.req.path === "/api/config"
+  ) {
+    return next();
+  }
+  return injectAllowedInboxes(c, next);
 });
 
 // Admin guard middleware
