@@ -15,4 +15,6 @@ jobs:
           node-version: 20
           cache: yarn
       - run: yarn install --frozen-lockfile
+      - name: Seed wrangler.jsonc (gitignored; needed by vitest-pool-workers)
+        run: cp wrangler.jsonc.example wrangler.jsonc
       - run: yarn test
