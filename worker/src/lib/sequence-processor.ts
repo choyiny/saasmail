@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and, lte } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { Resend } from "resend";
+import { createEmailSender, type EmailSender } from "./email-sender";
 import { schema } from "../db/schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
@@ -57,11 +57,11 @@ export async function handleQueueBatch(
   env: CloudflareBindings,
 ): Promise<void> {
   const db = drizzle(env.DB, { schema });
-  const resend = new Resend(env.RESEND_API_KEY);
+  const sender = createEmailSender(env);
 
   for (const msg of batch.messages) {
     try {
-      await processSequenceEmail(db, resend, msg.body.sequenceEmailId);
+      await processSequenceEmail(db, sender, msg.body.sequenceEmailId);
       msg.ack();
     } catch (err) {
       console.error(
@@ -75,7 +75,7 @@ export async function handleQueueBatch(
 
 async function processSequenceEmail(
   db: ReturnType<typeof drizzle>,
-  resend: Resend,
+  sender: EmailSender,
   sequenceEmailId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
@@ -160,9 +160,8 @@ async function processSequenceEmail(
   const renderedSubject = interpolate(template.subject, mergedVars);
   const renderedHtml = interpolate(template.bodyHtml, mergedVars);
 
-  // Send via Resend
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await resend.emails.send({
+  const result = await sender.send({
     from: formattedFrom,
     to: person.email,
     subject: renderedSubject,
@@ -179,7 +178,7 @@ async function processSequenceEmail(
     subject: renderedSubject,
     bodyHtml: renderedHtml,
     bodyText: null,
-    resendId: result.data?.id ?? null,
+    resendId: result.id,
     status: result.error ? "failed" : "sent",
     sentAt: now,
     createdAt: now,
