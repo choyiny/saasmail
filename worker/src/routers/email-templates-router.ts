@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { Resend } from "resend";
+import { createEmailSender } from "../lib/email-sender";
 import { emailTemplates } from "../db/email-templates.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
@@ -317,9 +317,8 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   const renderedSubject = interpolate(template.subject, variables);
   const renderedHtml = interpolate(template.bodyHtml, variables);
 
-  // Send via Resend
-  const resend = new Resend(c.env.RESEND_API_KEY);
-  const result = await resend.emails.send({
+  const sender = createEmailSender(c.env);
+  const result = await sender.send({
     from: fromAddress,
     to,
     subject: renderedSubject,
@@ -346,7 +345,7 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
     subject: renderedSubject,
     bodyHtml: renderedHtml,
     bodyText: null,
-    resendId: result.data?.id ?? null,
+    resendId: result.id,
     status: result.error ? "failed" : "sent",
     sentAt: now,
     createdAt: now,
@@ -355,7 +354,7 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   return c.json(
     {
       id,
-      resendId: result.data?.id ?? null,
+      resendId: result.id,
       status: result.error ? "failed" : "sent",
     },
     201,
