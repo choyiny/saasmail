@@ -44,7 +44,7 @@ export default function TemplatesPage() {
             {templates.map((t) => (
               <div
                 key={t.id}
-                className="flex items-center justify-between rounded-lg border border-border-dark bg-card px-4 py-3"
+                className="flex items-center justify-between rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-3"
               >
                 <div>
                   <p className="text-xs font-medium text-text-primary">
@@ -57,13 +57,13 @@ export default function TemplatesPage() {
                 <div className="flex gap-1">
                   <button
                     onClick={() => navigate(`/templates/${t.slug}/edit`)}
-                    className="rounded-md px-2.5 py-1 text-[11px] text-text-secondary hover:bg-hover hover:text-text-primary"
+                    className="rounded-md px-2.5 py-1 text-[11px] text-text-secondary hover:bg-bg-muted hover:text-text-primary"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => handleDelete(t.slug)}
-                    className="rounded-md px-2.5 py-1 text-[11px] text-destructive hover:bg-hover"
+                    className="rounded-md px-2.5 py-1 text-[11px] text-destructive hover:bg-bg-muted"
                   >
                     Delete
                   </button>

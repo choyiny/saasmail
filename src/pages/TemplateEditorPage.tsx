@@ -54,7 +54,7 @@ function ApiSamplePanel({
   return (
     <div className="fixed inset-y-0 right-0 z-40 flex">
       <div className="fixed inset-0 bg-black/20" onClick={onClose} />
-      <div className="relative w-80 xl:w-96 bg-panel border-l border-border-dark overflow-auto p-6 shadow-2xl">
+      <div className="relative w-80 xl:w-96 bg-white border-l border-border overflow-auto p-6 shadow-2xl">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold text-text-primary">
             API Reference
@@ -102,7 +102,7 @@ function ApiSamplePanel({
             <h4 className="text-[11px] font-medium text-text-secondary mb-1.5">
               Example Request
             </h4>
-            <pre className="overflow-x-auto rounded-md bg-sidebar p-3 text-[11px] leading-relaxed text-text-secondary font-mono">
+            <pre className="overflow-x-auto rounded-md bg-bg-subtle p-3 text-[11px] leading-relaxed text-text-secondary font-mono">
               {curlCommand}
             </pre>
           </div>
@@ -111,7 +111,7 @@ function ApiSamplePanel({
             <h4 className="text-[11px] font-medium text-text-secondary mb-1.5">
               Error Response
             </h4>
-            <pre className="overflow-x-auto rounded-md bg-sidebar p-3 text-[11px] leading-relaxed text-text-secondary font-mono">
+            <pre className="overflow-x-auto rounded-md bg-bg-subtle p-3 text-[11px] leading-relaxed text-text-secondary font-mono">
               {JSON.stringify(
                 {
                   error: "Missing required template variables",
@@ -182,16 +182,16 @@ export default function TemplateEditorPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center bg-main">
+      <div className="flex h-full items-center justify-center bg-white">
         <p className="text-sm text-text-tertiary">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-main overflow-hidden">
+    <div className="flex h-full flex-col bg-white overflow-hidden">
       {/* Top bar */}
-      <div className="flex items-center justify-between border-b border-border-dark px-4 sm:px-6 py-2.5 bg-panel shrink-0">
+      <div className="flex items-center justify-between border-b border-border px-4 sm:px-6 py-2.5 bg-white shrink-0">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate("/templates")}
@@ -209,14 +209,14 @@ export default function TemplateEditorPage() {
           <button
             type="button"
             onClick={() => setApiPanelOpen(true)}
-            className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary transition-colors"
+            className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary transition-colors"
           >
             API
           </button>
           <button
             type="button"
             onClick={() => navigate("/templates")}
-            className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-hover hover:text-text-primary transition-colors"
+            className="rounded-md px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary transition-colors"
           >
             Cancel
           </button>
@@ -253,7 +253,7 @@ export default function TemplateEditorPage() {
               title="Lowercase letters, numbers, and hyphens only"
               disabled={isEdit}
               required
-              className="flex-1 bg-transparent border-b border-transparent hover:border-border-dark focus:border-accent text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none py-1 disabled:opacity-50 transition-colors"
+              className="flex-1 bg-transparent border-b border-transparent hover:border-border focus:border-accent text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none py-1 disabled:opacity-50 transition-colors"
             />
           </div>
           <div className="flex items-center gap-2 flex-1">
@@ -265,14 +265,14 @@ export default function TemplateEditorPage() {
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Welcome, {{name}}!"
               required
-              className="flex-1 bg-transparent border-b border-transparent hover:border-border-dark focus:border-accent text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none py-1 transition-colors"
+              className="flex-1 bg-transparent border-b border-transparent hover:border-border focus:border-accent text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none py-1 transition-colors"
             />
           </div>
         </div>
       </div>
 
       {/* Variable bar */}
-      <div className="shrink-0 px-4 sm:px-6 py-2 border-b border-border-dark">
+      <div className="shrink-0 px-4 sm:px-6 py-2 border-b border-border">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-medium">
             Variables
@@ -305,8 +305,8 @@ export default function TemplateEditorPage() {
       {/* Split editor: Code + Preview */}
       <div className="flex-1 min-h-0 flex">
         {/* HTML Source */}
-        <div className="flex-1 flex flex-col min-w-0 border-r border-border-dark">
-          <div className="shrink-0 px-3 py-1.5 border-b border-border-dark bg-panel flex items-center justify-between">
+        <div className="flex-1 flex flex-col min-w-0 border-r border-border">
+          <div className="shrink-0 px-3 py-1.5 border-b border-border bg-white flex items-center justify-between">
             <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-medium">
               HTML Source
             </span>
@@ -353,7 +353,7 @@ export default function TemplateEditorPage() {
 
         {/* Preview */}
         <div className="flex-1 flex flex-col min-w-0">
-          <div className="shrink-0 px-3 py-1.5 border-b border-border-dark bg-panel">
+          <div className="shrink-0 px-3 py-1.5 border-b border-border bg-white">
             <span className="text-[10px] text-text-tertiary uppercase tracking-wider font-medium">
               Preview
             </span>
