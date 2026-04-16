@@ -16,23 +16,23 @@
 
 Use this table for class substitutions during retheme tasks. When you see the "Before" class in a file, replace with the "After" class.
 
-| Before (dark) | After (light) |
-|---|---|
-| `bg-sidebar` | `bg-bg-subtle` |
-| `bg-panel` | `bg-bg-subtle` (sidebar/rails) or `bg-white` (cards) |
-| `bg-main` | `bg-bg` (plus `bg-white` in most places) |
-| `bg-hover` | `bg-bg-muted` |
-| `bg-card` | `bg-white ring-1 ring-gray-200` |
-| `bg-input-bg` | `bg-white ring-1 ring-gray-200` |
-| `border-border-dark` | `border-border` |
-| `divide-border-dark` | `divide-border-subtle` |
-| `text-text-primary` | `text-text-primary` (unchanged — same token name, new value) |
-| `text-text-secondary` | `text-text-secondary` (unchanged — same token name, new value) |
-| `text-text-tertiary` | `text-text-tertiary` (unchanged — same token name, new value) |
-| `bg-accent` (primary btn) | `bg-accent` (unchanged token name, new value) |
-| `bg-warning-bg` | `bg-warning-bg` (unchanged token name, new value) |
+| Before (dark)             | After (light)                                                  |
+| ------------------------- | -------------------------------------------------------------- |
+| `bg-sidebar`              | `bg-bg-subtle`                                                 |
+| `bg-panel`                | `bg-bg-subtle` (sidebar/rails) or `bg-white` (cards)           |
+| `bg-main`                 | `bg-bg` (plus `bg-white` in most places)                       |
+| `bg-hover`                | `bg-bg-muted`                                                  |
+| `bg-card`                 | `bg-white ring-1 ring-gray-200`                                |
+| `bg-input-bg`             | `bg-white ring-1 ring-gray-200`                                |
+| `border-border-dark`      | `border-border`                                                |
+| `divide-border-dark`      | `divide-border-subtle`                                         |
+| `text-text-primary`       | `text-text-primary` (unchanged — same token name, new value)   |
+| `text-text-secondary`     | `text-text-secondary` (unchanged — same token name, new value) |
+| `text-text-tertiary`      | `text-text-tertiary` (unchanged — same token name, new value)  |
+| `bg-accent` (primary btn) | `bg-accent` (unchanged token name, new value)                  |
+| `bg-warning-bg`           | `bg-warning-bg` (unchanged token name, new value)              |
 
-**Note:** `text-text-*` and `bg-accent`/`bg-warning-*` token *names* are preserved — only the underlying `@theme` values change. You do not need to rewrite those classes.
+**Note:** `text-text-*` and `bg-accent`/`bg-warning-*` token _names_ are preserved — only the underlying `@theme` values change. You do not need to rewrite those classes.
 
 ---
 
@@ -62,6 +62,7 @@ Expected: prints ~28 file paths. Save this output somewhere — the final task r
 ## Task 2: Rewrite `src/index.css` `@theme` block and base styles
 
 **Files:**
+
 - Modify: `src/index.css` (lines 1–30)
 
 - [ ] **Step 1: Replace the `@theme` block and `html`/`body` rules**
@@ -118,16 +119,9 @@ body {
   background-color: #ffffff;
   color: #0f172a;
   font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Inter",
-    "Segoe UI",
-    Helvetica,
-    Arial,
+    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial,
     sans-serif;
-  font-feature-settings:
-    "cv11",
-    "ss01";
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -150,6 +144,7 @@ git commit -m "refactor(ui): swap dark theme tokens for light palette"
 ## Task 3: Rewrite `.notion-editor` and `.drag-handle` styles in `src/index.css`
 
 **Files:**
+
 - Modify: `src/index.css` (lines 32–231, the notion-editor/drag-handle/drop-indicator rules)
 
 - [ ] **Step 1: Replace all rules from `/* ── Notion-like Editor Styles ── */` to end of file**
@@ -366,6 +361,7 @@ git commit -m "refactor(ui): light-theme TipTap editor and drag-handle styles"
 ## Task 4: Create `useSidebarCollapsed` hook
 
 **Files:**
+
 - Create: `src/lib/useSidebarCollapsed.ts`
 
 - [ ] **Step 1: Write the hook**
@@ -420,6 +416,7 @@ git commit -m "feat(ui): add useSidebarCollapsed hook with localStorage persiste
 ## Task 5: Rewrite UI primitive — `button.tsx`
 
 **Files:**
+
 - Modify: `src/components/ui/button.tsx`
 
 - [ ] **Step 1: Replace the file contents**
@@ -438,16 +435,13 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default:
-          "bg-accent text-white shadow-sm hover:bg-accent-hover",
-        destructive:
-          "bg-destructive text-white shadow-sm hover:bg-red-700",
+        default: "bg-accent text-white shadow-sm hover:bg-accent-hover",
+        destructive: "bg-destructive text-white shadow-sm hover:bg-red-700",
         outline:
           "bg-white text-text-primary ring-1 ring-gray-200 hover:bg-bg-muted",
         secondary:
           "bg-white text-text-primary ring-1 ring-gray-200 hover:bg-bg-muted",
-        ghost:
-          "text-text-secondary hover:bg-bg-muted hover:text-text-primary",
+        ghost: "text-text-secondary hover:bg-bg-muted hover:text-text-primary",
         link: "text-accent underline-offset-4 hover:underline",
       },
       size: {
@@ -505,6 +499,7 @@ git commit -m "refactor(ui): light-theme button variants"
 ## Task 6: Rewrite UI primitives — `input.tsx` + `textarea.tsx`
 
 **Files:**
+
 - Modify: `src/components/ui/input.tsx`
 - Modify: `src/components/ui/textarea.tsx`
 
@@ -579,6 +574,7 @@ git commit -m "refactor(ui): light-theme input and textarea"
 ## Task 7: Rewrite UI primitive — `card.tsx`
 
 **Files:**
+
 - Modify: `src/components/ui/card.tsx`
 
 - [ ] **Step 1: Replace `card.tsx`**
@@ -621,7 +617,10 @@ const CardTitle = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <div
     ref={ref}
-    className={cn("font-semibold leading-none tracking-tight text-text-primary", className)}
+    className={cn(
+      "font-semibold leading-none tracking-tight text-text-primary",
+      className,
+    )}
     {...props}
   />
 ));
@@ -686,6 +685,7 @@ git commit -m "refactor(ui): light-theme card"
 ## Task 8: Rewrite UI primitive — `dialog.tsx`
 
 **Files:**
+
 - Modify: `src/components/ui/dialog.tsx`
 
 - [ ] **Step 1: Replace `dialog.tsx`**
@@ -832,6 +832,7 @@ git commit -m "refactor(ui): light-theme dialog"
 ## Task 9: Rewrite UI primitive — `dropdown-menu.tsx`
 
 **Files:**
+
 - Modify: `src/components/ui/dropdown-menu.tsx`
 
 - [ ] **Step 1: Update color classes in all item-like elements**
@@ -839,6 +840,7 @@ git commit -m "refactor(ui): light-theme dialog"
 Within `src/components/ui/dropdown-menu.tsx`, replace the `className` values on these components:
 
 For `DropdownMenuSubTrigger`:
+
 ```tsx
 className={cn(
   "flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-primary outline-none focus:bg-bg-muted data-[state=open]:bg-bg-muted [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
@@ -848,6 +850,7 @@ className={cn(
 ```
 
 For `DropdownMenuSubContent`:
+
 ```tsx
 className={cn(
   "z-50 min-w-[8rem] overflow-hidden rounded-lg bg-white p-1 text-text-primary shadow-md ring-1 ring-gray-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 origin-[--radix-dropdown-menu-content-transform-origin]",
@@ -856,6 +859,7 @@ className={cn(
 ```
 
 For `DropdownMenuContent`:
+
 ```tsx
 className={cn(
   "z-50 max-h-[var(--radix-dropdown-menu-content-available-height)] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-lg bg-white p-1 text-text-primary shadow-md ring-1 ring-gray-200",
@@ -865,6 +869,7 @@ className={cn(
 ```
 
 For `DropdownMenuItem`:
+
 ```tsx
 className={cn(
   "relative flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm text-text-primary outline-none transition-colors focus:bg-bg-muted focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
@@ -874,6 +879,7 @@ className={cn(
 ```
 
 For `DropdownMenuCheckboxItem` and `DropdownMenuRadioItem`:
+
 ```tsx
 className={cn(
   "relative flex cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2 text-sm text-text-primary outline-none transition-colors focus:bg-bg-muted focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
@@ -882,6 +888,7 @@ className={cn(
 ```
 
 For `DropdownMenuLabel`:
+
 ```tsx
 className={cn(
   "px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-text-secondary",
@@ -891,6 +898,7 @@ className={cn(
 ```
 
 For `DropdownMenuSeparator`:
+
 ```tsx
 className={cn("-mx-1 my-1 h-px bg-border-subtle", className)}
 ```
@@ -912,6 +920,7 @@ git commit -m "refactor(ui): light-theme dropdown-menu"
 ## Task 10: Rewrite UI primitives — `badge.tsx` + `avatar.tsx`
 
 **Files:**
+
 - Modify: `src/components/ui/badge.tsx`
 - Modify: `src/components/ui/avatar.tsx`
 
@@ -928,18 +937,12 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default:
-          "bg-accent-subtle text-accent-subtle-fg",
-        secondary:
-          "bg-bg-muted text-text-secondary",
-        destructive:
-          "bg-destructive-subtle text-destructive",
-        success:
-          "bg-emerald-50 text-emerald-700",
-        warning:
-          "bg-warning-bg text-warning-text",
-        outline:
-          "text-text-primary ring-1 ring-gray-200",
+        default: "bg-accent-subtle text-accent-subtle-fg",
+        secondary: "bg-bg-muted text-text-secondary",
+        destructive: "bg-destructive-subtle text-destructive",
+        success: "bg-emerald-50 text-emerald-700",
+        warning: "bg-warning-bg text-warning-text",
+        outline: "text-text-primary ring-1 ring-gray-200",
       },
     },
     defaultVariants: {
@@ -1034,6 +1037,7 @@ git commit -m "refactor(ui): light-theme badge and avatar"
 ## Task 11: Rewrite UI primitives — `label.tsx`, `separator.tsx`, `scroll-area.tsx`
 
 **Files:**
+
 - Modify: `src/components/ui/label.tsx`
 - Modify: `src/components/ui/separator.tsx`
 - Modify: `src/components/ui/scroll-area.tsx`
@@ -1106,10 +1110,13 @@ export { Separator };
 - [ ] **Step 3: Update `scroll-area.tsx` scrollbar thumb**
 
 In `src/components/ui/scroll-area.tsx`, find this line:
+
 ```tsx
 <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-border" />
 ```
+
 and replace the className with:
+
 ```tsx
 <ScrollAreaPrimitive.ScrollAreaThumb className="relative flex-1 rounded-full bg-slate-300 transition-colors hover:bg-slate-400" />
 ```
@@ -1131,6 +1138,7 @@ git commit -m "refactor(ui): light-theme label, separator, scroll-area"
 ## Task 12: Rewrite `Sidebar.tsx` — collapsible layout
 
 **Files:**
+
 - Modify: `src/components/Sidebar.tsx`
 
 - [ ] **Step 1: Replace the file contents**
@@ -1243,7 +1251,9 @@ export default function Sidebar({ onCompose }: SidebarProps) {
       className={`flex h-full flex-col border-r border-border bg-bg-subtle transition-[width] duration-150 ${widthClass}`}
     >
       {/* Header */}
-      <div className={`flex items-center ${collapsed ? "justify-center px-0" : "px-3"} py-3`}>
+      <div
+        className={`flex items-center ${collapsed ? "justify-center px-0" : "px-3"} py-3`}
+      >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">
           {logoLetter}
         </div>
@@ -1362,15 +1372,19 @@ git commit -m "feat(ui): collapsible light-theme sidebar"
 ## Task 13: Retheme `DashboardLayout.tsx`
 
 **Files:**
+
 - Modify: `src/components/DashboardLayout.tsx`
 
 - [ ] **Step 1: Replace `bg-main` with `bg-bg`**
 
 In `src/components/DashboardLayout.tsx`, change:
+
 ```tsx
 <div className="flex h-screen bg-main">
 ```
+
 to:
+
 ```tsx
 <div className="flex h-screen bg-bg">
 ```
@@ -1392,6 +1406,7 @@ git commit -m "refactor(ui): light-theme dashboard layout background"
 ## Task 14: Retheme `ThreadSidebar.tsx`
 
 **Files:**
+
 - Modify: `src/components/ThreadSidebar.tsx`
 
 - [ ] **Step 1: Apply class substitutions**
@@ -1399,15 +1414,19 @@ git commit -m "refactor(ui): light-theme dashboard layout background"
 In `src/components/ThreadSidebar.tsx`, apply these changes:
 
 Replace:
+
 ```tsx
 <div className="flex h-full w-80 shrink-0 flex-col border-l border-border-dark bg-panel max-md:absolute max-md:right-0 max-md:top-0 max-md:z-10 max-md:w-full max-md:border-l-0">
 ```
+
 with:
+
 ```tsx
 <div className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-bg-subtle max-md:absolute max-md:right-0 max-md:top-0 max-md:z-10 max-md:w-full max-md:border-l-0">
 ```
 
 Replace:
+
 ```tsx
 <div className="flex items-center justify-between border-b border-border-dark px-4 py-3">
   <h3 className="text-xs font-semibold text-text-primary">Thread</h3>
@@ -1416,7 +1435,9 @@ Replace:
     className="rounded p-0.5 text-text-tertiary hover:bg-hover hover:text-text-secondary"
   >
 ```
+
 with:
+
 ```tsx
 <div className="flex items-center justify-between border-b border-border px-4 py-3">
   <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">Thread</h3>
@@ -1427,10 +1448,13 @@ with:
 ```
 
 Replace:
+
 ```tsx
 <div className="divide-y divide-border-dark">
 ```
+
 with:
+
 ```tsx
 <div className="divide-y divide-border-subtle">
 ```
@@ -1452,22 +1476,23 @@ git commit -m "refactor(ui): light-theme ThreadSidebar"
 ## Task 15: Retheme `MessageBubble.tsx`
 
 **Files:**
+
 - Modify: `src/components/MessageBubble.tsx`
 
 - [ ] **Step 1: Open the file and apply this class mapping**
 
 Read the current file contents. Apply these substitutions globally within `src/components/MessageBubble.tsx`:
 
-| Before | After |
-|---|---|
-| `bg-panel` | `bg-white ring-1 ring-gray-200` (drop any `border border-border-dark` on the same element) |
-| `bg-card` | `bg-white ring-1 ring-gray-200` |
-| `bg-hover` | `bg-bg-muted` |
-| `border-border-dark` | `border-border` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `bg-warning-bg` | `bg-amber-50` |
-| `border-warning-border` | `ring-1 ring-amber-200` (replacing `border border-warning-border`) |
-| `text-warning-text` | `text-amber-700` |
+| Before                  | After                                                                                      |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| `bg-panel`              | `bg-white ring-1 ring-gray-200` (drop any `border border-border-dark` on the same element) |
+| `bg-card`               | `bg-white ring-1 ring-gray-200`                                                            |
+| `bg-hover`              | `bg-bg-muted`                                                                              |
+| `border-border-dark`    | `border-border`                                                                            |
+| `hover:bg-hover`        | `hover:bg-bg-muted`                                                                        |
+| `bg-warning-bg`         | `bg-amber-50`                                                                              |
+| `border-warning-border` | `ring-1 ring-amber-200` (replacing `border border-warning-border`)                         |
+| `text-warning-text`     | `text-amber-700`                                                                           |
 
 If a draft-message highlight exists, ensure it uses `bg-amber-50 ring-1 ring-amber-200` instead of dark warning tokens.
 
@@ -1493,20 +1518,21 @@ git commit -m "refactor(ui): light-theme MessageBubble with draft highlight"
 ## Task 16: Retheme `ReplyComposer.tsx`
 
 **Files:**
+
 - Modify: `src/components/ReplyComposer.tsx`
 
 - [ ] **Step 1: Apply class substitutions**
 
 Apply these global substitutions within `src/components/ReplyComposer.tsx`:
 
-| Before | After |
-|---|---|
-| `bg-panel` | `bg-white` |
-| `bg-card` | `bg-white ring-1 ring-gray-200` |
-| `bg-hover` | `bg-bg-muted` |
-| `bg-input-bg` | `bg-white ring-1 ring-gray-200` |
-| `border-border-dark` | `border-border` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
+| Before               | After                           |
+| -------------------- | ------------------------------- |
+| `bg-panel`           | `bg-white`                      |
+| `bg-card`            | `bg-white ring-1 ring-gray-200` |
+| `bg-hover`           | `bg-bg-muted`                   |
+| `bg-input-bg`        | `bg-white ring-1 ring-gray-200` |
+| `border-border-dark` | `border-border`                 |
+| `hover:bg-hover`     | `hover:bg-bg-muted`             |
 
 Also ensure the primary Send button uses `bg-accent text-white hover:bg-accent-hover` (if inline — if it uses `<Button variant="default">` from shadcn already, no change needed).
 
@@ -1532,31 +1558,34 @@ git commit -m "refactor(ui): light-theme ReplyComposer"
 ## Task 17: Retheme `PersonList.tsx`
 
 **Files:**
+
 - Modify: `src/pages/PersonList.tsx`
 
 - [ ] **Step 1: Apply class substitutions**
 
 Apply these global substitutions within `src/pages/PersonList.tsx`:
 
-| Before | After |
-|---|---|
-| `bg-sidebar` | `bg-bg-subtle` |
-| `bg-panel` | `bg-bg-subtle` |
-| `bg-main` | `bg-white` |
-| `bg-hover` | `bg-bg-muted` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `bg-card` | `bg-white ring-1 ring-gray-200` |
-| `bg-input-bg` | `bg-white ring-1 ring-gray-200` |
-| `border-border-dark` | `border-border` |
-| `divide-border-dark` | `divide-border-subtle` |
-| `bg-accent text-white` (for selected row — keep, but add accent-subtle variant instead) | see step 2 |
+| Before                                                                                  | After                           |
+| --------------------------------------------------------------------------------------- | ------------------------------- |
+| `bg-sidebar`                                                                            | `bg-bg-subtle`                  |
+| `bg-panel`                                                                              | `bg-bg-subtle`                  |
+| `bg-main`                                                                               | `bg-white`                      |
+| `bg-hover`                                                                              | `bg-bg-muted`                   |
+| `hover:bg-hover`                                                                        | `hover:bg-bg-muted`             |
+| `bg-card`                                                                               | `bg-white ring-1 ring-gray-200` |
+| `bg-input-bg`                                                                           | `bg-white ring-1 ring-gray-200` |
+| `border-border-dark`                                                                    | `border-border`                 |
+| `divide-border-dark`                                                                    | `divide-border-subtle`          |
+| `bg-accent text-white` (for selected row — keep, but add accent-subtle variant instead) | see step 2                      |
 
 - [ ] **Step 2: Update the selected-row styling**
 
 Wherever a person row's "selected" state is applied, change the selected class from something like `bg-accent text-white` (if present) to:
+
 ```
 bg-accent-subtle border-l-[3px] border-l-accent
 ```
+
 and keep text classes as-is (text-text-primary/secondary). If the existing selected state is already subtle, just ensure it uses `bg-accent-subtle` with a left accent border.
 
 - [ ] **Step 3: Update the unread dot**
@@ -1585,23 +1614,24 @@ git commit -m "refactor(ui): light-theme PersonList with subtle selected state"
 ## Task 18: Retheme `PersonDetail.tsx`
 
 **Files:**
+
 - Modify: `src/pages/PersonDetail.tsx`
 
 - [ ] **Step 1: Apply global class substitutions**
 
 Within `src/pages/PersonDetail.tsx`:
 
-| Before | After |
-|---|---|
-| `bg-sidebar` | `bg-bg-subtle` |
-| `bg-panel` | `bg-white` |
-| `bg-main` | `bg-white` |
-| `bg-hover` | `bg-bg-muted` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `bg-card` | `bg-white ring-1 ring-gray-200` |
-| `bg-input-bg` | `bg-white ring-1 ring-gray-200` |
-| `border-border-dark` | `border-border` |
-| `divide-border-dark` | `divide-border-subtle` |
+| Before               | After                           |
+| -------------------- | ------------------------------- |
+| `bg-sidebar`         | `bg-bg-subtle`                  |
+| `bg-panel`           | `bg-white`                      |
+| `bg-main`            | `bg-white`                      |
+| `bg-hover`           | `bg-bg-muted`                   |
+| `hover:bg-hover`     | `hover:bg-bg-muted`             |
+| `bg-card`            | `bg-white ring-1 ring-gray-200` |
+| `bg-input-bg`        | `bg-white ring-1 ring-gray-200` |
+| `border-border-dark` | `border-border`                 |
+| `divide-border-dark` | `divide-border-subtle`          |
 
 - [ ] **Step 2: Verify TypeScript**
 
@@ -1625,11 +1655,13 @@ git commit -m "refactor(ui): light-theme PersonDetail"
 ## Task 19: Retheme `InboxPage.tsx`
 
 **Files:**
+
 - Modify: `src/pages/InboxPage.tsx`
 
 - [ ] **Step 1: Apply class substitutions**
 
 Replace the middle-panel div:
+
 ```tsx
 <div
   className={`w-full md:w-80 shrink-0 border-r border-border-dark bg-panel ${
@@ -1637,7 +1669,9 @@ Replace the middle-panel div:
   }`}
 >
 ```
+
 with:
+
 ```tsx
 <div
   className={`w-full md:w-80 shrink-0 border-r border-border bg-bg-subtle ${
@@ -1647,6 +1681,7 @@ with:
 ```
 
 Replace the right-panel div:
+
 ```tsx
 <div
   className={`flex-1 bg-main min-w-0 ${
@@ -1654,7 +1689,9 @@ Replace the right-panel div:
   }`}
 >
 ```
+
 with:
+
 ```tsx
 <div
   className={`flex-1 bg-white min-w-0 ${
@@ -1664,13 +1701,16 @@ with:
 ```
 
 Replace the mobile back button:
+
 ```tsx
 <button
   onClick={() => setSelectedPerson(null)}
   className="flex items-center gap-1.5 px-4 py-2 text-xs text-text-secondary hover:text-text-primary md:hidden border-b border-border-dark"
 >
 ```
+
 with:
+
 ```tsx
 <button
   onClick={() => setSelectedPerson(null)}
@@ -1700,20 +1740,21 @@ git commit -m "refactor(ui): light-theme InboxPage panes"
 ## Task 20: Retheme `ComposeModal.tsx`
 
 **Files:**
+
 - Modify: `src/pages/ComposeModal.tsx`
 
 - [ ] **Step 1: Apply global class substitutions**
 
-| Before | After |
-|---|---|
-| `bg-panel` | `bg-white` |
-| `bg-main` | `bg-white` |
-| `bg-card` | `bg-white` |
-| `bg-input-bg` | `bg-white ring-1 ring-gray-200` |
-| `bg-hover` | `bg-bg-muted` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `border-border-dark` | `border-border` |
-| `divide-border-dark` | `divide-border-subtle` |
+| Before               | After                           |
+| -------------------- | ------------------------------- |
+| `bg-panel`           | `bg-white`                      |
+| `bg-main`            | `bg-white`                      |
+| `bg-card`            | `bg-white`                      |
+| `bg-input-bg`        | `bg-white ring-1 ring-gray-200` |
+| `bg-hover`           | `bg-bg-muted`                   |
+| `hover:bg-hover`     | `hover:bg-bg-muted`             |
+| `border-border-dark` | `border-border`                 |
+| `divide-border-dark` | `divide-border-subtle`          |
 
 - [ ] **Step 2: Verify TypeScript**
 
@@ -1737,16 +1778,17 @@ git commit -m "refactor(ui): light-theme ComposeModal"
 ## Task 21: Retheme `TiptapEditor.tsx`
 
 **Files:**
+
 - Modify: `src/components/TiptapEditor.tsx`
 
 - [ ] **Step 1: Apply global class substitutions**
 
-| Before | After |
-|---|---|
-| `bg-panel` | `bg-white` |
-| `bg-hover` | `bg-bg-muted` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `border-border-dark` | `border-border` |
+| Before               | After               |
+| -------------------- | ------------------- |
+| `bg-panel`           | `bg-white`          |
+| `bg-hover`           | `bg-bg-muted`       |
+| `hover:bg-hover`     | `hover:bg-bg-muted` |
+| `border-border-dark` | `border-border`     |
 
 The `.notion-editor` CSS was already updated in Task 3, so visual styles come from there.
 
@@ -1772,11 +1814,13 @@ git commit -m "refactor(ui): light-theme TiptapEditor wrapper"
 ## Task 22: Swap CodeMirror theme in `HtmlCodeEditor.tsx`
 
 **Files:**
+
 - Modify: `src/components/HtmlCodeEditor.tsx`
 
 - [ ] **Step 1: Remove the `oneDark` import**
 
 Remove this line:
+
 ```tsx
 import { oneDark } from "@codemirror/theme-one-dark";
 ```
@@ -1784,6 +1828,7 @@ import { oneDark } from "@codemirror/theme-one-dark";
 - [ ] **Step 2: Remove `oneDark` from the extensions array and replace the theme**
 
 Within the `EditorState.create({ extensions: [...] })` call:
+
 - Remove the `oneDark,` entry from the extensions array.
 - Replace the existing `EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { overflow: "auto" } })` entry with:
 
@@ -1831,20 +1876,21 @@ git commit -m "refactor(ui): switch CodeMirror to light theme"
 ## Task 23: Retheme `EmailHtmlModal.tsx` + `EnrollSequenceModal.tsx`
 
 **Files:**
+
 - Modify: `src/components/EmailHtmlModal.tsx`
 - Modify: `src/components/EnrollSequenceModal.tsx`
 
 - [ ] **Step 1: Apply global class substitutions to both files**
 
-| Before | After |
-|---|---|
-| `bg-panel` | `bg-white` |
-| `bg-main` | `bg-white` |
-| `bg-card` | `bg-white` |
-| `bg-input-bg` | `bg-white ring-1 ring-gray-200` |
-| `bg-hover` | `bg-bg-muted` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `border-border-dark` | `border-border` |
+| Before               | After                           |
+| -------------------- | ------------------------------- |
+| `bg-panel`           | `bg-white`                      |
+| `bg-main`            | `bg-white`                      |
+| `bg-card`            | `bg-white`                      |
+| `bg-input-bg`        | `bg-white ring-1 ring-gray-200` |
+| `bg-hover`           | `bg-bg-muted`                   |
+| `hover:bg-hover`     | `hover:bg-bg-muted`             |
+| `border-border-dark` | `border-border`                 |
 
 - [ ] **Step 2: Verify TypeScript**
 
@@ -1868,22 +1914,24 @@ git commit -m "refactor(ui): light-theme email HTML and enrollment modals"
 ## Task 24: Retheme `AdminInboxTable.tsx` + `SequenceStatus.tsx`
 
 **Files:**
+
 - Modify: `src/components/AdminInboxTable.tsx`
 - Modify: `src/components/SequenceStatus.tsx`
 
 - [ ] **Step 1: Apply global class substitutions to both files**
 
-| Before | After |
-|---|---|
-| `bg-panel` | `bg-white` |
-| `bg-main` | `bg-white` |
-| `bg-card` | `bg-white ring-1 ring-gray-200` |
-| `bg-hover` | `bg-bg-muted` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `border-border-dark` | `border-border` |
-| `divide-border-dark` | `divide-border-subtle` |
+| Before               | After                           |
+| -------------------- | ------------------------------- |
+| `bg-panel`           | `bg-white`                      |
+| `bg-main`            | `bg-white`                      |
+| `bg-card`            | `bg-white ring-1 ring-gray-200` |
+| `bg-hover`           | `bg-bg-muted`                   |
+| `hover:bg-hover`     | `hover:bg-bg-muted`             |
+| `border-border-dark` | `border-border`                 |
+| `divide-border-dark` | `divide-border-subtle`          |
 
 For `SequenceStatus` status pills, ensure the color mappings are:
+
 - Active → `bg-emerald-50 text-emerald-700` (or keep `<Badge variant="success">` if the component uses badge now — after Task 10 the success variant exists).
 - Paused → `bg-warning-bg text-warning-text`
 - Draft → `bg-bg-muted text-text-secondary`
@@ -1910,22 +1958,23 @@ git commit -m "refactor(ui): light-theme admin inbox table and sequence status p
 ## Task 25: Retheme `InboxesPage.tsx` + `AdminUsersPage.tsx`
 
 **Files:**
+
 - Modify: `src/pages/InboxesPage.tsx`
 - Modify: `src/pages/AdminUsersPage.tsx`
 
 - [ ] **Step 1: Apply global class substitutions to both files**
 
-| Before | After |
-|---|---|
-| `bg-sidebar` | `bg-bg-subtle` |
-| `bg-panel` | `bg-white` |
-| `bg-main` | `bg-white` |
-| `bg-card` | `bg-white ring-1 ring-gray-200` |
-| `bg-input-bg` | `bg-white ring-1 ring-gray-200` |
-| `bg-hover` | `bg-bg-muted` |
-| `hover:bg-hover` | `hover:bg-bg-muted` |
-| `border-border-dark` | `border-border` |
-| `divide-border-dark` | `divide-border-subtle` |
+| Before               | After                           |
+| -------------------- | ------------------------------- |
+| `bg-sidebar`         | `bg-bg-subtle`                  |
+| `bg-panel`           | `bg-white`                      |
+| `bg-main`            | `bg-white`                      |
+| `bg-card`            | `bg-white ring-1 ring-gray-200` |
+| `bg-input-bg`        | `bg-white ring-1 ring-gray-200` |
+| `bg-hover`           | `bg-bg-muted`                   |
+| `hover:bg-hover`     | `hover:bg-bg-muted`             |
+| `border-border-dark` | `border-border`                 |
+| `divide-border-dark` | `divide-border-subtle`          |
 
 - [ ] **Step 2: Verify TypeScript**
 
@@ -1949,6 +1998,7 @@ git commit -m "refactor(ui): light-theme admin inbox and user pages"
 ## Task 26: Retheme `ApiKeysPage.tsx`
 
 **Files:**
+
 - Modify: `src/pages/ApiKeysPage.tsx`
 
 - [ ] **Step 1: Apply global class substitutions**
@@ -1977,6 +2027,7 @@ git commit -m "refactor(ui): light-theme API keys page"
 ## Task 27: Retheme Templates pages
 
 **Files:**
+
 - Modify: `src/pages/TemplatesPage.tsx`
 - Modify: `src/pages/TemplateEditorPage.tsx`
 
@@ -2006,6 +2057,7 @@ git commit -m "refactor(ui): light-theme template pages"
 ## Task 28: Retheme Sequence pages
 
 **Files:**
+
 - Modify: `src/pages/SequencesPage.tsx`
 - Modify: `src/pages/SequenceEditorPage.tsx`
 - Modify: `src/pages/SequenceDetailPage.tsx`
@@ -2036,6 +2088,7 @@ git commit -m "refactor(ui): light-theme sequence pages"
 ## Task 29: Retheme auth pages
 
 **Files:**
+
 - Modify: `src/pages/LoginPage.tsx`
 - Modify: `src/pages/OnboardingPage.tsx`
 - Modify: `src/pages/InviteAcceptPage.tsx`
@@ -2078,6 +2131,7 @@ Run: `rg "bg-sidebar|bg-panel|bg-main|bg-card|bg-hover|bg-input-bg|border-border
 Expected: **no matches**.
 
 If any matches remain, open each file and apply the mapping table. Commit as:
+
 ```bash
 git commit -m "refactor(ui): clean up remaining dark-theme class stragglers"
 ```
@@ -2088,6 +2142,7 @@ Run: `rg "bg-primary|bg-secondary|text-primary-foreground|text-secondary-foregro
 Expected: **no matches** (these were replaced in Tasks 5–11).
 
 If any remain, they're in files that weren't part of the planned rewrite — open and fix them using the mapping:
+
 - `bg-primary` → `bg-accent`
 - `text-primary-foreground` → `text-white`
 - `bg-card` → `bg-white ring-1 ring-gray-200`
@@ -2103,6 +2158,7 @@ If any remain, they're in files that weren't part of the planned rewrite — ope
 - `bg-accent` (in hover contexts) → leave (this now resolves to blue-600 — check visually if wrong)
 
 Commit any fixes:
+
 ```bash
 git commit -m "refactor(ui): replace undefined shadcn tokens with project tokens"
 ```
@@ -2126,6 +2182,7 @@ Expected: all tests pass.
 
 Run: `yarn dev`
 Open each route in the browser and visually confirm light theme:
+
 - `/` (Inbox) — empty state + loaded state + thread open
 - `/templates` and `/templates/:id`
 - `/sequences`, `/sequences/:id`, `/sequences/:id/edit`
@@ -2141,6 +2198,7 @@ Fix anything that looks broken. Commit fixes.
 - [ ] **Step 7: Final commit if no fixes needed**
 
 If Steps 1–5 all pass cleanly, no additional commit is needed. Otherwise:
+
 ```bash
 git commit -m "refactor(ui): final QA fixes for light theme"
 ```

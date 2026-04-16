@@ -260,11 +260,7 @@ peopleRouter.openapi(getPersonRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
 
-  const rows = await db
-    .select()
-    .from(people)
-    .where(eq(people.id, id))
-    .limit(1);
+  const rows = await db.select().from(people).where(eq(people.id, id)).limit(1);
 
   if (rows.length === 0) {
     return c.json({ error: "Person not found" }, 404);

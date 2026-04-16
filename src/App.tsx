@@ -68,41 +68,44 @@ function AuthGuard() {
 function App() {
   return (
     <BrandingProvider>
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          {/* Public routes */}
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/onboarding" element={<OnboardingPage />} />
-          <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route path="/setup-passkey" element={<SetupPasskeyPage />} />
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
+          <Routes>
+            {/* Public routes */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/onboarding" element={<OnboardingPage />} />
+            <Route path="/invite/:token" element={<InviteAcceptPage />} />
+            <Route path="/setup-passkey" element={<SetupPasskeyPage />} />
 
-          {/* Authenticated routes with shared layout */}
-          <Route element={<AuthGuard />}>
-            <Route element={<DashboardLayout />}>
-              <Route path="/admin/users" element={<AdminUsersPage />} />
-              <Route path="/templates" element={<TemplatesPage />} />
-              <Route path="/templates/new" element={<TemplateEditorPage />} />
-              <Route
-                path="/templates/:slug/edit"
-                element={<TemplateEditorPage />}
-              />
-              <Route path="/sequences" element={<SequencesPage />} />
-              <Route path="/sequences/new" element={<SequenceEditorPage />} />
-              <Route
-                path="/sequences/:id/edit"
-                element={<SequenceEditorPage />}
-              />
-              <Route path="/sequences/:id" element={<SequenceDetailPage />} />
-              <Route path="/api-keys" element={<ApiKeysPage />} />
-              <Route path="/inboxes" element={<InboxesPage />} />
-              <Route path="/settings" element={<Navigate to="/inboxes" replace />} />
-              <Route path="/*" element={<InboxPage />} />
+            {/* Authenticated routes with shared layout */}
+            <Route element={<AuthGuard />}>
+              <Route element={<DashboardLayout />}>
+                <Route path="/admin/users" element={<AdminUsersPage />} />
+                <Route path="/templates" element={<TemplatesPage />} />
+                <Route path="/templates/new" element={<TemplateEditorPage />} />
+                <Route
+                  path="/templates/:slug/edit"
+                  element={<TemplateEditorPage />}
+                />
+                <Route path="/sequences" element={<SequencesPage />} />
+                <Route path="/sequences/new" element={<SequenceEditorPage />} />
+                <Route
+                  path="/sequences/:id/edit"
+                  element={<SequenceEditorPage />}
+                />
+                <Route path="/sequences/:id" element={<SequenceDetailPage />} />
+                <Route path="/api-keys" element={<ApiKeysPage />} />
+                <Route path="/inboxes" element={<InboxesPage />} />
+                <Route
+                  path="/settings"
+                  element={<Navigate to="/inboxes" replace />}
+                />
+                <Route path="/*" element={<InboxPage />} />
+              </Route>
             </Route>
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </QueryClientProvider>
+          </Routes>
+        </BrowserRouter>
+      </QueryClientProvider>
     </BrandingProvider>
   );
 }

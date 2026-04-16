@@ -6,10 +6,10 @@ Receive email with **Cloudflare Email Workers**. Send email with **Cloudflare Em
 
 ## Provider Matrix
 
-|               | Cloudflare         | Resend |
-| ------------- | ------------------ | ------ |
-| **Sending**   | ✅                 | ✅     |
-| **Receiving** | ✅                 | ❌     |
+|               | Cloudflare | Resend |
+| ------------- | ---------- | ------ |
+| **Sending**   | ✅         | ✅     |
+| **Receiving** | ✅         | ❌     |
 
 Pick one outbound provider at deploy time:
 

@@ -15,12 +15,14 @@ const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
  * Strip path traversal sequences and dangerous characters from filenames.
  */
 function sanitizeFilename(filename: string): string {
-  return filename
-    .replace(/\.\.[/\\]/g, "") // strip path traversal
-    .replace(/[/\\]/g, "_") // replace path separators
-    .replace(/[\x00-\x1f]/g, "") // strip control characters
-    .slice(0, 255) // limit length
-    || "unnamed";
+  return (
+    filename
+      .replace(/\.\.[/\\]/g, "") // strip path traversal
+      .replace(/[/\\]/g, "_") // replace path separators
+      .replace(/[\x00-\x1f]/g, "") // strip control characters
+      .slice(0, 255) || // limit length
+    "unnamed"
+  );
 }
 
 export async function handleEmail(

@@ -32,8 +32,7 @@ describe("parseAuthResults (via email-parser)", () => {
   });
 
   it("extracts fail results", () => {
-    const header =
-      "mx.google.com; dkim=fail; spf=softfail; dmarc=fail";
+    const header = "mx.google.com; dkim=fail; spf=softfail; dmarc=fail";
     const result = parseAuthResults(header);
     expect(result.spf).toBe("softfail");
     expect(result.dkim).toBe("fail");

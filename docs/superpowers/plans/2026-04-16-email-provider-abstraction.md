@@ -26,6 +26,7 @@ Spec: `docs/superpowers/specs/2026-04-16-email-provider-abstraction-design.md`
 ## Task 1: Create the `EmailSender` interface and factory with tests
 
 **Files:**
+
 - Create: `worker/src/lib/email-sender.ts`
 - Create: `worker/src/__tests__/email-sender.test.ts`
 
@@ -245,6 +246,7 @@ git commit -m "feat: add EmailSender abstraction with Resend and Cloudflare adap
 ## Task 2: Migrate `send-router.ts` to use `EmailSender`
 
 **Files:**
+
 - Modify: `worker/src/routers/send-router.ts`
 
 - [ ] **Step 1: Read the current state of the file**
@@ -265,30 +267,30 @@ import { createEmailSender } from "../lib/email-sender";
 Inside the `sendEmailRoute` handler (around line 54-68), replace:
 
 ```typescript
-  // Send via Resend
-  const resend = new Resend(c.env.RESEND_API_KEY);
-  const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await resend.emails.send({
-    from: formattedFrom,
-    to,
-    subject,
-    html: bodyHtml,
-    text: bodyText,
-  });
+// Send via Resend
+const resend = new Resend(c.env.RESEND_API_KEY);
+const formattedFrom = await formatFromAddress(db, fromAddress);
+const result = await resend.emails.send({
+  from: formattedFrom,
+  to,
+  subject,
+  html: bodyHtml,
+  text: bodyText,
+});
 ```
 
 With:
 
 ```typescript
-  const sender = createEmailSender(c.env);
-  const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await sender.send({
-    from: formattedFrom,
-    to,
-    subject,
-    html: bodyHtml,
-    text: bodyText,
-  });
+const sender = createEmailSender(c.env);
+const formattedFrom = await formatFromAddress(db, fromAddress);
+const result = await sender.send({
+  from: formattedFrom,
+  to,
+  subject,
+  html: bodyHtml,
+  text: bodyText,
+});
 ```
 
 Then further down in the same handler, replace:
@@ -324,32 +326,32 @@ With:
 Inside the `replyEmailRoute` handler (around line 221-231), replace:
 
 ```typescript
-  // Send via Resend
-  const resend = new Resend(c.env.RESEND_API_KEY);
-  const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await resend.emails.send({
-    from: formattedFrom,
-    to: toAddress,
-    subject: finalSubject,
-    html: finalBodyHtml,
-    text: bodyText,
-    headers: orig.messageId ? { "In-Reply-To": orig.messageId } : undefined,
-  });
+// Send via Resend
+const resend = new Resend(c.env.RESEND_API_KEY);
+const formattedFrom = await formatFromAddress(db, fromAddress);
+const result = await resend.emails.send({
+  from: formattedFrom,
+  to: toAddress,
+  subject: finalSubject,
+  html: finalBodyHtml,
+  text: bodyText,
+  headers: orig.messageId ? { "In-Reply-To": orig.messageId } : undefined,
+});
 ```
 
 With:
 
 ```typescript
-  const sender = createEmailSender(c.env);
-  const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await sender.send({
-    from: formattedFrom,
-    to: toAddress,
-    subject: finalSubject,
-    html: finalBodyHtml,
-    text: bodyText,
-    headers: orig.messageId ? { "In-Reply-To": orig.messageId } : undefined,
-  });
+const sender = createEmailSender(c.env);
+const formattedFrom = await formatFromAddress(db, fromAddress);
+const result = await sender.send({
+  from: formattedFrom,
+  to: toAddress,
+  subject: finalSubject,
+  html: finalBodyHtml,
+  text: bodyText,
+  headers: orig.messageId ? { "In-Reply-To": orig.messageId } : undefined,
+});
 ```
 
 Replace the two remaining `result.data?.id ?? null` occurrences with `result.id`.
@@ -376,6 +378,7 @@ git commit -m "refactor: route send-router through EmailSender abstraction"
 ## Task 3: Migrate `email-templates-router.ts` to use `EmailSender`
 
 **Files:**
+
 - Modify: `worker/src/routers/email-templates-router.ts`
 
 - [ ] **Step 1: Swap the import**
@@ -394,26 +397,26 @@ import { createEmailSender } from "../lib/email-sender";
 Around line 321, replace:
 
 ```typescript
-  // Send via Resend
-  const resend = new Resend(c.env.RESEND_API_KEY);
-  const result = await resend.emails.send({
-    from: fromAddress,
-    to,
-    subject: renderedSubject,
-    html: renderedHtml,
-  });
+// Send via Resend
+const resend = new Resend(c.env.RESEND_API_KEY);
+const result = await resend.emails.send({
+  from: fromAddress,
+  to,
+  subject: renderedSubject,
+  html: renderedHtml,
+});
 ```
 
 With:
 
 ```typescript
-  const sender = createEmailSender(c.env);
-  const result = await sender.send({
-    from: fromAddress,
-    to,
-    subject: renderedSubject,
-    html: renderedHtml,
-  });
+const sender = createEmailSender(c.env);
+const result = await sender.send({
+  from: fromAddress,
+  to,
+  subject: renderedSubject,
+  html: renderedHtml,
+});
 ```
 
 Then replace the two `result.data?.id ?? null` usages (in the sentEmails insert and the response) with `result.id`. Status logic (`result.error ? "failed" : "sent"`) is unchanged.
@@ -440,6 +443,7 @@ git commit -m "refactor: route email-templates-router through EmailSender abstra
 ## Task 4: Migrate `sequence-processor.ts` to use `EmailSender`
 
 **Files:**
+
 - Modify: `worker/src/lib/sequence-processor.ts`
 
 - [ ] **Step 1: Swap the import**
@@ -458,7 +462,7 @@ import { createEmailSender, type EmailSender } from "./email-sender";
 Find where the handler currently creates `const resend = new Resend(env.RESEND_API_KEY);` (around line 60). Replace with:
 
 ```typescript
-  const sender = createEmailSender(env);
+const sender = createEmailSender(env);
 ```
 
 - [ ] **Step 3: Update `processSequenceEmail` signature and call site**
@@ -468,26 +472,26 @@ In `processSequenceEmail` (around line 57), change the parameter from `resend: R
 Inside `processSequenceEmail`, replace (around line 165):
 
 ```typescript
-  // Send via Resend
-  const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await resend.emails.send({
-    from: formattedFrom,
-    to: person.email,
-    subject: renderedSubject,
-    html: renderedHtml,
-  });
+// Send via Resend
+const formattedFrom = await formatFromAddress(db, fromAddress);
+const result = await resend.emails.send({
+  from: formattedFrom,
+  to: person.email,
+  subject: renderedSubject,
+  html: renderedHtml,
+});
 ```
 
 With:
 
 ```typescript
-  const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await sender.send({
-    from: formattedFrom,
-    to: person.email,
-    subject: renderedSubject,
-    html: renderedHtml,
-  });
+const formattedFrom = await formatFromAddress(db, fromAddress);
+const result = await sender.send({
+  from: formattedFrom,
+  to: person.email,
+  subject: renderedSubject,
+  html: renderedHtml,
+});
 ```
 
 Replace the `result.data?.id ?? null` in the `sentEmails` insert with `result.id`. The `result.error` check stays as-is.
@@ -526,6 +530,7 @@ git commit -m "refactor: route sequence-processor through EmailSender abstractio
 ## Task 5: Update config examples
 
 **Files:**
+
 - Modify: `wrangler.jsonc.example`
 
 - [ ] **Step 1: Add commented `send_email` binding**
@@ -533,12 +538,12 @@ git commit -m "refactor: route sequence-processor through EmailSender abstractio
 In `wrangler.jsonc.example`, insert after the `r2_buckets` block (around line 28) and before `assets`:
 
 ```jsonc
-  // Optional: enable Cloudflare Email Sending as the outbound provider.
-  // If RESEND_API_KEY is set, Resend is used instead. Requires onboarding
-  // your domain at Email Service → https://dash.cloudflare.com/?to=/:account/email-service
-  // "send_email": [
-  //   { "name": "EMAIL" }
-  // ],
+// Optional: enable Cloudflare Email Sending as the outbound provider.
+// If RESEND_API_KEY is set, Resend is used instead. Requires onboarding
+// your domain at Email Service → https://dash.cloudflare.com/?to=/:account/email-service
+// "send_email": [
+//   { "name": "EMAIL" }
+// ],
 ```
 
 - [ ] **Step 2: Document env var selection**
@@ -546,10 +551,10 @@ In `wrangler.jsonc.example`, insert after the `r2_buckets` block (around line 28
 Find the `vars` block. Above it, insert a top-level comment:
 
 ```jsonc
-  // Outbound email provider selection (runtime, no explicit toggle):
-  //   - Set RESEND_API_KEY (via `wrangler secret put RESEND_API_KEY`) to use Resend.
-  //   - Or uncomment the `send_email` binding above to use Cloudflare Email Sending.
-  //   - If neither is configured, send attempts return a "No email provider configured" error.
+// Outbound email provider selection (runtime, no explicit toggle):
+//   - Set RESEND_API_KEY (via `wrangler secret put RESEND_API_KEY`) to use Resend.
+//   - Or uncomment the `send_email` binding above to use Cloudflare Email Sending.
+//   - If neither is configured, send attempts return a "No email provider configured" error.
 ```
 
 - [ ] **Step 3: Verify syntax**

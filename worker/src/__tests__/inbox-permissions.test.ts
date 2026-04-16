@@ -12,24 +12,28 @@ import {
 
 async function insertUser(id: string, role: string) {
   const now = Date.now();
-  await getDb().insert(users).values({
-    id,
-    name: id,
-    email: `${id}@test.local`,
-    emailVerified: false,
-    createdAt: new Date(now),
-    updatedAt: new Date(now),
-    role,
-  });
+  await getDb()
+    .insert(users)
+    .values({
+      id,
+      name: id,
+      email: `${id}@test.local`,
+      emailVerified: false,
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
+      role,
+    });
 }
 
 async function insertPermission(userId: string, email: string) {
-  await getDb().insert(inboxPermissions).values({
-    userId,
-    email,
-    createdAt: Math.floor(Date.now() / 1000),
-    createdBy: null,
-  });
+  await getDb()
+    .insert(inboxPermissions)
+    .values({
+      userId,
+      email,
+      createdAt: Math.floor(Date.now() / 1000),
+      createdBy: null,
+    });
 }
 
 beforeEach(async () => {
@@ -112,19 +116,13 @@ describe("assertInboxAllowed", () => {
 
   it("does not throw when member has the inbox", () => {
     expect(() =>
-      assertInboxAllowed(
-        { isAdmin: false, inboxes: ["a@x.com"] },
-        "a@x.com",
-      ),
+      assertInboxAllowed({ isAdmin: false, inboxes: ["a@x.com"] }, "a@x.com"),
     ).not.toThrow();
   });
 
   it("throws 403 when member lacks the inbox", () => {
     expect(() =>
-      assertInboxAllowed(
-        { isAdmin: false, inboxes: ["a@x.com"] },
-        "b@x.com",
-      ),
+      assertInboxAllowed({ isAdmin: false, inboxes: ["a@x.com"] }, "b@x.com"),
     ).toThrowError(/Inbox not allowed/);
   });
 });

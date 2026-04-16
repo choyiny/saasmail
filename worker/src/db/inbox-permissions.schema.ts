@@ -1,4 +1,10 @@
-import { sqliteTable, text, integer, primaryKey, index } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  primaryKey,
+  index,
+} from "drizzle-orm/sqlite-core";
 import { users } from "./auth.schema";
 
 export const inboxPermissions = sqliteTable(

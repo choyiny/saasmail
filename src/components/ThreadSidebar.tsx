@@ -29,7 +29,9 @@ export default function ThreadSidebar({
     <div className="flex h-full w-80 shrink-0 flex-col border-l border-border bg-bg-subtle max-md:absolute max-md:right-0 max-md:top-0 max-md:z-10 max-md:w-full max-md:border-l-0">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">Thread</h3>
+        <h3 className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+          Thread
+        </h3>
         <button
           onClick={onClose}
           className="rounded p-0.5 text-text-tertiary hover:bg-bg-muted hover:text-text-secondary"

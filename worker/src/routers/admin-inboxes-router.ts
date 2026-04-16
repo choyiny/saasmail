@@ -118,7 +118,8 @@ const putAssignmentsRoute = createRoute({
   method: "put",
   path: "/{email}/assignments",
   tags: ["Admin Inboxes"],
-  description: "Replace the full set of member user IDs assigned to this inbox.",
+  description:
+    "Replace the full set of member user IDs assigned to this inbox.",
   request: {
     params: z.object({ email: z.string() }),
     body: {

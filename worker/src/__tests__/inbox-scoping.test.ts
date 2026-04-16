@@ -13,12 +13,14 @@ import { emails } from "../db/emails.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 
 async function grantInbox(userId: string, email: string) {
-  await getDb().insert(inboxPermissions).values({
-    userId,
-    email,
-    createdAt: Math.floor(Date.now() / 1000),
-    createdBy: null,
-  });
+  await getDb()
+    .insert(inboxPermissions)
+    .values({
+      userId,
+      email,
+      createdAt: Math.floor(Date.now() / 1000),
+      createdBy: null,
+    });
 }
 
 beforeEach(async () => {

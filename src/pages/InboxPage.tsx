@@ -13,7 +13,9 @@ export default function InboxPage() {
   const { data: session } = useSession();
 
   useEffect(() => {
-    fetchStats().then(setStats).catch(() => {});
+    fetchStats()
+      .then(setStats)
+      .catch(() => {});
   }, []);
 
   const isAdmin = session?.user?.role === "admin";

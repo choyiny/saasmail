@@ -33,7 +33,8 @@ export default function SetupPasskeyPage() {
             Register a Passkey
           </CardTitle>
           <p className="text-xs text-text-secondary">
-            For security, you must register a passkey before accessing {appName}.
+            For security, you must register a passkey before accessing {appName}
+            .
           </p>
         </CardHeader>
         <CardContent className="space-y-4">

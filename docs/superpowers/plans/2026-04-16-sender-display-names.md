@@ -13,6 +13,7 @@
 ### Task 1: Create `sender_identities` schema and migration
 
 **Files:**
+
 - Create: `worker/src/db/sender-identities.schema.ts`
 - Modify: `worker/src/db/schema.ts`
 
@@ -49,6 +50,7 @@ Expected: A new SQL migration file appears in `migrations/` creating `sender_ide
 - [ ] **Step 4: Verify migration SQL**
 
 Read the generated migration file. It should contain:
+
 ```sql
 CREATE TABLE `sender_identities` (
   `email` text PRIMARY KEY NOT NULL,
@@ -70,6 +72,7 @@ git commit -m "feat: add sender_identities table for display names"
 ### Task 2: Create sender identities CRUD router
 
 **Files:**
+
 - Create: `worker/src/routers/sender-identities-router.ts`
 - Modify: `worker/src/index.ts` (register the router)
 
@@ -209,6 +212,7 @@ git commit -m "feat: add sender identities CRUD endpoints"
 ### Task 3: Create `formatFromAddress` helper and use it in all sending paths
 
 **Files:**
+
 - Create: `worker/src/lib/format-from-address.ts`
 - Modify: `worker/src/routers/send-router.ts`
 - Modify: `worker/src/lib/sequence-processor.ts`
@@ -328,6 +332,7 @@ git commit -m "feat: format From header with display name from sender identities
 ### Task 4: Extend stats API to return sender identities alongside recipients
 
 **Files:**
+
 - Modify: `worker/src/routers/stats-router.ts`
 - Modify: `src/lib/api.ts`
 
@@ -412,6 +417,7 @@ git commit -m "feat: include sender identities in stats API response"
 ### Task 5: Update frontend From dropdowns to show display names
 
 **Files:**
+
 - Modify: `src/pages/ComposeModal.tsx`
 - Modify: `src/components/ReplyComposer.tsx`
 
@@ -449,11 +455,13 @@ function getFromLabel(email: string): string {
 Update the `<select>` options to use the label:
 
 ```tsx
-{recipients.map((r) => (
-  <option key={r} value={r}>
-    {getFromLabel(r)}
-  </option>
-))}
+{
+  recipients.map((r) => (
+    <option key={r} value={r}>
+      {getFromLabel(r)}
+    </option>
+  ));
+}
 ```
 
 - [ ] **Step 2: Update ReplyComposer to accept and show display names**
@@ -504,6 +512,7 @@ git commit -m "feat: show display names in From dropdown for compose and reply"
 ### Task 6: Add Settings UI for managing sender identities
 
 **Files:**
+
 - Create: `src/components/SenderIdentitiesSettings.tsx`
 - Modify: `src/lib/api.ts` (add API functions)
 - Modify: Settings page (wherever settings are rendered)

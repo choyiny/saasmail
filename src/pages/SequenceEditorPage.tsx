@@ -202,7 +202,9 @@ export default function SequenceEditorPage() {
           </p>
           <pre className="overflow-x-auto rounded-lg border border-border bg-white ring-1 ring-gray-200 p-4 text-xs text-text-secondary">
             {(() => {
-              const usedSlugs = steps.map((s) => s.templateSlug).filter(Boolean);
+              const usedSlugs = steps
+                .map((s) => s.templateSlug)
+                .filter(Boolean);
               const usedTemplates = templates.filter((t) =>
                 usedSlugs.includes(t.slug),
               );
@@ -219,7 +221,10 @@ export default function SequenceEditorPage() {
               const varsObj =
                 varSet.size > 0
                   ? Object.fromEntries(
-                      Array.from(varSet).map((v) => [v, `<${v.toUpperCase()}>`]),
+                      Array.from(varSet).map((v) => [
+                        v,
+                        `<${v.toUpperCase()}>`,
+                      ]),
                     )
                   : undefined;
               const body = JSON.stringify(
@@ -242,7 +247,11 @@ export default function SequenceEditorPage() {
             const usedTemplates = templates.filter((t) =>
               usedSlugs.includes(t.slug),
             );
-            const templateVars: { slug: string; name: string; vars: string[] }[] = [];
+            const templateVars: {
+              slug: string;
+              name: string;
+              vars: string[];
+            }[] = [];
             const varRegex = /\{\{(\w+)\}\}/g;
             for (const t of usedTemplates) {
               const vars = new Set<string>();
@@ -253,7 +262,11 @@ export default function SequenceEditorPage() {
                 }
               }
               if (vars.size > 0) {
-                templateVars.push({ slug: t.slug, name: t.name, vars: Array.from(vars) });
+                templateVars.push({
+                  slug: t.slug,
+                  name: t.name,
+                  vars: Array.from(vars),
+                });
               }
             }
             if (templateVars.length === 0) return null;

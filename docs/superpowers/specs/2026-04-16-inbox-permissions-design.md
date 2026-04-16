@@ -52,9 +52,7 @@ Add nullable column `from_address text`. `null` = global/admin-only. Existing ro
 A middleware `injectAllowedInboxes` runs after auth on every `/api/*` route (except auth/setup/invites/health/config). It calls `resolveAllowedInboxes(db, user)` once and stores the result on `c.set("allowedInboxes", …)`.
 
 ```ts
-type AllowedInboxes =
-  | { isAdmin: true }
-  | { isAdmin: false; inboxes: string[] };
+type AllowedInboxes = { isAdmin: true } | { isAdmin: false; inboxes: string[] };
 ```
 
 Helpers used by handlers:
@@ -71,23 +69,23 @@ Cost: one extra small SELECT per request for members; zero for admins.
 
 ### Admin-only, under `/api/admin/inboxes`
 
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/api/admin/inboxes` | List rich inbox rows `{ email, displayName, assignedUserIds }` — union of `emails.recipient` and `sender_identities` left-joined to `inbox_permissions`. |
-| `PATCH` | `/api/admin/inboxes/:email` | Body `{ displayName?: string \| null }`. Upserts or clears the `sender_identities` row. |
-| `PUT` | `/api/admin/inboxes/:email/assignments` | Body `{ userIds: string[] }`. Replaces the full member assignment set (delete + insert in a transaction). Admins are implicitly allowed and not representable here. |
-| `GET` | `/api/admin/users/:id/inboxes` | Convenience lookup for the user-admin page. |
+| Method  | Path                                    | Purpose                                                                                                                                                             |
+| ------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`   | `/api/admin/inboxes`                    | List rich inbox rows `{ email, displayName, assignedUserIds }` — union of `emails.recipient` and `sender_identities` left-joined to `inbox_permissions`.            |
+| `PATCH` | `/api/admin/inboxes/:email`             | Body `{ displayName?: string \| null }`. Upserts or clears the `sender_identities` row.                                                                             |
+| `PUT`   | `/api/admin/inboxes/:email/assignments` | Body `{ userIds: string[] }`. Replaces the full member assignment set (delete + insert in a transaction). Admins are implicitly allowed and not representable here. |
+| `GET`   | `/api/admin/users/:id/inboxes`          | Convenience lookup for the user-admin page.                                                                                                                         |
 
 ### Existing routers — apply filters
 
-| Router | Change |
-|---|---|
-| `stats-router` | `recipients` filtered; `totalEmails` / `unreadCount` / `totalPeople` each recomputed through `inboxFilter`. `senderIdentities` in response filtered to allowed inboxes. |
-| `emails-router` | All list queries (`by-person`, sent, search) apply `inboxFilter(allowed, emails.recipient)` (and `sent_emails.fromAddress` for sent). Single-email GET returns 404 (not 403) when disallowed, to avoid leaking existence. |
-| `people-router` | List filtered to people having ≥1 email in an allowed inbox (subquery on `emails.recipient`). Detail GET: same 404-on-disallow behavior. |
-| `send-router` | Compose + reply call `assertInboxAllowed(allowed, fromAddress)` before sending. |
-| `sequences-router` | List filtered by enrollment `fromAddress` ∈ allowed. Create/update: assert fromAddress allowed. |
-| `email-templates-router` | List: admins see all; members see `from_address IS NULL OR from_address IN (allowed)`. Create/update: members must set `from_address` to an allowed inbox. |
+| Router                   | Change                                                                                                                                                                                                                    |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stats-router`           | `recipients` filtered; `totalEmails` / `unreadCount` / `totalPeople` each recomputed through `inboxFilter`. `senderIdentities` in response filtered to allowed inboxes.                                                   |
+| `emails-router`          | All list queries (`by-person`, sent, search) apply `inboxFilter(allowed, emails.recipient)` (and `sent_emails.fromAddress` for sent). Single-email GET returns 404 (not 403) when disallowed, to avoid leaking existence. |
+| `people-router`          | List filtered to people having ≥1 email in an allowed inbox (subquery on `emails.recipient`). Detail GET: same 404-on-disallow behavior.                                                                                  |
+| `send-router`            | Compose + reply call `assertInboxAllowed(allowed, fromAddress)` before sending.                                                                                                                                           |
+| `sequences-router`       | List filtered by enrollment `fromAddress` ∈ allowed. Create/update: assert fromAddress allowed.                                                                                                                           |
+| `email-templates-router` | List: admins see all; members see `from_address IS NULL OR from_address IN (allowed)`. Create/update: members must set `from_address` to an allowed inbox.                                                                |
 
 ### Deleted
 

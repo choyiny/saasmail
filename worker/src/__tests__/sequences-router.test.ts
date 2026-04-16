@@ -193,7 +193,10 @@ describe("sequences router", () => {
       const res = await authFetch(`/api/sequences/${seq.id}/enroll`, {
         apiKey,
         method: "POST",
-        body: JSON.stringify({ personId: "nonexistent", fromAddress: "me@cmail.test" }),
+        body: JSON.stringify({
+          personId: "nonexistent",
+          fromAddress: "me@cmail.test",
+        }),
       });
       expect(res.status).toBe(404);
     });
@@ -223,7 +226,11 @@ describe("sequences router", () => {
       const res = await authFetch(`/api/sequences/${seq.id}/enroll`, {
         apiKey,
         method: "POST",
-        body: JSON.stringify({ personId: "s1", fromAddress: "me@cmail.test", skipSteps: [2] }),
+        body: JSON.stringify({
+          personId: "s1",
+          fromAddress: "me@cmail.test",
+          skipSteps: [2],
+        }),
       });
       expect(res.status).toBe(201);
       const data = await res.json();
@@ -238,7 +245,11 @@ describe("sequences router", () => {
       const res = await authFetch(`/api/sequences/${seq.id}/enroll`, {
         apiKey,
         method: "POST",
-        body: JSON.stringify({ personId: "s1", fromAddress: "me@cmail.test", skipSteps: [1, 2] }),
+        body: JSON.stringify({
+          personId: "s1",
+          fromAddress: "me@cmail.test",
+          skipSteps: [1, 2],
+        }),
       });
       expect(res.status).toBe(400);
     });

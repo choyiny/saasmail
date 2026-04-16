@@ -73,7 +73,9 @@ export default function HtmlCodeEditor({
           ".cm-activeLine": { backgroundColor: "#f3f4f6" },
           ".cm-activeLineGutter": { backgroundColor: "#f3f4f6" },
           ".cm-cursor": { borderLeftColor: "#2563eb" },
-          ".cm-selectionBackground, ::selection": { backgroundColor: "#dbeafe" },
+          ".cm-selectionBackground, ::selection": {
+            backgroundColor: "#dbeafe",
+          },
         }),
       ],
     });

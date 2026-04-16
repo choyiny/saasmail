@@ -14,13 +14,11 @@ export default function AdminInboxTable() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([fetchAdminInboxes(), fetchAdminUsers()]).then(
-      ([i, u]) => {
-        setInboxes(i);
-        setUsers(u);
-        setLoading(false);
-      },
-    );
+    Promise.all([fetchAdminInboxes(), fetchAdminUsers()]).then(([i, u]) => {
+      setInboxes(i);
+      setUsers(u);
+      setLoading(false);
+    });
   }, []);
 
   const members = users.filter((u) => u.role !== "admin");

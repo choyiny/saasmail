@@ -46,16 +46,9 @@ body {
   background-color: #ffffff;
   color: #0f172a;
   font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Inter",
-    "Segoe UI",
-    Helvetica,
-    Arial,
+    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial,
     sans-serif;
-  font-feature-settings:
-    "cv11",
-    "ss01";
+  font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

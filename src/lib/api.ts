@@ -517,4 +517,3 @@ export interface AdminUser {
 export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
 }
-

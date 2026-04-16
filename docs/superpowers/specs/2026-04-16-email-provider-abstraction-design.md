@@ -26,7 +26,7 @@ New file `worker/src/lib/email-sender.ts`:
 
 ```typescript
 export interface SendEmailParams {
-  from: string;             // already formatted, e.g. "Name <email@domain>"
+  from: string; // already formatted, e.g. "Name <email@domain>"
   to: string;
   subject: string;
   html: string;
@@ -35,7 +35,7 @@ export interface SendEmailParams {
 }
 
 export interface SendEmailResult {
-  id: string | null;        // provider message ID, stored in sent_emails.resendId
+  id: string | null; // provider message ID, stored in sent_emails.resendId
   error: { message: string } | null;
 }
 

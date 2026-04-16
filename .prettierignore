@@ -4,5 +4,6 @@ dist
 .vite
 worker-configuration.d.ts
 worker/src/db/auth.schema.ts
+migrations
 yarn.lock
 package-lock.json

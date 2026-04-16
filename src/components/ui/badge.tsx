@@ -8,18 +8,12 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        default:
-          "bg-accent-subtle text-accent-subtle-fg",
-        secondary:
-          "bg-bg-muted text-text-secondary",
-        destructive:
-          "bg-destructive-subtle text-destructive",
-        success:
-          "bg-emerald-50 text-emerald-700",
-        warning:
-          "bg-warning-bg text-warning-text",
-        outline:
-          "text-text-primary ring-1 ring-gray-200",
+        default: "bg-accent-subtle text-accent-subtle-fg",
+        secondary: "bg-bg-muted text-text-secondary",
+        destructive: "bg-destructive-subtle text-destructive",
+        success: "bg-emerald-50 text-emerald-700",
+        warning: "bg-warning-bg text-warning-text",
+        outline: "text-text-primary ring-1 ring-gray-200",
       },
     },
     defaultVariants: {

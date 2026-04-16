@@ -105,7 +105,9 @@ export default function Sidebar({ onCompose }: SidebarProps) {
       className={`flex h-full flex-col border-r border-border bg-bg-subtle transition-[width] duration-150 ${widthClass}`}
     >
       {/* Header */}
-      <div className={`flex items-center ${collapsed ? "justify-center px-0" : "px-3"} py-3`}>
+      <div
+        className={`flex items-center ${collapsed ? "justify-center px-0" : "px-3"} py-3`}
+      >
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">
           {logoLetter}
         </div>

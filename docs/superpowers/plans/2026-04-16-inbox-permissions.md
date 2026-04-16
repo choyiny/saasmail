@@ -15,6 +15,7 @@
 ## File Structure
 
 **New files:**
+
 - `worker/src/db/inbox-permissions.schema.ts`
 - `worker/src/lib/inbox-permissions.ts` (resolveAllowedInboxes, inboxFilter, assertInboxAllowed, AllowedInboxes type)
 - `worker/src/middleware/inject-allowed-inboxes.ts`
@@ -28,6 +29,7 @@
 - `migrations/<next+1>_email_templates_from_address.sql` (generated)
 
 **Modified files:**
+
 - `worker/src/db/schema.ts` — register new schema in barrel
 - `worker/src/db/email-templates.schema.ts` — add nullable `from_address` column
 - `worker/src/variables.ts` — add `allowedInboxes` to Variables
@@ -44,6 +46,7 @@
 - `src/lib/api.ts` — remove sender-identity helpers; add admin-inbox helpers
 
 **Deleted files:**
+
 - `worker/src/routers/sender-identities-router.ts`
 - `src/pages/SettingsPage.tsx`
 - `src/components/SenderIdentitiesSettings.tsx`
@@ -53,6 +56,7 @@
 ### Task 1: Add `inbox_permissions` schema
 
 **Files:**
+
 - Create: `worker/src/db/inbox-permissions.schema.ts`
 - Modify: `worker/src/db/schema.ts`
 
@@ -60,7 +64,13 @@
 
 ```typescript
 // worker/src/db/inbox-permissions.schema.ts
-import { sqliteTable, text, integer, primaryKey, index } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  primaryKey,
+  index,
+} from "drizzle-orm/sqlite-core";
 import { users } from "./auth.schema";
 
 export const inboxPermissions = sqliteTable(
@@ -157,6 +167,7 @@ git commit -m "feat: add inbox_permissions schema and migration"
 ### Task 2: Add `from_address` column to `email_templates`
 
 **Files:**
+
 - Modify: `worker/src/db/email-templates.schema.ts`
 - Modify: `worker/src/__tests__/helpers.ts`
 
@@ -190,11 +201,13 @@ Expected: new SQL file with `ALTER TABLE email_templates ADD COLUMN from_address
 In `worker/src/__tests__/helpers.ts`, update the `email_templates` DDL to include the column:
 
 Replace:
+
 ```typescript
 `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
 ```
 
 With:
+
 ```typescript
 `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, from_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
 ```
@@ -216,6 +229,7 @@ git commit -m "feat: add nullable from_address to email_templates"
 ### Task 3: Build permission resolution library (with tests)
 
 **Files:**
+
 - Create: `worker/src/lib/inbox-permissions.ts`
 - Create: `worker/src/__tests__/inbox-permissions.test.ts`
 
@@ -238,24 +252,28 @@ import {
 
 async function insertUser(id: string, role: string) {
   const now = Date.now();
-  await getDb().insert(users).values({
-    id,
-    name: id,
-    email: `${id}@test.local`,
-    emailVerified: false,
-    createdAt: new Date(now),
-    updatedAt: new Date(now),
-    role,
-  });
+  await getDb()
+    .insert(users)
+    .values({
+      id,
+      name: id,
+      email: `${id}@test.local`,
+      emailVerified: false,
+      createdAt: new Date(now),
+      updatedAt: new Date(now),
+      role,
+    });
 }
 
 async function insertPermission(userId: string, email: string) {
-  await getDb().insert(inboxPermissions).values({
-    userId,
-    email,
-    createdAt: Math.floor(Date.now() / 1000),
-    createdBy: null,
-  });
+  await getDb()
+    .insert(inboxPermissions)
+    .values({
+      userId,
+      email,
+      createdAt: Math.floor(Date.now() / 1000),
+      createdBy: null,
+    });
 }
 
 beforeEach(async () => {
@@ -338,19 +356,13 @@ describe("assertInboxAllowed", () => {
 
   it("does not throw when member has the inbox", () => {
     expect(() =>
-      assertInboxAllowed(
-        { isAdmin: false, inboxes: ["a@x.com"] },
-        "a@x.com",
-      ),
+      assertInboxAllowed({ isAdmin: false, inboxes: ["a@x.com"] }, "a@x.com"),
     ).not.toThrow();
   });
 
   it("throws 403 when member lacks the inbox", () => {
     expect(() =>
-      assertInboxAllowed(
-        { isAdmin: false, inboxes: ["a@x.com"] },
-        "b@x.com",
-      ),
+      assertInboxAllowed({ isAdmin: false, inboxes: ["a@x.com"] }, "b@x.com"),
     ).toThrowError(/Inbox not allowed/);
   });
 });
@@ -438,6 +450,7 @@ git commit -m "feat: add inbox permission resolution helpers"
 ### Task 4: Add middleware + variable type
 
 **Files:**
+
 - Modify: `worker/src/variables.ts`
 - Create: `worker/src/middleware/inject-allowed-inboxes.ts`
 - Modify: `worker/src/index.ts`
@@ -524,6 +537,7 @@ git commit -m "feat: inject allowedInboxes into request context"
 ### Task 5: Admin inboxes router (with tests)
 
 **Files:**
+
 - Create: `worker/src/routers/admin-inboxes-router.ts`
 - Create: `worker/src/__tests__/admin-inboxes-router.test.ts`
 - Modify: `worker/src/index.ts` — mount new router under admin guard; remove sender-identities mount (done in Task 12)
@@ -800,7 +814,8 @@ const putAssignmentsRoute = createRoute({
   method: "put",
   path: "/{email}/assignments",
   tags: ["Admin Inboxes"],
-  description: "Replace the full set of member user IDs assigned to this inbox.",
+  description:
+    "Replace the full set of member user IDs assigned to this inbox.",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -914,6 +929,7 @@ git commit -m "feat: add admin inboxes router"
 ### Task 6: Apply scoping to stats router (with tests)
 
 **Files:**
+
 - Modify: `worker/src/routers/stats-router.ts`
 
 - [ ] **Step 1: Write failing test**
@@ -934,12 +950,14 @@ import {
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 
 async function grantInbox(userId: string, email: string) {
-  await getDb().insert(inboxPermissions).values({
-    userId,
-    email,
-    createdAt: Math.floor(Date.now() / 1000),
-    createdBy: null,
-  });
+  await getDb()
+    .insert(inboxPermissions)
+    .values({
+      userId,
+      email,
+      createdAt: Math.floor(Date.now() / 1000),
+      createdBy: null,
+    });
 }
 
 beforeEach(async () => {
@@ -1046,7 +1064,8 @@ const statsRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["Stats"],
-  description: "Get inbox statistics (filtered to caller's accessible inboxes).",
+  description:
+    "Get inbox statistics (filtered to caller's accessible inboxes).",
   request: {
     query: z.object({
       recipient: z.string().optional(),
@@ -1061,7 +1080,9 @@ statsRouter.openapi(statsRoute, async (c) => {
   const { recipient } = c.req.valid("query");
 
   const scopeFilter = inboxFilter(allowed, emails.recipient);
-  const recipientFilter = recipient ? sql`${emails.recipient} = ${recipient}` : undefined;
+  const recipientFilter = recipient
+    ? sql`${emails.recipient} = ${recipient}`
+    : undefined;
 
   const whereEmails = and(scopeFilter, recipientFilter);
 
@@ -1138,6 +1159,7 @@ git commit -m "feat: scope stats endpoint to allowed inboxes"
 ### Task 7: Apply scoping to emails router (with tests)
 
 **Files:**
+
 - Modify: `worker/src/routers/emails-router.ts`
 - Modify: `worker/src/__tests__/inbox-scoping.test.ts`
 
@@ -1180,6 +1202,7 @@ Expected: fails — member sees both recipients.
 In `worker/src/routers/emails-router.ts`:
 
 1. Import helpers at the top of the file:
+
 ```typescript
 import { inboxFilter } from "../lib/inbox-permissions";
 ```
@@ -1257,6 +1280,7 @@ git commit -m "feat: scope emails endpoints to allowed inboxes"
 ### Task 8: Apply scoping to people router (with tests)
 
 **Files:**
+
 - Modify: `worker/src/routers/people-router.ts`
 - Modify: `worker/src/__tests__/inbox-scoping.test.ts`
 
@@ -1353,9 +1377,7 @@ With:
 const allowed = c.get("allowedInboxes")!;
 const scopeClause = peopleScopeClause(allowed);
 const extraConditions =
-  conditions.length > 0
-    ? sql`AND ${sql.join(conditions, sql` AND `)}`
-    : sql``;
+  conditions.length > 0 ? sql`AND ${sql.join(conditions, sql` AND `)}` : sql``;
 const whereClause = sql`WHERE 1=1 ${extraConditions} ${scopeClause}`;
 ```
 
@@ -1373,10 +1395,7 @@ if (!allowed.isAdmin) {
     .select({ id: emails.id })
     .from(emails)
     .where(
-      and(
-        eq(emails.personId, id),
-        inArray(emails.recipient, allowed.inboxes),
-      ),
+      and(eq(emails.personId, id), inArray(emails.recipient, allowed.inboxes)),
     )
     .limit(1);
   if (match.length === 0) {
@@ -1414,6 +1433,7 @@ git commit -m "feat: scope people endpoints to allowed inboxes"
 ### Task 9: Guard send + reply endpoints (with tests)
 
 **Files:**
+
 - Modify: `worker/src/routers/send-router.ts`
 - Modify: `worker/src/__tests__/inbox-scoping.test.ts`
 
@@ -1493,6 +1513,7 @@ git commit -m "feat: enforce inbox permission on send and reply"
 ### Task 10: Apply scoping to sequences router (with tests)
 
 **Files:**
+
 - Modify: `worker/src/routers/sequences-router.ts`
 - Modify: `worker/src/__tests__/inbox-scoping.test.ts`
 
@@ -1589,6 +1610,7 @@ git commit -m "feat: enforce inbox permission on sequence enrollment"
 ### Task 11: Apply scoping to email-templates router (with tests)
 
 **Files:**
+
 - Modify: `worker/src/routers/email-templates-router.ts`
 - Modify: `worker/src/__tests__/inbox-scoping.test.ts`
 
@@ -1802,6 +1824,7 @@ git commit -m "feat: scope email templates to allowed inboxes"
 ### Task 12: Delete sender-identities router
 
 **Files:**
+
 - Delete: `worker/src/routers/sender-identities-router.ts`
 - Modify: `worker/src/index.ts`
 - Delete: test file for that router if one exists
@@ -1868,6 +1891,7 @@ git commit -m "refactor: remove /api/sender-identities router (superseded by adm
 ### Task 13: Frontend — rename page, route, and sidebar
 
 **Files:**
+
 - Create: `src/pages/InboxesPage.tsx` (placeholder to be filled in Task 14)
 - Delete: `src/pages/SettingsPage.tsx`
 - Delete: `src/components/SenderIdentitiesSettings.tsx`
@@ -1896,19 +1920,25 @@ export default function InboxesPage() {
 Open `src/App.tsx`.
 
 Replace:
+
 ```tsx
 import SettingsPage from "./pages/SettingsPage";
 ```
+
 With:
+
 ```tsx
 import InboxesPage from "./pages/InboxesPage";
 ```
 
 Replace:
+
 ```tsx
 <Route path="/settings" element={<SettingsPage />} />
 ```
+
 With:
+
 ```tsx
 <Route path="/inboxes" element={<InboxesPage />} />
 <Route path="/settings" element={<Navigate to="/inboxes" replace />} />
@@ -1919,10 +1949,13 @@ With:
 Open `src/components/Sidebar.tsx`.
 
 Change the nav item for Settings from:
+
 ```tsx
 { icon: Settings, label: "Settings", path: "/settings" },
 ```
+
 To:
+
 ```tsx
 { icon: Settings, label: "Inboxes", path: "/inboxes", adminOnly: true },
 ```
@@ -1950,6 +1983,7 @@ git commit -m "feat: rename settings page to inboxes (admin only)"
 ### Task 14: Frontend — admin inboxes table
 
 **Files:**
+
 - Create: `src/components/AdminInboxTable.tsx`
 - Modify: `src/pages/InboxesPage.tsx`
 - Modify: `src/lib/api.ts`
@@ -2037,13 +2071,11 @@ export default function AdminInboxTable() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([fetchAdminInboxes(), fetchAdminUsers()]).then(
-      ([i, u]) => {
-        setInboxes(i);
-        setUsers(u);
-        setLoading(false);
-      },
-    );
+    Promise.all([fetchAdminInboxes(), fetchAdminUsers()]).then(([i, u]) => {
+      setInboxes(i);
+      setUsers(u);
+      setLoading(false);
+    });
   }, []);
 
   const members = users.filter((u) => u.role !== "admin");
@@ -2181,6 +2213,7 @@ Expected: no errors.
 Run: `yarn dev` in one terminal; in another, navigate to `/inboxes` after logging in as admin.
 
 Expected:
+
 - Admin: sees table, can edit display name and toggle member chips.
 - Member (if you have one): `/inboxes` redirects to `/`.
 
@@ -2196,6 +2229,7 @@ git commit -m "feat: admin inbox table for display names and member assignments"
 ### Task 15: Empty-state for members with no inboxes
 
 **Files:**
+
 - Modify: `src/components/DashboardLayout.tsx` (or wherever the main content area renders; identify during task)
 
 - [ ] **Step 1: Locate main inbox view**
@@ -2203,6 +2237,7 @@ git commit -m "feat: admin inbox table for display names and member assignments"
 Open `src/pages/InboxPage.tsx` (the default route component). Read the top of the file to understand how it fetches stats and renders the list.
 
 Run:
+
 ```bash
 grep -R "stats" src/pages/InboxPage.tsx | head -20
 ```
