@@ -7,7 +7,7 @@ export default function DashboardLayout() {
   const [composeOpen, setComposeOpen] = useState(false);
 
   return (
-    <div className="flex h-screen bg-main">
+    <div className="flex h-screen bg-bg">
       <Sidebar onCompose={() => setComposeOpen(true)} />
       <div className="flex flex-1 overflow-hidden">
         <Outlet />
