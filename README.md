@@ -4,9 +4,11 @@ Self-hosted email server on Cloudflare Workers.
 
 Receive email with **Cloudflare Email Workers**. Send email with **Cloudflare Email Sending** or **Resend**. Manage a shared team inbox through a clean web UI.
 
-![docs/screenshots/cmail.jpeg]
+<img width="5088" height="3506" alt="cmail" src="https://github.com/user-attachments/assets/1b1f9408-c5d5-46c9-a790-e3743533aedc" />
 
 ## Demo Video
+
+https://github.com/user-attachments/assets/fe3a3811-1902-4b0b-8b94-f8c72f1afab4
 
 ## Provider Matrix
 
