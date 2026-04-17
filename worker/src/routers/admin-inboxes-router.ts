@@ -14,6 +14,7 @@ export const adminInboxesRouter = new OpenAPIHono<{
 const InboxRowSchema = z.object({
   email: z.string(),
   displayName: z.string().nullable(),
+  displayMode: z.enum(["thread", "chat"]),
   assignedUserIds: z.array(z.string()),
 });
 
@@ -33,6 +34,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
   type Row = {
     email: string;
     displayName: string | null;
+    displayMode: "thread" | "chat" | null;
     assignedUserIds: string | null;
   };
   const rows = await db.all<Row>(sql`
@@ -44,6 +46,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     SELECT
       u.email AS email,
       s.display_name AS displayName,
+      s.display_mode AS displayMode,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -61,6 +64,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     rows.map((r) => ({
       email: r.email,
       displayName: r.displayName,
+      displayMode: r.displayMode ?? "thread",
       assignedUserIds: r.assignedUserIds ? JSON.parse(r.assignedUserIds) : [],
     })),
     200,

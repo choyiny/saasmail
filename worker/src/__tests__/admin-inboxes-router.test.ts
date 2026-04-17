@@ -95,6 +95,30 @@ describe("admin inboxes router", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("GET returns displayMode (defaulting to 'thread' when no row)", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await createTestPerson();
+    await createTestEmail({ recipient: "a@x.com" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "b@x.com",
+      displayName: "Bee",
+      displayMode: "chat",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const res = await authFetch("/api/admin/inboxes", { apiKey });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{
+      email: string;
+      displayName: string | null;
+      displayMode: "thread" | "chat";
+    }>;
+    const byEmail = Object.fromEntries(body.map((b) => [b.email, b]));
+    expect(byEmail["a@x.com"].displayMode).toBe("thread");
+    expect(byEmail["b@x.com"].displayMode).toBe("chat");
+  });
+
   it("PUT assignments replaces the full member set", async () => {
     const { apiKey } = await createTestUser({
       id: "u-admin",
