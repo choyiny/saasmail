@@ -51,6 +51,32 @@ export default function AdminInboxTable() {
     );
   }
 
+  async function handleSetMode(inbox: AdminInbox, next: "thread" | "chat") {
+    if (inbox.displayMode === next) return;
+    // Optimistic update with rollback on error.
+    const prev = inbox.displayMode;
+    setInboxes((all) =>
+      all.map((r) =>
+        r.email === inbox.email ? { ...r, displayMode: next } : r,
+      ),
+    );
+    try {
+      const res = await updateInboxSettings(inbox.email, { displayMode: next });
+      setInboxes((all) =>
+        all.map((r) =>
+          r.email === inbox.email ? { ...r, displayMode: res.displayMode } : r,
+        ),
+      );
+    } catch (err) {
+      setInboxes((all) =>
+        all.map((r) =>
+          r.email === inbox.email ? { ...r, displayMode: prev } : r,
+        ),
+      );
+      console.error("Failed to update inbox mode", err);
+    }
+  }
+
   if (loading) {
     return <p className="text-text-secondary">Loading…</p>;
   }
@@ -82,6 +108,35 @@ export default function AdminInboxTable() {
                 onBlur={(e) => handleNameBlur(inbox, e.currentTarget.value)}
                 className="mt-1 w-full rounded bg-white ring-1 ring-gray-200 px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
               />
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="mb-1 text-xs uppercase tracking-wide text-text-tertiary">
+              Mode
+            </div>
+            <div className="inline-flex rounded-md border border-border overflow-hidden">
+              {(["thread", "chat"] as const).map((m) => {
+                const active = inbox.displayMode === m;
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleSetMode(inbox, m)}
+                    className={`px-3 py-1 text-xs font-medium ${
+                      active
+                        ? "bg-accent text-white"
+                        : "bg-white text-text-secondary hover:bg-bg-muted"
+                    }`}
+                    aria-pressed={active}
+                  >
+                    {m === "thread" ? "Thread" : "Chat"}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="mt-1 text-xs text-text-tertiary">
+              Chat mode shows the last 5 messages as bubbles with an inline
+              reply.
             </div>
           </div>
           <div className="mt-4">
