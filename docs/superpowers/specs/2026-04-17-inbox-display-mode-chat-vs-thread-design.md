@@ -208,7 +208,7 @@ interface ChatQuickReplyProps {
 - `Enter` inserts a newline. `Cmd/Ctrl+Enter` sends.
 - Muted hint line: _"Replies in chat mode are sent as plain text from `support@example.com`."_
 - No template tab, no From picker, no Tiptap.
-- Send path: `replyToEmail(latestReceivedEmailId, { bodyText, fromAddress: inboxAddress })`. If the existing route signature requires `bodyHtml`, wrap as `<p>{escaped text}</p>` — verify during implementation.
+- Send path: the existing reply route (`POST /send/reply/{emailId}` in `worker/src/routers/send-router.ts`) requires `bodyHtml` or `templateSlug` and returns 400 otherwise. Rather than relax the backend, the quick reply wraps the plain text on the client into minimal HTML — `<p>` per non-empty line, empty lines become `<p>&nbsp;</p>`, with all text HTML-escaped — and sends both: `replyToEmail(latestReceivedEmailId, { bodyHtml: wrapped, bodyText: raw, fromAddress: inboxAddress })`. The wrapping helper is colocated with `ChatQuickReply`.
 - On success: clear textarea, call `onSent()`. On error: inline red message under the textarea, content preserved.
 - If `latestReceivedEmailId === null` (no received messages yet in this section): disable Send with hint _"Waiting for a message to reply to."_ — composing a new outbound email is out of scope here.
 
