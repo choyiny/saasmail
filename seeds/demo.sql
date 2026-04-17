@@ -221,7 +221,91 @@ INSERT OR REPLACE INTO emails (id, person_id, recipient, subject, body_html, bod
     '<p>One more thing: can we wire pilot usage into our internal BI via the API, or is that a paid-tier only feature? Also — who''s our CSM?</p>',
     'One more thing: can we wire pilot usage into our internal BI via the API, or is that a paid-tier only feature? Also — who''s our CSM?',
     '{}', '<henry-2@wayne.enterprises>', 'pass', 'pass', 'pass',
-    0, (CAST(strftime('%s','now') AS INTEGER) - 3600 * 1) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 3600 * 1) * 1000);
+    0, (CAST(strftime('%s','now') AS INTEGER) - 3600 * 1) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 3600 * 1) * 1000),
+
+  -- --------------------------------------------------------------------------
+  -- Cross-inbox messages: ensure every person has hit ≥2 of our inboxes.
+  -- --------------------------------------------------------------------------
+
+  -- Alice (support) → billing: split invoice between cost centers
+  ('e_alice_billing_1', 'p_alice', 'billing@example.com',
+    'Split March invoice between two cost centers?',
+    '<p>Hey — can you split the March invoice 60/40 between <code>platform-eng</code> and <code>growth</code> cost centers? Finance flagged it on our end.</p>',
+    'Hey — can you split the March invoice 60/40 between platform-eng and growth cost centers? Finance flagged it on our end.',
+    '{}', '<alice-billing-1@acme.co>', 'pass', 'pass', 'pass',
+    1, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 9) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 9) * 1000),
+
+  -- Bob (sales) → support: Okta SAML metadata URL
+  ('e_bob_support_1', 'p_bob', 'support@example.com',
+    'SAML metadata URL for Okta setup?',
+    '<p>Our IT team is ready to wire up Okta SAML. What''s the metadata URL on your side? Couldn''t find it in the SSO docs link you sent.</p>',
+    'Our IT team is ready to wire up Okta SAML. What''s the metadata URL on your side? Couldn''t find it in the SSO docs link you sent.',
+    '{}', '<bob-support-1@globex.io>', 'pass', 'pass', 'pass',
+    0, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 6) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 6) * 1000),
+
+  -- Carla (support) → billing: PO mismatch on April invoice
+  ('e_carla_billing_1', 'p_carla', 'billing@example.com',
+    'PO number missing on April invoice',
+    '<p>Our April invoice came through without our PO number (<code>INI-2026-0412</code>) on it — can you reissue with the PO so AP can process it?</p>',
+    'Our April invoice came through without our PO number (INI-2026-0412) on it — can you reissue with the PO so AP can process it?',
+    '{}', '<carla-billing-1@initech.dev>', 'pass', 'pass', 'pass',
+    1, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 13) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 13) * 1000),
+
+  -- Dan (hello) → sales: co-marketing pricing package
+  ('e_dan_sales_1', 'p_dan', 'sales@example.com',
+    'Co-marketing bundle — pricing?',
+    '<p>Following the partnership thread — our marketing lead wants to bundle a joint webinar with a 3-month paid trial. Do you have a co-marketing package you can share?</p>',
+    'Following the partnership thread — our marketing lead wants to bundle a joint webinar with a 3-month paid trial. Do you have a co-marketing package you can share?',
+    '{}', '<dan-sales-1@hooli.com>', 'pass', 'pass', 'pass',
+    0, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 3 - 3600 * 6) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 3 - 3600 * 6) * 1000),
+
+  -- Eve (sales) → billing: PO delivery confirmation
+  ('e_eve_billing_1', 'p_eve', 'billing@example.com',
+    'PO-4471 — confirm receipt?',
+    '<p>Our AP team sent <strong>PO-4471</strong> over last Thursday for the renewal. Can you confirm it''s been received on your side before the April 30 invoice goes out?</p>',
+    'Our AP team sent PO-4471 over last Thursday for the renewal. Can you confirm it''s been received on your side before the April 30 invoice goes out?',
+    '{}', '<eve-billing-1@piedpiper.ai>', 'pass', 'pass', 'pass',
+    1, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 2 - 3600 * 2) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 2 - 3600 * 2) * 1000),
+
+  -- Frank (support) → billing: card updated after failed charge
+  ('e_frank_billing_1', 'p_frank', 'billing@example.com',
+    'Re: Invoice cm_apr_2026_soylent — payment failed',
+    '<p>Updated the card on file — it was an expiration we missed. Can you retry the charge now instead of waiting 3 days? Don''t want the account to suspend.</p>',
+    'Updated the card on file — it was an expiration we missed. Can you retry the charge now instead of waiting 3 days? Don''t want the account to suspend.',
+    '{}', '<frank-billing-1@soylent.corp>', 'pass', 'pass', 'pass',
+    0, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 14 - 3600 * 3) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 14 - 3600 * 3) * 1000),
+
+  -- Grace (hello) → sales: sponsorship/advertising inquiry
+  ('e_grace_sales_1', 'p_grace', 'sales@example.com',
+    'Sponsorship slot in The Paper — Q3 issue?',
+    '<p>Separate from the press piece — would cmail consider a sponsorship slot in our Q3 developer issue? We have a 60k-dev audience and can share past sponsor decks.</p>',
+    'Separate from the press piece — would cmail consider a sponsorship slot in our Q3 developer issue? We have a 60k-dev audience and can share past sponsor decks.',
+    '{}', '<grace-sales-1@dundermifflin.com>', 'pass', 'pass', 'pass',
+    1, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 3) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 3) * 1000),
+
+  -- Henry (sales) → support: pilot SSO setup
+  ('e_henry_support_1', 'p_henry', 'support@example.com',
+    'Pilot SSO — can we enable on day 1?',
+    '<p>Hey — our IT requires SSO from day one for any pilot. Can Business-tier SSO be enabled on the pilot workspace <code>wayne-pilot</code> even though we''re technically on a trial?</p>',
+    'Hey — our IT requires SSO from day one for any pilot. Can Business-tier SSO be enabled on the pilot workspace wayne-pilot even though we''re technically on a trial?',
+    '{}', '<henry-support-1@wayne.enterprises>', 'pass', 'pass', 'pass',
+    0, (CAST(strftime('%s','now') AS INTEGER) - 3600 * 4) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 3600 * 4) * 1000),
+
+  -- Jack (support) → billing: reconciliation on workspace seats
+  ('e_jack_billing_1', 'p_jack', 'billing@example.com',
+    'Seat count mismatch on March invoice',
+    '<p>March invoice shows 42 seats but our audit log shows 38 active. Can you send a breakdown per seat ID so I can reconcile with AP?</p>',
+    'March invoice shows 42 seats but our audit log shows 38 active. Can you send a breakdown per seat ID so I can reconcile with AP?',
+    '{}', '<jack-billing-1@wayne.enterprises>', 'pass', 'pass', 'pass',
+    1, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 7) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 7) * 1000),
+
+  -- Leo (support) → billing: re-send February receipt
+  ('e_leo_billing_1', 'p_leo', 'billing@example.com',
+    'Re-send February receipt for expense report?',
+    '<p>I misplaced the February receipt and our finance close is tomorrow. Can you resend <code>cm_feb_2026_initech</code> as a PDF?</p>',
+    'I misplaced the February receipt and our finance close is tomorrow. Can you resend cm_feb_2026_initech as a PDF?',
+    '{}', '<leo-billing-1@initech.dev>', 'pass', 'pass', 'pass',
+    1, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 4) * 1000, (CAST(strftime('%s','now') AS INTEGER) - 86400 * 4) * 1000);
 
 -- ----------------------------------------------------------------------------
 -- Sent emails (our replies)
