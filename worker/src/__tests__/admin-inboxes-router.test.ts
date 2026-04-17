@@ -76,6 +76,7 @@ describe("admin inboxes router", () => {
     await getDb().insert(senderIdentities).values({
       email: "a@x.com",
       displayName: "Alpha",
+      displayMode: "thread", // ← add this line
       createdAt: now,
       updatedAt: now,
     });
@@ -117,6 +118,101 @@ describe("admin inboxes router", () => {
     const byEmail = Object.fromEntries(body.map((b) => [b.email, b]));
     expect(byEmail["a@x.com"].displayMode).toBe("thread");
     expect(byEmail["b@x.com"].displayMode).toBe("chat");
+  });
+
+  it("PATCH persists displayMode independently of displayName", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await createTestPerson();
+    await createTestEmail({ recipient: "a@x.com" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ displayMode: "chat" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      email: string;
+      displayName: string | null;
+      displayMode: "thread" | "chat";
+    };
+    expect(body.displayMode).toBe("chat");
+    expect(body.displayName).toBeNull();
+    const rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows[0]?.displayMode).toBe("chat");
+    expect(rows[0]?.displayName).toBeNull();
+  });
+
+  it("PATCH keeps the row when displayName=null but displayMode=chat", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "a@x.com",
+      displayName: "Alpha",
+      displayMode: "chat",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ displayName: null }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].displayName).toBeNull();
+    expect(rows[0].displayMode).toBe("chat");
+  });
+
+  it("PATCH deletes the row when both fields are at defaults", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "a@x.com",
+      displayName: "Alpha",
+      displayMode: "chat",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ displayName: null, displayMode: "thread" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("PATCH returns 400 when neither field is provided", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({}),
+      },
+    );
+    expect(res.status).toBe(400);
   });
 
   it("PUT assignments replaces the full member set", async () => {

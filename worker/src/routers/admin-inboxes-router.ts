@@ -71,26 +71,39 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
   );
 });
 
+const PatchInboxBodySchema = z
+  .object({
+    displayName: z.string().nullable().optional(),
+    displayMode: z.enum(["thread", "chat"]).optional(),
+  })
+  .refine(
+    (b) => b.displayName !== undefined || b.displayMode !== undefined,
+    "must update at least one field",
+  );
+
 const patchInboxRoute = createRoute({
   method: "patch",
   path: "/{email}",
   tags: ["Admin Inboxes"],
-  description: "Update display name for an inbox. Null clears it.",
+  description:
+    "Update display name and/or display mode for an inbox. Row is deleted only when both fields are at defaults (null + 'thread').",
   request: {
     params: z.object({ email: z.string() }),
     body: {
       content: {
         "application/json": {
-          schema: z.object({
-            displayName: z.string().nullable(),
-          }),
+          schema: PatchInboxBodySchema,
         },
       },
     },
   },
   responses: {
     ...json200Response(
-      z.object({ email: z.string(), displayName: z.string().nullable() }),
+      z.object({
+        email: z.string(),
+        displayName: z.string().nullable(),
+        displayMode: z.enum(["thread", "chat"]),
+      }),
       "Updated",
     ),
   },
@@ -99,23 +112,57 @@ const patchInboxRoute = createRoute({
 adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   const db = c.get("db");
   const { email } = c.req.valid("param");
-  const { displayName } = c.req.valid("json");
+  const body = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
-  if (displayName === null || displayName === "") {
+  // Load current row (if any) so we can apply a partial update without losing
+  // the field the caller didn't touch.
+  const current = await db
+    .select()
+    .from(senderIdentities)
+    .where(eq(senderIdentities.email, email))
+    .limit(1);
+  const currentRow = current[0];
+
+  const nextDisplayName =
+    body.displayName !== undefined
+      ? body.displayName === ""
+        ? null
+        : body.displayName
+      : (currentRow?.displayName ?? null);
+  const nextDisplayMode =
+    body.displayMode !== undefined
+      ? body.displayMode
+      : (currentRow?.displayMode ?? "thread");
+
+  // Both fields at defaults → delete the row to keep the table sparse.
+  if (nextDisplayName === null && nextDisplayMode === "thread") {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
-    return c.json({ email, displayName: null }, 200);
+    return c.json({ email, displayName: null, displayMode: "thread" }, 200);
   }
 
   await db
     .insert(senderIdentities)
-    .values({ email, displayName, createdAt: now, updatedAt: now })
+    .values({
+      email,
+      displayName: nextDisplayName,
+      displayMode: nextDisplayMode,
+      createdAt: now,
+      updatedAt: now,
+    })
     .onConflictDoUpdate({
       target: senderIdentities.email,
-      set: { displayName, updatedAt: now },
+      set: {
+        displayName: nextDisplayName,
+        displayMode: nextDisplayMode,
+        updatedAt: now,
+      },
     });
 
-  return c.json({ email, displayName }, 200);
+  return c.json(
+    { email, displayName: nextDisplayName, displayMode: nextDisplayMode },
+    200,
+  );
 });
 
 const putAssignmentsRoute = createRoute({
