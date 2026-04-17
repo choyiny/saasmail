@@ -9,6 +9,7 @@ import {
   type GroupedPerson,
   type Email,
   type PersonEnrollmentInfo,
+  type InboxDisplayMode,
 } from "@/lib/api";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
 import SequenceStatus from "@/components/SequenceStatus";
@@ -17,6 +18,7 @@ import ReplyComposer from "@/components/ReplyComposer";
 import ThreadInboxSection, {
   type ThreadInboxGroup,
 } from "@/components/ThreadInboxSection";
+import ChatInboxSection from "@/components/ChatInboxSection";
 
 interface PersonDetailProps {
   person: GroupedPerson;
@@ -65,13 +67,21 @@ export default function PersonDetail({ person }: PersonDetailProps) {
   const [expandedOlder, setExpandedOlder] = useState<Record<string, boolean>>(
     {},
   );
+  const [inboxModeMap, setInboxModeMap] = useState<
+    Map<string, InboxDisplayMode>
+  >(new Map());
   const [senderIdentities, setSenderIdentities] = useState<
     Array<{ email: string; displayName: string }>
   >([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   function refetchEmails() {
-    fetchPersonEmails(person.id).then((res) => setEmails(res.emails));
+    fetchPersonEmails(person.id).then((res) => {
+      setEmails(res.emails);
+      setInboxModeMap(
+        new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
+      );
+    });
   }
 
   useEffect(() => {
@@ -79,7 +89,12 @@ export default function PersonDetail({ person }: PersonDetailProps) {
     setReplyToEmailId(null);
     setExpandedOlder({});
     fetchPersonEmails(person.id)
-      .then((res) => setEmails(res.emails))
+      .then((res) => {
+        setEmails(res.emails);
+        setInboxModeMap(
+          new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
+        );
+      })
       .finally(() => setLoading(false));
   }, [person.id]);
 
@@ -185,24 +200,40 @@ export default function PersonDetail({ person }: PersonDetailProps) {
               No emails found.
             </p>
           ) : (
-            inboxGroups.map((group) => (
-              <ThreadInboxSection
-                key={group.inbox}
-                group={group}
-                personEmail={person.email}
-                isOlderExpanded={!!expandedOlder[group.inbox]}
-                onToggleOlder={() =>
-                  setExpandedOlder((prev) => ({
-                    ...prev,
-                    [group.inbox]: !prev[group.inbox],
-                  }))
-                }
-                onOpenHtml={setHtmlPreviewEmail}
-                onMarkRead={handleMarkRead}
-                onReply={setReplyToEmailId}
-                onDelete={handleDelete}
-              />
-            ))
+            inboxGroups.map((group) => {
+              const mode = inboxModeMap.get(group.inbox) ?? "thread";
+              if (mode === "chat") {
+                return (
+                  <ChatInboxSection
+                    key={group.inbox}
+                    group={group}
+                    personEmail={person.email}
+                    onOpenHtml={setHtmlPreviewEmail}
+                    onMarkRead={handleMarkRead}
+                    onDelete={handleDelete}
+                    onSent={refetchEmails}
+                  />
+                );
+              }
+              return (
+                <ThreadInboxSection
+                  key={group.inbox}
+                  group={group}
+                  personEmail={person.email}
+                  isOlderExpanded={!!expandedOlder[group.inbox]}
+                  onToggleOlder={() =>
+                    setExpandedOlder((prev) => ({
+                      ...prev,
+                      [group.inbox]: !prev[group.inbox],
+                    }))
+                  }
+                  onOpenHtml={setHtmlPreviewEmail}
+                  onMarkRead={handleMarkRead}
+                  onReply={setReplyToEmailId}
+                  onDelete={handleDelete}
+                />
+              );
+            })
           )}
           <div ref={bottomRef} />
         </ScrollArea>
