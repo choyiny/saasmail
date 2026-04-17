@@ -174,9 +174,14 @@ yarn db:generate
 # Apply migrations locally
 yarn db:migrate:dev
 
+# Seed the local database with mock inboxes, people, and email threads
+yarn db:seed:dev
+
 # Open Drizzle Studio (local)
 yarn db:studio:dev
 ```
+
+Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script populates `seeds/demo.sql` so you can exercise the inbox UI without real inbound email.
 
 The API is generated from Zod schemas in `worker/src/routers/` and exposes an OpenAPI 3.1 spec at `/api/doc` in the running worker.
 

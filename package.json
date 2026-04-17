@@ -11,6 +11,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate:dev": "wrangler d1 migrations apply cmail-db --local",
     "db:migrate:prod": "wrangler d1 migrations apply cmail-db --remote",
+    "db:seed:dev": "wrangler d1 execute cmail-db --local --file=seeds/demo.sql",
     "db:studio:dev": "drizzle-kit studio",
     "db:studio:prod": "NODE_ENV=production drizzle-kit studio",
     "test": "vitest run --config vitest.config.test.ts",
