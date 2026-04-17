@@ -1,7 +1,7 @@
 {
   // Copy this file to wrangler.jsonc and fill in your values.
   // wrangler.jsonc is gitignored so each deployer has their own config.
-  "name": "cmail",
+  "name": "saasmail",
   "main": "worker/src/index.ts",
   "account_id": "<your-cloudflare-account-id>",
   "compatibility_date": "2026-04-14",
@@ -16,14 +16,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "cmail-db",
+      "database_name": "saasmail-db",
       "database_id": "<your-d1-database-id>"
     }
   ],
   "r2_buckets": [
     {
       "binding": "R2",
-      "bucket_name": "cmail-attachments"
+      "bucket_name": "saasmail-attachments"
     }
   ],
   // Optional: enable Cloudflare Email Sending as the outbound provider.
@@ -48,12 +48,12 @@
     "producers": [
       {
         "binding": "EMAIL_QUEUE",
-        "queue": "cmail-sequence-emails"
+        "queue": "saasmail-sequence-emails"
       }
     ],
     "consumers": [
       {
-        "queue": "cmail-sequence-emails",
+        "queue": "saasmail-sequence-emails",
         "max_batch_size": 10,
         "max_retries": 3
       }
@@ -71,9 +71,9 @@
     "TRUSTED_ORIGINS": "http://localhost:8080,<your-deployed-url>",
 
     // Whitelabel branding — customize these to rebrand the UI
-    "APP_NAME": "cmail",          // Displayed in page title, login, sidebar, etc.
-    "APP_LOGO_LETTER": "c",       // Single character shown as the logo in sidebar/consent
-    "COOKIE_PREFIX": "cmail"      // Prefix for better-auth session cookies
+    "APP_NAME": "saasmail",       // Displayed in page title, login, sidebar, etc.
+    "APP_LOGO_LETTER": "s",       // Single character shown as the logo in sidebar/consent
+    "COOKIE_PREFIX": "saasmail"      // Prefix for better-auth session cookies
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

@@ -206,8 +206,8 @@ app.get("/api/health", (c) => c.json({ status: "ok" }));
 // Public branding config (no auth) — consumed by the SPA for whitelabeling
 app.get("/api/config", (c) =>
   c.json({
-    appName: c.env.APP_NAME || "cmail",
-    logoLetter: c.env.APP_LOGO_LETTER || "c",
+    appName: c.env.APP_NAME || "saasmail",
+    logoLetter: c.env.APP_LOGO_LETTER || "s",
   }),
 );
 
@@ -215,7 +215,7 @@ app.get("/api/config", (c) =>
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
 app.doc("/doc", {
   openapi: "3.0.0",
-  info: { title: "cmail API", version: "1.0.0" },
+  info: { title: "saasmail API", version: "1.0.0" },
 });
 
 // SPA fallback

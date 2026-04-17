@@ -1,8 +1,10 @@
-# cmail
+# saasmail
 
-Self-hosted email server on Cloudflare Workers.
+**The centralized inbox for SaaS teams.** One unified timeline per customer — marketing, notifications, and support emails collapsed into a single view, per person.
 
-Receive email with **Cloudflare Email Workers**. Send email with **Cloudflare Email Sending** or **Resend**. Manage a shared team inbox through a clean web UI.
+Every interaction with a customer matters, and context compounds. saasmail pulls the promo blast, the billing receipt, and the support thread into the same conversation, so anyone on your team can respond with the full history already in hand.
+
+Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending** or **Resend**.
 
 <img alt="cmail" src="https://github.com/user-attachments/assets/1b1f9408-c5d5-46c9-a790-e3743533aedc" />
 
@@ -26,13 +28,22 @@ If `RESEND_API_KEY` is set it takes precedence; otherwise the `EMAIL` binding is
 
 ## Features
 
-### Consolidated Inbox
+### One Timeline Per Customer
 
-All incoming email lands in one place. Senders are grouped and sorted by recency with unread counts. Click a sender to see the latest message, then open the thread sidebar to browse the full conversation history. The latest email renders as sanitized HTML with a Slack-style reply composer.
+Every email from a given person — marketing campaigns, transactional notifications, support replies — lands on a single timeline. People are sorted by recency with unread counts, so the customer who needs attention is always on top. Click in to see the latest message, and open the thread sidebar to replay the full history. Messages render as sanitized HTML with a Slack-style reply composer.
 
 ### Multi-Inbox with Team Permissions
 
 Run multiple inbound addresses from a single deployment. Admins configure display names per inbox (`support@`, `sales@`, etc.) and assign members to specific inboxes. Members only see email, templates, and sequences scoped to the inboxes they're allowed to access.
+
+### Thread or Chat, Per Inbox
+
+Different inboxes call for different UX. Set each inbox to render as **Thread** or **Chat**:
+
+- **Thread** — traditional email threading with subject lines, quoted history, and formatted HTML. The right fit for `marketing@` and `newsletters@`, where context lives inside the message.
+- **Chat** — bubble-style conversation view that strips away subjects and signatures so replies feel like iMessage. The right fit for `support@`, where customers expect a back-and-forth, not a formal thread.
+
+One deployment, one person timeline, but the interaction model matches the channel.
 
 ### Email Templates
 
@@ -40,7 +51,7 @@ Create reusable HTML email templates with `{{variable}}` interpolation. Edit tem
 
 ### Email Sequencing
 
-Build multi-step drip campaigns. Enroll a sender into a sequence and cmail will send templated emails on a schedule. Supports step skipping, delay overrides, custom variables, and automatic cancellation when the sender replies. Enrollment is enforced against the member's allowed inboxes.
+Build multi-step drip campaigns. Enroll a contact into a sequence and saasmail sends templated emails on a schedule. Supports step skipping, delay overrides, custom variables, and automatic cancellation when the contact replies. Enrollment is enforced against the member's allowed inboxes.
 
 ### User Management
 
@@ -95,13 +106,13 @@ wrangler login
 
 ```bash
 # D1 database
-wrangler d1 create cmail-db
+wrangler d1 create saasmail-db
 
 # R2 bucket
-wrangler r2 bucket create cmail-attachments
+wrangler r2 bucket create saasmail-attachments
 
 # Queue for email sequencing
-wrangler queues create cmail-sequence-emails
+wrangler queues create saasmail-sequence-emails
 ```
 
 ### 4. Configure wrangler
@@ -152,7 +163,7 @@ yarn db:migrate:prod
 
 ### 7. Configure email routing
 
-In the [Cloudflare dashboard](https://dash.cloudflare.com/), go to your domain's **Email Routing** settings and add a catch-all rule that routes to your cmail worker.
+In the [Cloudflare dashboard](https://dash.cloudflare.com/), go to your domain's **Email Routing** settings and add a catch-all rule that routes to your saasmail worker.
 
 ### 8. Deploy
 

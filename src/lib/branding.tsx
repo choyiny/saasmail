@@ -6,8 +6,8 @@ interface Branding {
 }
 
 const DEFAULT_BRANDING: Branding = {
-  appName: "cmail",
-  logoLetter: "c",
+  appName: "saasmail",
+  logoLetter: "s",
 };
 
 const BrandingContext = createContext<Branding>(DEFAULT_BRANDING);

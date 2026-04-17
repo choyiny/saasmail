@@ -2,21 +2,21 @@
   // CI-only wrangler config. Used by .github/workflows/test.yml to satisfy
   // vitest-pool-workers, which requires a wrangler.jsonc to be present.
   // Values here are placeholders sufficient for unit tests — not for deploy.
-  "name": "cmail",
+  "name": "saasmail",
   "main": "worker/src/index.ts",
   "compatibility_date": "2026-04-14",
   "compatibility_flags": ["nodejs_compat"],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "cmail-db",
+      "database_name": "saasmail-db",
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
   "r2_buckets": [
     {
       "binding": "R2",
-      "bucket_name": "cmail-attachments"
+      "bucket_name": "saasmail-attachments"
     }
   ],
   "assets": {
@@ -35,12 +35,12 @@
     "producers": [
       {
         "binding": "EMAIL_QUEUE",
-        "queue": "cmail-sequence-emails"
+        "queue": "saasmail-sequence-emails"
       }
     ],
     "consumers": [
       {
-        "queue": "cmail-sequence-emails",
+        "queue": "saasmail-sequence-emails",
         "max_batch_size": 10,
         "max_retries": 3
       }
@@ -52,9 +52,9 @@
   "vars": {
     "BASE_URL": "http://localhost:8080",
     "TRUSTED_ORIGINS": "http://localhost:8080",
-    "APP_NAME": "cmail",
-    "APP_LOGO_LETTER": "c",
-    "COOKIE_PREFIX": "cmail",
+    "APP_NAME": "saasmail",
+    "APP_LOGO_LETTER": "s",
+    "COOKIE_PREFIX": "saasmail",
     "DISABLE_PASSKEY_GATE": "true"
   }
 }
