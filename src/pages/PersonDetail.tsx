@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   fetchPersonEmails,
@@ -6,7 +6,7 @@ import {
   deleteEmail,
   fetchPersonEnrollment,
   fetchStats,
-  type Person,
+  type GroupedPerson,
   type Email,
   type PersonEnrollmentInfo,
 } from "@/lib/api";
@@ -15,11 +15,48 @@ import SequenceStatus from "@/components/SequenceStatus";
 import MessageBubble from "@/components/MessageBubble";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import ReplyComposer from "@/components/ReplyComposer";
-import ThreadSidebar from "@/components/ThreadSidebar";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Inbox } from "lucide-react";
 
 interface PersonDetailProps {
-  person: Person;
+  person: GroupedPerson;
+}
+
+// Each email is associated with an "inbox" address:
+//   - received: the recipient address (who the sender wrote to)
+//   - sent:     the fromAddress (which of our inboxes sent it)
+function inboxOf(email: Email): string {
+  return (
+    (email.type === "received" ? email.recipient : email.fromAddress) ??
+    "(unknown)"
+  );
+}
+
+interface InboxGroup {
+  inbox: string;
+  emails: Email[]; // newest first
+  latestTimestamp: number;
+}
+
+function groupEmailsByInbox(emails: Email[]): InboxGroup[] {
+  const byInbox = new Map<string, Email[]>();
+  for (const email of emails) {
+    const key = inboxOf(email);
+    const list = byInbox.get(key);
+    if (list) list.push(email);
+    else byInbox.set(key, [email]);
+  }
+  const groups: InboxGroup[] = [];
+  for (const [inbox, list] of byInbox) {
+    // Emails come newest-first from the API; keep that order within a group.
+    groups.push({
+      inbox,
+      emails: list,
+      latestTimestamp: list[0]?.timestamp ?? 0,
+    });
+  }
+  // Sort inbox groups by most recent activity.
+  groups.sort((a, b) => b.latestTimestamp - a.latestTimestamp);
+  return groups;
 }
 
 export default function PersonDetail({ person }: PersonDetailProps) {
@@ -30,25 +67,32 @@ export default function PersonDetail({ person }: PersonDetailProps) {
     useState<PersonEnrollmentInfo | null>(null);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
-  const [threadOpen, setThreadOpen] = useState(false);
+  const [expandedOlder, setExpandedOlder] = useState<Record<string, boolean>>(
+    {},
+  );
   const [senderIdentities, setSenderIdentities] = useState<
     Array<{ email: string; displayName: string }>
   >([]);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
 
   function refetchEmails() {
-    fetchPersonEmails(person.id, {
-      recipient: person.recipient,
-    }).then(setEmails);
+    fetchPersonEmails(person.id).then(setEmails);
   }
 
   useEffect(() => {
     setLoading(true);
     setReplyToEmailId(null);
-    setThreadOpen(false);
-    fetchPersonEmails(person.id, { recipient: person.recipient })
+    setExpandedOlder({});
+    fetchPersonEmails(person.id)
       .then(setEmails)
       .finally(() => setLoading(false));
-  }, [person.id, person.recipient]);
+  }, [person.id]);
+
+  // Auto-scroll to latest (bottom) whenever the email list or expansion changes
+  useEffect(() => {
+    if (loading) return;
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [emails, expandedOlder, loading]);
 
   useEffect(() => {
     fetchPersonEnrollment(person.id).then(setEnrollmentInfo);
@@ -83,6 +127,16 @@ export default function PersonDetail({ person }: PersonDetailProps) {
     setEmails((prev) => prev.filter((e) => e.id !== emailId));
   }
 
+  const inboxGroups = useMemo(() => groupEmailsByInbox(emails), [emails]);
+  const distinctInboxes = useMemo(
+    () => inboxGroups.map((g) => g.inbox).filter((i) => i !== "(unknown)"),
+    [inboxGroups],
+  );
+  const replyInboxForEmail = (email: Email) => {
+    const ib = inboxOf(email);
+    return ib === "(unknown)" ? distinctInboxes : [ib];
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-text-tertiary">
@@ -90,10 +144,6 @@ export default function PersonDetail({ person }: PersonDetailProps) {
       </div>
     );
   }
-
-  // Latest email is first in the array (API returns newest first)
-  const latestEmail = emails[0] ?? null;
-  const threadEmails = emails.slice(1); // older emails for sidebar
 
   return (
     <div className="flex h-full flex-col">
@@ -107,8 +157,10 @@ export default function PersonDetail({ person }: PersonDetailProps) {
             <p className="text-xs text-text-secondary">{person.email}</p>
           )}
           <p className="text-[11px] text-text-tertiary">
-            &rarr; {person.recipient} &middot; {person.totalCount} email
-            {person.totalCount !== 1 ? "s" : ""}
+            {person.totalCount} email{person.totalCount !== 1 ? "s" : ""}
+            {inboxGroups.length > 1
+              ? ` across ${inboxGroups.length} inboxes`
+              : ""}
           </p>
         </div>
       </div>
@@ -130,67 +182,99 @@ export default function PersonDetail({ person }: PersonDetailProps) {
         )}
       </div>
 
-      {/* Conversation — main email + thread sidebar */}
-      <div className="relative flex flex-1 overflow-hidden">
-        {/* Main email area */}
-        <div className="flex flex-1 flex-col min-w-0">
-          <ScrollArea className="flex-1">
-            {latestEmail ? (
-              <div className="px-4 sm:px-6 py-4">
-                {/* Thread indicator */}
-                {threadEmails.length > 0 && (
-                  <button
-                    onClick={() => setThreadOpen(!threadOpen)}
-                    className="mb-3 flex items-center gap-1.5 text-xs text-accent hover:underline"
-                  >
-                    <MessageSquare size={12} />
-                    {threadEmails.length} earlier message
-                    {threadEmails.length !== 1 ? "s" : ""}
-                  </button>
-                )}
-
-                {/* Latest email display */}
-                <MessageBubble
-                  email={latestEmail}
-                  personEmail={person.email}
-                  onOpenHtml={setHtmlPreviewEmail}
-                  onMarkRead={handleMarkRead}
-                  onReply={setReplyToEmailId}
-                  onDelete={handleDelete}
-                  renderHtml
-                />
-              </div>
-            ) : (
-              <p className="py-4 text-center text-xs text-text-tertiary">
-                No emails found.
-              </p>
-            )}
-          </ScrollArea>
-
-          {/* Reply Composer stays in main area */}
-          {replyToEmailId && (
-            <ReplyComposer
-              emailId={replyToEmailId}
-              personName={person.name}
-              personEmail={person.email}
-              recipients={[person.recipient]}
-              senderIdentities={senderIdentities}
-              onClose={() => setReplyToEmailId(null)}
-              onSent={refetchEmails}
-            />
+      {/* Conversation — grouped by inbox */}
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+        <ScrollArea className="flex-1">
+          {inboxGroups.length === 0 ? (
+            <p className="py-4 text-center text-xs text-text-tertiary">
+              No emails found.
+            </p>
+          ) : (
+            inboxGroups.map((group) => {
+              // Within a group, emails arrive newest-first. Show the latest
+              // expanded (HTML) and collapse older messages behind a toggle.
+              const latest = group.emails[0];
+              const olderChronological = group.emails.slice(1).reverse();
+              const isOlderExpanded = !!expandedOlder[group.inbox];
+              return (
+                <section
+                  key={group.inbox}
+                  className="border-b-4 border-border-subtle"
+                >
+                  <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg-subtle px-4 sm:px-6 py-2">
+                    <Inbox size={12} className="text-text-tertiary" />
+                    <span className="text-[11px] font-medium text-text-secondary">
+                      {group.inbox}
+                    </span>
+                    <span className="text-[11px] text-text-tertiary">
+                      · {group.emails.length} email
+                      {group.emails.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-border-subtle">
+                    {olderChronological.length > 0 && (
+                      <div className="px-4 sm:px-6 py-2">
+                        <button
+                          onClick={() =>
+                            setExpandedOlder((prev) => ({
+                              ...prev,
+                              [group.inbox]: !prev[group.inbox],
+                            }))
+                          }
+                          className="flex items-center gap-1.5 text-xs text-accent hover:underline"
+                        >
+                          <MessageSquare size={12} />
+                          {isOlderExpanded ? "Hide" : "Show"}{" "}
+                          {olderChronological.length} previous message
+                          {olderChronological.length !== 1 ? "s" : ""}
+                        </button>
+                      </div>
+                    )}
+                    {isOlderExpanded &&
+                      olderChronological.map((email) => (
+                        <MessageBubble
+                          key={email.id}
+                          email={email}
+                          personEmail={person.email}
+                          onOpenHtml={setHtmlPreviewEmail}
+                          onMarkRead={handleMarkRead}
+                          onReply={setReplyToEmailId}
+                          onDelete={handleDelete}
+                        />
+                      ))}
+                    {latest && (
+                      <MessageBubble
+                        key={latest.id}
+                        email={latest}
+                        personEmail={person.email}
+                        onOpenHtml={setHtmlPreviewEmail}
+                        onMarkRead={handleMarkRead}
+                        onReply={setReplyToEmailId}
+                        onDelete={handleDelete}
+                        renderHtml
+                      />
+                    )}
+                  </div>
+                </section>
+              );
+            })
           )}
-        </div>
+          <div ref={bottomRef} />
+        </ScrollArea>
 
-        {/* Thread sidebar */}
-        {threadOpen && threadEmails.length > 0 && (
-          <ThreadSidebar
-            emails={threadEmails}
+        {/* Reply Composer */}
+        {replyToEmailId && (
+          <ReplyComposer
+            emailId={replyToEmailId}
+            personName={person.name}
             personEmail={person.email}
-            onOpenHtml={setHtmlPreviewEmail}
-            onMarkRead={handleMarkRead}
-            onReply={setReplyToEmailId}
-            onDelete={handleDelete}
-            onClose={() => setThreadOpen(false)}
+            recipients={(() => {
+              const target = emails.find((e) => e.id === replyToEmailId);
+              return target ? replyInboxForEmail(target) : distinctInboxes;
+            })()}
+            senderIdentities={senderIdentities}
+            onClose={() => setReplyToEmailId(null)}
+            onSent={refetchEmails}
           />
         )}
       </div>
@@ -207,7 +291,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
         personId={person.id}
         personName={person.name}
         personEmail={person.email}
-        recipients={[person.recipient]}
+        recipients={distinctInboxes}
         open={enrollModalOpen}
         onClose={() => setEnrollModalOpen(false)}
         onEnrolled={refreshEnrollment}

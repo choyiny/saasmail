@@ -3,11 +3,13 @@ import { ArrowLeft } from "lucide-react";
 import PersonList from "./PersonList";
 import PersonDetail from "./PersonDetail";
 import ComposeModal from "./ComposeModal";
-import { fetchStats, type Person, type Stats } from "@/lib/api";
+import { fetchStats, type GroupedPerson, type Stats } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 
 export default function InboxPage() {
-  const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
+  const [selectedPerson, setSelectedPerson] = useState<GroupedPerson | null>(
+    null,
+  );
   const [composeOpen, setComposeOpen] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const { data: session } = useSession();
@@ -45,7 +47,6 @@ export default function InboxPage() {
       >
         <PersonList
           selectedPersonId={selectedPerson?.id ?? null}
-          selectedRecipient={selectedPerson?.recipient ?? null}
           onSelectPerson={setSelectedPerson}
         />
       </div>

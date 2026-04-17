@@ -19,13 +19,6 @@ export interface GroupedPerson {
   recipientCount: number;
 }
 
-export interface PaginatedGroupedPeople {
-  data: GroupedPerson[];
-  total: number;
-  page: number;
-  limit: number;
-}
-
 export interface Email {
   id: string;
   type: "received" | "sent";
@@ -77,18 +70,6 @@ export interface PaginatedPeople {
   limit: number;
 }
 
-export async function fetchGroupedPeople(params?: {
-  q?: string;
-  page?: number;
-  limit?: number;
-}): Promise<PaginatedGroupedPeople> {
-  const qs = new URLSearchParams();
-  if (params?.q) qs.set("q", params.q);
-  if (params?.page) qs.set("page", params.page.toString());
-  if (params?.limit) qs.set("limit", params.limit.toString());
-  return apiFetch(`/api/people/grouped?${qs}`);
-}
-
 export async function fetchPeople(params?: {
   q?: string;
   recipient?: string;
@@ -107,6 +88,25 @@ export async function fetchPeople(params?: {
 
 export async function fetchPerson(id: string): Promise<Person> {
   return apiFetch(`/api/people/${id}`);
+}
+
+export interface PaginatedGroupedPeople {
+  data: GroupedPerson[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export async function fetchGroupedPeople(params?: {
+  q?: string;
+  page?: number;
+  limit?: number;
+}): Promise<PaginatedGroupedPeople> {
+  const qs = new URLSearchParams();
+  if (params?.q) qs.set("q", params.q);
+  if (params?.page) qs.set("page", params.page.toString());
+  if (params?.limit) qs.set("limit", params.limit.toString());
+  return apiFetch(`/api/people/grouped?${qs}`);
 }
 
 export async function fetchPersonEmails(
