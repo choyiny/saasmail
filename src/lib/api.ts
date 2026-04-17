@@ -62,7 +62,7 @@ export interface Stats {
   totalEmails: number;
   unreadCount: number;
   recipients: string[];
-  senderIdentities: Array<{ email: string; displayName: string }>;
+  senderIdentities: Array<{ email: string; displayName: string | null }>;
 }
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {

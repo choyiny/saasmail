@@ -9,7 +9,7 @@ interface ReplyComposerProps {
   personName: string | null;
   personEmail: string;
   recipients: string[];
-  senderIdentities: Array<{ email: string; displayName: string }>;
+  senderIdentities: Array<{ email: string; displayName: string | null }>;
   onClose: () => void;
   onSent: () => void;
 }

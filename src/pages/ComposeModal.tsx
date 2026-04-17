@@ -19,7 +19,7 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
   const [fromAddress, setFromAddress] = useState("");
   const [recipients, setRecipients] = useState<string[]>([]);
   const [senderIdentities, setSenderIdentities] = useState<
-    Array<{ email: string; displayName: string }>
+    Array<{ email: string; displayName: string | null }>
   >([]);
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");

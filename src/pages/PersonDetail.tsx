@@ -71,7 +71,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
     Map<string, InboxDisplayMode>
   >(new Map());
   const [senderIdentities, setSenderIdentities] = useState<
-    Array<{ email: string; displayName: string }>
+    Array<{ email: string; displayName: string | null }>
   >([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 

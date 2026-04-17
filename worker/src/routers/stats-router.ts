@@ -20,7 +20,7 @@ const StatsSchema = z.object({
   senderIdentities: z.array(
     z.object({
       email: z.string(),
-      displayName: z.string(),
+      displayName: z.string().nullable(),
     }),
   ),
 });
