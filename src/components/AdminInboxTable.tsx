@@ -3,7 +3,7 @@ import {
   fetchAdminInboxes,
   fetchAdminUsers,
   updateInboxAssignments,
-  updateInboxDisplayName,
+  updateInboxSettings,
   type AdminInbox,
   type AdminUser,
 } from "@/lib/api";
@@ -26,10 +26,12 @@ export default function AdminInboxTable() {
   async function handleNameBlur(inbox: AdminInbox, value: string) {
     const next = value.trim() === "" ? null : value.trim();
     if (next === inbox.displayName) return;
-    const res = await updateInboxDisplayName(inbox.email, next);
+    const res = await updateInboxSettings(inbox.email, { displayName: next });
     setInboxes((prev) =>
       prev.map((r) =>
-        r.email === inbox.email ? { ...r, displayName: res.displayName } : r,
+        r.email === inbox.email
+          ? { ...r, displayName: res.displayName, displayMode: res.displayMode }
+          : r,
       ),
     );
   }

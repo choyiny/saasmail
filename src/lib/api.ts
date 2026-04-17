@@ -35,6 +35,19 @@ export interface Email {
   attachments?: Attachment[];
 }
 
+export type InboxDisplayMode = "thread" | "chat";
+
+export interface InboxMeta {
+  email: string;
+  displayName: string | null;
+  displayMode: InboxDisplayMode;
+}
+
+export interface PersonEmailsResponse {
+  emails: Email[];
+  inboxes: InboxMeta[];
+}
+
 export interface Attachment {
   id: string;
   emailId: string;
@@ -112,7 +125,7 @@ export async function fetchGroupedPeople(params?: {
 export async function fetchPersonEmails(
   personId: string,
   params?: { q?: string; recipient?: string; page?: number; limit?: number },
-): Promise<Email[]> {
+): Promise<PersonEmailsResponse> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set("q", params.q);
   if (params?.recipient) qs.set("recipient", params.recipient);
@@ -475,6 +488,7 @@ export async function fetchSequenceEnrollments(
 export interface AdminInbox {
   email: string;
   displayName: string | null;
+  displayMode: InboxDisplayMode;
   assignedUserIds: string[];
 }
 
@@ -482,14 +496,18 @@ export async function fetchAdminInboxes(): Promise<AdminInbox[]> {
   return apiFetch("/api/admin/inboxes");
 }
 
-export async function updateInboxDisplayName(
+export async function updateInboxSettings(
   email: string,
-  displayName: string | null,
-): Promise<{ email: string; displayName: string | null }> {
+  patch: { displayName?: string | null; displayMode?: InboxDisplayMode },
+): Promise<{
+  email: string;
+  displayName: string | null;
+  displayMode: InboxDisplayMode;
+}> {
   return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ displayName }),
+    body: JSON.stringify(patch),
   });
 }
 

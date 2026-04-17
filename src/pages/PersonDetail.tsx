@@ -76,7 +76,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   function refetchEmails() {
-    fetchPersonEmails(person.id).then(setEmails);
+    fetchPersonEmails(person.id).then((res) => setEmails(res.emails));
   }
 
   useEffect(() => {
@@ -84,7 +84,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
     setReplyToEmailId(null);
     setExpandedOlder({});
     fetchPersonEmails(person.id)
-      .then(setEmails)
+      .then((res) => setEmails(res.emails))
       .finally(() => setLoading(false));
   }, [person.id]);
 
