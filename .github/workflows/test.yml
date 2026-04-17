@@ -16,7 +16,7 @@ jobs:
           cache: yarn
       - run: yarn install --frozen-lockfile
       - name: Seed wrangler.jsonc (gitignored; needed by vitest-pool-workers)
-        run: cp wrangler.jsonc.example wrangler.jsonc
+        run: cp wrangler.jsonc.ci wrangler.jsonc
       - name: Create empty assets dir (referenced by wrangler.jsonc)
         run: mkdir -p dist/client
       - run: yarn test
