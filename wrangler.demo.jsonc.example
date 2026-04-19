@@ -1,0 +1,69 @@
+{
+  // Copy this file to wrangler.demo.jsonc and fill in your values.
+  // wrangler.demo.jsonc is gitignored so each deployer has their own config.
+  //
+  // Demo deploy — DB-only sample of saasmail.
+  //
+  // This config intentionally omits queues, the cron trigger, the
+  // `send_email` binding, and `email_routing` so the worker can be
+  // deployed without provisioning anything beyond D1 (and R2 if you
+  // want attachment uploads to work in the UI).
+  //
+  // Deploy:
+  //   yarn deploy:demo
+  //   # equivalent to: yarn build && wrangler deploy --minify --config wrangler.demo.jsonc
+  //
+  // Behavior in DEMO_MODE=1:
+  //   - Outbound sends from the compose UI return success but no email
+  //     is actually delivered (a "demo_..." id is recorded in sent_emails).
+  //   - Sequence enrollments create DB rows but the first email is left
+  //     as "pending" instead of being enqueued.
+  //   - The scheduled and queue handlers short-circuit defensively.
+  //   - Inbound email handler is unreachable (no email_routing binding).
+  "name": "saasmail-demo",
+  "main": "worker/src/index.ts",
+  "account_id": "<your-cloudflare-account-id>",
+  "compatibility_date": "2026-04-14",
+  "compatibility_flags": ["nodejs_compat"],
+  // Uncomment and configure if using a custom domain:
+  // "routes": [
+  //   {
+  //     "pattern": "demo.yourdomain.com",
+  //     "custom_domain": true
+  //   }
+  // ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "saasmail-demo-db",
+      "database_id": "<your-d1-database-id>"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "saasmail-demo-attachments"
+    }
+  ],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    // Toggles demo behavior at runtime — required for this config.
+    "DEMO_MODE": "1",
+
+    "BASE_URL": "<your-deployed-url>",
+    "TRUSTED_ORIGINS": "http://localhost:8080,<your-deployed-url>",
+
+    // Whitelabel branding
+    "APP_NAME": "saasmail demo",
+    "APP_LOGO_LETTER": "s",
+    "COOKIE_PREFIX": "saasmail-demo"
+  }
+}

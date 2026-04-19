@@ -10,6 +10,7 @@ import { people } from "../db/people.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import type { SequenceEmailMessage } from "../lib/sequence-processor";
 import type { Variables } from "../variables";
+import { isDemoMode } from "../lib/is-dev";
 
 export const sequencesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -451,7 +452,14 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
       stepOrder: step.order,
       templateSlug: step.templateSlug,
       scheduledAt: isFirstEmail ? now : baseTime + delayHours * 3600,
-      status: isFirstEmail ? "queued" : "pending",
+      // In demo mode there is no queue/cron to advance "queued" emails, so
+      // leave everything as "pending" — the records exist for the UI to show
+      // but nothing is dispatched.
+      status: isDemoMode(c.env)
+        ? "pending"
+        : isFirstEmail
+          ? "queued"
+          : "pending",
       sentAt: null,
       sentEmailId: null,
     };
@@ -459,10 +467,13 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
 
   await db.insert(sequenceEmails).values(scheduledEmails);
 
-  // Immediately queue the first email so it sends without waiting for cron
-  const firstEmail = scheduledEmails[0];
-  const message: SequenceEmailMessage = { sequenceEmailId: firstEmail.id };
-  await c.env.EMAIL_QUEUE.send(message);
+  // Immediately queue the first email so it sends without waiting for cron.
+  // Skipped in demo mode where no EMAIL_QUEUE binding exists.
+  if (!isDemoMode(c.env)) {
+    const firstEmail = scheduledEmails[0];
+    const message: SequenceEmailMessage = { sequenceEmailId: firstEmail.id };
+    await c.env.EMAIL_QUEUE.send(message);
+  }
 
   return c.json(
     {

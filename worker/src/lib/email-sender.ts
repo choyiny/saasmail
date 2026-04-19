@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import { nanoid } from "nanoid";
+import { isDemoMode } from "./is-dev";
 
 export interface SendEmailParams {
   from: string;
@@ -15,7 +17,7 @@ export interface SendEmailResult {
 }
 
 export interface EmailSender {
-  provider: "resend" | "cloudflare" | "none";
+  provider: "resend" | "cloudflare" | "none" | "demo";
   send(params: SendEmailParams): Promise<SendEmailResult>;
 }
 
@@ -75,9 +77,22 @@ class NoopSender implements EmailSender {
   }
 }
 
+class DemoSender implements EmailSender {
+  readonly provider = "demo" as const;
+  async send(params: SendEmailParams): Promise<SendEmailResult> {
+    console.log(
+      `[demo] Pretending to send email from ${params.from} to ${params.to} (subject: "${params.subject}")`,
+    );
+    return { id: `demo_${nanoid(10)}`, error: null };
+  }
+}
+
 export function createEmailSender(
   env: CloudflareBindings & { RESEND_API_KEY?: string; EMAIL?: SendEmail },
 ): EmailSender {
+  if (isDemoMode(env)) {
+    return new DemoSender();
+  }
   if (env.RESEND_API_KEY) {
     return new ResendSender(env.RESEND_API_KEY);
   }

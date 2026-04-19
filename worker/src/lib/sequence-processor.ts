@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, and, lte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createEmailSender, type EmailSender } from "./email-sender";
+import { isDemoMode } from "./is-dev";
 import { schema } from "../db/schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
@@ -19,6 +20,12 @@ export interface SequenceEmailMessage {
  * Cron handler: find due pending emails and push them onto the queue.
  */
 export async function handleScheduled(env: CloudflareBindings): Promise<void> {
+  // Demo deploys have no EMAIL_QUEUE binding and no cron trigger, but guard
+  // here too so this can't crash if invoked manually.
+  if (isDemoMode(env)) {
+    console.log("[demo] Skipping scheduled sequence dispatch");
+    return;
+  }
   const db = drizzle(env.DB, { schema });
   const now = Math.floor(Date.now() / 1000);
 
@@ -56,6 +63,12 @@ export async function handleQueueBatch(
   batch: MessageBatch<SequenceEmailMessage>,
   env: CloudflareBindings,
 ): Promise<void> {
+  if (isDemoMode(env)) {
+    // No queue binding exists in demo, so this should never fire — ack
+    // anything that somehow lands here so it doesn't infinitely retry.
+    for (const msg of batch.messages) msg.ack();
+    return;
+  }
   const db = drizzle(env.DB, { schema });
   const sender = createEmailSender(env);
 
