@@ -12,6 +12,7 @@
 import { test, expect } from "../fixtures/test";
 import { truncateAndReseed } from "../support/reset-db";
 import { BASE_URL } from "../support/login";
+import { TEST_IDS } from "../support/selectors";
 
 test.describe.serial("templates CRUD", () => {
   test.beforeAll(() => {
@@ -70,7 +71,9 @@ test.describe.serial("templates CRUD", () => {
     await expect(page).toHaveURL(/\/templates$/);
 
     // Template row appears in the list
-    const row = page.locator("div").filter({ hasText: tplName }).first();
+    const row = page.locator(
+      `[data-testid="${TEST_IDS.templateRow}"][data-template-name="${tplName}"]`,
+    );
     await expect(row).toBeVisible();
   });
 
@@ -141,17 +144,15 @@ test.describe.serial("templates CRUD", () => {
     await page.goto("/templates");
 
     // Confirm row is visible
-    const row = page.locator("div").filter({ hasText: tplName }).nth(0);
-    await expect(row).toBeVisible();
+    const templateRow = page.locator(
+      `[data-testid="${TEST_IDS.templateRow}"][data-template-name="${tplName}"]`,
+    );
+    await expect(templateRow).toBeVisible();
 
     // Accept the confirm dialog and click Delete
     page.once("dialog", (dialog) => dialog.accept());
     // Find the delete button within the row for this template
     // The row renders the name in a <p> and has Edit/Delete buttons alongside
-    const templateRow = page
-      .locator("div.flex.items-center.justify-between")
-      .filter({ hasText: tplName });
-    await expect(templateRow).toBeVisible();
     await templateRow.getByRole("button", { name: "Delete" }).click();
 
     // Row should disappear

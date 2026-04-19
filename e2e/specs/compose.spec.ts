@@ -32,10 +32,10 @@ test.describe.serial("compose & send", () => {
     ).toBeVisible();
 
     // Fill in To field
-    await dialog.locator('input[type="email"]').fill("alice@customers.test");
+    await dialog.getByLabel("To").fill("alice@customers.test");
 
     // Fill in Subject
-    await dialog.locator("input:not([type])").fill("E2E compose subject");
+    await dialog.getByLabel("Subject").fill("E2E compose subject");
 
     // Fill in body via ProseMirror (TipTap contenteditable)
     const proseMirror = dialog.locator(".ProseMirror");
@@ -96,12 +96,7 @@ test.describe.serial("compose & send", () => {
     // The latest marketing@ email is e_m_a2 "Re: Welcome to our product"
     // MessageBubble renders with a Reply button hidden behind group-hover
     // Hover the email container to reveal the button
-    const emailContainer = page
-      .locator('[class*="group"]')
-      .filter({
-        has: page.getByRole("button", { name: "Reply" }),
-      })
-      .first();
+    const emailContainer = page.getByTestId(TEST_IDS.threadMessage).last();
 
     await emailContainer.hover();
     const replyButton = emailContainer.getByRole("button", { name: "Reply" });
@@ -112,8 +107,10 @@ test.describe.serial("compose & send", () => {
     const freeformTab = page.getByRole("button", { name: "Freeform" });
     await expect(freeformTab).toBeVisible();
 
-    // Type reply body in the ProseMirror at the bottom of the page
-    const proseMirror = page.locator(".ProseMirror").last();
+    // Type reply body in the ProseMirror inside the reply composer
+    const proseMirror = page
+      .getByTestId(TEST_IDS.replyComposer)
+      .locator(".ProseMirror");
     await proseMirror.click();
     await page.keyboard.type("This is a reply from E2E test");
 
@@ -159,8 +156,8 @@ test.describe.serial("compose & send", () => {
     await expect(dialog).toBeVisible();
 
     // Fill in To and Subject but leave body empty
-    await dialog.locator('input[type="email"]').fill("alice@customers.test");
-    await dialog.locator("input:not([type])").fill("Empty body test");
+    await dialog.getByLabel("To").fill("alice@customers.test");
+    await dialog.getByLabel("Subject").fill("Empty body test");
 
     // The Send button should be disabled while body is empty
     const sendButton = dialog.getByTestId(TEST_IDS.composeSendButton);

@@ -92,8 +92,8 @@ test.describe.serial("auth flow", () => {
     }
 
     // Should now be on the inbox (root path).
-    await expect(page).not.toHaveURL(/\/onboarding/);
-    await expect(page).not.toHaveURL(/\/login/);
+    await page.waitForURL((url) => url.pathname === "/");
+    expect(new URL(page.url()).pathname).toBe("/");
   });
 
   test("logout then login with correct credentials", async ({ page }) => {
@@ -110,7 +110,8 @@ test.describe.serial("auth flow", () => {
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
     // Should land on inbox.
-    await expect(page).not.toHaveURL(/\/login/);
+    await page.waitForURL((url) => url.pathname === "/");
+    expect(new URL(page.url()).pathname).toBe("/");
 
     // Open account dropdown in sidebar footer and click Sign out.
     // The trigger button has title = user's email.
@@ -128,7 +129,8 @@ test.describe.serial("auth flow", () => {
     await page.getByPlaceholder("Password").fill(ADMIN.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
-    await expect(page).not.toHaveURL(/\/login/);
+    await page.waitForURL((url) => url.pathname === "/");
+    expect(new URL(page.url()).pathname).toBe("/");
   });
 
   test("login with wrong password shows error", async ({ page }) => {
@@ -146,9 +148,7 @@ test.describe.serial("auth flow", () => {
     // An error message should appear — stay on /login.
     await expect(page).toHaveURL(/\/login/);
     // The error paragraph rendered by LoginPage has class text-destructive.
-    const errorEl = page
-      .locator("p.text-destructive, p.text-red-500, [class*='destructive']")
-      .first();
+    const errorEl = page.locator("p.text-destructive").first();
     await expect(errorEl).toBeVisible();
   });
 });

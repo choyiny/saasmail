@@ -59,19 +59,19 @@ test.describe.serial("sequences CRUD", () => {
       .fill("E2E Test Sequence");
 
     // Step 1 is pre-populated — set template + delay
-    const step1 = page.locator(".space-y-3 > div").nth(0);
+    const step1 = page.getByTestId(TEST_IDS.sequenceStepRow).nth(0);
     await step1.locator("select").selectOption({ label: "Welcome" });
     await step1.locator("input[type=number]").fill("0");
 
     // Add step 2
     await page.getByRole("button", { name: "+ Add step" }).click();
-    const step2 = page.locator(".space-y-3 > div").nth(1);
+    const step2 = page.getByTestId(TEST_IDS.sequenceStepRow).nth(1);
     await step2.locator("select").selectOption({ label: "Follow-up" });
     await step2.locator("input[type=number]").fill("24");
 
     // Add step 3
     await page.getByRole("button", { name: "+ Add step" }).click();
-    const step3 = page.locator(".space-y-3 > div").nth(2);
+    const step3 = page.getByTestId(TEST_IDS.sequenceStepRow).nth(2);
     await step3.locator("select").selectOption({ label: "Closing" });
     await step3.locator("input[type=number]").fill("48");
 
@@ -104,16 +104,16 @@ test.describe.serial("sequences CRUD", () => {
     await expect(page).toHaveURL(/\/sequences\/.+\/edit/);
 
     // Change the delay of step 2 (index 1) from 24 → 48
-    const step2 = page.locator(".space-y-3 > div").nth(1);
+    const step2 = page.getByTestId(TEST_IDS.sequenceStepRow).nth(1);
     const delayInput = step2.locator("input[type=number]");
     await delayInput.fill("48");
 
     // Remove step 3
-    const step3 = page.locator(".space-y-3 > div").nth(2);
+    const step3 = page.getByTestId(TEST_IDS.sequenceStepRow).nth(2);
     await step3.getByRole("button", { name: "Remove" }).click();
 
     // Only 2 steps should remain
-    await expect(page.locator(".space-y-3 > div")).toHaveCount(2);
+    await expect(page.getByTestId(TEST_IDS.sequenceStepRow)).toHaveCount(2);
 
     // Save
     await page.getByRole("button", { name: "Update" }).click();

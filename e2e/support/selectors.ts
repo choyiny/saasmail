@@ -22,6 +22,9 @@ export const TEST_IDS = {
   sequenceStepRow: "sequence-step-row",
   enrollmentRow: "enrollment-row",
 
+  // Templates
+  templateRow: "template-row",
+
   // Display
   chatBubble: "chat-bubble",
   threadMessage: "thread-message",
@@ -32,6 +35,7 @@ export const TEST_IDS = {
 
   // Reply
   replySendButton: "reply-send-button",
+  replyComposer: "reply-composer",
 
   // API keys
   apiKeyRow: "api-key-row",

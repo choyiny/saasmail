@@ -27,7 +27,7 @@ test.describe.serial("chat-mode display (support@)", () => {
     // body_text for e_s_a1 is "login", e_s_a2 is "still"
     // The chat section renders body_text (or strips HTML to text).
     // body_html is <p>I can't log in.</p> and <p>Tried that, still broken.</p>
-    await expect(bubbles.first()).toContainText(/I can't log in|login/i);
+    await expect(bubbles.first()).toContainText("login");
 
     // Chat mode does NOT render subjects as visible UI headers.
     // The subjects "Help with login" / "Re: Help with login" should not appear
