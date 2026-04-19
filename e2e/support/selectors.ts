@@ -10,7 +10,12 @@ export const TEST_IDS = {
   // Inbox admin page
   inboxRow: "inbox-row",
   inboxCreateButton: "inbox-create-button",
+  inboxCreateEmail: "inbox-create-email",
+  inboxCreateDisplayName: "inbox-create-display-name",
+  inboxDisplayNameInput: "inbox-display-name-input",
   inboxModeToggle: "inbox-mode-toggle",
+  inboxDeleteButton: "inbox-delete-button",
+  inboxMemberToggle: "inbox-member-toggle",
 
   // Sequences
   sequenceRow: "sequence-row",
