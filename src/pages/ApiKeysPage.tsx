@@ -66,6 +66,7 @@ export default function ApiKeysPage() {
             <div className="flex items-center gap-2">
               <input
                 readOnly
+                data-testid="api-key-revealed"
                 value={newKey}
                 className="h-8 flex-1 rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 font-mono text-xs text-text-primary focus:outline-none"
               />
