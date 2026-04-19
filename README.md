@@ -206,6 +206,28 @@ Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script 
 
 The API is generated from Zod schemas in `worker/src/routers/` and exposes an OpenAPI 3.1 spec at `/api/doc` in the running worker.
 
+### End-to-end tests
+
+Playwright drives the UI against a local `vite dev` running in demo mode (port 8788).
+
+```bash
+# Install Playwright browsers (first run only)
+yarn playwright install chromium
+
+# Run the full E2E suite (wipes and re-seeds the local D1 first)
+yarn test:e2e
+
+# Interactive runner
+yarn test:e2e:ui
+
+# Debug a single spec
+yarn test:e2e e2e/specs/compose.spec.ts
+```
+
+The E2E suite **wipes and re-seeds the local D1 database** (`.wrangler/state/v3/d1/`) every time it runs. If you have hand-seeded dev data you want to keep, re-run `yarn db:seed:dev` after the E2E suite finishes.
+
+Requirements in `.dev.vars`: `DEMO_MODE=1` and `DISABLE_PASSKEY_GATE=true` — both are in `.dev.vars.example`. The suite also expects `http://localhost:8788` in `TRUSTED_ORIGINS` in `wrangler.jsonc`.
+
 ## Configuration
 
 ### wrangler.jsonc
