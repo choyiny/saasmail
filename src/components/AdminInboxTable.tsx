@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   createInbox,
+  deleteInbox,
   fetchAdminInboxes,
   fetchAdminUsers,
   updateInboxAssignments,
@@ -120,6 +121,15 @@ export default function AdminInboxTable() {
     }
   }
 
+  async function handleDelete(inbox: AdminInbox) {
+    if (
+      !window.confirm(`Delete inbox "${inbox.email}"? This cannot be undone.`)
+    )
+      return;
+    await deleteInbox(inbox.email);
+    setInboxes((prev) => prev.filter((r) => r.email !== inbox.email));
+  }
+
   if (loading) {
     return <p className="text-text-secondary">Loading…</p>;
   }
@@ -139,6 +149,7 @@ export default function AdminInboxTable() {
           value={newEmail}
           onChange={(e) => setNewEmail(e.currentTarget.value)}
           placeholder="inbox@example.com"
+          data-testid="inbox-create-email"
           className="flex-1 rounded bg-white ring-1 ring-gray-200 px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
         />
         <input
@@ -146,10 +157,12 @@ export default function AdminInboxTable() {
           value={newDisplayName}
           onChange={(e) => setNewDisplayName(e.currentTarget.value)}
           placeholder="Display name (optional)"
+          data-testid="inbox-create-display-name"
           className="flex-1 rounded bg-white ring-1 ring-gray-200 px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
         />
         <button
           type="submit"
+          data-testid="inbox-create-button"
           disabled={creating || newEmail.trim() === ""}
           className="rounded bg-accent px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
         >
@@ -180,6 +193,8 @@ export default function AdminInboxTable() {
       {inboxes.map((inbox) => (
         <div
           key={inbox.email}
+          data-testid="inbox-row"
+          data-inbox-email={inbox.email}
           className="rounded-lg border border-border bg-white ring-1 ring-gray-200 p-4"
         >
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -192,9 +207,19 @@ export default function AdminInboxTable() {
                 defaultValue={inbox.displayName ?? ""}
                 placeholder="Display name (optional)"
                 onBlur={(e) => handleNameBlur(inbox, e.currentTarget.value)}
+                data-testid="inbox-display-name-input"
                 className="mt-1 w-full rounded bg-white ring-1 ring-gray-200 px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
               />
             </div>
+            <button
+              type="button"
+              data-testid="inbox-delete-button"
+              onClick={() => handleDelete(inbox)}
+              className="self-start rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50"
+              aria-label={`Delete inbox ${inbox.email}`}
+            >
+              Delete
+            </button>
           </div>
           <div className="mt-3">
             <div className="mb-1 text-xs uppercase tracking-wide text-text-tertiary">
@@ -207,6 +232,9 @@ export default function AdminInboxTable() {
                   <button
                     key={m}
                     type="button"
+                    data-testid="inbox-mode-toggle"
+                    data-mode={m}
+                    data-active={active}
                     onClick={() => handleSetMode(inbox, m)}
                     className={`px-3 py-1 text-xs font-medium ${
                       active
@@ -238,6 +266,9 @@ export default function AdminInboxTable() {
                 return (
                   <button
                     key={u.id}
+                    data-testid="inbox-member-toggle"
+                    data-user-id={u.id}
+                    data-assigned={on}
                     onClick={() => handleToggleAssignment(inbox, u.id)}
                     className={`rounded-full px-3 py-1 text-xs ${
                       on

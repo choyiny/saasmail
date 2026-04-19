@@ -523,6 +523,15 @@ export async function updateInboxSettings(
   });
 }
 
+export async function deleteInbox(
+  email: string,
+): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(
+    `/api/admin/inboxes/${encodeURIComponent(email)}`,
+    { method: "DELETE" },
+  );
+}
+
 export async function updateInboxAssignments(
   email: string,
   userIds: string[],

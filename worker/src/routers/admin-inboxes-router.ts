@@ -278,6 +278,47 @@ adminInboxesRouter.openapi(putAssignmentsRoute, async (c) => {
   return c.json({ email, assignedUserIds: userIds }, 200);
 });
 
+const deleteInboxRoute = createRoute({
+  method: "delete",
+  path: "/{email}",
+  tags: ["Admin Inboxes"],
+  description:
+    "Delete an inbox (sender_identity row + its inbox_permissions). Inbound emails are not removed.",
+  request: {
+    params: z.object({ email: z.string() }),
+  },
+  responses: {
+    ...json200Response(z.object({ success: z.literal(true) }), "Inbox deleted"),
+    404: {
+      description: "Inbox not found",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
+  },
+});
+
+adminInboxesRouter.openapi(deleteInboxRoute, async (c) => {
+  const db = c.get("db");
+  const { email } = c.req.valid("param");
+
+  const existing = await db
+    .select({ email: senderIdentities.email })
+    .from(senderIdentities)
+    .where(eq(senderIdentities.email, email))
+    .limit(1);
+  if (existing.length === 0) {
+    return c.json({ error: "Inbox not found" }, 404);
+  }
+
+  await db.delete(inboxPermissions).where(eq(inboxPermissions.email, email));
+  await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+
+  return c.json({ success: true as const }, 200);
+});
+
 const listUserInboxesRoute = createRoute({
   method: "get",
   path: "/users/{id}/inboxes",
