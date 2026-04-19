@@ -67,6 +67,7 @@ function Bubble({
 
   return (
     <div
+      data-testid="chat-bubble"
       className={`group flex flex-col px-4 sm:px-6 py-1 ${
         isSent ? "items-end" : "items-start"
       }`}

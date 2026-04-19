@@ -26,6 +26,9 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
+  // TipTap emits "<p></p>" for an empty editor — treat that as empty.
+  const bodyIsEmpty = !bodyHtml || bodyHtml === "<p></p>";
+
   useEffect(() => {
     if (open) {
       fetchStats().then((stats) => {
@@ -82,10 +85,14 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">
+            <label
+              htmlFor="compose-to"
+              className="text-xs font-medium text-text-secondary"
+            >
               To
             </label>
             <input
+              id="compose-to"
               type="email"
               value={to}
               onChange={(e) => setTo(e.target.value)}
@@ -94,10 +101,14 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs font-medium text-text-secondary">
+            <label
+              htmlFor="compose-subject"
+              className="text-xs font-medium text-text-secondary"
+            >
               Subject
             </label>
             <input
+              id="compose-subject"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               required
@@ -108,7 +119,9 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
             <label className="text-xs font-medium text-text-secondary">
               Message
             </label>
-            <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
+            <div data-testid="compose-body">
+              <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
+            </div>
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <div className="flex justify-end gap-2">
@@ -121,7 +134,8 @@ export default function ComposeModal({ open, onClose }: ComposeModalProps) {
             </button>
             <button
               type="submit"
-              disabled={sending}
+              data-testid="compose-send-button"
+              disabled={sending || bodyIsEmpty}
               className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
             >
               {sending ? "Sending..." : "Send"}

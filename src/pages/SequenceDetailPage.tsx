@@ -108,6 +108,8 @@ export default function SequenceDetailPage() {
             {enrollments.map((enr) => (
               <div
                 key={enr.id}
+                data-testid="enrollment-row"
+                data-enrollment-id={enr.id}
                 className="flex items-center justify-between rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-3"
               >
                 <div>

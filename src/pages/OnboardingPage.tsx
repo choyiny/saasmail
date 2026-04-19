@@ -112,10 +112,14 @@ export default function OnboardingPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">
+              <label
+                htmlFor="onboarding-name"
+                className="text-xs font-medium text-text-secondary"
+              >
                 Name
               </label>
               <input
+                id="onboarding-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -124,10 +128,14 @@ export default function OnboardingPage() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">
+              <label
+                htmlFor="onboarding-email"
+                className="text-xs font-medium text-text-secondary"
+              >
                 Email
               </label>
               <input
+                id="onboarding-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -137,10 +145,14 @@ export default function OnboardingPage() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">
+              <label
+                htmlFor="onboarding-password"
+                className="text-xs font-medium text-text-secondary"
+              >
                 Password
               </label>
               <input
+                id="onboarding-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

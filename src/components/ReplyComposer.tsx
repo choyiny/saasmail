@@ -116,7 +116,10 @@ export default function ReplyComposer({
   }
 
   return (
-    <div className="border-t border-border bg-white shrink-0">
+    <div
+      data-testid="reply-composer"
+      className="border-t border-border bg-white shrink-0"
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border">
         <span className="text-xs font-semibold text-text-primary">Reply</span>
@@ -251,6 +254,7 @@ export default function ReplyComposer({
           <div className="ml-auto">
             <button
               onClick={handleSend}
+              data-testid="reply-send-button"
               disabled={sending}
               className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-colors"
             >

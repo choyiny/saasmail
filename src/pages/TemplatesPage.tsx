@@ -44,6 +44,9 @@ export default function TemplatesPage() {
             {templates.map((t) => (
               <div
                 key={t.id}
+                data-testid="template-row"
+                data-template-name={t.name}
+                data-template-slug={t.slug}
                 className="flex items-center justify-between rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-3"
               >
                 <div>

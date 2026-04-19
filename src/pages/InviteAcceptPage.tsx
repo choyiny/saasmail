@@ -115,10 +115,14 @@ export default function InviteAcceptPage() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">
+              <label
+                htmlFor="invite-name"
+                className="text-xs font-medium text-text-secondary"
+              >
                 Name
               </label>
               <input
+                id="invite-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
@@ -127,10 +131,14 @@ export default function InviteAcceptPage() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">
+              <label
+                htmlFor="invite-email"
+                className="text-xs font-medium text-text-secondary"
+              >
                 Email
               </label>
               <input
+                id="invite-email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -141,10 +149,14 @@ export default function InviteAcceptPage() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-text-secondary">
+              <label
+                htmlFor="invite-password"
+                className="text-xs font-medium text-text-secondary"
+              >
                 Password
               </label>
               <input
+                id="invite-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

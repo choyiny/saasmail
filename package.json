@@ -20,7 +20,12 @@
     "test:watch": "vitest --config vitest.config.test.ts",
     "prepare": "husky",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "dev:e2e": "DEMO_MODE=1 DISABLE_PASSKEY_GATE=true vite dev --port 8788",
+    "db:reset:e2e": "node e2e/scripts/wipe-db.mjs",
+    "test:e2e": "node e2e/scripts/wipe-db.mjs && playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "PWDEBUG=1 playwright test"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,css,md,html}": "prettier --write"
@@ -69,6 +74,7 @@
     "@cloudflare/vite-plugin": "^1.0.0",
     "@cloudflare/vitest-pool-workers": "^0.14.7",
     "@cloudflare/workers-types": "^4.20250410.0",
+    "@playwright/test": "^1.59.1",
     "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^18.3.20",
     "@types/react-dom": "^18.3.6",

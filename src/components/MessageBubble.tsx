@@ -74,6 +74,7 @@ export default function MessageBubble({
 
   return (
     <div
+      data-testid="thread-message"
       className={`group ${compact ? "px-3 py-1.5" : "px-4 sm:px-6 py-2"} hover:bg-bg-muted/50 transition-colors ${
         isUnread ? "bg-accent/5" : ""
       }`}

@@ -44,6 +44,8 @@ export default function SequencesPage() {
           {sequences.map((seq) => (
             <div
               key={seq.id}
+              data-testid="sequence-row"
+              data-sequence-id={seq.id}
               className="flex items-center justify-between rounded-lg border border-border bg-white ring-1 ring-gray-200 px-4 py-3"
             >
               <div

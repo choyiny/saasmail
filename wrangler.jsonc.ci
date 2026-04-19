@@ -51,7 +51,7 @@
   },
   "vars": {
     "BASE_URL": "http://localhost:8080",
-    "TRUSTED_ORIGINS": "http://localhost:8080",
+    "TRUSTED_ORIGINS": "http://localhost:8080,http://localhost:8788",
     "APP_NAME": "saasmail",
     "APP_LOGO_LETTER": "s",
     "COOKIE_PREFIX": "saasmail",

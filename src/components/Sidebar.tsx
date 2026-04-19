@@ -182,7 +182,10 @@ export default function Sidebar({ onCompose }: SidebarProps) {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start">
-            <DropdownMenuItem onClick={() => signOut()}>
+            <DropdownMenuItem
+              data-testid="logout-button"
+              onClick={() => signOut()}
+            >
               <LogOut size={14} />
               Sign out
             </DropdownMenuItem>

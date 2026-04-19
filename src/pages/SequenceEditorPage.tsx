@@ -113,6 +113,8 @@ export default function SequenceEditorPage() {
             {steps.map((step, idx) => (
               <div
                 key={step.order}
+                data-testid="sequence-step-row"
+                data-step-index={idx}
                 className="flex items-center gap-3 rounded-lg border border-border bg-white ring-1 ring-gray-200 p-3"
               >
                 <span className="text-xs font-medium text-text-tertiary">

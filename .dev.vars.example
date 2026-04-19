@@ -5,3 +5,8 @@ BETTER_AUTH_SECRET=generate-a-random-secret
 # email+password and hit the API without registering a WebAuthn
 # credential. Set to "true" for local dev; omit / leave blank in prod.
 DISABLE_PASSKEY_GATE=true
+
+# Local-only: short-circuits real email sending (compose returns a
+# synthetic demo_... id). Required by `yarn test:e2e`; safe to leave
+# off for normal `yarn dev`. Never set in production.
+DEMO_MODE=1

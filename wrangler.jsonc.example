@@ -68,7 +68,7 @@
   //   - If neither is configured, send attempts return a "No email provider configured" error.
   "vars": {
     "BASE_URL": "<your-deployed-url>",
-    "TRUSTED_ORIGINS": "http://localhost:8080,<your-deployed-url>",
+    "TRUSTED_ORIGINS": "http://localhost:8080,http://localhost:8788,<your-deployed-url>",
 
     // Whitelabel branding — customize these to rebrand the UI
     "APP_NAME": "saasmail",       // Displayed in page title, login, sidebar, etc.
