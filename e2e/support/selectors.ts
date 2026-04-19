@@ -4,6 +4,9 @@
 // data-testid to the component.
 
 export const TEST_IDS = {
+  // Auth / navigation
+  logoutButton: "logout-button",
+
   // Inbox admin page
   inboxRow: "inbox-row",
   inboxCreateButton: "inbox-create-button",
