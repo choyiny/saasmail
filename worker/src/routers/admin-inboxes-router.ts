@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { emails } from "../db/emails.schema";
-import { json200Response } from "../lib/helpers";
+import { json200Response, json201Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 
 export const adminInboxesRouter = new OpenAPIHono<{
@@ -69,6 +69,74 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     })),
     200,
   );
+});
+
+const createInboxRoute = createRoute({
+  method: "post",
+  path: "/",
+  tags: ["Admin Inboxes"],
+  description:
+    "Create a new inbox by inserting a sender_identities row. Returns 409 if an identity already exists for that email.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            email: z.string().email(),
+            displayName: z.string().min(1).nullable().optional(),
+            displayMode: z.enum(["thread", "chat"]).optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    ...json201Response(
+      z.object({
+        email: z.string(),
+        displayName: z.string().nullable(),
+        displayMode: z.enum(["thread", "chat"]),
+        assignedUserIds: z.array(z.string()),
+      }),
+      "Created inbox",
+    ),
+    409: {
+      description: "Inbox already exists",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
+  },
+});
+
+adminInboxesRouter.openapi(createInboxRoute, async (c) => {
+  const db = c.get("db");
+  const body = c.req.valid("json");
+  const email = body.email.trim().toLowerCase();
+  const displayName = body.displayName ?? null;
+  const displayMode = body.displayMode ?? "thread";
+  const now = Math.floor(Date.now() / 1000);
+
+  const existing = await db
+    .select({ email: senderIdentities.email })
+    .from(senderIdentities)
+    .where(eq(senderIdentities.email, email))
+    .limit(1);
+  if (existing.length > 0) {
+    return c.json({ error: "Inbox already exists" }, 409);
+  }
+
+  await db.insert(senderIdentities).values({
+    email,
+    displayName,
+    displayMode,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  return c.json({ email, displayName, displayMode, assignedUserIds: [] }, 201);
 });
 
 const PatchInboxBodySchema = z

@@ -496,6 +496,18 @@ export async function fetchAdminInboxes(): Promise<AdminInbox[]> {
   return apiFetch("/api/admin/inboxes");
 }
 
+export async function createInbox(data: {
+  email: string;
+  displayName?: string | null;
+  displayMode?: InboxDisplayMode;
+}): Promise<AdminInbox> {
+  return apiFetch("/api/admin/inboxes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
 export async function updateInboxSettings(
   email: string,
   patch: { displayName?: string | null; displayMode?: InboxDisplayMode },

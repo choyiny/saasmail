@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  createInbox,
   fetchAdminInboxes,
   fetchAdminUsers,
   updateInboxAssignments,
@@ -12,6 +13,10 @@ export default function AdminInboxTable() {
   const [inboxes, setInboxes] = useState<AdminInbox[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
+  const [newEmail, setNewEmail] = useState("");
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([fetchAdminInboxes(), fetchAdminUsers()]).then(([i, u]) => {
@@ -22,6 +27,44 @@ export default function AdminInboxTable() {
   }, []);
 
   const members = users.filter((u) => u.role !== "admin");
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const email = newEmail.trim().toLowerCase();
+    if (!email) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const created = await createInbox({
+        email,
+        displayName: newDisplayName.trim() || null,
+      });
+      setInboxes((prev) => {
+        if (prev.some((r) => r.email === created.email)) {
+          return prev.map((r) =>
+            r.email === created.email
+              ? {
+                  ...r,
+                  displayName: created.displayName,
+                  displayMode: created.displayMode,
+                }
+              : r,
+          );
+        }
+        return [...prev, created].sort((a, b) =>
+          a.email.localeCompare(b.email),
+        );
+      });
+      setNewEmail("");
+      setNewDisplayName("");
+    } catch (err) {
+      setCreateError(
+        err instanceof Error ? err.message : "Failed to create inbox",
+      );
+    } finally {
+      setCreating(false);
+    }
+  }
 
   async function handleNameBlur(inbox: AdminInbox, value: string) {
     const next = value.trim() === "" ? null : value.trim();
@@ -81,16 +124,59 @@ export default function AdminInboxTable() {
     return <p className="text-text-secondary">Loading…</p>;
   }
 
+  const createForm = (
+    <form
+      onSubmit={handleCreate}
+      className="rounded-lg border border-border bg-white ring-1 ring-gray-200 p-4"
+    >
+      <div className="mb-2 text-xs uppercase tracking-wide text-text-tertiary">
+        Create inbox
+      </div>
+      <div className="flex flex-col gap-2 md:flex-row">
+        <input
+          type="email"
+          required
+          value={newEmail}
+          onChange={(e) => setNewEmail(e.currentTarget.value)}
+          placeholder="inbox@example.com"
+          className="flex-1 rounded bg-white ring-1 ring-gray-200 px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
+        />
+        <input
+          type="text"
+          value={newDisplayName}
+          onChange={(e) => setNewDisplayName(e.currentTarget.value)}
+          placeholder="Display name (optional)"
+          className="flex-1 rounded bg-white ring-1 ring-gray-200 px-2 py-1 text-sm text-text-primary outline-none focus:ring-1 focus:ring-accent"
+        />
+        <button
+          type="submit"
+          disabled={creating || newEmail.trim() === ""}
+          className="rounded bg-accent px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {creating ? "Creating…" : "Create"}
+        </button>
+      </div>
+      {createError && (
+        <div className="mt-2 text-xs text-red-600">{createError}</div>
+      )}
+    </form>
+  );
+
   if (inboxes.length === 0) {
     return (
-      <p className="text-text-secondary">
-        No inboxes yet. Once you receive email, inboxes will appear here.
-      </p>
+      <div className="space-y-6">
+        {createForm}
+        <p className="text-text-secondary">
+          No inboxes yet. Once you receive email or create one above, inboxes
+          will appear here.
+        </p>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {createForm}
       {inboxes.map((inbox) => (
         <div
           key={inbox.email}
