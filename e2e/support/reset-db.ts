@@ -61,3 +61,35 @@ export function truncateAndReseed(): void {
     stdio: "pipe",
   });
 }
+
+/**
+ * Wipe only BetterAuth user/session/account tables while leaving inboxes,
+ * people, and emails intact.  Safe to call while the dev server is running
+ * (uses `wrangler d1 execute --local --command`).
+ * Used by auth.spec.ts beforeAll to give the setup-wizard a clean slate.
+ */
+export function wipeUsers(): void {
+  const dbName = getDbName();
+  // Delete in dependency order: child tables first, then parent tables.
+  // `sessions`, `accounts`, `passkeys`, `verifications` all cascade from
+  // `users` via ON DELETE CASCADE, but we DELETE them explicitly to be safe
+  // and to avoid any FK constraint issues in SQLite's strict mode.
+  const sql = [
+    "DELETE FROM oauth_access_tokens",
+    "DELETE FROM oauth_refresh_tokens",
+    "DELETE FROM oauth_consents",
+    "DELETE FROM oauth_clients",
+    "DELETE FROM passkeys",
+    "DELETE FROM verifications",
+    "DELETE FROM accounts",
+    "DELETE FROM sessions",
+    "DELETE FROM users",
+    // Also clear any outstanding invitations so no stale tokens linger.
+    "DELETE FROM invitations",
+  ].join("; ");
+
+  execSync(
+    `wrangler d1 execute ${dbName} --local --command="${sql.replace(/"/g, '\\"')}"`,
+    { cwd: REPO_ROOT, stdio: "pipe" },
+  );
+}
