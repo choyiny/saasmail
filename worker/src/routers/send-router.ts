@@ -12,6 +12,7 @@ import { interpolate, extractVariables } from "../lib/interpolate";
 import type { Variables } from "../variables";
 import { formatFromAddress } from "../lib/format-from-address";
 import { assertInboxAllowed } from "../lib/inbox-permissions";
+import { generateMessageId } from "../lib/message-id";
 
 export const sendRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -59,6 +60,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
 
+  const messageId = generateMessageId(fromAddress);
   const sender = createEmailSender(c.env);
   const formattedFrom = await formatFromAddress(db, fromAddress);
   const result = await sender.send({
@@ -67,6 +69,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     subject,
     html: bodyHtml,
     text: bodyText,
+    headers: { "Message-ID": messageId },
   });
 
   // Find person if they exist
@@ -88,6 +91,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     subject,
     bodyHtml,
     bodyText: bodyText ?? null,
+    messageId,
     resendId: result.id,
     status: result.error ? "failed" : "sent",
     sentAt: now,

@@ -12,7 +12,19 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { eq } from "drizzle-orm";
+
+async function grantInbox(userId: string, email: string) {
+  await getDb()
+    .insert(inboxPermissions)
+    .values({
+      userId,
+      email,
+      createdAt: Math.floor(Date.now() / 1000),
+      createdBy: null,
+    });
+}
 
 describe("emails router", () => {
   let apiKey: string;
@@ -294,4 +306,42 @@ describe("emails router", () => {
   // Note: PATCH /api/emails/bulk is unreachable because PATCH /{id} is
   // registered first and "bulk" matches as an {id} param. Skipping tests
   // for this endpoint as it's a known routing issue.
+});
+
+describe("send stores generated message-id", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+  });
+
+  it("persists a <...@domain> message_id on /send", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "u-send",
+      role: "admin",
+      email: "admin@x.com",
+    });
+    await grantInbox(userId, "a@x.com");
+    const res = await authFetch("/api/send", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        to: "target@external.com",
+        fromAddress: "a@x.com",
+        subject: "hello",
+        bodyHtml: "<p>hi</p>",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    const db = getDb();
+    const row = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, body.id))
+      .get();
+    expect(row?.messageId).toMatch(/^<[A-Za-z0-9_-]+@x\.com>$/);
+  });
 });
