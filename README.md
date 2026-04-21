@@ -82,6 +82,25 @@ Issue scoped API keys for programmatic access to send email, manage templates, e
 
 ## Quick Start
 
+### Recommended: install with Claude Code
+
+saasmail ships with two [Claude Code](https://claude.ai/claude-code) skills that do the install and upgrade for you. This is the path we actively maintain — everything in the manual setup below is what the skills automate.
+
+```bash
+git clone https://github.com/choyiny/saasmail.git
+cd saasmail
+claude
+```
+
+Then, inside Claude Code:
+
+- **`/saasmail-onboarding`** — interactive setup wizard. Walks you through Cloudflare login, creating D1/R2/Queue resources, filling out `wrangler.jsonc` and `.dev.vars`, running migrations, configuring Email Routing, and deploying. Expect ~30–40 minutes; most of that is DNS propagation, not typing.
+- **`/update-saasmail`** — pull the latest upstream changes. Adds the `upstream` remote if missing, rebases your local commits on top, and resolves conflicts in favor of upstream so you don't get stuck. Run this anytime you want to sync with `choyiny/saasmail`.
+
+Don't have Claude Code? The manual steps below cover the same ground.
+
+### Manual setup
+
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) v18+
@@ -89,8 +108,6 @@ Issue scoped API keys for programmatic access to send email, manage templates, e
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm install -g wrangler`)
 - A [Cloudflare](https://dash.cloudflare.com/) account with Email Routing available for your domain
 - _Optional:_ a [Resend](https://resend.com/) account and API key (only if you prefer Resend over Cloudflare Email Sending)
-
-> **Tip:** If you have [Claude Code](https://claude.ai/claude-code) installed, you can run `/saasmail-onboarding` to walk through the setup interactively.
 
 ### 1. Clone and install
 
@@ -176,6 +193,22 @@ yarn deploy
 ```
 
 Visit your deployed URL to create your first admin account. Once signed in, go to **Inboxes** to name your inbound addresses and **Users** to invite additional team members.
+
+## Updating saasmail
+
+### Recommended: `/update-saasmail`
+
+From inside Claude Code, run **`/update-saasmail`**. It links the `upstream` remote to `https://github.com/choyiny/saasmail`, fetches the latest, and rebases your local commits on top. Any unresolvable conflicts are auto-resolved in favor of upstream so the sync never gets stuck.
+
+### Manual
+
+```bash
+git remote add upstream https://github.com/choyiny/saasmail.git  # first time only
+git fetch upstream
+git rebase upstream/main -X ours
+```
+
+The `-X ours` flag tells rebase to prefer upstream for conflicting hunks (during a rebase, "ours" is the branch being rebased onto). Your local commits are still replayed on top.
 
 ## Local Development
 
