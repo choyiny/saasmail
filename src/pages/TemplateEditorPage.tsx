@@ -182,14 +182,14 @@ export default function TemplateEditorPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center bg-white">
+      <div className="flex flex-1 h-full items-center justify-center bg-white">
         <p className="text-sm text-text-tertiary">Loading...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-white overflow-hidden">
+    <div className="flex flex-1 h-full flex-col bg-white overflow-hidden">
       {/* Top bar */}
       <div className="flex items-center justify-between border-b border-border px-4 sm:px-6 py-2.5 bg-white shrink-0">
         <div className="flex items-center gap-3">
