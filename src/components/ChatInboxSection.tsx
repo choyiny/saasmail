@@ -168,10 +168,15 @@ export default function ChatInboxSection({
     [group.emails],
   );
   const total = chronological.length;
-  const [visible, setVisible] = useState(Math.min(INITIAL_VISIBLE, total));
-  const start = Math.max(0, total - visible);
+  // Track the hidden-count (start index) instead of a visible-count so that
+  // when new messages arrive (e.g. after sending a reply) they append to the
+  // bottom without re-collapsing previously-visible earlier messages.
+  const [hiddenCount, setHiddenCount] = useState(() =>
+    Math.max(0, total - INITIAL_VISIBLE),
+  );
+  const start = Math.min(hiddenCount, Math.max(0, total - 1));
   const visibleEmails = chronological.slice(start);
-  const hiddenCount = start;
+  const effectiveHidden = start;
 
   // Latest received email — the target of the quick reply.
   // group.emails is newest-first, so .find returns the most recent received.
@@ -193,15 +198,15 @@ export default function ChatInboxSection({
       </div>
 
       <div className="flex flex-col py-2 gap-1">
-        {hiddenCount > 0 && (
+        {effectiveHidden > 0 && (
           <div className="px-4 sm:px-6 py-1">
             <button
               type="button"
-              onClick={() => setVisible((v) => Math.min(total, v + PAGE_SIZE))}
+              onClick={() => setHiddenCount((h) => Math.max(0, h - PAGE_SIZE))}
               className="text-xs text-accent hover:underline"
             >
-              Show {Math.min(PAGE_SIZE, hiddenCount)} earlier message
-              {Math.min(PAGE_SIZE, hiddenCount) !== 1 ? "s" : ""}
+              Show {Math.min(PAGE_SIZE, effectiveHidden)} earlier message
+              {Math.min(PAGE_SIZE, effectiveHidden) !== 1 ? "s" : ""}
             </button>
           </div>
         )}
