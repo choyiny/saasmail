@@ -61,9 +61,6 @@
     "BASE_URL": "<your-deployed-url>",
     "TRUSTED_ORIGINS": "http://localhost:8080,<your-deployed-url>",
 
-    // Whitelabel branding
-    "APP_NAME": "saasmail demo",
-    "APP_LOGO_LETTER": "s",
     "COOKIE_PREFIX": "saasmail-demo"
   }
 }

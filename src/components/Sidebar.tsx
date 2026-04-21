@@ -12,7 +12,6 @@ import {
   ChevronsRight,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
-import { useBranding } from "@/lib/branding";
 import { useSidebarCollapsed } from "@/lib/useSidebarCollapsed";
 import {
   DropdownMenu,
@@ -85,7 +84,6 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ onCompose }: SidebarProps) {
-  const { logoLetter, appName } = useBranding();
   const location = useLocation();
   const navigate = useNavigate();
   const { data: session } = useSession();
@@ -108,13 +106,17 @@ export default function Sidebar({ onCompose }: SidebarProps) {
       <div
         className={`flex items-center ${collapsed ? "justify-center px-0" : "px-3"} py-3`}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent text-sm font-bold text-white">
-          {logoLetter}
-        </div>
-        {!collapsed && (
-          <span className="ml-2 truncate text-sm font-semibold text-text-primary">
-            {appName}
-          </span>
+        {collapsed ? (
+          // Collapsed: crop the logo to show just the icon portion on the left.
+          <div className="h-8 w-8 shrink-0 overflow-hidden">
+            <img
+              src="/saasmail-logo.png"
+              alt="saasmail"
+              className="h-8 w-auto max-w-none object-left"
+            />
+          </div>
+        ) : (
+          <img src="/saasmail-logo.png" alt="saasmail" className="h-7 w-auto" />
         )}
       </div>
 

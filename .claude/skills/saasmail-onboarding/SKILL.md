@@ -131,7 +131,7 @@ Edit `wrangler.jsonc` and fill in:
 - `BASE_URL` — `https://<UI host>`.
 - `TRUSTED_ORIGINS` — `<BASE_URL>` (production-only; do not add localhost).
 - If Decision 2 is **Option A**, uncomment the `send_email` block.
-- Optional branding: `APP_NAME`, `APP_LOGO_LETTER`, `COOKIE_PREFIX`.
+- Optional: override `COOKIE_PREFIX` if you want to run multiple saasmail deployments on sibling subdomains without cookie collisions.
 
 **Do not rename bindings.** The worker code looks them up by exact name — renaming any of these will break the app:
 
@@ -143,6 +143,26 @@ Edit `wrangler.jsonc` and fill in:
 | `send_email[].name`          | `"EMAIL"`       |
 
 `database_name`, `bucket_name`, `queue`, `account_id`, and all IDs can be freely changed. Only the `binding` / `name` values above are load-bearing.
+
+### Step 4.5: Optional — Replace the logo
+
+saasmail ships with its own logo at `public/saasmail-logo.png`. That file is used as both the favicon and the in-app logo (sidebar, login, invite, onboarding pages). Vite serves it at `/saasmail-logo.png`.
+
+Ask the user:
+
+> Want to use your own logo instead of the default saasmail logo? Drag a PNG into this chat, or just say "skip".
+
+If they drag a file in, you'll receive a path like `/Users/<them>/Downloads/<name>.png`. Overwrite the repo's copy:
+
+```bash
+cp <their-file> public/saasmail-logo.png
+```
+
+Accept any PNG. Wide horizontal logos (roughly 3:1 to 4:1, matching the default) display best because the sidebar uses the full image when expanded and crops to the left edge when collapsed — so an icon + wordmark with the icon on the left is the sweet spot. If they give you something square or tall, it'll still work but the collapsed sidebar will show the top-left corner, which may look off.
+
+If they say skip, leave the file alone and move on.
+
+No config to change — the reference is hardcoded to `/saasmail-logo.png`.
 
 ### Step 5: Set Production Secrets
 

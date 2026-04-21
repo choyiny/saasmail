@@ -70,10 +70,9 @@
     "BASE_URL": "<your-deployed-url>",
     "TRUSTED_ORIGINS": "http://localhost:8080,http://localhost:8788,<your-deployed-url>",
 
-    // Whitelabel branding — customize these to rebrand the UI
-    "APP_NAME": "saasmail",       // Displayed in page title, login, sidebar, etc.
-    "APP_LOGO_LETTER": "s",       // Single character shown as the logo in sidebar/consent
-    "COOKIE_PREFIX": "saasmail"      // Prefix for better-auth session cookies
+    // Prefix for better-auth session cookies. Drop a replacement logo into
+    // public/saasmail-logo.png to rebrand the favicon and in-app logo.
+    "COOKIE_PREFIX": "saasmail"
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

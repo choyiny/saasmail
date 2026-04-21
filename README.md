@@ -1,4 +1,6 @@
-# saasmail
+<p align="center">
+  <img src="public/saasmail-logo.png" alt="saasmail" width="480" />
+</p>
 
 **The centralized inbox for SaaS teams.** One unified timeline per customer — marketing, notifications, and support emails collapsed into a single view, per person.
 
@@ -274,7 +276,9 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
 - `send_email` (optional) — Binding for Cloudflare Email Sending
 - `vars.BASE_URL` — Your deployed URL (used for OAuth redirects and BetterAuth)
 - `vars.TRUSTED_ORIGINS` — CORS allowed origins
-- `vars.APP_NAME` / `APP_LOGO_LETTER` / `COOKIE_PREFIX` — Whitelabel branding
+- `vars.COOKIE_PREFIX` — Prefix for better-auth session cookies
+
+To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used as both the favicon and the in-app logo. The `/saasmail-onboarding` skill will do this for you interactively.
 
 ### .dev.vars
 

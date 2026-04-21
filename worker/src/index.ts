@@ -203,11 +203,9 @@ app.route("/api/admin/inboxes", adminInboxesRouter);
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 
-// Public branding config (no auth) — consumed by the SPA for whitelabeling
+// Public runtime config (no auth) — consumed by the SPA
 app.get("/api/config", (c) =>
   c.json({
-    appName: c.env.APP_NAME || "saasmail",
-    logoLetter: c.env.APP_LOGO_LETTER || "s",
     passkeyRequired: !isDevEnvironment(c.env),
   }),
 );
