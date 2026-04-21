@@ -113,7 +113,17 @@ test.describe.serial("reply to own sent message", () => {
     // Reply composer should close
     await expect(replyComposer).not.toBeVisible();
 
-    // ── Step 6: verify via backend that a Re: sent row now exists ─────────
+    // ── Step 6: assert the new sent bubble appears in the DOM ─────────────
+    // MessageBubble renders the subject as a <p> inside the thread-message
+    // container, so filtering thread messages by the Re: subject targets
+    // the newly sent reply bubble.
+    await expect(
+      page
+        .getByTestId(TEST_IDS.threadMessage)
+        .filter({ hasText: "Re: Initial outreach to Alice" }),
+    ).toBeVisible();
+
+    // ── Step 7: verify via backend that a Re: sent row now exists ─────────
     const emailsRes = await api.get(`${BASE_URL}/api/emails/by-person/p_alice`);
     expect(emailsRes.ok()).toBeTruthy();
     const payload = (await emailsRes.json()) as {
