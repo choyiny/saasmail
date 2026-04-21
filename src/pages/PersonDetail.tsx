@@ -171,10 +171,12 @@ export default function PersonDetail({ person }: PersonDetailProps) {
         <div>
           <h2 className="text-sm font-semibold text-text-primary">
             {person.name || person.email}
+            {person.name && (
+              <span className="ml-2 text-xs font-normal text-text-secondary">
+                {person.email}
+              </span>
+            )}
           </h2>
-          {person.name && (
-            <p className="text-xs text-text-secondary">{person.email}</p>
-          )}
           <p className="text-[11px] text-text-tertiary">
             {person.totalCount} email{person.totalCount !== 1 ? "s" : ""}
             {inboxGroups.length > 1
