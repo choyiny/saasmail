@@ -17,6 +17,7 @@ export interface GroupedPerson {
   unreadCount: number;
   totalCount: number;
   recipientCount: number;
+  hasAttachment: number;
 }
 
 export interface Email {

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Paperclip } from "lucide-react";
 import { fetchGroupedPeople, type GroupedPerson } from "@/lib/api";
 
 const PAGE_SIZE = 50;
@@ -110,11 +110,16 @@ export default function PersonList({
                       ? ` · ${person.recipientCount} inboxes`
                       : ""}
                   </span>
-                  {person.unreadCount > 0 && (
-                    <span className="ml-2 flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-unread px-1 text-[10px] font-semibold text-white">
-                      {person.unreadCount}
-                    </span>
-                  )}
+                  <div className="ml-2 flex shrink-0 items-center gap-1.5">
+                    {person.hasAttachment === 1 && (
+                      <Paperclip size={10} className="text-text-tertiary" />
+                    )}
+                    {person.unreadCount > 0 && (
+                      <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-unread px-1 text-[10px] font-semibold text-white">
+                        {person.unreadCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             );

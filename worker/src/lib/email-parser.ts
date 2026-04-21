@@ -23,6 +23,7 @@ export interface ParsedAttachment {
   contentType: string;
   content: ArrayBuffer;
   contentId: string | null;
+  disposition: string | null;
 }
 
 /**
@@ -146,6 +147,7 @@ export async function parseEmail(
       contentType: att.mimeType || "application/octet-stream",
       content: att.content,
       contentId: att.contentId || null,
+      disposition: att.disposition || null,
     })),
     auth: parseAuthResults(headers),
   };

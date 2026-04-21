@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { desc, like, or, eq, sql, and, inArray } from "drizzle-orm";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
+import { attachments } from "../db/attachments.schema";
 import { json200Response, escapeLike } from "../lib/helpers";
 import type { Variables } from "../variables";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
@@ -38,6 +39,7 @@ const GroupedPersonSchema = z.object({
   unreadCount: z.number(),
   totalCount: z.number(),
   recipientCount: z.number(),
+  hasAttachment: z.number(),
 });
 
 const listGroupedPeopleRoute = createRoute({
@@ -98,6 +100,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     unreadCount: number;
     totalCount: number;
     recipientCount: number;
+    hasAttachment: number;
   }>(sql`
     SELECT
       s.id,
@@ -106,7 +109,13 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       MAX(e.received_at) AS lastEmailAt,
       SUM(CASE WHEN e.is_read = 0 THEN 1 ELSE 0 END) AS unreadCount,
       COUNT(*) AS totalCount,
-      COUNT(DISTINCT e.recipient) AS recipientCount
+      COUNT(DISTINCT e.recipient) AS recipientCount,
+      EXISTS(
+        SELECT 1 FROM ${attachments} a
+        JOIN ${emails} e2 ON e2.id = a.email_id
+        WHERE e2.person_id = s.id
+        AND a.content_id IS NULL
+      ) AS hasAttachment
     FROM ${emails} e
     JOIN ${people} s ON s.id = e.person_id
     ${whereClause}
