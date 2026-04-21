@@ -226,6 +226,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     );
   }
 
+  const messageId = generateMessageId(fromAddress);
   const sender = createEmailSender(c.env);
   const formattedFrom = await formatFromAddress(db, fromAddress);
   const result = await sender.send({
@@ -234,7 +235,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     subject: finalSubject,
     html: finalBodyHtml,
     text: bodyText,
-    headers: orig.messageId ? { "In-Reply-To": orig.messageId } : undefined,
+    headers: {
+      "Message-ID": messageId,
+      ...(orig.messageId ? { "In-Reply-To": orig.messageId } : {}),
+    },
   });
 
   // Store sent email
@@ -242,12 +246,13 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   await db.insert(sentEmails).values({
     id,
     personId: orig.personId,
-    fromAddress: fromAddress,
+    fromAddress,
     toAddress,
     subject: finalSubject,
     bodyHtml: finalBodyHtml,
     bodyText: bodyText ?? null,
     inReplyTo: orig.messageId,
+    messageId,
     resendId: result.id,
     status: result.error ? "failed" : "sent",
     sentAt: now,

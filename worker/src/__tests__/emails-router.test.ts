@@ -308,6 +308,50 @@ describe("emails router", () => {
   // for this endpoint as it's a known routing issue.
 });
 
+describe("reply stores generated message-id", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+  });
+
+  it("persists a <...@domain> message_id on /reply/{id} for a received email", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "u-reply",
+      role: "admin",
+      email: "admin@x.com",
+    });
+    await grantInbox(userId, "a@x.com");
+    await createTestPerson({ id: "p-r", email: "person@external.com" });
+    await createTestEmail({
+      id: "e-r",
+      personId: "p-r",
+      recipient: "a@x.com",
+      messageId: "<orig@external>",
+    });
+    const res = await authFetch("/api/send/reply/e-r", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        fromAddress: "a@x.com",
+        bodyHtml: "<p>reply</p>",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    const db = getDb();
+    const row = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, body.id))
+      .get();
+    expect(row?.messageId).toMatch(/^<[A-Za-z0-9_-]+@x\.com>$/);
+    expect(row?.inReplyTo).toBe("<orig@external>");
+  });
+});
+
 describe("send stores generated message-id", () => {
   beforeAll(async () => {
     await applyMigrations();
