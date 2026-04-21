@@ -8,7 +8,11 @@ import { TEST_IDS } from "../support/selectors";
 import { BASE_URL } from "../support/login";
 
 test.describe.serial("compose & send", () => {
-  test.beforeAll(() => truncateAndReseed());
+  // Re-seed before every test: test 1 ("compose modal sends email") adds a
+  // new sent email to Alice's marketing@ inbox, which would shift test 2's
+  // `getByTestId('thread-message').last()` onto that sent email (no Reply
+  // button). A fresh seed per test keeps each case independent.
+  test.beforeEach(() => truncateAndReseed());
 
   // ── 1. Compose modal: sends email in DEMO_MODE, records demo_ resendId ──────
 
