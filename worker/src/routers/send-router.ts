@@ -149,31 +149,50 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
 
-  // Get the original email
-  const original = await db
+  // Resolve the original across both received and sent tables.
+  const receivedRow = await db
     .select()
     .from(emails)
     .where(eq(emails.id, emailId))
     .limit(1);
 
-  if (original.length === 0) {
-    return c.json({ error: "Email not found" }, 404);
+  let origPersonId: string;
+  let origSubject: string | null;
+  let origInReplyToMessageId: string | null;
+  let toAddress: string;
+
+  if (receivedRow.length > 0) {
+    const orig = receivedRow[0];
+    const person = await db
+      .select({ email: people.email })
+      .from(people)
+      .where(eq(people.id, orig.personId))
+      .limit(1);
+    if (person.length === 0) {
+      return c.json({ error: "Person not found" }, 404);
+    }
+    origPersonId = orig.personId;
+    origSubject = orig.subject ?? null;
+    origInReplyToMessageId = orig.messageId ?? null;
+    toAddress = person[0].email;
+  } else {
+    const sentRow = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, emailId))
+      .limit(1);
+    if (sentRow.length === 0) {
+      return c.json({ error: "Email not found" }, 404);
+    }
+    const orig = sentRow[0];
+    if (!orig.personId) {
+      return c.json({ error: "Email has no associated person" }, 404);
+    }
+    origPersonId = orig.personId;
+    origSubject = orig.subject ?? null;
+    origInReplyToMessageId = orig.messageId ?? null;
+    toAddress = orig.toAddress;
   }
-
-  const orig = original[0];
-
-  // Get person email address
-  const person = await db
-    .select({ email: people.email })
-    .from(people)
-    .where(eq(people.id, orig.personId))
-    .limit(1);
-
-  if (person.length === 0) {
-    return c.json({ error: "Person not found" }, 404);
-  }
-
-  const toAddress = person[0].email;
 
   // Determine subject and body
   let finalSubject: string;
@@ -215,9 +234,9 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     finalBodyHtml = interpolate(template.bodyHtml, vars);
   } else if (bodyHtml) {
     // Freeform reply
-    finalSubject = orig.subject?.startsWith("Re: ")
-      ? orig.subject
-      : `Re: ${orig.subject || ""}`;
+    finalSubject = origSubject?.startsWith("Re: ")
+      ? origSubject
+      : `Re: ${origSubject || ""}`;
     finalBodyHtml = bodyHtml;
   } else {
     return c.json(
@@ -237,7 +256,9 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     text: bodyText,
     headers: {
       "Message-ID": messageId,
-      ...(orig.messageId ? { "In-Reply-To": orig.messageId } : {}),
+      ...(origInReplyToMessageId
+        ? { "In-Reply-To": origInReplyToMessageId }
+        : {}),
     },
   });
 
@@ -245,13 +266,13 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   const id = nanoid();
   await db.insert(sentEmails).values({
     id,
-    personId: orig.personId,
+    personId: origPersonId,
     fromAddress,
     toAddress,
     subject: finalSubject,
     bodyHtml: finalBodyHtml,
     bodyText: bodyText ?? null,
-    inReplyTo: orig.messageId,
+    inReplyTo: origInReplyToMessageId,
     messageId,
     resendId: result.id,
     status: result.error ? "failed" : "sent",
@@ -260,7 +281,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   });
 
   // Cancel any active sequences for this person
-  await cancelSequencesForPerson(db, orig.personId);
+  await cancelSequencesForPerson(db, origPersonId);
 
   return c.json(
     {

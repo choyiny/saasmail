@@ -388,4 +388,113 @@ describe("send stores generated message-id", () => {
       .get();
     expect(row?.messageId).toMatch(/^<[A-Za-z0-9_-]+@x\.com>$/);
   });
+
+  describe("reply to own sent email", () => {
+    it("replies to a sent email id using its to_address and message_id", async () => {
+      const { apiKey, userId } = await createTestUser({
+        id: "u-rso",
+        role: "admin",
+        email: "admin@x.com",
+      });
+      await grantInbox(userId, "a@x.com");
+      await createTestPerson({ id: "p-rso", email: "target@external.com" });
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      // Seed a prior sent email with a known message_id.
+      await db.insert(sentEmails).values({
+        id: "sent-1",
+        personId: "p-rso",
+        fromAddress: "a@x.com",
+        toAddress: "target@external.com",
+        subject: "Original outreach",
+        bodyHtml: "<p>hi</p>",
+        bodyText: null,
+        messageId: "<prior@x.com>",
+        resendId: "r-1",
+        status: "sent",
+        sentAt: now,
+        createdAt: now,
+      });
+      const res = await authFetch("/api/send/reply/sent-1", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          fromAddress: "a@x.com",
+          bodyHtml: "<p>follow up</p>",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string };
+      const row = await db
+        .select()
+        .from(sentEmails)
+        .where(eq(sentEmails.id, body.id))
+        .get();
+      expect(row?.toAddress).toBe("target@external.com");
+      expect(row?.inReplyTo).toBe("<prior@x.com>");
+      expect(row?.subject).toBe("Re: Original outreach");
+      expect(row?.personId).toBe("p-rso");
+    });
+
+    it("replies to a sent email with null message_id (legacy row) and omits in_reply_to", async () => {
+      const { apiKey, userId } = await createTestUser({
+        id: "u-rso2",
+        role: "admin",
+        email: "admin@x.com",
+      });
+      await grantInbox(userId, "a@x.com");
+      await createTestPerson({ id: "p-rso2", email: "target2@external.com" });
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      await db.insert(sentEmails).values({
+        id: "sent-legacy",
+        personId: "p-rso2",
+        fromAddress: "a@x.com",
+        toAddress: "target2@external.com",
+        subject: "Legacy outreach",
+        bodyHtml: "<p>hi</p>",
+        bodyText: null,
+        messageId: null,
+        resendId: "r-legacy",
+        status: "sent",
+        sentAt: now,
+        createdAt: now,
+      });
+      const res = await authFetch("/api/send/reply/sent-legacy", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          fromAddress: "a@x.com",
+          bodyHtml: "<p>follow up</p>",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { id: string };
+      const row = await db
+        .select()
+        .from(sentEmails)
+        .where(eq(sentEmails.id, body.id))
+        .get();
+      expect(row?.inReplyTo).toBeNull();
+      expect(row?.toAddress).toBe("target2@external.com");
+    });
+
+    it("returns 404 when id matches neither emails nor sent_emails", async () => {
+      const { apiKey, userId } = await createTestUser({
+        id: "u-rso3",
+        role: "admin",
+        email: "admin@x.com",
+      });
+      await grantInbox(userId, "a@x.com");
+      const res = await authFetch("/api/send/reply/does-not-exist", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          fromAddress: "a@x.com",
+          bodyHtml: "<p>follow up</p>",
+        }),
+      });
+      expect(res.status).toBe(404);
+    });
+  });
 });
