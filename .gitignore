@@ -13,3 +13,6 @@ e2e/.auth/
 test-results/
 playwright-report/
 .playwright/
+
+# Local superpowers docs (specs, plans)
+docs/superpowers/
