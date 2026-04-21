@@ -112,6 +112,8 @@ export async function handleEmail(
       httpMetadata: { contentType: att.contentType },
     });
 
+    const isInline = att.disposition === "inline" && !!att.contentId;
+
     await db.insert(attachments).values({
       id: attachmentId,
       emailId,
@@ -119,11 +121,11 @@ export async function handleEmail(
       contentType: att.contentType,
       size: att.content.byteLength,
       r2Key,
-      contentId: att.contentId,
+      contentId: isInline ? att.contentId : null,
       createdAt: now,
     });
 
-    if (att.contentId) {
+    if (isInline && att.contentId) {
       const cleanCid = att.contentId.replace(/^<|>$/g, "");
       cidMap[cleanCid] = attachmentId;
     }

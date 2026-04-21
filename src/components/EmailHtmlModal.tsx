@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import { Paperclip } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +21,10 @@ export default function EmailHtmlModal({
 }: EmailHtmlModalProps) {
   if (!email) return null;
 
+  const downloadableAttachments = (email.attachments ?? []).filter(
+    (att) => !att.contentId,
+  );
+
   const senderLabel =
     email.type === "sent"
       ? `You → ${email.toAddress}`
@@ -37,6 +42,20 @@ export default function EmailHtmlModal({
             {new Date(email.timestamp * 1000).toLocaleString()}
           </p>
         </DialogHeader>
+        {downloadableAttachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-b border-border px-6 py-3">
+            {downloadableAttachments.map((att) => (
+              <a
+                key={att.id}
+                href={`/api/attachments/${att.id}`}
+                className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[10px] text-text-secondary hover:bg-bg-muted"
+              >
+                <Paperclip size={10} />
+                {att.filename}
+              </a>
+            ))}
+          </div>
+        )}
         <div
           className="overflow-auto"
           style={{ maxHeight: "calc(90vh - 120px)" }}
