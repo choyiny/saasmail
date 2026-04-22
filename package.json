@@ -61,6 +61,7 @@
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.14",
     "lucide-react": "^1.8.0",
+    "mimetext": "^3.0.28",
     "nanoid": "^5.1.5",
     "postal-mime": "^2.4.1",
     "react": "^18.3.1",

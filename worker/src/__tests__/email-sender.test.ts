@@ -39,7 +39,7 @@ describe("createEmailSender", () => {
 });
 
 describe("CloudflareSender", () => {
-  it("returns messageId on success", async () => {
+  it("sends a raw MIME message with custom headers embedded", async () => {
     const fakeBinding = {
       send: vi.fn().mockResolvedValue({ messageId: "msg-123" }),
     };
@@ -48,24 +48,32 @@ describe("CloudflareSender", () => {
     } as unknown as CloudflareBindings);
 
     const result = await sender.send({
-      from: "a@b.com",
+      from: '"Alice" <a@b.com>',
       to: "c@d.com",
       subject: "hello",
       html: "<p>hi</p>",
       text: "hi",
-      headers: { "In-Reply-To": "<orig@msg>" },
+      headers: {
+        "Message-ID": "<new@msg>",
+        "In-Reply-To": "<orig@msg>",
+      },
     });
 
     expect(result.id).toBe("msg-123");
     expect(result.error).toBeNull();
-    expect(fakeBinding.send).toHaveBeenCalledWith({
-      from: "a@b.com",
-      to: "c@d.com",
-      subject: "hello",
-      html: "<p>hi</p>",
-      text: "hi",
-      headers: { "In-Reply-To": "<orig@msg>" },
-    });
+    expect(fakeBinding.send).toHaveBeenCalledTimes(1);
+    const sent = fakeBinding.send.mock.calls[0][0] as {
+      from: string;
+      to: string;
+    };
+    // EmailMessage uses the bare address as the envelope sender.
+    expect(sent.from).toBe("a@b.com");
+    expect(sent.to).toBe("c@d.com");
+    const serialized = JSON.stringify(sent);
+    expect(serialized).toContain("Message-ID: <new@msg>");
+    expect(serialized).toContain("In-Reply-To: <orig@msg>");
+    expect(serialized).toContain("text/plain");
+    expect(serialized).toContain("text/html");
   });
 
   it("catches thrown errors and returns normalized result", async () => {
