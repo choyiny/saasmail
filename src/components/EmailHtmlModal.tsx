@@ -1,4 +1,4 @@
-import DOMPurify from "dompurify";
+import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { Paperclip } from "lucide-react";
 import {
   Dialog,
@@ -64,9 +64,7 @@ export default function EmailHtmlModal({
             <div
               className="prose prose-sm max-w-none bg-white p-6 text-black"
               dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(email.bodyHtml, {
-                  ADD_ATTR: ["target"],
-                }),
+                __html: sanitizeEmailHtml(email.bodyHtml),
               }}
             />
           ) : (

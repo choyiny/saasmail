@@ -1,5 +1,5 @@
 import { useState } from "react";
-import DOMPurify from "dompurify";
+import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { Maximize2, Paperclip, Trash2 } from "lucide-react";
 import type { Email } from "@/lib/api";
 
@@ -118,9 +118,7 @@ export default function MessageBubble({
         <div
           className="prose prose-sm max-w-none text-xs text-text-secondary leading-relaxed"
           dangerouslySetInnerHTML={{
-            __html: DOMPurify.sanitize(email.bodyHtml, {
-              ADD_ATTR: ["target"],
-            }),
+            __html: sanitizeEmailHtml(email.bodyHtml),
           }}
         />
       ) : displayText ? (
