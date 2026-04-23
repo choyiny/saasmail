@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Paperclip,
+  X,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
@@ -115,13 +116,23 @@ export default function PersonList({
   return (
     <div className="flex h-full flex-col">
       <div className="space-y-2 p-3">
-        <input
-          type="text"
-          placeholder="Search people..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
-        />
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="Search..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 pr-7 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
       </div>
       <ScrollArea className="flex-1">
         {loading ? (

@@ -4,7 +4,7 @@ import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
-import { json200Response, escapeLike } from "../lib/helpers";
+import { json200Response, escapeLike, escapeFts } from "../lib/helpers";
 import type { Variables } from "../variables";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 
@@ -80,8 +80,14 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
   const conditions: any[] = [];
   if (q) {
     const pattern = `%${escapeLike(q)}%`;
+    const ftsQuery = escapeFts(q);
     conditions.push(
-      sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\')`,
+      sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\'
+        OR s.id IN (
+          SELECT person_id FROM emails
+          JOIN emails_fts ON emails.rowid = emails_fts.rowid
+          WHERE emails_fts MATCH ${ftsQuery}
+        ))`,
     );
   }
 
