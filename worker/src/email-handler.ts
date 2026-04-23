@@ -9,14 +9,13 @@ import { inboxPermissions } from "./db/inbox-permissions.schema";
 import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
+import {
+  MAX_ADMIN_FANOUT,
+  computeFanoutTargets,
+} from "./lib/notification-fanout";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
-// Cap admin WebSocket fanout so a deployment with many admin accounts does
-// not incur unbounded DO RPCs on every inbound email. A presence-aware
-// implementation (only notifying users with an active stream) would be the
-// proper long-term fix; until then this keeps worst-case cost predictable.
-const MAX_ADMIN_FANOUT = 50;
 
 /**
  * Strip path traversal sequences and dangerous characters from filenames.
@@ -185,18 +184,18 @@ export async function handleEmail(
             .where(eq(users.role, "admin"))
             .limit(MAX_ADMIN_FANOUT + 1),
         ]);
-        if (adminRows.length > MAX_ADMIN_FANOUT) {
+        const { userIds, adminTruncated } = computeFanoutTargets({
+          permissionUserIds: permRows.map((r) => r.userId),
+          adminUserIds: adminRows.map((r) => r.id),
+        });
+        if (adminTruncated) {
           console.warn(
             `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
           );
         }
-        const userIds = new Set<string>([
-          ...permRows.map((r) => r.userId),
-          ...adminRows.slice(0, MAX_ADMIN_FANOUT).map((r) => r.id),
-        ]);
         const payload = JSON.stringify({ inbox: parsed.to });
         const results = await Promise.allSettled(
-          [...userIds].map((userId) => {
+          userIds.map((userId) => {
             const hub = env.NOTIFICATIONS_HUB.get(
               env.NOTIFICATIONS_HUB.idFromName(userId),
             );
