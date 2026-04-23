@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import PersonList from "./PersonList";
 import PersonDetail from "./PersonDetail";
 import ComposeModal from "./ComposeModal";
 import { fetchStats, type GroupedPerson, type Stats } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
+import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
 
 export default function InboxPage() {
   const [selectedPerson, setSelectedPerson] = useState<GroupedPerson | null>(
@@ -13,6 +14,7 @@ export default function InboxPage() {
   const [people, setPeople] = useState<GroupedPerson[]>([]);
   const [composeOpen, setComposeOpen] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const { data: session } = useSession();
 
   function handleEmailRead(personId: string) {
@@ -47,6 +49,12 @@ export default function InboxPage() {
       .catch(() => {});
   }, []);
 
+  const incrementRefreshKey = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  useRealtimeUpdates(incrementRefreshKey);
+
   const isAdmin = session?.user?.role === "admin";
 
   if (stats && stats.recipients.length === 0 && !isAdmin) {
@@ -77,6 +85,7 @@ export default function InboxPage() {
           setPeople={setPeople}
           selectedPersonId={selectedPerson?.id ?? null}
           onSelectPerson={setSelectedPerson}
+          refreshKey={refreshKey}
         />
       </div>
 
@@ -101,6 +110,7 @@ export default function InboxPage() {
                 person={selectedPerson}
                 onEmailRead={handleEmailRead}
                 onEmailDelete={handleEmailDelete}
+                refreshKey={refreshKey}
               />
             </div>
           </div>

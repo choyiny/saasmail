@@ -24,6 +24,8 @@ import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { notificationsRouter } from "./routers/notifications-router";
+export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
@@ -194,6 +196,7 @@ app.route("/api/user", userRouter);
 app.route("/api/api-keys", apiKeysRouter);
 app.route("/api/invites", invitesRouter);
 app.route("/api/sequences", sequencesRouter);
+app.route("/api/notifications", notificationsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);

@@ -59,6 +59,20 @@
       }
     ]
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NOTIFICATIONS_HUB",
+        "class_name": "NotificationsHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["NotificationsHub"]
+    }
+  ],
   "triggers": {
     "crons": ["0 * * * *"]
   },

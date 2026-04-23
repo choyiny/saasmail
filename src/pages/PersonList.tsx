@@ -10,6 +10,7 @@ interface PersonListProps {
   setPeople: (people: GroupedPerson[]) => void;
   selectedPersonId: string | null;
   onSelectPerson: (person: GroupedPerson) => void;
+  refreshKey?: number;
 }
 
 export default function PersonList({
@@ -17,6 +18,7 @@ export default function PersonList({
   setPeople,
   selectedPersonId,
   onSelectPerson,
+  refreshKey,
 }: PersonListProps) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -46,7 +48,7 @@ export default function PersonList({
         .finally(() => setLoading(false));
     }, 200);
     return () => clearTimeout(timeout);
-  }, [search, page]);
+  }, [search, page, refreshKey]);
 
   function formatTime(ts: number) {
     const date = new Date(ts * 1000);

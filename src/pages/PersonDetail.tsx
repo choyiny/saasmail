@@ -24,6 +24,7 @@ interface PersonDetailProps {
   person: GroupedPerson;
   onEmailRead: (personId: string) => void;
   onEmailDelete: (personId: string, wasUnread: boolean) => void;
+  refreshKey?: number;
 }
 
 // Each email is associated with an "inbox" address:
@@ -71,6 +72,7 @@ export default function PersonDetail({
   person,
   onEmailRead,
   onEmailDelete,
+  refreshKey,
 }: PersonDetailProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
@@ -112,6 +114,10 @@ export default function PersonDetail({
       })
       .finally(() => setLoading(false));
   }, [person.id]);
+
+  useEffect(() => {
+    if (refreshKey) refetchEmails();
+  }, [refreshKey]);
 
   // Auto-scroll to latest (bottom) whenever the email list or expansion changes
   useEffect(() => {

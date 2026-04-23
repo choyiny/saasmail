@@ -5,8 +5,14 @@ import { schema } from "./db/schema";
 import { people } from "./db/people.schema";
 import { emails } from "./db/emails.schema";
 import { attachments } from "./db/attachments.schema";
+import { inboxPermissions } from "./db/inbox-permissions.schema";
+import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
+import {
+  MAX_ADMIN_FANOUT,
+  computeFanoutTargets,
+} from "./lib/notification-fanout";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -159,6 +165,61 @@ export async function handleEmail(
     receivedAt: now,
     createdAt: now,
   });
+
+  // Notify connected WebSocket clients about the new email (per-user DOs).
+  // Fan out to users with explicit permission for this inbox, plus admins
+  // (capped) — all best-effort via ctx.waitUntil so push failures never
+  // block the inbound-email path.
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const [permRows, adminRows] = await Promise.all([
+          db
+            .select({ userId: inboxPermissions.userId })
+            .from(inboxPermissions)
+            .where(eq(inboxPermissions.email, parsed.to)),
+          db
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.role, "admin"))
+            .limit(MAX_ADMIN_FANOUT + 1),
+        ]);
+        const { userIds, adminTruncated } = computeFanoutTargets({
+          permissionUserIds: permRows.map((r) => r.userId),
+          adminUserIds: adminRows.map((r) => r.id),
+        });
+        if (adminTruncated) {
+          console.warn(
+            `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
+          );
+        }
+        const payload = JSON.stringify({ inbox: parsed.to });
+        const results = await Promise.allSettled(
+          userIds.map((userId) => {
+            const hub = env.NOTIFICATIONS_HUB.get(
+              env.NOTIFICATIONS_HUB.idFromName(userId),
+            );
+            return hub.fetch(
+              new Request("http://do/notify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: payload,
+              }),
+            );
+          }),
+        );
+        const failures = results.filter((r) => r.status === "rejected").length;
+        if (failures > 0) {
+          console.warn(
+            `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
+          );
+        }
+      } catch (err) {
+        // Non-fatal: real-time push is best-effort.
+        console.warn("Real-time fanout error:", err);
+      }
+    })(),
+  );
 
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, actualPersonId);
