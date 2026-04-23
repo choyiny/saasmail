@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-04-23
+
+### Added
+
+- Issue and pull-request templates, Code of Conduct, Dependabot config, CodeQL scanning, and `.editorconfig` for open-source community hygiene.
+- Type-check step added to the CI test workflow.
+- CI, license, and Cloudflare badges added to the README.
+
+### Fixed
+
+- Cloudflare Email Sending binding now works with custom headers (Message-ID, In-Reply-To): the sender rewrites outbound messages as raw MIME via `mimetext` instead of the object-form builder, which rejects non-whitelisted headers.
+- Sidebar unread and total counts now update immediately when an email is read or deleted, instead of remaining stale until the next refetch.
+
 ## [0.1.0] - 2026-04-21
 
 ### Added
@@ -49,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/choyiny/saasmail/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/choyiny/saasmail/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/choyiny/saasmail/releases/tag/v0.0.1
