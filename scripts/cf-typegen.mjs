@@ -10,12 +10,7 @@
  * local file if there was one. A crash would leave the original at
  * .wrangler.jsonc.local-backup for manual recovery.
  */
-import {
-  copyFileSync,
-  existsSync,
-  renameSync,
-  unlinkSync,
-} from "node:fs";
+import { copyFileSync, existsSync, renameSync, unlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 
 const LOCAL = "wrangler.jsonc";
