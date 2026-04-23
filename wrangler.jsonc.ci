@@ -49,6 +49,20 @@
   "triggers": {
     "crons": ["0 * * * *"]
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NOTIFICATIONS_HUB",
+        "class_name": "NotificationsHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["NotificationsHub"]
+    }
+  ],
   "vars": {
     "BASE_URL": "http://localhost:8080",
     "TRUSTED_ORIGINS": "http://localhost:8080,http://localhost:8788",

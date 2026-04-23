@@ -16,6 +16,7 @@
     "db:seed:dev": "wrangler d1 execute saasmail-db --local --file=seeds/demo.sql",
     "db:studio:dev": "drizzle-kit studio",
     "db:studio:prod": "NODE_ENV=production drizzle-kit studio",
+    "cf-typegen": "node scripts/cf-typegen.mjs",
     "test": "vitest run --config vitest.config.test.ts",
     "test:watch": "vitest --config vitest.config.test.ts",
     "prepare": "husky",
