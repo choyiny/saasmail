@@ -29,6 +29,10 @@ export const TEST_IDS = {
   chatBubble: "chat-bubble",
   threadMessage: "thread-message",
 
+  // Person list
+  personRow: "person-row",
+  personUnreadBadge: "person-unread-badge",
+
   // Compose
   composeSendButton: "compose-send-button",
   composeBody: "compose-body",

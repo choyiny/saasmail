@@ -10,9 +10,36 @@ export default function InboxPage() {
   const [selectedPerson, setSelectedPerson] = useState<GroupedPerson | null>(
     null,
   );
+  const [people, setPeople] = useState<GroupedPerson[]>([]);
   const [composeOpen, setComposeOpen] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const { data: session } = useSession();
+
+  function handleEmailRead(personId: string) {
+    setPeople((prev) =>
+      prev.map((p) =>
+        p.id === personId
+          ? { ...p, unreadCount: Math.max(0, p.unreadCount - 1) }
+          : p,
+      ),
+    );
+  }
+
+  function handleEmailDelete(personId: string, wasUnread: boolean) {
+    setPeople((prev) =>
+      prev.map((p) =>
+        p.id === personId
+          ? {
+              ...p,
+              totalCount: Math.max(0, p.totalCount - 1),
+              unreadCount: wasUnread
+                ? Math.max(0, p.unreadCount - 1)
+                : p.unreadCount,
+            }
+          : p,
+      ),
+    );
+  }
 
   useEffect(() => {
     fetchStats()
@@ -46,6 +73,8 @@ export default function InboxPage() {
         }`}
       >
         <PersonList
+          people={people}
+          setPeople={setPeople}
           selectedPersonId={selectedPerson?.id ?? null}
           onSelectPerson={setSelectedPerson}
         />
@@ -68,7 +97,11 @@ export default function InboxPage() {
               Back
             </button>
             <div className="flex-1 overflow-hidden">
-              <PersonDetail person={selectedPerson} />
+              <PersonDetail
+                person={selectedPerson}
+                onEmailRead={handleEmailRead}
+                onEmailDelete={handleEmailDelete}
+              />
             </div>
           </div>
         ) : (

@@ -6,15 +6,18 @@ import { fetchGroupedPeople, type GroupedPerson } from "@/lib/api";
 const PAGE_SIZE = 50;
 
 interface PersonListProps {
+  people: GroupedPerson[];
+  setPeople: (people: GroupedPerson[]) => void;
   selectedPersonId: string | null;
   onSelectPerson: (person: GroupedPerson) => void;
 }
 
 export default function PersonList({
+  people,
+  setPeople,
   selectedPersonId,
   onSelectPerson,
 }: PersonListProps) {
-  const [people, setPeople] = useState<GroupedPerson[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -83,6 +86,8 @@ export default function PersonList({
             return (
               <button
                 key={person.id}
+                data-testid="person-row"
+                data-person-id={person.id}
                 onClick={() => onSelectPerson(person)}
                 className={`w-full border-b border-border px-4 py-2.5 text-left transition-colors hover:bg-bg-muted ${
                   isSelected ? "bg-bg-muted" : ""
@@ -115,7 +120,10 @@ export default function PersonList({
                       <Paperclip size={10} className="text-text-tertiary" />
                     )}
                     {person.unreadCount > 0 && (
-                      <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-unread px-1 text-[10px] font-semibold text-white">
+                      <span
+                        data-testid="person-unread-badge"
+                        className="flex h-4 min-w-4 items-center justify-center rounded-full bg-unread px-1 text-[10px] font-semibold text-white"
+                      >
                         {person.unreadCount}
                       </span>
                     )}

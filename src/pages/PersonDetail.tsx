@@ -22,6 +22,8 @@ import ChatInboxSection from "@/components/ChatInboxSection";
 
 interface PersonDetailProps {
   person: GroupedPerson;
+  onEmailRead: (personId: string) => void;
+  onEmailDelete: (personId: string, wasUnread: boolean) => void;
 }
 
 // Each email is associated with an "inbox" address:
@@ -65,7 +67,11 @@ function groupEmailsByInbox(emails: Email[]): ThreadInboxGroup[] {
   return groups;
 }
 
-export default function PersonDetail({ person }: PersonDetailProps) {
+export default function PersonDetail({
+  person,
+  onEmailRead,
+  onEmailDelete,
+}: PersonDetailProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
@@ -133,6 +139,7 @@ export default function PersonDetail({ person }: PersonDetailProps) {
     setEmails((prev) =>
       prev.map((e) => (e.id === email.id ? { ...e, isRead: 1 } : e)),
     );
+    onEmailRead(person.id);
   }
 
   async function handleDelete(emailId: string) {
@@ -142,8 +149,11 @@ export default function PersonDetail({ person }: PersonDetailProps) {
       )
     )
       return;
+    const target = emails.find((e) => e.id === emailId);
+    const wasUnread = target?.type === "received" && target.isRead === 0;
     await deleteEmail(emailId);
     setEmails((prev) => prev.filter((e) => e.id !== emailId));
+    onEmailDelete(person.id, wasUnread);
   }
 
   const inboxGroups = useMemo(() => groupEmailsByInbox(emails), [emails]);
