@@ -3818,7 +3818,7 @@ workerd@1.20260421.1:
     "@cloudflare/workerd-linux-arm64" "1.20260421.1"
     "@cloudflare/workerd-windows-64" "1.20260421.1"
 
-wrangler@4.84.1, wrangler@^4.14.0:
+wrangler@4.84.1, wrangler@^4.84.1:
   version "4.84.1"
   resolved "https://registry.yarnpkg.com/wrangler/-/wrangler-4.84.1.tgz#2ea088ec24b027ccfaa0c3b1672bacf9f659c836"
   integrity sha512-Xe1S/Bik7pNdtdJ+asHsEZC2dX9k3WxYn2BbxFtOrrLVxN/LKi750zsrjX41jSAk00M/O1l7jzyQV4sQqw8ftg==
