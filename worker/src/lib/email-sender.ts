@@ -1,6 +1,17 @@
 import { Resend } from "resend";
 import { nanoid } from "nanoid";
+import { EmailMessage } from "cloudflare:email";
+import { createMimeMessage } from "mimetext";
 import { isDemoMode } from "./is-dev";
+
+function parseFrom(input: string): { name?: string; address: string } {
+  const match = input.match(/^\s*(.*)\s*<([^>]+)>\s*$/);
+  if (match && match[2]) {
+    const name = match[1].replace(/^"|"$/g, "").trim();
+    return { name: name || undefined, address: match[2].trim() };
+  }
+  return { address: input.trim() };
+}
 
 export interface SendEmailParams {
   from: string;
@@ -54,15 +65,25 @@ class CloudflareSender implements EmailSender {
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
     try {
-      const result = await this.binding.send({
-        from: params.from,
-        to: params.to,
-        subject: params.subject,
-        html: params.html,
-        text: params.text,
-        headers: params.headers,
-      });
-      return { id: result.messageId, error: null };
+      const { name, address } = parseFrom(params.from);
+      const msg = createMimeMessage();
+      msg.setSender(name ? { name, addr: address } : { addr: address });
+      msg.setRecipient(params.to);
+      msg.setSubject(params.subject);
+      if (params.text) {
+        msg.addMessage({ contentType: "text/plain", data: params.text });
+      }
+      if (params.html) {
+        msg.addMessage({ contentType: "text/html", data: params.html });
+      }
+      if (params.headers) {
+        for (const [key, value] of Object.entries(params.headers)) {
+          msg.setHeader(key, value);
+        }
+      }
+      const message = new EmailMessage(address, params.to, msg.asRaw());
+      const result = await this.binding.send(message);
+      return { id: result?.messageId ?? null, error: null };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       return { id: null, error: { message } };
