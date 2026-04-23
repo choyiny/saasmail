@@ -16,4 +16,3 @@ playwright-report/
 
 # Local superpowers docs (specs, plans)
 docs/superpowers/
-worker-configuration.d.ts
