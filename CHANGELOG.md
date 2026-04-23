@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-04-23
+
+### Added
+
+- Real-time inbox updates via Durable Object WebSockets: the inbox, person list, and open conversation now refetch automatically when new mail arrives, without any manual refresh.
+- `NotificationsHub` Durable Object maintains hibernatable, per-user WebSocket connections keyed by user ID so only the correct user's connections are notified.
+- `/api/notifications/stream` WebSocket upgrade endpoint; session and inbox permissions are validated in the main worker before the connection is forwarded to the DO.
+- `useRealtimeUpdates` React hook that opens a WebSocket, reconnects on close, and fires a callback on `email_received` events.
+- `wrangler.jsonc.example` now documents the DO binding and the required v1 migration for fresh deployers.
+
+### Changed
+
+- Emails are now marked read only when the user explicitly clicks the mark-read control. Auto-marking on conversation open has been removed because it conflicted with the upstream `onEmailRead` callback contract and broke the unread-count-sync test.
+
+### Security
+
+- WebSocket upgrade endpoint validates the `Origin` header against `TRUSTED_ORIGINS` to block Cross-Site WebSocket Hijacking (CSWSH).
+
 ## [0.1.1] - 2026-04-23
 
 ### Added
@@ -62,7 +80,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/choyiny/saasmail/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/choyiny/saasmail/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/choyiny/saasmail/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/choyiny/saasmail/releases/tag/v0.0.1
