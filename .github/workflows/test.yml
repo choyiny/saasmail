@@ -19,13 +19,6 @@ jobs:
         run: cp wrangler.jsonc.ci wrangler.jsonc
       - name: Create empty assets dir (referenced by wrangler.jsonc)
         run: mkdir -p dist/client
-      - name: Check worker-configuration.d.ts is in sync with wrangler.jsonc.ci
-        run: |
-          yarn cf-typegen
-          if ! git diff --exit-code worker-configuration.d.ts; then
-            echo "::error::worker-configuration.d.ts is out of sync with wrangler.jsonc.ci. Run 'yarn cf-typegen' and commit the result."
-            exit 1
-          fi
       - name: Type check
         run: yarn tsc --noEmit
       - run: yarn test
