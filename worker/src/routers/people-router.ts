@@ -3,6 +3,7 @@ import { desc, like, or, eq, sql, and, inArray } from "drizzle-orm";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
+import { sentEmails } from "../db/sent-emails.schema";
 import { json200Response, escapeLike } from "../lib/helpers";
 import type { Variables } from "../variables";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
@@ -296,4 +297,69 @@ peopleRouter.openapi(getPersonRoute, async (c) => {
   }
 
   return c.json(rows[0], 200);
+});
+
+const deletePersonRoute = createRoute({
+  method: "delete",
+  path: "/{id}",
+  tags: ["People"],
+  description:
+    "Hard delete a person and all their received emails, sent emails, and R2 attachments.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    200: { description: "Person deleted" },
+    403: { description: "Forbidden" },
+    404: { description: "Person not found" },
+  },
+});
+
+peopleRouter.openapi(deletePersonRoute, async (c) => {
+  const db = c.get("db");
+  const r2 = c.env.R2;
+  const { id } = c.req.valid("param");
+  const allowed = c.get("allowedInboxes")!;
+
+  if (!allowed.isAdmin) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  const person = await db
+    .select({ id: people.id })
+    .from(people)
+    .where(eq(people.id, id))
+    .limit(1);
+
+  if (person.length === 0) {
+    return c.json({ error: "Person not found" }, 404);
+  }
+
+  // Delete R2 attachments for all received emails belonging to this person
+  const atts = await db
+    .select({ r2Key: attachments.r2Key })
+    .from(attachments)
+    .innerJoin(emails, eq(attachments.emailId, emails.id))
+    .where(eq(emails.personId, id));
+
+  for (const att of atts) {
+    await r2.delete(att.r2Key);
+  }
+
+  await db
+    .delete(attachments)
+    .where(
+      inArray(
+        attachments.emailId,
+        db
+          .select({ id: emails.id })
+          .from(emails)
+          .where(eq(emails.personId, id)),
+      ),
+    );
+  await db.delete(emails).where(eq(emails.personId, id));
+  await db.delete(sentEmails).where(eq(sentEmails.personId, id));
+  await db.delete(people).where(eq(people.id, id));
+
+  return c.json({ success: true }, 200);
 });
