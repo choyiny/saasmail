@@ -12,6 +12,11 @@ import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+// Cap admin WebSocket fanout so a deployment with many admin accounts does
+// not incur unbounded DO RPCs on every inbound email. A presence-aware
+// implementation (only notifying users with an active stream) would be the
+// proper long-term fix; until then this keeps worst-case cost predictable.
+const MAX_ADMIN_FANOUT = 50;
 
 /**
  * Strip path traversal sequences and dangerous characters from filenames.
@@ -162,7 +167,10 @@ export async function handleEmail(
     createdAt: now,
   });
 
-  // Notify connected WebSocket clients about the new email (per-user DOs)
+  // Notify connected WebSocket clients about the new email (per-user DOs).
+  // Fan out to users with explicit permission for this inbox, plus admins
+  // (capped) — all best-effort via ctx.waitUntil so push failures never
+  // block the inbound-email path.
   ctx.waitUntil(
     (async () => {
       try {
@@ -174,14 +182,20 @@ export async function handleEmail(
           db
             .select({ id: users.id })
             .from(users)
-            .where(eq(users.role, "admin")),
+            .where(eq(users.role, "admin"))
+            .limit(MAX_ADMIN_FANOUT + 1),
         ]);
+        if (adminRows.length > MAX_ADMIN_FANOUT) {
+          console.warn(
+            `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
+          );
+        }
         const userIds = new Set<string>([
           ...permRows.map((r) => r.userId),
-          ...adminRows.map((r) => r.id),
+          ...adminRows.slice(0, MAX_ADMIN_FANOUT).map((r) => r.id),
         ]);
         const payload = JSON.stringify({ inbox: parsed.to });
-        await Promise.all(
+        const results = await Promise.allSettled(
           [...userIds].map((userId) => {
             const hub = env.NOTIFICATIONS_HUB.get(
               env.NOTIFICATIONS_HUB.idFromName(userId),
@@ -195,8 +209,15 @@ export async function handleEmail(
             );
           }),
         );
-      } catch {
-        // Non-fatal: real-time push is best-effort
+        const failures = results.filter((r) => r.status === "rejected").length;
+        if (failures > 0) {
+          console.warn(
+            `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
+          );
+        }
+      } catch (err) {
+        // Non-fatal: real-time push is best-effort.
+        console.warn("Real-time fanout error:", err);
       }
     })(),
   );

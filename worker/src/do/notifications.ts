@@ -38,8 +38,8 @@ export class NotificationsHub implements DurableObject {
   }
 
   webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {}
-  webSocketClose(ws: WebSocket) {
-    ws.close();
-  }
+  // The socket is already closed by the time this handler runs; do not call
+  // ws.close() again. The runtime will clean up the hibernated socket.
+  webSocketClose(_ws: WebSocket) {}
   webSocketError(_ws: WebSocket) {}
 }
