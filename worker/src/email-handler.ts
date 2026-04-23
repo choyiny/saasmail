@@ -5,6 +5,8 @@ import { schema } from "./db/schema";
 import { people } from "./db/people.schema";
 import { emails } from "./db/emails.schema";
 import { attachments } from "./db/attachments.schema";
+import { inboxPermissions } from "./db/inbox-permissions.schema";
+import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 
@@ -160,22 +162,44 @@ export async function handleEmail(
     createdAt: now,
   });
 
-  // Notify connected WebSocket clients about the new email
-  try {
-    const hubId = env.NOTIFICATIONS_HUB.idFromName("global");
-    const hub = env.NOTIFICATIONS_HUB.get(hubId);
-    ctx.waitUntil(
-      hub.fetch(
-        new Request("http://do/notify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inbox: parsed.to }),
-        }),
-      ),
-    );
-  } catch {
-    // Non-fatal: real-time push is best-effort
-  }
+  // Notify connected WebSocket clients about the new email (per-user DOs)
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const [permRows, adminRows] = await Promise.all([
+          db
+            .select({ userId: inboxPermissions.userId })
+            .from(inboxPermissions)
+            .where(eq(inboxPermissions.email, parsed.to)),
+          db
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.role, "admin")),
+        ]);
+        const userIds = new Set<string>([
+          ...permRows.map((r) => r.userId),
+          ...adminRows.map((r) => r.id),
+        ]);
+        const payload = JSON.stringify({ inbox: parsed.to });
+        await Promise.all(
+          [...userIds].map((userId) => {
+            const hub = env.NOTIFICATIONS_HUB.get(
+              env.NOTIFICATIONS_HUB.idFromName(userId),
+            );
+            return hub.fetch(
+              new Request("http://do/notify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: payload,
+              }),
+            );
+          }),
+        );
+      } catch {
+        // Non-fatal: real-time push is best-effort
+      }
+    })(),
+  );
 
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, actualPersonId);

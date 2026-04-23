@@ -49,11 +49,11 @@ export default function InboxPage() {
       .catch(() => {});
   }, []);
 
-  const handleEmailReceived = useCallback(() => {
+  const incrementRefreshKey = useCallback(() => {
     setRefreshKey((k) => k + 1);
   }, []);
 
-  useRealtimeUpdates(handleEmailReceived);
+  useRealtimeUpdates(incrementRefreshKey);
 
   const isAdmin = session?.user?.role === "admin";
 
@@ -110,6 +110,7 @@ export default function InboxPage() {
                 person={selectedPerson}
                 onEmailRead={handleEmailRead}
                 onEmailDelete={handleEmailDelete}
+                refreshKey={refreshKey}
               />
             </div>
           </div>

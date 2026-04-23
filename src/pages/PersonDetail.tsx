@@ -24,6 +24,7 @@ interface PersonDetailProps {
   person: GroupedPerson;
   onEmailRead: (personId: string) => void;
   onEmailDelete: (personId: string, wasUnread: boolean) => void;
+  refreshKey?: number;
 }
 
 // Each email is associated with an "inbox" address:
@@ -71,6 +72,7 @@ export default function PersonDetail({
   person,
   onEmailRead,
   onEmailDelete,
+  refreshKey,
 }: PersonDetailProps) {
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,10 +94,22 @@ export default function PersonDetail({
 
   function refetchEmails() {
     fetchPersonEmails(person.id).then((res) => {
-      setEmails(res.emails);
+      setEmails(
+        res.emails.map((e) =>
+          e.isRead === 0 && e.type === "received" ? { ...e, isRead: 1 } : e,
+        ),
+      );
       setInboxModeMap(
         new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
       );
+      const unread = res.emails.filter(
+        (e) => e.isRead === 0 && e.type === "received",
+      );
+      if (unread.length > 0) {
+        Promise.all(unread.map((e) => markEmailRead(e.id, true))).then(() => {
+          unread.forEach(() => onEmailRead(person.id));
+        });
+      }
     });
   }
 
@@ -105,10 +119,22 @@ export default function PersonDetail({
     setExpandedOlder({});
     fetchPersonEmails(person.id)
       .then((res) => {
-        setEmails(res.emails);
+        setEmails(
+          res.emails.map((e) =>
+            e.isRead === 0 && e.type === "received" ? { ...e, isRead: 1 } : e,
+          ),
+        );
         setInboxModeMap(
           new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
         );
+        const unread = res.emails.filter(
+          (e) => e.isRead === 0 && e.type === "received",
+        );
+        if (unread.length > 0) {
+          Promise.all(unread.map((e) => markEmailRead(e.id, true))).then(() => {
+            unread.forEach(() => onEmailRead(person.id));
+          });
+        }
       })
       .finally(() => setLoading(false));
   }, [person.id]);

@@ -14,16 +14,10 @@ export class NotificationsHub implements DurableObject {
         return new Response("Expected WebSocket", { status: 426 });
       }
 
-      const isAdmin = request.headers.get("X-Is-Admin") === "true";
-      const inboxes: string[] = isAdmin
-        ? []
-        : JSON.parse(request.headers.get("X-Allowed-Inboxes") ?? "[]");
-
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
 
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ isAdmin, inboxes });
 
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -31,16 +25,10 @@ export class NotificationsHub implements DurableObject {
     if (url.pathname === "/notify" && request.method === "POST") {
       const { inbox } = (await request.json()) as { inbox: string };
       for (const ws of this.ctx.getWebSockets()) {
-        const meta = ws.deserializeAttachment() as {
-          isAdmin: boolean;
-          inboxes: string[];
-        };
-        if (meta.isAdmin || meta.inboxes.includes(inbox)) {
-          try {
-            ws.send(JSON.stringify({ type: "email_received", inbox }));
-          } catch {
-            // client disconnected; DO will clean it up via webSocketClose
-          }
+        try {
+          ws.send(JSON.stringify({ type: "email_received", inbox }));
+        } catch {
+          // client disconnected; DO will clean it up via webSocketClose
         }
       }
       return new Response("ok");

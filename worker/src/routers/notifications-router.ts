@@ -11,14 +11,20 @@ notificationsRouter.get("/stream", async (c) => {
     return c.json({ error: "Expected WebSocket upgrade" }, 426);
   }
 
-  const user = c.get("user");
-  const allowed = c.get("allowedInboxes");
+  const origin = c.req.header("Origin");
+  const trustedOrigins = c.env.TRUSTED_ORIGINS
+    ? c.env.TRUSTED_ORIGINS.split(",").map((o) => o.trim())
+    : [];
+  if (!origin || !trustedOrigins.includes(origin)) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
 
-  if (!user || !allowed) {
+  const user = c.get("user");
+  if (!user) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
-  const id = c.env.NOTIFICATIONS_HUB.idFromName("global");
+  const id = c.env.NOTIFICATIONS_HUB.idFromName(user.id);
   const stub = c.env.NOTIFICATIONS_HUB.get(id);
 
   return stub.fetch(
@@ -26,10 +32,6 @@ notificationsRouter.get("/stream", async (c) => {
       headers: {
         Upgrade: "websocket",
         Connection: "Upgrade",
-        "X-Is-Admin": allowed.isAdmin ? "true" : "false",
-        "X-Allowed-Inboxes": allowed.isAdmin
-          ? "[]"
-          : JSON.stringify(allowed.inboxes),
       },
     }),
   );
