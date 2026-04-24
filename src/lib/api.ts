@@ -156,6 +156,10 @@ export async function deleteEmail(
   return apiFetch(`/api/emails/${id}`, { method: "DELETE" });
 }
 
+export async function deletePerson(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/api/people/${id}`, { method: "DELETE" });
+}
+
 export async function sendEmail(data: {
   to: string;
   fromAddress: string;

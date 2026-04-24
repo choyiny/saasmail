@@ -96,7 +96,11 @@ export default function InboxPage() {
           setPeople={setPeople}
           selectedPersonId={selectedPerson?.id ?? null}
           onSelectPerson={setSelectedPerson}
+          onPersonDeleted={(id) => {
+            if (selectedPerson?.id === id) setSelectedPerson(null);
+          }}
           refreshKey={refreshKey}
+          isAdmin={isAdmin}
         />
       </div>
 
