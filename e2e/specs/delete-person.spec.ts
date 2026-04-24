@@ -72,8 +72,10 @@ test.describe.serial("delete person", () => {
     await expect(bobRow).toBeVisible();
     await bobRow.click();
 
-    // Right panel should show Bob's emails.
-    await expect(page.locator("text=bob@customers.test")).toBeVisible();
+    // Right panel should show Bob's detail heading (Bob Brown is the seeded name).
+    await expect(
+      page.getByRole("heading", { name: "Bob Brown" }),
+    ).toBeVisible();
 
     // Open the kebab for Bob.
     await bobRow.hover();
