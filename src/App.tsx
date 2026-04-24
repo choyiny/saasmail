@@ -24,6 +24,7 @@ import SequencesPage from "@/pages/SequencesPage";
 import SequenceDetailPage from "@/pages/SequenceDetailPage";
 import SequenceEditorPage from "@/pages/SequenceEditorPage";
 import InboxesPage from "./pages/InboxesPage";
+import NotificationsSettingsPage from "@/pages/NotificationsSettingsPage";
 
 const queryClient = new QueryClient();
 
@@ -106,7 +107,7 @@ function App() {
                 <Route path="/inboxes" element={<InboxesPage />} />
                 <Route
                   path="/settings"
-                  element={<Navigate to="/inboxes" replace />}
+                  element={<NotificationsSettingsPage />}
                 />
                 <Route path="/*" element={<InboxPage />} />
               </Route>

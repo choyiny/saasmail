@@ -292,6 +292,10 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
 - `vars.BASE_URL` — Your deployed URL (used for OAuth redirects and BetterAuth)
 - `vars.TRUSTED_ORIGINS` — CORS allowed origins
 - `vars.COOKIE_PREFIX` — Prefix for better-auth session cookies
+- `vars.VAPID_PUBLIC_KEY` / `vars.VAPID_SUBJECT` — public VAPID config for
+  browser push notifications. Generate with `yarn vapid:generate` and store
+  the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank
+  to disable push.
 
 To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used as both the favicon and the in-app logo. The `/saasmail-onboarding` skill will do this for you interactively.
 

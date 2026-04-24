@@ -6,6 +6,8 @@ import ComposeModal from "./ComposeModal";
 import { fetchStats, type GroupedPerson, type Stats } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
+import { PushOptInBanner } from "@/components/PushOptInBanner";
+import { isPushSupported, hasDismissedPrompt } from "@/lib/push";
 
 export default function InboxPage() {
   const [selectedPerson, setSelectedPerson] = useState<GroupedPerson | null>(
@@ -15,6 +17,7 @@ export default function InboxPage() {
   const [composeOpen, setComposeOpen] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [showBanner, setShowBanner] = useState(false);
   const { data: session } = useSession();
 
   function handleEmailRead(personId: string) {
@@ -53,7 +56,14 @@ export default function InboxPage() {
     setRefreshKey((k) => k + 1);
   }, []);
 
-  useRealtimeUpdates(incrementRefreshKey);
+  function onShouldPromptPush() {
+    if (!isPushSupported()) return;
+    if (hasDismissedPrompt()) return;
+    if (Notification.permission !== "default") return;
+    setShowBanner(true);
+  }
+
+  useRealtimeUpdates(incrementRefreshKey, onShouldPromptPush);
 
   const isAdmin = session?.user?.role === "admin";
 
@@ -80,6 +90,7 @@ export default function InboxPage() {
           selectedPerson ? "hidden md:block" : "block"
         }`}
       >
+        {showBanner && <PushOptInBanner onClose={() => setShowBanner(false)} />}
         <PersonList
           people={people}
           setPeople={setPeople}

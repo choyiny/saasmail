@@ -1,8 +1,16 @@
+import { drizzle } from "drizzle-orm/d1";
+import { eq } from "drizzle-orm";
+import { schema } from "../db/schema";
+import { pushSubscriptions } from "../db/push-subscriptions.schema";
+import { sendPush, type PushPayload, type VapidConfig } from "../lib/web-push";
+
 export class NotificationsHub implements DurableObject {
   ctx: DurableObjectState;
+  env: CloudflareBindings;
 
-  constructor(ctx: DurableObjectState) {
+  constructor(ctx: DurableObjectState, env: CloudflareBindings) {
     this.ctx = ctx;
+    this.env = env;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -13,23 +21,24 @@ export class NotificationsHub implements DurableObject {
       if (upgrade !== "websocket") {
         return new Response("Expected WebSocket", { status: 426 });
       }
-
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-
       this.ctx.acceptWebSocket(server);
-
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    if (url.pathname === "/deliver" && request.method === "POST") {
+      return this.handleDeliver(request);
+    }
+
+    // Back-compat: /notify falls through to WS-only delivery. Remove once the
+    // email-handler is fully migrated (Task 9) and no callers remain.
     if (url.pathname === "/notify" && request.method === "POST") {
       const { inbox } = (await request.json()) as { inbox: string };
       for (const ws of this.ctx.getWebSockets()) {
         try {
           ws.send(JSON.stringify({ type: "email_received", inbox }));
-        } catch {
-          // client disconnected; DO will clean it up via webSocketClose
-        }
+        } catch {}
       }
       return new Response("ok");
     }
@@ -37,9 +46,106 @@ export class NotificationsHub implements DurableObject {
     return new Response("Not found", { status: 404 });
   }
 
+  private async handleDeliver(request: Request): Promise<Response> {
+    const payload = (await request.json()) as {
+      inbox: string;
+      threadId: string;
+      personId: string;
+      senderName: string;
+      subject: string;
+      bodyPreview: string;
+    };
+
+    // Presence check: any live WS for this user?
+    const sockets = this.ctx.getWebSockets();
+    if (sockets.length > 0) {
+      // Back-compat frame shape — useRealtimeUpdates already handles this.
+      const frame = JSON.stringify({
+        type: "email_received",
+        inbox: payload.inbox,
+      });
+      for (const ws of sockets) {
+        try {
+          ws.send(frame);
+        } catch {}
+      }
+      return Response.json({ via: "ws" });
+    }
+
+    // No WS: fall back to Web Push. Read this user's subscriptions.
+    const userId = this.ctx.id.name; // DO id is idFromName(userId)
+    if (!userId) return Response.json({ via: "none" });
+
+    const vapidPublic = this.env.VAPID_PUBLIC_KEY ?? "";
+    const vapidPrivate = this.env.VAPID_PRIVATE_KEY ?? "";
+    const vapidSubject = this.env.VAPID_SUBJECT ?? "";
+    if (!vapidPublic || !vapidPrivate || !vapidSubject) {
+      return Response.json({ via: "none" });
+    }
+
+    const db = drizzle(this.env.DB, { schema });
+    const subs = await db
+      .select()
+      .from(pushSubscriptions)
+      .where(eq(pushSubscriptions.userId, userId));
+
+    if (subs.length === 0) return Response.json({ via: "none" });
+
+    const vapid: VapidConfig = {
+      publicKey: vapidPublic,
+      privateKey: vapidPrivate,
+      subject: vapidSubject,
+    };
+    const pushPayload: PushPayload = {
+      title: payload.senderName || "New email",
+      body: payload.subject || payload.bodyPreview || "",
+      tag: `thread:${payload.threadId}`,
+      icon: "/saasmail-logo.png",
+      badge: "/saasmail-logo.png",
+      data: {
+        url: `/inbox/${encodeURIComponent(payload.inbox)}/${payload.personId}`,
+        threadId: payload.threadId,
+      },
+    };
+
+    const results = await Promise.allSettled(
+      subs.map(async (sub) => {
+        try {
+          const { status } = await sendPush(
+            { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
+            pushPayload,
+            vapid,
+          );
+          return { id: sub.id, status };
+        } catch {
+          return { id: sub.id, status: 0 };
+        }
+      }),
+    );
+
+    const now = Math.floor(Date.now() / 1000);
+    let sent = 0;
+    let pruned = 0;
+    for (const r of results) {
+      if (r.status !== "fulfilled") continue;
+      const { id, status } = r.value;
+      if (status >= 200 && status < 300) {
+        sent++;
+        await db
+          .update(pushSubscriptions)
+          .set({ lastUsedAt: now })
+          .where(eq(pushSubscriptions.id, id));
+      } else if (status === 404 || status === 410) {
+        pruned++;
+        await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, id));
+      }
+      // 401/403/0/other: leave the row, log-only.
+    }
+
+    return Response.json({ via: "push", sent, pruned });
+  }
+
   webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {}
-  // The socket is already closed by the time this handler runs; do not call
-  // ws.close() again. The runtime will clean up the hibernated socket.
   webSocketClose(_ws: WebSocket) {}
   webSocketError(_ws: WebSocket) {}
 }

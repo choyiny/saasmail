@@ -9,11 +9,16 @@ const MAX_RECONNECT_MS = 60_000;
 // immediately closes with an explicit code.
 const TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403]);
 
-export function useRealtimeUpdates(onEmailReceived: () => void) {
+export function useRealtimeUpdates(
+  onEmailReceived: () => void,
+  onShouldPromptPush?: () => void,
+) {
   // Keep the latest callback in a ref so we don't bake a stale closure into
   // the long-lived socket lifecycle.
   const callbackRef = useRef(onEmailReceived);
   callbackRef.current = onEmailReceived;
+  const promptRef = useRef(onShouldPromptPush);
+  promptRef.current = onShouldPromptPush;
 
   useEffect(() => {
     let ws: WebSocket | null = null;
@@ -48,6 +53,7 @@ export function useRealtimeUpdates(onEmailReceived: () => void) {
           const data = JSON.parse(event.data);
           if (data.type === "email_received") {
             callbackRef.current();
+            promptRef.current?.();
           }
         } catch {}
       };

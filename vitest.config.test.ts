@@ -11,6 +11,11 @@ export default defineConfig({
       },
       miniflare: {
         bindings: {
+          // `wrangler.jsonc` ships a `<your-deployed-url>` placeholder so new
+          // clones don't accidentally send tests to a real deployment. Override
+          // with a valid URL so BetterAuth initializes during tests.
+          BASE_URL: "http://localhost:8080",
+          TRUSTED_ORIGINS: "http://localhost:8080,http://localhost:8788",
           RESEND_API_KEY: "re_test_fake_key",
           // Tests authenticate via API keys (no WebAuthn ceremony available).
           // Disable the passkey gate so the existing fixtures keep working;
@@ -21,6 +26,9 @@ export default defineConfig({
           // auto-loads those secrets. Force it off for tests so sequence
           // processor / enroll route exercise real (non-demo) behavior.
           DEMO_MODE: "0",
+          VAPID_PRIVATE_KEY: "test-vapid-private",
+          VAPID_PUBLIC_KEY: "test-vapid-public",
+          VAPID_SUBJECT: "mailto:test@example.com",
         },
       },
     }),

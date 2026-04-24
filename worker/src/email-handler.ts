@@ -193,17 +193,24 @@ export async function handleEmail(
             `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
           );
         }
-        const payload = JSON.stringify({ inbox: parsed.to });
+        const deliverPayload = JSON.stringify({
+          inbox: parsed.to,
+          threadId: actualPersonId,
+          personId: actualPersonId,
+          senderName: parsed.from.name || parsed.from.address,
+          subject: parsed.subject ?? "",
+          bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
+        });
         const results = await Promise.allSettled(
           userIds.map((userId) => {
             const hub = env.NOTIFICATIONS_HUB.get(
               env.NOTIFICATIONS_HUB.idFromName(userId),
             );
             return hub.fetch(
-              new Request("http://do/notify", {
+              new Request("http://do/deliver", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: payload,
+                body: deliverPayload,
               }),
             );
           }),

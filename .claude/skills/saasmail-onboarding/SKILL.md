@@ -194,6 +194,57 @@ yarn db:migrate:prod
 
 This applies schema migrations to the remote D1 database directly via wrangler; the worker does not need to be deployed yet.
 
+### Step 6.5: Configure VAPID Keys (Browser Push Notifications)
+
+Check whether VAPID keys are already configured:
+
+```bash
+# Check wrangler.jsonc for the public key
+grep -q "VAPID_PUBLIC_KEY" wrangler.jsonc && echo "public key present" || echo "public key missing"
+
+# Check Cloudflare secrets for the private key
+wrangler secret list
+```
+
+If `VAPID_PUBLIC_KEY` appears in `wrangler.jsonc` **and** `VAPID_PRIVATE_KEY` appears in `wrangler secret list`, say:
+
+> VAPID keys already configured, skipping.
+
+Otherwise, ask the user:
+
+> saasmail supports browser push notifications via the Web Push API. Would you like to generate VAPID keys now? (Recommended — push notifications won't work without them.)
+
+**If yes:**
+
+1. Generate the keypair:
+
+   ```bash
+   yarn vapid:generate
+   ```
+
+   The script prints a `VAPID_PUBLIC_KEY` and a `VAPID_PRIVATE_KEY`. Copy both values.
+
+2. Store the private key as a Cloudflare secret:
+
+   ```bash
+   wrangler secret put VAPID_PRIVATE_KEY
+   ```
+
+   Paste the `VAPID_PRIVATE_KEY` value when wrangler prompts.
+
+3. Add the public key and subject to `wrangler.jsonc` under `[vars]` (or the top-level `vars` object, matching the existing style):
+   ```jsonc
+   "VAPID_PUBLIC_KEY": "<paste VAPID_PUBLIC_KEY here>",
+   "VAPID_SUBJECT": "mailto:admin@<host-of-BASE_URL>"
+   ```
+   Replace `<host-of-BASE_URL>` with the hostname from `BASE_URL` (e.g. `mail.example.com`).
+
+**If no:**
+
+> Push notifications will remain disabled until you run `yarn vapid:generate` and configure the keys.
+
+Proceed to the next step either way.
+
 ### Step 7: Deploy
 
 ```bash
