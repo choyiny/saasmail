@@ -28,6 +28,7 @@ export default defineConfig({
           DEMO_MODE: "0",
           VAPID_PRIVATE_KEY: "test-vapid-private",
           VAPID_PUBLIC_KEY: "test-vapid-public",
+          VAPID_SUBJECT: "mailto:test@example.com",
         },
       },
     }),
