@@ -96,7 +96,7 @@ describe("notifications-router /config", () => {
     await cleanDb();
   });
 
-  it("returns pushEnabled=false and empty key when VAPID is unset", async () => {
+  it("returns pushEnabled=true and public key when VAPID is configured", async () => {
     const { apiKey } = await createTestUser({ role: "member" });
     const res = await authFetch("/api/notifications/config", { apiKey });
     expect(res.status).toBe(200);
@@ -104,7 +104,8 @@ describe("notifications-router /config", () => {
       vapidPublicKey: string;
       pushEnabled: boolean;
     };
-    expect(json.vapidPublicKey).toBe("");
-    expect(json.pushEnabled).toBe(false);
+    // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set in vitest.config.test.ts
+    expect(json.vapidPublicKey).toBe("test-vapid-public");
+    expect(json.pushEnabled).toBe(true);
   });
 });

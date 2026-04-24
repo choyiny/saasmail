@@ -68,6 +68,9 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS inbox_permissions (user_id TEXT NOT NULL, email TEXT NOT NULL, created_at INTEGER NOT NULL, created_by TEXT, PRIMARY KEY(user_id, email), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)`,
     `CREATE INDEX IF NOT EXISTS inbox_permissions_email_idx ON inbox_permissions(email)`,
+    `CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions(endpoint)`,
+    `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
   ];
 
   for (const sql of statements) {
@@ -218,6 +221,7 @@ export async function authFetch(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM push_subscriptions;
     DELETE FROM inbox_permissions;
     DELETE FROM sender_identities;
     DELETE FROM sequence_emails;

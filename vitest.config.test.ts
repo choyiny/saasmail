@@ -26,6 +26,8 @@ export default defineConfig({
           // auto-loads those secrets. Force it off for tests so sequence
           // processor / enroll route exercise real (non-demo) behavior.
           DEMO_MODE: "0",
+          VAPID_PRIVATE_KEY: "test-vapid-private",
+          VAPID_PUBLIC_KEY: "test-vapid-public",
         },
       },
     }),
