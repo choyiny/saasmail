@@ -76,6 +76,7 @@ export class NotificationsHub implements DurableObject {
     // the user may have other devices, or the socket may be a stale hibernated one.
     const userId = this.ctx.id.name; // DO id is idFromName(userId)
     if (!userId) {
+      console.warn("[push] deliver: missing DO name (userId); skipping push");
       return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
     }
 
@@ -83,7 +84,20 @@ export class NotificationsHub implements DurableObject {
     const vapidPrivate = this.env.VAPID_PRIVATE_KEY ?? "";
     const vapidSubject = this.env.VAPID_SUBJECT ?? "";
     if (!vapidPublic || !vapidPrivate || !vapidSubject) {
+      console.warn(
+        `[push] deliver: VAPID not configured (publicKey=${vapidPublic ? "set" : "empty"}, privateKey=${vapidPrivate ? "set" : "empty"}, subject=${vapidSubject ? "set" : "empty"}); skipping push for user=${userId}`,
+      );
       return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
+    }
+    // Subject must be a real mailto:/https: URL — the example placeholder
+    // "mailto:admin@<your-domain>" would silently 400 at the push service.
+    if (
+      !/^(mailto:|https:\/\/)/.test(vapidSubject) ||
+      /[<>]/.test(vapidSubject)
+    ) {
+      console.warn(
+        `[push] deliver: VAPID_SUBJECT looks invalid (${vapidSubject}); push services will reject. Expected mailto:you@example.com or https://example.com`,
+      );
     }
 
     const db = drizzle(this.env.DB, { schema });
@@ -93,8 +107,14 @@ export class NotificationsHub implements DurableObject {
       .where(eq(pushSubscriptions.userId, userId));
 
     if (subs.length === 0) {
+      console.log(
+        `[push] deliver: no subscriptions for user=${userId} (wsCount=${wsCount})`,
+      );
       return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
     }
+    console.log(
+      `[push] deliver: user=${userId} subs=${subs.length} wsCount=${wsCount} inbox=${payload.inbox}`,
+    );
 
     const vapid: VapidConfig = {
       publicKey: vapidPublic,
@@ -115,14 +135,33 @@ export class NotificationsHub implements DurableObject {
 
     const results = await Promise.allSettled(
       subs.map(async (sub) => {
+        const host = (() => {
+          try {
+            return new URL(sub.endpoint).host;
+          } catch {
+            return "invalid-endpoint";
+          }
+        })();
         try {
           const { status } = await sendPush(
             { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
             pushPayload,
             vapid,
           );
+          if (status >= 400) {
+            console.warn(
+              `[push] send: non-2xx status=${status} host=${host} sub=${sub.id}`,
+            );
+          } else {
+            console.log(
+              `[push] send: ok status=${status} host=${host} sub=${sub.id}`,
+            );
+          }
           return { id: sub.id, status };
-        } catch {
+        } catch (err) {
+          console.error(
+            `[push] send: threw host=${host} sub=${sub.id}: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+          );
           return { id: sub.id, status: 0 };
         }
       }),
@@ -147,6 +186,9 @@ export class NotificationsHub implements DurableObject {
       // 401/403/0/other: leave the row, log-only.
     }
 
+    console.log(
+      `[push] deliver: user=${userId} sent=${sent} pruned=${pruned} total=${subs.length} wsCount=${wsCount}`,
+    );
     return Response.json({ via: "push", sent, pruned, wsCount });
   }
 
