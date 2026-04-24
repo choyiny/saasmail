@@ -32,6 +32,8 @@ export const TEST_IDS = {
   // Person list
   personRow: "person-row",
   personUnreadBadge: "person-unread-badge",
+  personKebabMenu: "person-kebab-menu",
+  personDeleteButton: "person-delete-button",
 
   // Compose
   composeSendButton: "compose-send-button",

@@ -190,6 +190,8 @@ export default function PersonList({
                 {/* Kebab menu button — admin only, visible on hover or when menu is open */}
                 {isAdmin && (
                   <button
+                    data-testid="person-kebab-menu"
+                    data-person-id={person.id}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (menuOpen) {
@@ -228,6 +230,7 @@ export default function PersonList({
             className="fixed z-50 w-40 rounded-md border border-border bg-white py-1 shadow-md"
           >
             <button
+              data-testid="person-delete-button"
               onClick={(e) => {
                 e.stopPropagation();
                 const person = people.find((p) => p.id === menuOpenId);
