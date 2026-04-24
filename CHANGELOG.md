@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VAPID configuration step added to the onboarding and update skills.
 - `VAPID_SUBJECT` added to `wrangler.jsonc.example` and regenerated `worker-configuration.d.ts`.
 - E2E smoke test covering the notifications settings page.
+- Admin delete-person action: admins can delete a person and all associated emails from the person list via a new kebab menu, with a confirmation dialog and `DELETE /api/people/:id` endpoint.
 
 ### Fixed
 
@@ -34,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `NotificationsHub` Durable Object now captures `env` in its constructor so the `/deliver` handler can access bindings without passing them per-call.
+- `/deliver` path on `NotificationsHub` now logs missing VAPID config, empty subscription lists, non-2xx push responses, and thrown `sendPush` errors instead of silently swallowing them, and warns if `VAPID_SUBJECT` is not a valid `mailto:`/`https:` URL.
 
 ### Dependencies
 
