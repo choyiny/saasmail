@@ -87,3 +87,17 @@ describe("notifications-router /stream", () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe("notifications-router /config", () => {
+  it("returns pushEnabled=false and empty key when VAPID is unset", async () => {
+    const { cookie } = await createTestUser({ role: "member" });
+    const res = await authFetch("/api/notifications/config", { cookie });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      vapidPublicKey: string;
+      pushEnabled: boolean;
+    };
+    expect(json.vapidPublicKey).toBe("");
+    expect(json.pushEnabled).toBe(false);
+  });
+});
