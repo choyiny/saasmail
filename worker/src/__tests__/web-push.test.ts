@@ -104,4 +104,28 @@ describe("web-push: aes128gcm", () => {
       JSON.stringify({ hello: "world" }),
     );
   });
+
+  // RFC 8291 §5 known-answer vector. A round-trip test only proves self-
+  // consistency — this proves our key derivation matches what the browser
+  // computes, so real pushes actually decrypt on the receiving end.
+  it("decrypts the RFC 8291 §5 test vector", async () => {
+    const ciphertext = b64urlDecode(
+      "DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN",
+    );
+    const recipientPublicRaw = b64urlDecode(
+      "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+    );
+    const recipientPrivateD = "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94";
+    const authSecret = b64urlDecode("BTBZMqHH6r4Tts7J_aSIgg");
+
+    const plaintext = await decryptAes128Gcm({
+      body: ciphertext,
+      recipientPrivateJwkD: recipientPrivateD,
+      recipientPublicRaw,
+      authSecret,
+    });
+    expect(new TextDecoder().decode(plaintext)).toBe(
+      "When I grow up, I want to be a watermelon",
+    );
+  });
 });
