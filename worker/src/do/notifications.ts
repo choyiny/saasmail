@@ -76,14 +76,9 @@ export class NotificationsHub implements DurableObject {
     const userId = this.ctx.id.name; // DO id is idFromName(userId)
     if (!userId) return Response.json({ via: "none" });
 
-    const vapidPublic =
-      (this.env as unknown as { VAPID_PUBLIC_KEY?: string }).VAPID_PUBLIC_KEY ??
-      "";
-    const vapidPrivate =
-      (this.env as unknown as { VAPID_PRIVATE_KEY?: string })
-        .VAPID_PRIVATE_KEY ?? "";
-    const vapidSubject =
-      (this.env as unknown as { VAPID_SUBJECT?: string }).VAPID_SUBJECT ?? "";
+    const vapidPublic = this.env.VAPID_PUBLIC_KEY ?? "";
+    const vapidPrivate = this.env.VAPID_PRIVATE_KEY ?? "";
+    const vapidSubject = this.env.VAPID_SUBJECT ?? "";
     if (!vapidPublic || !vapidPrivate || !vapidSubject) {
       return Response.json({ via: "none" });
     }

@@ -41,11 +41,8 @@ notificationsRouter.get("/stream", async (c) => {
 });
 
 notificationsRouter.get("/config", (c) => {
-  const publicKey =
-    (c.env as unknown as { VAPID_PUBLIC_KEY?: string }).VAPID_PUBLIC_KEY ?? "";
-  const privateKey =
-    (c.env as unknown as { VAPID_PRIVATE_KEY?: string }).VAPID_PRIVATE_KEY ??
-    "";
+  const publicKey = c.env.VAPID_PUBLIC_KEY ?? "";
+  const privateKey = c.env.VAPID_PRIVATE_KEY ?? "";
   return c.json({
     vapidPublicKey: publicKey,
     pushEnabled: Boolean(publicKey && privateKey),
@@ -65,9 +62,7 @@ notificationsRouter.post("/subscribe", async (c) => {
   const user = c.get("user");
   if (!user) return c.json({ error: "Unauthorized" }, 401);
 
-  const privateKey =
-    (c.env as unknown as { VAPID_PRIVATE_KEY?: string }).VAPID_PRIVATE_KEY ??
-    "";
+  const privateKey = c.env.VAPID_PRIVATE_KEY ?? "";
   if (!privateKey) {
     return c.json({ error: "push_not_configured" }, 503);
   }

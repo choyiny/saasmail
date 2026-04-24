@@ -86,7 +86,14 @@
 
     // Prefix for better-auth session cookies. Drop a replacement logo into
     // public/saasmail-logo.png to rebrand the favicon and in-app logo.
-    "COOKIE_PREFIX": "saasmail"
+    "COOKIE_PREFIX": "saasmail",
+
+    /* push notifications */
+    // VAPID_PRIVATE_KEY is a secret — set it with `wrangler secret put VAPID_PRIVATE_KEY`.
+    // VAPID_PUBLIC_KEY and VAPID_SUBJECT are public config (safe to commit here).
+    // Generate all three with `yarn vapid:generate`. Leave blank to disable push.
+    "VAPID_PUBLIC_KEY": "",
+    "VAPID_SUBJECT": "mailto:admin@<your-domain>"
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".
