@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-24
+
+### Added
+
+- Browser push notifications: users can now receive push alerts for new emails without the tab being open, powered by the Web Push Protocol (VAPID).
+- `push_subscriptions` table stores per-user browser subscriptions.
+- `GET /api/notifications/config` returns the server's VAPID public key so the frontend can subscribe.
+- `POST/DELETE /api/notifications/subscriptions` for managing push subscriptions.
+- `/deliver` endpoint on `NotificationsHub` Durable Object fans out new-email events to active WebSocket connections and falls back to Web Push when no WebSocket is present.
+- Service worker (`sw.js`) that handles incoming push events and displays system notifications.
+- Push orchestration library in the frontend (`usePush`) that manages subscription lifecycle, permission requests, and server sync.
+- Contextual opt-in banner shown in the inbox when push permission has not yet been granted.
+- Notifications settings page where users can subscribe or unsubscribe from push alerts.
+- "Settings" entry added to the user dropdown in the sidebar for quick access to the new page.
+- `vapid:generate` script (`scripts/generate-vapid.ts`) to generate a VAPID keypair for new deployments.
+- VAPID configuration step added to the onboarding and update skills.
+- `VAPID_SUBJECT` added to `wrangler.jsonc.example` and regenerated `worker-configuration.d.ts`.
+- E2E smoke test covering the notifications settings page.
+
+### Fixed
+
+- Web push is now always attempted when a new email is delivered; the previous logic skipped push if any WebSocket was open, even for other users.
+- Push subscription UI in settings now surfaces errors, shows a loading state, and prevents double-clicks while a request is in-flight.
+
+### Changed
+
+- `NotificationsHub` Durable Object now captures `env` in its constructor so the `/deliver` handler can access bindings without passing them per-call.
+
+### Dependencies
+
+- Bumped `actions/setup-node` from 4 to 6.
+- Bumped `github/codeql-action` from 3 to 4.
+- Bumped `actions/upload-artifact` from 4 to 7.
+- Bumped `@codemirror/view` (codemirror group).
+- Bumped the tiptap group (4 packages).
+
 ## [0.1.2] - 2026-04-23
 
 ### Added
@@ -80,7 +116,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/choyiny/saasmail/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/choyiny/saasmail/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/choyiny/saasmail/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/choyiny/saasmail/compare/v0.0.1...v0.1.0
