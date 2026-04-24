@@ -154,33 +154,26 @@ async function deriveAes128GcmKeys(args: {
   sharedSecret: Uint8Array; // ECDH bits
   authSecret: Uint8Array;
 }): Promise<{ contentEncryptionKey: Uint8Array; nonce: Uint8Array }> {
-  // RFC 8291 §3.4
+  // RFC 8291 §3.4. Note: hkdfExpand already appends the HKDF counter byte
+  // (0x01 for the first block), so the info args here must NOT include it —
+  // otherwise the HMAC sees `info || 0x01 || 0x01` and the derived key won't
+  // match what the browser computes (browser decryption fails silently).
   const keyInfo = concatBytes(
     new TextEncoder().encode("WebPush: info\0"),
     args.recipientPublicRaw,
     args.senderPublicRaw,
   );
   const prkKey = await hkdfExtract(args.authSecret, args.sharedSecret);
-  const ikm = await hkdfExpand(
-    prkKey,
-    concatBytes(keyInfo, new Uint8Array([0x01])),
-    32,
-  );
+  const ikm = await hkdfExpand(prkKey, keyInfo, 32);
   const prk = await hkdfExtract(args.salt, ikm);
   const cek = await hkdfExpand(
     prk,
-    concatBytes(
-      new TextEncoder().encode("Content-Encoding: aes128gcm\0"),
-      new Uint8Array([0x01]),
-    ),
+    new TextEncoder().encode("Content-Encoding: aes128gcm\0"),
     16,
   );
   const nonce = await hkdfExpand(
     prk,
-    concatBytes(
-      new TextEncoder().encode("Content-Encoding: nonce\0"),
-      new Uint8Array([0x01]),
-    ),
+    new TextEncoder().encode("Content-Encoding: nonce\0"),
     12,
   );
   return { contentEncryptionKey: cek, nonce };
