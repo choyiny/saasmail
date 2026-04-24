@@ -1,8 +1,10 @@
 export class NotificationsHub implements DurableObject {
   ctx: DurableObjectState;
+  env: CloudflareBindings;
 
-  constructor(ctx: DurableObjectState) {
+  constructor(ctx: DurableObjectState, env: CloudflareBindings) {
     this.ctx = ctx;
+    this.env = env;
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -13,23 +15,20 @@ export class NotificationsHub implements DurableObject {
       if (upgrade !== "websocket") {
         return new Response("Expected WebSocket", { status: 426 });
       }
-
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-
       this.ctx.acceptWebSocket(server);
-
       return new Response(null, { status: 101, webSocket: client });
     }
 
     if (url.pathname === "/notify" && request.method === "POST") {
+      // Preserved for backwards compatibility during the /notify → /deliver
+      // transition. Task 8 replaces this with /deliver. Do not extend.
       const { inbox } = (await request.json()) as { inbox: string };
       for (const ws of this.ctx.getWebSockets()) {
         try {
           ws.send(JSON.stringify({ type: "email_received", inbox }));
-        } catch {
-          // client disconnected; DO will clean it up via webSocketClose
-        }
+        } catch {}
       }
       return new Response("ok");
     }
@@ -38,8 +37,6 @@ export class NotificationsHub implements DurableObject {
   }
 
   webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {}
-  // The socket is already closed by the time this handler runs; do not call
-  // ws.close() again. The runtime will clean up the hibernated socket.
   webSocketClose(_ws: WebSocket) {}
   webSocketError(_ws: WebSocket) {}
 }
