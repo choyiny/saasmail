@@ -64,7 +64,42 @@ If the rebase still stops (e.g., a whole file conflict that `-X ours` can't reso
 
 Never run `git rebase --skip` without asking — that silently drops one of the user's commits.
 
-### 5. Restore stashed changes
+### 5. Check for new VAPID configuration
+
+Run:
+
+```bash
+wrangler secret list
+grep "VAPID_PUBLIC_KEY" wrangler.jsonc
+```
+
+If `VAPID_PRIVATE_KEY` is missing from `wrangler secret list` **or** `VAPID_PUBLIC_KEY` is missing from `wrangler.jsonc`, prompt the user:
+
+> This update adds browser push notifications. Generate VAPID keys now? (If skipped, push remains disabled until you run `yarn vapid:generate`.)
+
+**If yes**, run the same flow as the onboarding step:
+
+1. `yarn vapid:generate` — copy the printed `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`.
+2. `wrangler secret put VAPID_PRIVATE_KEY` — paste the private key when prompted.
+3. Edit `wrangler.jsonc` to add under `vars`:
+   ```jsonc
+   "VAPID_PUBLIC_KEY": "<paste VAPID_PUBLIC_KEY here>",
+   "VAPID_SUBJECT": "mailto:admin@<host-of-BASE_URL>"
+   ```
+
+**If no**, proceed without blocking.
+
+### 5a. Apply database migrations
+
+Run:
+
+```bash
+yarn db:migrate:prod
+```
+
+This ensures any new migrations (including the push-subscriptions table) are applied to the remote D1 database. If the command reports nothing to migrate, that's fine — continue.
+
+### 6. Restore stashed changes
 
 If you stashed in step 2:
 
@@ -74,7 +109,7 @@ git stash pop
 
 If `stash pop` itself conflicts, leave the stash entry in place and tell the user — don't drop their uncommitted work.
 
-### 6. Report what happened
+### 7. Report what happened
 
 Give the user a concise summary:
 
