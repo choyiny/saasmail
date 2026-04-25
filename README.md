@@ -104,52 +104,27 @@ Issue scoped API keys for programmatic access to send email, manage templates, e
 ### Architecture Diagram
 
 ```mermaid
-flowchart TB
-    subgraph CF["Cloudflare"]
-        EmailIn["Email Workers<br/>(inbound MX)"]
-        Cron["Cron Trigger<br/>(hourly)"]
+flowchart LR
+    EmailRouting["Email Routing<br/>(inbound)"]
+    EmailSending["Email Sending<br/>(outbound)"]
 
-        subgraph Worker["Worker (Hono + Zod OpenAPI)"]
-            API["/api/* routes"]
-            EmailHandler["email handler"]
-            Scheduled["scheduled handler"]
-            QueueConsumer["queue consumer"]
-            Auth["BetterAuth<br/>(session + passkey)"]
-        end
+    Worker["Worker<br/>(Hono API + handlers)"]
+    DO["NotificationsHub<br/>(Durable Object, per user)"]
 
-        subgraph DO["Durable Object: NotificationsHub<br/>(idFromName = userId)"]
-            WS["WebSocket fan-out<br/>(hibernatable)"]
-            Push["Web Push sender<br/>VAPID + aes128gcm"]
-        end
+    D1[("D1")]
+    R2[("R2")]
+    Q[["Queue"]]
 
-        CFSend["Cloudflare<br/>Email Sending"]
-        D1[("D1<br/>SQLite via Drizzle")]
-        R2[("R2<br/>attachments")]
-        Q[["Queue<br/>saasmail-sequence-emails"]]
-    end
-
-    EmailIn --> EmailHandler
-    EmailHandler --> D1
-    EmailHandler --> R2
-    EmailHandler -->|"fan out per recipient user"| DO
-
-    Cron --> Scheduled
-    Scheduled --> D1
-    Scheduled -->|"enqueue due steps"| Q
-    Q --> QueueConsumer
-    QueueConsumer --> CFSend
-
-    API <-.->|"WebSocket upgrade"| WS
-    API --> D1
-    API --> R2
-    API --> Auth
-    Auth --> D1
-    API -->|"send"| CFSend
-
+    EmailRouting --> Worker
+    Worker --> EmailSending
+    Worker --> DO
+    Worker --> D1
+    Worker --> R2
+    Worker <--> Q
     DO --> D1
 ```
 
-The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). When inbound mail arrives, the email handler resolves recipient users from D1 and POSTs `/deliver` to each user's hub, which (a) fans out to any live WebSocket tabs for instant in-app updates and (b) reads that user's push subscriptions from D1 and sends encrypted Web Push payloads (egress to the browser's push service) for delivery to registered devices.
+The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). On inbound mail the worker fans out to each recipient's hub, which pushes WebSocket frames to live tabs and sends encrypted Web Push to registered devices. The queue carries scheduled sequence emails — the cron trigger enqueues due steps and a queue consumer in the same worker sends them.
 
 ## Quick Start
 
