@@ -36,6 +36,10 @@
       {
         "binding": "EMAIL_QUEUE",
         "queue": "saasmail-sequence-emails"
+      },
+      {
+        "binding": "AGENT_QUEUE",
+        "queue": "saasmail-agent-runs"
       }
     ],
     "consumers": [
@@ -43,6 +47,11 @@
         "queue": "saasmail-sequence-emails",
         "max_batch_size": 10,
         "max_retries": 3
+      },
+      {
+        "queue": "saasmail-agent-runs",
+        "max_batch_size": 5,
+        "max_retries": 2
       }
     ]
   },

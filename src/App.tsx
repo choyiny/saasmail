@@ -25,6 +25,11 @@ import SequenceDetailPage from "@/pages/SequenceDetailPage";
 import SequenceEditorPage from "@/pages/SequenceEditorPage";
 import InboxesPage from "./pages/InboxesPage";
 import NotificationsSettingsPage from "@/pages/NotificationsSettingsPage";
+import AgentsPage from "./pages/AgentsPage";
+import AgentEditorPage from "./pages/AgentEditorPage";
+import AgentDetailPage from "./pages/AgentDetailPage";
+import AgentRunsPage from "./pages/AgentRunsPage";
+import DraftsPage from "./pages/DraftsPage";
 
 const queryClient = new QueryClient();
 
@@ -109,6 +114,12 @@ function App() {
                   path="/settings"
                   element={<NotificationsSettingsPage />}
                 />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/agents/new" element={<AgentEditorPage />} />
+                <Route path="/agents/runs" element={<AgentRunsPage />} />
+                <Route path="/agents/:id" element={<AgentDetailPage />} />
+                <Route path="/agents/:id/edit" element={<AgentEditorPage />} />
+                <Route path="/drafts" element={<DraftsPage />} />
                 <Route path="/*" element={<InboxPage />} />
               </Route>
             </Route>

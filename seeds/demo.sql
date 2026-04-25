@@ -16,6 +16,10 @@ DELETE FROM api_keys;
 DELETE FROM email_templates;
 DELETE FROM invitations;
 DELETE FROM attachments;
+DELETE FROM drafts;
+DELETE FROM agent_runs;
+DELETE FROM agent_assignments;
+DELETE FROM agent_definitions;
 DELETE FROM sent_emails;
 DELETE FROM emails;
 DELETE FROM people;
@@ -716,6 +720,69 @@ INSERT OR REPLACE INTO sent_emails (id, person_id, from_address, to_address, sub
     NULL, 'resend_inv_kim_apr', 'sent',
     (CAST(strftime('%s','now') AS INTEGER) - 86400 * 11 - 3600 * 20),
     (CAST(strftime('%s','now') AS INTEGER) - 86400 * 11 - 3600 * 20));
+
+-- ----------------------------------------------------------------------------
+-- Agent: Support Intent Classifier
+--
+-- Reads each inbound support email, classifies intent into one of three
+-- categories, and outputs the exact pre-approved reply phrase.
+--
+-- Intent → reply mapping:
+--   didn''t receive email  → "We''re looking into it!"
+--   cannot connect to network → "follow this guide on lotsotravel"
+--   do you have discount? → "yes, here''s the link"
+--
+-- The agent runs in "draft" mode so a human reviews before sending.
+-- ----------------------------------------------------------------------------
+
+-- Reply template — uses {{reply}} variable filled by the agent.
+INSERT OR REPLACE INTO email_templates (id, slug, name, subject, body_html, from_address, created_at, updated_at) VALUES (
+  'tpl_support_autoreply',
+  'support-auto-reply',
+  'Support Auto-Reply',
+  'Re: Your inquiry',
+  '<p>{{reply}}</p>',
+  'support@example.com',
+  CAST(strftime('%s','now') AS INTEGER),
+  CAST(strftime('%s','now') AS INTEGER)
+);
+
+-- Agent definition — @cf/meta/llama-3.3-70b-instruct-fp8-fast is a good
+-- structured-output model available on Cloudflare Workers AI.
+INSERT OR REPLACE INTO agent_definitions (id, name, description, model_id, system_prompt, output_schema_json, max_runs_per_hour, is_active, created_at, updated_at) VALUES (
+  'agent_support_classifier',
+  'Support Intent Classifier',
+  'Reads inbound support emails, classifies intent into one of three categories, and outputs the exact pre-approved reply phrase. Runs in draft mode for human review.',
+  '@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+  'You are a customer support agent for lotsotravel, a travel service.
+
+Read the incoming email and classify the customer''s intent. Based on that intent, set the "reply" field to EXACTLY one of the following three phrases — copy the text verbatim with no changes, no greeting, no sign-off:
+
+• If the customer says they did not receive an email or confirmation → reply: "We''re looking into it!"
+• If the customer reports they cannot connect to the network or has connectivity problems → reply: "follow this guide on lotsotravel"
+• If the customer is asking about discounts, promotions, or offers → reply: "yes, here''s the link"
+
+Output only the reply field. Do not add any other text.',
+  '{"type":"object","properties":{"reply":{"type":"string","description":"The exact pre-approved reply phrase for the classified intent"}},"required":["reply"]}',
+  20,
+  1,
+  CAST(strftime('%s','now') AS INTEGER),
+  CAST(strftime('%s','now') AS INTEGER)
+);
+
+-- Assignment — wires the classifier to the support inbox.
+-- mailbox = support@example.com, person = any (*), mode = draft.
+INSERT OR REPLACE INTO agent_assignments (id, agent_id, mailbox, person_id, template_slug, mode, is_active, created_at, updated_at) VALUES (
+  'asgn_support_classifier',
+  'agent_support_classifier',
+  'support@example.com',
+  NULL,
+  'support-auto-reply',
+  'draft',
+  1,
+  CAST(strftime('%s','now') AS INTEGER),
+  CAST(strftime('%s','now') AS INTEGER)
+);
 
 -- ----------------------------------------------------------------------------
 -- Recompute people.last_email_at / unread_count / total_count from the emails

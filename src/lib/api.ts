@@ -561,3 +561,183 @@ export interface AdminUser {
 export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
 }
+
+// ── Agent types ────────────────────────────────────────────────────────────
+
+export interface OutputField {
+  name: string;
+  description: string;
+}
+
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  description: string | null;
+  modelId: string;
+  systemPrompt: string;
+  outputFields: OutputField[];
+  maxRunsPerHour: number;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AgentAssignment {
+  id: string;
+  agentId: string;
+  mailbox: string | null;
+  personId: string | null;
+  templateSlug: string;
+  mode: "first_thread_reply" | "every_mail_reply" | "draft_only";
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+  agentName: string;
+  templateName: string;
+}
+
+export interface AgentRun {
+  id: string;
+  assignmentId: string;
+  emailId: string;
+  personId: string;
+  status: string;
+  action: string | null;
+  sentEmailId: string | null;
+  draftId: string | null;
+  modelId: string | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Draft {
+  id: string;
+  personId: string;
+  agentRunId: string;
+  fromAddress: string;
+  toAddress: string;
+  subject: string;
+  bodyHtml: string | null;
+  inReplyTo: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ── Agent Definitions ──────────────────────────────────────────────────────
+
+export const fetchAgentDefinitions = () =>
+  apiFetch<AgentDefinition[]>("/api/agents/definitions");
+
+export const fetchAgentDefinition = (id: string) =>
+  apiFetch<AgentDefinition>(`/api/agents/definitions/${id}`);
+
+export const createAgentDefinition = (data: {
+  name: string;
+  description?: string;
+  modelId: string;
+  systemPrompt: string;
+  outputFields: OutputField[];
+  maxRunsPerHour: number;
+  isActive: boolean;
+}) =>
+  apiFetch<AgentDefinition>("/api/agents/definitions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+export const updateAgentDefinition = (
+  id: string,
+  data: Partial<{
+    name: string;
+    description: string | null;
+    modelId: string;
+    systemPrompt: string;
+    outputFields: OutputField[];
+    maxRunsPerHour: number;
+    isActive: boolean;
+  }>,
+) =>
+  apiFetch<AgentDefinition>(`/api/agents/definitions/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+export const deleteAgentDefinition = (id: string) =>
+  apiFetch<void>(`/api/agents/definitions/${id}`, { method: "DELETE" });
+
+// ── Agent Assignments ──────────────────────────────────────────────────────
+
+export const fetchAgentAssignments = (agentId?: string) =>
+  apiFetch<AgentAssignment[]>(
+    `/api/agents/assignments${agentId ? `?agentId=${agentId}` : ""}`,
+  );
+
+export const createAgentAssignment = (data: {
+  agentId: string;
+  mailbox?: string | null;
+  personId?: string | null;
+  templateSlug: string;
+  mode: AgentAssignment["mode"];
+  isActive: boolean;
+}) =>
+  apiFetch<AgentAssignment>("/api/agents/assignments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+export const updateAgentAssignment = (
+  id: string,
+  data: Partial<{
+    templateSlug: string;
+    mode: AgentAssignment["mode"];
+    isActive: boolean;
+    mailbox: string | null;
+    personId: string | null;
+  }>,
+) =>
+  apiFetch<AgentAssignment>(`/api/agents/assignments/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+export const deleteAgentAssignment = (id: string) =>
+  apiFetch<void>(`/api/agents/assignments/${id}`, { method: "DELETE" });
+
+// ── Agent Runs ─────────────────────────────────────────────────────────────
+
+export const fetchAgentRuns = (params?: {
+  assignmentId?: string;
+  personId?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}) => {
+  const qs = new URLSearchParams(
+    Object.entries(params ?? {})
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, String(v)]),
+  ).toString();
+  return apiFetch<{ runs: AgentRun[]; total: number }>(
+    `/api/agents/runs${qs ? `?${qs}` : ""}`,
+  );
+};
+
+// ── Drafts ─────────────────────────────────────────────────────────────────
+
+export const fetchDrafts = (personId?: string) =>
+  apiFetch<Draft[]>(`/api/drafts${personId ? `?personId=${personId}` : ""}`);
+
+export const sendDraft = (id: string) =>
+  apiFetch<{ sentEmailId: string }>(`/api/drafts/${id}/send`, {
+    method: "POST",
+  });
+
+export const deleteDraft = (id: string) =>
+  apiFetch<void>(`/api/drafts/${id}`, { method: "DELETE" });

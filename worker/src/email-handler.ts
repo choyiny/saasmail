@@ -228,6 +228,42 @@ export async function handleEmail(
     })(),
   );
 
+  // Dispatch AI agents for this email (non-blocking, best-effort)
+  ctx.waitUntil(
+    (async () => {
+      try {
+        const { dispatchAgentsForEmail } =
+          await import("./lib/dispatch-agents");
+        // Detect mail-loop headers
+        const rawHeadersParsed = parsed.headers as Record<
+          string,
+          string | string[]
+        >;
+        const autoSubmitted =
+          typeof rawHeadersParsed["auto-submitted"] === "string"
+            ? rawHeadersParsed["auto-submitted"]
+            : Array.isArray(rawHeadersParsed["auto-submitted"])
+              ? rawHeadersParsed["auto-submitted"][0]
+              : null;
+        const hasListHeader = Object.keys(rawHeadersParsed).some((k) =>
+          k.toLowerCase().startsWith("list-"),
+        );
+        await dispatchAgentsForEmail(
+          {
+            emailId,
+            personId: actualPersonId,
+            mailbox: parsed.to,
+            autoSubmitted,
+            hasListHeader,
+          },
+          env,
+        );
+      } catch (err) {
+        console.warn("Agent dispatch error:", err);
+      }
+    })(),
+  );
+
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, actualPersonId);
 

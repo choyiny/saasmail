@@ -32,6 +32,11 @@
   // "send_email": [
   //   { "name": "EMAIL" }
   // ],
+  // Workers AI binding — gives access to Cloudflare-hosted models.
+  // No API keys needed; usage is billed to your CF account.
+  "ai": {
+    "binding": "AI"
+  },
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS",
@@ -49,6 +54,10 @@
       {
         "binding": "EMAIL_QUEUE",
         "queue": "saasmail-sequence-emails"
+      },
+      {
+        "binding": "AGENT_QUEUE",
+        "queue": "saasmail-agent-runs"
       }
     ],
     "consumers": [
@@ -56,6 +65,11 @@
         "queue": "saasmail-sequence-emails",
         "max_batch_size": 10,
         "max_retries": 3
+      },
+      {
+        "queue": "saasmail-agent-runs",
+        "max_batch_size": 5,
+        "max_retries": 2
       }
     ]
   },
@@ -93,7 +107,13 @@
     // VAPID_PUBLIC_KEY and VAPID_SUBJECT are public config (safe to commit here).
     // Generate all three with `yarn vapid:generate`. Leave blank to disable push.
     "VAPID_PUBLIC_KEY": "",
-    "VAPID_SUBJECT": "mailto:admin@<your-domain>"
+    "VAPID_SUBJECT": "mailto:admin@<your-domain>",
+    // AI Gateway slug — create at dash.cloudflare.com → AI → AI Gateway.
+    // All agent LLM calls route through here for logging and caching.
+    // Leave blank to bypass the gateway.
+    "AI_GATEWAY_SLUG": "",
+    // Set to "false" to disable all agent processing globally.
+    // "AGENTS_ENABLED": "true"
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

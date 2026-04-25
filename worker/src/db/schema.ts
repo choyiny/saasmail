@@ -12,6 +12,10 @@ import { sequenceEmails } from "./sequence-emails.schema";
 import { senderIdentities } from "./sender-identities.schema";
 import { inboxPermissions } from "./inbox-permissions.schema";
 import { pushSubscriptions } from "./push-subscriptions.schema";
+import { agentDefinitions } from "./agent-definitions.schema";
+import { agentAssignments } from "./agent-assignments.schema";
+import { agentRuns } from "./agent-runs.schema";
+import { drafts } from "./drafts.schema";
 
 export const schema = {
   ...authSchema,
@@ -28,4 +32,8 @@ export const schema = {
   senderIdentities,
   inboxPermissions,
   pushSubscriptions,
+  agentDefinitions,
+  agentAssignments,
+  agentRuns,
+  drafts,
 } as const;

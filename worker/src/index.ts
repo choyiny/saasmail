@@ -25,6 +25,12 @@ import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { notificationsRouter } from "./routers/notifications-router";
+import { agentDefinitionsRouter } from "./routers/agent-definitions-router";
+import { agentAssignmentsRouter } from "./routers/agent-assignments-router";
+import { agentRunsRouter } from "./routers/agent-runs-router";
+import { draftsRouter } from "./routers/drafts-router";
+import { handleAgentQueueBatch } from "./lib/agent-processor";
+import type { AgentRunMessage } from "./lib/agent-processor";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
@@ -197,6 +203,10 @@ app.route("/api/api-keys", apiKeysRouter);
 app.route("/api/invites", invitesRouter);
 app.route("/api/sequences", sequencesRouter);
 app.route("/api/notifications", notificationsRouter);
+app.route("/api/agents/definitions", agentDefinitionsRouter);
+app.route("/api/agents/assignments", agentAssignmentsRouter);
+app.route("/api/agents/runs", agentRunsRouter);
+app.route("/api/drafts", draftsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
@@ -236,9 +246,13 @@ export default {
     ctx.waitUntil(handleScheduled(env));
   },
   async queue(
-    batch: MessageBatch<SequenceEmailMessage>,
+    batch: MessageBatch<SequenceEmailMessage | AgentRunMessage>,
     env: CloudflareBindings,
   ) {
-    await handleQueueBatch(batch, env);
+    if (batch.queue === "saasmail-agent-runs") {
+      await handleAgentQueueBatch(batch as MessageBatch<AgentRunMessage>, env);
+    } else {
+      await handleQueueBatch(batch as MessageBatch<SequenceEmailMessage>, env);
+    }
   },
 };

@@ -14,3 +14,7 @@ export * from "./sender-identities.schema";
 export * from "./inbox-permissions.schema";
 export * from "./push-subscriptions.schema";
 export * from "./schema";
+export * from "./agent-definitions.schema";
+export * from "./agent-assignments.schema";
+export * from "./agent-runs.schema";
+export * from "./drafts.schema";

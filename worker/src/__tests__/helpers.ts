@@ -21,6 +21,9 @@ import {
   oauthRefreshTokens,
 } from "../db/auth.schema";
 import { hashKey } from "../lib/crypto";
+import { agentDefinitions } from "../db/agent-definitions.schema";
+import { agentAssignments } from "../db/agent-assignments.schema";
+import { agentRuns } from "../db/agent-runs.schema";
 
 export function getDb() {
   return drizzle(env.DB, { schema });
@@ -71,6 +74,17 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions(endpoint)`,
     `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
+    `CREATE TABLE IF NOT EXISTS agent_definitions (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, model_id TEXT NOT NULL, system_prompt TEXT NOT NULL, output_schema_json TEXT NOT NULL, max_runs_per_hour INTEGER NOT NULL DEFAULT 10, is_active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS agent_assignments (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL REFERENCES agent_definitions(id) ON DELETE CASCADE, mailbox TEXT, person_id TEXT, template_slug TEXT NOT NULL, mode TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS assignments_agent_idx ON agent_assignments(agent_id)`,
+    `CREATE INDEX IF NOT EXISTS assignments_mailbox_person_idx ON agent_assignments(mailbox, person_id)`,
+    `CREATE TABLE IF NOT EXISTS agent_runs (id TEXT PRIMARY KEY, assignment_id TEXT NOT NULL, email_id TEXT NOT NULL, person_id TEXT NOT NULL, status TEXT NOT NULL, action TEXT, sent_email_id TEXT, draft_id TEXT, model_id TEXT, input_tokens INTEGER, output_tokens INTEGER, error_message TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS runs_assignment_person_created_idx ON agent_runs(assignment_id, person_id, created_at)`,
+    `CREATE INDEX IF NOT EXISTS runs_email_idx ON agent_runs(email_id)`,
+    `CREATE INDEX IF NOT EXISTS runs_status_created_idx ON agent_runs(status, created_at)`,
+    `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, agent_run_id TEXT NOT NULL, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, in_reply_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS drafts_person_created_idx ON drafts(person_id, created_at)`,
+    `CREATE INDEX IF NOT EXISTS drafts_agent_run_idx ON drafts(agent_run_id)`,
   ];
 
   for (const sql of statements) {
@@ -221,6 +235,10 @@ export async function authFetch(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM drafts;
+    DELETE FROM agent_runs;
+    DELETE FROM agent_assignments;
+    DELETE FROM agent_definitions;
     DELETE FROM push_subscriptions;
     DELETE FROM inbox_permissions;
     DELETE FROM sender_identities;
@@ -245,4 +263,104 @@ export async function cleanDb() {
     DELETE FROM jwkss;
     DELETE FROM users;
   `);
+}
+
+/** Create a test agent definition. */
+export async function createTestAgentDefinition(
+  opts: {
+    id?: string;
+    name?: string;
+    modelId?: string;
+    systemPrompt?: string;
+    outputSchemaJson?: string;
+    maxRunsPerHour?: number;
+    isActive?: number;
+  } = {},
+) {
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const def = {
+    id: opts.id ?? "agent-def-1",
+    name: opts.name ?? "Test Agent",
+    description: null,
+    modelId: opts.modelId ?? "@cf/meta/llama-3.3-70b-instruct",
+    systemPrompt: opts.systemPrompt ?? "You are a helpful assistant.",
+    outputSchemaJson:
+      opts.outputSchemaJson ??
+      JSON.stringify({
+        type: "object",
+        properties: {
+          greeting: { type: "string", description: "A greeting message" },
+        },
+        required: ["greeting"],
+      }),
+    maxRunsPerHour: opts.maxRunsPerHour ?? 10,
+    isActive: opts.isActive ?? 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(agentDefinitions).values(def);
+  return def;
+}
+
+/** Create a test agent assignment. */
+export async function createTestAgentAssignment(
+  opts: {
+    id?: string;
+    agentId?: string;
+    mailbox?: string | null;
+    personId?: string | null;
+    templateSlug?: string;
+    mode?: string;
+    isActive?: number;
+  } = {},
+) {
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const assignment = {
+    id: opts.id ?? "assignment-1",
+    agentId: opts.agentId ?? "agent-def-1",
+    mailbox: opts.mailbox !== undefined ? opts.mailbox : "inbox@saasmail.test",
+    personId: opts.personId !== undefined ? opts.personId : null,
+    templateSlug: opts.templateSlug ?? "welcome",
+    mode: opts.mode ?? "every_mail_reply",
+    isActive: opts.isActive ?? 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(agentAssignments).values(assignment);
+  return assignment;
+}
+
+/** Create a test agent run. */
+export async function createTestAgentRun(
+  opts: {
+    id?: string;
+    assignmentId?: string;
+    emailId?: string;
+    personId?: string;
+    status?: string;
+    action?: string | null;
+  } = {},
+) {
+  const db = getDb();
+  const now = Math.floor(Date.now() / 1000);
+  const run = {
+    id: opts.id ?? "run-1",
+    assignmentId: opts.assignmentId ?? "assignment-1",
+    emailId: opts.emailId ?? "email-1",
+    personId: opts.personId ?? "sender-1",
+    status: opts.status ?? "succeeded",
+    action: opts.action !== undefined ? opts.action : "sent",
+    sentEmailId: null,
+    draftId: null,
+    modelId: "@cf/meta/llama-3.3-70b-instruct",
+    inputTokens: 100,
+    outputTokens: 50,
+    errorMessage: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  await db.insert(agentRuns).values(run);
+  return run;
 }
