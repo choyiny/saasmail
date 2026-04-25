@@ -105,12 +105,7 @@ Issue scoped API keys for programmatic access to send email, manage templates, e
 
 ```mermaid
 flowchart TB
-    subgraph Client["Browser"]
-        SPA["React SPA<br/>Tailwind + TipTap"]
-        SW["Service Worker<br/>(public/sw.js)"]
-    end
-
-    subgraph CF["Cloudflare Edge"]
+    subgraph CF["Cloudflare"]
         EmailIn["Email Workers<br/>(inbound MX)"]
         Cron["Cron Trigger<br/>(hourly)"]
 
@@ -127,22 +122,11 @@ flowchart TB
             Push["Web Push sender<br/>VAPID + aes128gcm"]
         end
 
+        CFSend["Cloudflare<br/>Email Sending"]
         D1[("D1<br/>SQLite via Drizzle")]
         R2[("R2<br/>attachments")]
         Q[["Queue<br/>saasmail-sequence-emails"]]
     end
-
-    subgraph Out["Outbound Provider (one of)"]
-        CFSend["Cloudflare<br/>Email Sending"]
-        Resend["Resend API"]
-    end
-
-    PushSvc["Browser Push Service<br/>(FCM / Mozilla / Apple)"]
-
-    SPA <-->|"HTTP + cookies / Bearer sk_*"| API
-    SPA <-.->|"WebSocket /api/notifications/ws"| API
-    API <-.->|"upgrade"| WS
-    SW -->|"showNotification"| Client
 
     EmailIn --> EmailHandler
     EmailHandler --> D1
@@ -154,22 +138,18 @@ flowchart TB
     Scheduled -->|"enqueue due steps"| Q
     Q --> QueueConsumer
     QueueConsumer --> CFSend
-    QueueConsumer --> Resend
 
+    API <-.->|"WebSocket upgrade"| WS
     API --> D1
     API --> R2
     API --> Auth
     Auth --> D1
-
-    Push -->|"POST encrypted payload"| PushSvc
-    PushSvc -->|"push event"| SW
-    DO --> D1
-
     API -->|"send"| CFSend
-    API -->|"send"| Resend
+
+    DO --> D1
 ```
 
-The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). When inbound mail arrives, the email handler resolves recipient users from D1 and POSTs `/deliver` to each user's hub, which (a) fans out to any live WebSocket tabs for instant in-app updates and (b) reads that user's push subscriptions from D1 and sends encrypted payloads via Web Push to all registered devices. The service worker renders the OS notification and routes click-throughs back into the SPA.
+The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). When inbound mail arrives, the email handler resolves recipient users from D1 and POSTs `/deliver` to each user's hub, which (a) fans out to any live WebSocket tabs for instant in-app updates and (b) reads that user's push subscriptions from D1 and sends encrypted Web Push payloads (egress to the browser's push service) for delivery to registered devices.
 
 ## Quick Start
 
