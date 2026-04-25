@@ -24,19 +24,30 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const url = (event.notification.data && event.notification.data.url) || "/";
   event.waitUntil(
-    self.clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((wins) => {
-        for (const w of wins) {
+    (async () => {
+      const wins = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      // Prefer focusing any same-origin tab and asking it to navigate to the
+      // target URL — focusing alone leaves the tab on whatever route it was
+      // already showing (commonly "/"), which made notifications appear to
+      // "do nothing" for users who already had the app open.
+      for (const w of wins) {
+        try {
+          const u = new URL(w.url);
+          if (u.origin !== self.location.origin) continue;
           try {
-            const u = new URL(w.url);
-            if (u.pathname === url || u.pathname.startsWith(url)) {
-              return w.focus();
-            }
+            await w.focus();
           } catch (_) {}
-        }
-        return self.clients.openWindow(url);
-      }),
+          try {
+            w.postMessage({ type: "saasmail.notificationclick", url });
+          } catch (_) {}
+          return;
+        } catch (_) {}
+      }
+      await self.clients.openWindow(url);
+    })(),
   );
 });
 
