@@ -10,6 +10,8 @@ import {
   ListOrdered,
   ChevronsLeft,
   ChevronsRight,
+  Bot,
+  FilePen,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { useSidebarCollapsed } from "@/lib/useSidebarCollapsed";
@@ -29,8 +31,10 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { icon: Mail, label: "Inbox", path: "/" },
+  { icon: FilePen, label: "Drafts", path: "/drafts" },
   { icon: FileText, label: "Templates", path: "/templates" },
   { icon: ListOrdered, label: "Sequences", path: "/sequences" },
+  { icon: Bot, label: "Agents", path: "/agents" },
   { icon: Key, label: "API", path: "/api-keys" },
   { icon: Settings, label: "Inboxes", path: "/inboxes", adminOnly: true },
   { icon: Users, label: "Users", path: "/admin/users", adminOnly: true },

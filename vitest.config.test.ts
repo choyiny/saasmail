@@ -29,6 +29,8 @@ export default defineConfig({
           VAPID_PRIVATE_KEY: "test-vapid-private",
           VAPID_PUBLIC_KEY: "test-vapid-public",
           VAPID_SUBJECT: "mailto:test@example.com",
+          AI_GATEWAY_SLUG: "test-gateway",
+          AGENTS_ENABLED: "true",
         },
       },
     }),

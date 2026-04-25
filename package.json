@@ -55,6 +55,7 @@
     "@tiptap/react": "^3.22.4",
     "@tiptap/starter-kit": "^3.22.4",
     "@types/dompurify": "^3.2.0",
+    "ai": "^6.0.168",
     "better-auth": "^1.6.7",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -71,6 +72,7 @@
     "react-router-dom": "^6.30.1",
     "resend": "^6.9.2",
     "tailwind-merge": "^3.0.2",
+    "workers-ai-provider": "^3.1.12",
     "zod": "^4.3.6"
   },
   "devDependencies": {

@@ -10,6 +10,10 @@ declare namespace Cloudflare {
 		R2: R2Bucket;
 		DB: D1Database;
 		EMAIL_QUEUE: Queue;
+		/** Agent runs queue — added for AI agents feature. */
+		AGENT_QUEUE: Queue;
+		/** Workers AI binding for running Cloudflare-hosted models. */
+		AI: Ai;
 		ASSETS: Fetcher;
 		BASE_URL: "<your-deployed-url>";
 		TRUSTED_ORIGINS: "http://localhost:8080,http://localhost:8788,<your-deployed-url>";
@@ -19,6 +23,10 @@ declare namespace Cloudflare {
 		/** Secret: set via `wrangler secret put VAPID_PRIVATE_KEY`. Not emitted by `wrangler types`; added manually. */
 		VAPID_PRIVATE_KEY?: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
+		/** AI Gateway slug — create at dash.cloudflare.com → AI → AI Gateway. */
+		AI_GATEWAY_SLUG: string;
+		/** Set to "false" to disable all agent processing globally. */
+		AGENTS_ENABLED?: string;
 	}
 }
 interface Env extends Cloudflare.Env {}
