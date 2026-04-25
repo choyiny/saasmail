@@ -118,6 +118,7 @@ export default function PersonList({
       <div className="space-y-2 p-3">
         <div className="relative">
           <input
+            data-testid="person-search-input"
             type="text"
             placeholder="Search..."
             value={search}
@@ -126,6 +127,7 @@ export default function PersonList({
           />
           {search && (
             <button
+              data-testid="person-search-clear"
               onClick={() => setSearch("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
             >
