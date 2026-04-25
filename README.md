@@ -84,18 +84,92 @@ Issue scoped API keys for programmatic access to send email, manage templates, e
 
 ## Architecture
 
-| Layer             | Technology                              |
-| ----------------- | --------------------------------------- |
-| **Receive email** | Cloudflare Email Workers                |
-| **Send email**    | Cloudflare Email Sending or Resend      |
-| **Runtime**       | Cloudflare Workers + Hono               |
-| **API**           | Zod + `@hono/zod-openapi` (OpenAPI 3.1) |
-| **Database**      | Cloudflare D1 (SQLite)                  |
-| **File storage**  | Cloudflare R2 (attachments)             |
-| **Queue**         | Cloudflare Queues (sequence processing) |
-| **Frontend**      | React + Tailwind CSS + TipTap editor    |
-| **ORM**           | Drizzle                                 |
-| **Auth**          | BetterAuth with passkey support         |
+| Layer               | Technology                                                                |
+| ------------------- | ------------------------------------------------------------------------- |
+| **Receive email**   | Cloudflare Email Workers                                                  |
+| **Send email**      | Cloudflare Email Sending or Resend                                        |
+| **Runtime**         | Cloudflare Workers + Hono                                                 |
+| **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.1)                                   |
+| **Database**        | Cloudflare D1 (SQLite)                                                    |
+| **File storage**    | Cloudflare R2 (attachments)                                               |
+| **Queue**           | Cloudflare Queues (sequence processing)                                   |
+| **Realtime + Push** | Durable Object (`NotificationsHub`, one per user) — WebSockets + Web Push |
+| **Web Push**        | VAPID + `aes128gcm` payload encryption (RFC 8291), implemented in-worker  |
+| **Service Worker**  | `public/sw.js` — receives push events, renders OS notifications           |
+| **Cron**            | Hourly trigger for sequence email scheduling                              |
+| **Frontend**        | React + Tailwind CSS + TipTap editor                                      |
+| **ORM**             | Drizzle                                                                   |
+| **Auth**            | BetterAuth with passkey support                                           |
+
+### Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph Client["Browser"]
+        SPA["React SPA<br/>Tailwind + TipTap"]
+        SW["Service Worker<br/>(public/sw.js)"]
+    end
+
+    subgraph CF["Cloudflare Edge"]
+        EmailIn["Email Workers<br/>(inbound MX)"]
+        Cron["Cron Trigger<br/>(hourly)"]
+
+        subgraph Worker["Worker (Hono + Zod OpenAPI)"]
+            API["/api/* routes"]
+            EmailHandler["email handler"]
+            Scheduled["scheduled handler"]
+            QueueConsumer["queue consumer"]
+            Auth["BetterAuth<br/>(session + passkey)"]
+        end
+
+        subgraph DO["Durable Object: NotificationsHub<br/>(idFromName = userId)"]
+            WS["WebSocket fan-out<br/>(hibernatable)"]
+            Push["Web Push sender<br/>VAPID + aes128gcm"]
+        end
+
+        D1[("D1<br/>SQLite via Drizzle")]
+        R2[("R2<br/>attachments")]
+        Q[["Queue<br/>saasmail-sequence-emails"]]
+    end
+
+    subgraph Out["Outbound Provider (one of)"]
+        CFSend["Cloudflare<br/>Email Sending"]
+        Resend["Resend API"]
+    end
+
+    PushSvc["Browser Push Service<br/>(FCM / Mozilla / Apple)"]
+
+    SPA <-->|"HTTP + cookies / Bearer sk_*"| API
+    SPA <-.->|"WebSocket /api/notifications/ws"| API
+    API <-.->|"upgrade"| WS
+    SW -->|"showNotification"| Client
+
+    EmailIn --> EmailHandler
+    EmailHandler --> D1
+    EmailHandler --> R2
+    EmailHandler -->|"fan out per recipient user"| DO
+
+    Cron --> Scheduled
+    Scheduled --> D1
+    Scheduled -->|"enqueue due steps"| Q
+    Q --> QueueConsumer
+    QueueConsumer --> CFSend
+    QueueConsumer --> Resend
+
+    API --> D1
+    API --> R2
+    API --> Auth
+    Auth --> D1
+
+    Push -->|"POST encrypted payload"| PushSvc
+    PushSvc -->|"push event"| SW
+    DO --> D1
+
+    API -->|"send"| CFSend
+    API -->|"send"| Resend
+```
+
+The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). When inbound mail arrives, the email handler resolves recipient users from D1 and POSTs `/deliver` to each user's hub, which (a) fans out to any live WebSocket tabs for instant in-app updates and (b) reads that user's push subscriptions from D1 and sends encrypted payloads via Web Push to all registered devices. The service worker renders the OS notification and routes click-throughs back into the SPA.
 
 ## Quick Start
 
