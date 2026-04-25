@@ -1,9 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import PersonList from "./PersonList";
 import PersonDetail from "./PersonDetail";
 import ComposeModal from "./ComposeModal";
-import { fetchStats, type GroupedPerson, type Stats } from "@/lib/api";
+import {
+  fetchPerson,
+  fetchStats,
+  type GroupedPerson,
+  type Stats,
+} from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
 import { PushOptInBanner } from "@/components/PushOptInBanner";
@@ -19,6 +25,56 @@ export default function InboxPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [showBanner, setShowBanner] = useState(false);
   const { data: session } = useSession();
+  // When the user arrives via a Web Push notification (URL shape:
+  // /inbox/:inbox/:personId — see worker/src/do/notifications.ts and
+  // the route in App.tsx), pre-select that person so the tab shows the
+  // intended conversation rather than the empty default view.
+  const { personId: routePersonId } = useParams<{
+    inbox: string;
+    personId: string;
+  }>();
+  const lastProcessedPersonId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!routePersonId) return;
+    if (lastProcessedPersonId.current === routePersonId) return;
+    if (selectedPerson?.id === routePersonId) {
+      lastProcessedPersonId.current = routePersonId;
+      return;
+    }
+    lastProcessedPersonId.current = routePersonId;
+
+    // Prefer a hit in the already-loaded list (cheaper, has full grouped
+    // stats); fall back to fetching the person directly so we can still
+    // open the conversation when it isn't on the current page.
+    const found = people.find((p) => p.id === routePersonId);
+    if (found) {
+      setSelectedPerson(found);
+      return;
+    }
+    let cancelled = false;
+    fetchPerson(routePersonId)
+      .then((p) => {
+        if (cancelled) return;
+        setSelectedPerson({
+          id: p.id,
+          email: p.email,
+          name: p.name,
+          lastEmailAt: p.lastEmailAt,
+          unreadCount: p.unreadCount,
+          totalCount: p.totalCount,
+          // recipientCount/hasAttachment aren't returned by /api/people/:id;
+          // the grouped list will overwrite this object with full stats once
+          // it loads. PersonDetail only needs `id` to fetch emails.
+          recipientCount: 1,
+          hasAttachment: 0,
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [routePersonId, people, selectedPerson?.id]);
 
   function handleEmailRead(personId: string) {
     setPeople((prev) =>

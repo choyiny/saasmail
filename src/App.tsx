@@ -4,6 +4,7 @@ import {
   Route,
   Navigate,
   Outlet,
+  useNavigate,
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrandingProvider, useBranding } from "@/lib/branding";
@@ -74,11 +75,41 @@ function AuthGuard() {
   return <Outlet />;
 }
 
+/**
+ * Listens for `saasmail.notificationclick` messages posted by the service
+ * worker (public/sw.js) when a user clicks a Web Push notification while a
+ * tab is already open. The SW focuses the tab and posts the target URL; we
+ * complete the deep link by performing a client-side navigation here.
+ */
+function NotificationClickListener() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator))
+      return;
+    function onMessage(e: MessageEvent) {
+      const data = e.data;
+      if (
+        data &&
+        data.type === "saasmail.notificationclick" &&
+        typeof data.url === "string"
+      ) {
+        navigate(data.url);
+      }
+    }
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+    };
+  }, [navigate]);
+  return null;
+}
+
 function App() {
   return (
     <BrandingProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
+          <NotificationClickListener />
           <Routes>
             {/* Public routes */}
             <Route path="/login" element={<LoginPage />} />
@@ -109,6 +140,9 @@ function App() {
                   path="/settings"
                   element={<NotificationsSettingsPage />}
                 />
+                {/* Deep link from Web Push notifications — see
+                    worker/src/do/notifications.ts where data.url is set. */}
+                <Route path="/inbox/:inbox/:personId" element={<InboxPage />} />
                 <Route path="/*" element={<InboxPage />} />
               </Route>
             </Route>
