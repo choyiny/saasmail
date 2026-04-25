@@ -108,12 +108,12 @@ flowchart LR
     EmailRouting["Email Routing<br/>(inbound)"]
     EmailSending["Email Sending<br/>(outbound)"]
 
-    Worker["Worker<br/>(Hono API + handlers)"]
+    Worker["Worker"]
     DO["NotificationsHub<br/>(Durable Object, per user)"]
 
     D1[("D1")]
-    R2[("R2")]
-    Q[["Queue"]]
+    R2[("R2<br/>(attachments)")]
+    Q[["Queue<br/>(sequence processing)"]]
 
     EmailRouting --> Worker
     Worker --> EmailSending
