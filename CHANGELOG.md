@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-25
+
+### Fixed
+
+- Web push notifications now successfully decrypt in Chrome and other browsers: `deriveAes128GcmKeys` was appending a redundant `0x01` counter byte to the HKDF info before calling `hkdfExpand`, but `hkdfExpand` (RFC 5869) already appends its own counter byte for the first output block. The double-`0x01` caused "AES-GCM decryption failed" in `chrome://gcm-internals` while FCM silently accepted the malformed ciphertext. A known-answer test against the RFC 8291 §5 vector has been added to catch future regressions.
+
+### Dependencies
+
+- Bumped `postcss` from 8.5.9 to 8.5.10 (dev dependency).
+
 ## [0.2.0] - 2026-04-24
 
 ### Added
@@ -118,7 +128,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/choyiny/saasmail/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/choyiny/saasmail/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/choyiny/saasmail/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/choyiny/saasmail/compare/v0.1.0...v0.1.1
