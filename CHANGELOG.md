@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-26
+
+### Fixed
+
+- Clicking a Web Push notification now deep-links directly to the person's conversation instead of landing on the generic inbox view. Two bugs were fixed: `InboxPage` now reads `personId` from URL params and falls back to `fetchPerson(id)` when the contact isn't already in the loaded list; the service worker now `postMessage`s the target URL to any open same-origin tab (falling back to `openWindow`), and `App.tsx` adds a `/inbox/:inbox/:personId` route with a `NotificationClickListener` that calls `navigate(url)` on receipt.
+
 ## [0.2.1] - 2026-04-25
 
 ### Fixed
@@ -128,7 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/choyiny/saasmail/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/choyiny/saasmail/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/choyiny/saasmail/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/choyiny/saasmail/compare/v0.1.1...v0.1.2
