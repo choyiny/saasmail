@@ -6,7 +6,9 @@ import {
   createTestPerson,
   createTestEmail,
   authFetch,
+  getDb,
 } from "./helpers";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
 
 describe("GET /api/people/grouped — FTS search", () => {
   let apiKey: string;
@@ -144,5 +146,53 @@ describe("GET /api/people/grouped — FTS search", () => {
       );
       expect(res.status).toBe(200);
     }
+  });
+
+  it("does not leak FTS matches from inboxes a member cannot access", async () => {
+    // Member has access to support@ only, not billing@
+    const { userId: memberId, apiKey: memberKey } = await createTestUser({
+      id: "member-1",
+      role: "member",
+      email: "member@example.com",
+    });
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(inboxPermissions).values({
+      userId: memberId,
+      email: "support@saasmail.test",
+      createdAt: now,
+      createdBy: memberId,
+    });
+
+    // Alice has emails in both inboxes — only the billing@ one mentions "salary"
+    await createTestPerson({
+      id: "p1",
+      email: "alice@test.com",
+      name: "Alice",
+    });
+    await createTestEmail({
+      id: "e1",
+      personId: "p1",
+      recipient: "support@saasmail.test",
+      subject: "General question",
+      bodyText: "Just checking in",
+    });
+    await createTestEmail({
+      id: "e2",
+      personId: "p1",
+      recipient: "billing@saasmail.test",
+      subject: "Salary review",
+      bodyText: "Details about salary",
+      messageId: "msg-2@test.com",
+    });
+
+    // Member searches for "salary" — should get no results even though
+    // Alice has a match, because the matching email is in a restricted inbox.
+    const res = await authFetch("/api/people/grouped?q=salary", {
+      apiKey: memberKey,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(0);
   });
 });
