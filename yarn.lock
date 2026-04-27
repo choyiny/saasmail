@@ -2,16 +2,9 @@
 # yarn lockfile v1
 
 
-"@asteasolutions/zod-to-openapi@7.3.0":
-  version "7.3.0"
-  resolved "https://registry.npmjs.org/@asteasolutions/zod-to-openapi/-/zod-to-openapi-7.3.0.tgz"
-  integrity sha512-7tE/r1gXwMIvGnXVUdIqUhCU1RevEFC4Jk6Bussa0fk1ecbnnINkZzj1EOAJyE/M3AI25DnHT/zKQL1/FPFi8Q==
-  dependencies:
-    openapi3-ts "^4.1.2"
-
-"@asteasolutions/zod-to-openapi@^8.5.0":
+"@asteasolutions/zod-to-openapi@8.5.0", "@asteasolutions/zod-to-openapi@^8.5.0":
   version "8.5.0"
-  resolved "https://registry.npmjs.org/@asteasolutions/zod-to-openapi/-/zod-to-openapi-8.5.0.tgz"
+  resolved "https://registry.yarnpkg.com/@asteasolutions/zod-to-openapi/-/zod-to-openapi-8.5.0.tgz#f073822daad87c4ab2ae991ee86b1a5070ac9942"
   integrity sha512-SABbKiObg5dLRiTFnqiW1WWwGcg1BJfmHtT2asIBnBHg6Smy/Ms2KHc650+JI4Hw7lSkdiNebEGXpwoxfben8Q==
   dependencies:
     openapi3-ts "^4.1.2"

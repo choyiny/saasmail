@@ -33,7 +33,7 @@
     "*.{js,jsx,ts,tsx,json,css,md,html}": "prettier --write"
   },
   "dependencies": {
-    "@asteasolutions/zod-to-openapi": "7.3.0",
+    "@asteasolutions/zod-to-openapi": "8.5.0",
     "@better-auth/passkey": "^1.6.7",
     "@codemirror/lang-html": "^6.4.11",
     "@codemirror/state": "^6.6.0",
