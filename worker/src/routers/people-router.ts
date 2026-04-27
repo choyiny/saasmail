@@ -4,7 +4,7 @@ import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
-import { json200Response, escapeLike } from "../lib/helpers";
+import { json200Response, escapeLike, escapeFts } from "../lib/helpers";
 import type { Variables } from "../variables";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 
@@ -77,15 +77,25 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
   const { q, page, limit } = c.req.valid("query");
   const offset = (page - 1) * limit;
 
+  const allowed = c.get("allowedInboxes")!;
   const conditions: any[] = [];
   if (q) {
     const pattern = `%${escapeLike(q)}%`;
+    const ftsQuery = escapeFts(q);
+    const ftsInboxScope = allowed.isAdmin
+      ? sql``
+      : allowed.inboxes.length === 0
+        ? sql`AND 0`
+        : sql`AND emails.recipient IN ${allowed.inboxes}`;
     conditions.push(
-      sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\')`,
+      sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\'
+        OR s.id IN (
+          SELECT person_id FROM emails
+          JOIN emails_fts ON emails.rowid = emails_fts.rowid
+          WHERE emails_fts MATCH ${ftsQuery} ${ftsInboxScope}
+        ))`,
     );
   }
-
-  const allowed = c.get("allowedInboxes")!;
   const scopeClause = peopleScopeClause(allowed);
   const extraConditions =
     conditions.length > 0

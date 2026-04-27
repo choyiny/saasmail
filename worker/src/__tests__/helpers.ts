@@ -76,6 +76,20 @@ export async function applyMigrations() {
   for (const sql of statements) {
     await db.exec(sql);
   }
+
+  // FTS5 virtual table + triggers (custom migration, not in schema statements above)
+  await db.exec(
+    `CREATE VIRTUAL TABLE IF NOT EXISTS emails_fts USING fts5(subject, body_text, content='emails', content_rowid='rowid')`,
+  );
+  await db.exec(
+    `CREATE TRIGGER IF NOT EXISTS emails_fts_ai AFTER INSERT ON emails BEGIN INSERT INTO emails_fts(rowid, subject, body_text) VALUES (new.rowid, new.subject, new.body_text); END`,
+  );
+  await db.exec(
+    `CREATE TRIGGER IF NOT EXISTS emails_fts_ad AFTER DELETE ON emails BEGIN INSERT INTO emails_fts(emails_fts, rowid, subject, body_text) VALUES ('delete', old.rowid, old.subject, old.body_text); END`,
+  );
+  await db.exec(
+    `CREATE TRIGGER IF NOT EXISTS emails_fts_au AFTER UPDATE ON emails BEGIN INSERT INTO emails_fts(emails_fts, rowid, subject, body_text) VALUES ('delete', old.rowid, old.subject, old.body_text); INSERT INTO emails_fts(rowid, subject, body_text) VALUES (new.rowid, new.subject, new.body_text); END`,
+  );
 }
 
 /** Insert a test user with an API key for auth. Returns userId and apiKey. */
@@ -147,6 +161,7 @@ export async function createTestEmail(
     personId?: string;
     recipient?: string;
     subject?: string;
+    bodyText?: string;
     messageId?: string;
     isRead?: number;
   } = {},
@@ -159,7 +174,7 @@ export async function createTestEmail(
     recipient: opts.recipient ?? "inbox@saasmail.test",
     subject: opts.subject ?? "Test Subject",
     bodyHtml: "<p>Hello</p>",
-    bodyText: "Hello",
+    bodyText: opts.bodyText ?? "Hello",
     rawHeaders: "{}",
     messageId: opts.messageId ?? "msg-1@example.com",
     isRead: opts.isRead ?? 0,
