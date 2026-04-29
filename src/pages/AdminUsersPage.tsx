@@ -18,6 +18,7 @@ import {
   createInvite,
   updateUserRole,
   deleteUser,
+  revokeInvite,
 } from "@/lib/api";
 import type { User, Invite } from "@/lib/api";
 import {
@@ -175,6 +176,12 @@ export default function AdminUsersPage() {
   async function handleDelete(userId: string) {
     if (!confirm("Delete this user? This can't be undone.")) return;
     await deleteUser(userId);
+    await loadData();
+  }
+
+  async function handleRevoke(inviteId: string) {
+    if (!confirm("Revoke this invitation? This cannot be undone.")) return;
+    await revokeInvite(inviteId);
     await loadData();
   }
 
@@ -472,6 +479,29 @@ export default function AdminUsersPage() {
                             : `expires ${relativeTime(invite.expiresAt)}`}
                       </p>
                     </div>
+                    {status === "pending" && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            aria-label="More actions"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                          >
+                            <MoreHorizontal size={14} />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="border-border bg-card text-text-primary ring-1 ring-border"
+                        >
+                          <DropdownMenuItem
+                            onClick={() => handleRevoke(invite.id)}
+                            className="text-xs text-destructive focus:bg-bg-muted"
+                          >
+                            Revoke invitation
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </li>
                 );
               })}

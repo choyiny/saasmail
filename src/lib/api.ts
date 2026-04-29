@@ -462,6 +462,12 @@ export async function deleteUser(id: string): Promise<{ success: boolean }> {
   });
 }
 
+export async function revokeInvite(id: string): Promise<{ success: true }> {
+  return apiFetch<{ success: true }>(`/api/admin/invites/${id}`, {
+    method: "DELETE",
+  });
+}
+
 // --- Public Invite API ---
 
 export async function validateInvite(token: string): Promise<InviteInfo> {
