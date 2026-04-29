@@ -178,6 +178,92 @@ describe("admin router", () => {
     });
   });
 
+  describe("DELETE /api/admin/invites/:id", () => {
+    it("revokes a pending invite", async () => {
+      const db = getDb();
+      const now = new Date();
+      await db.insert(invitations).values({
+        id: "invite-1",
+        token: crypto.randomUUID(),
+        role: "member",
+        email: null,
+        expiresAt: new Date(now.getTime() + 86400000),
+        usedBy: null,
+        usedAt: null,
+        createdBy: userId,
+        createdAt: now,
+      });
+
+      const res = await authFetch("/api/admin/invites/invite-1", {
+        apiKey,
+        method: "DELETE",
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+
+      const remaining = await db
+        .select()
+        .from(invitations)
+        .where(eq(invitations.id, "invite-1"))
+        .get();
+      expect(remaining).toBeUndefined();
+    });
+
+    it("revokes a used invite", async () => {
+      const db = getDb();
+      const now = new Date();
+      const now2 = Date.now();
+      await db.insert(users).values({
+        id: "user-2",
+        name: "Accepted User",
+        email: "accepted@example.com",
+        emailVerified: false,
+        createdAt: new Date(now2),
+        updatedAt: new Date(now2),
+        role: "member",
+      });
+      await db.insert(invitations).values({
+        id: "invite-2",
+        token: crypto.randomUUID(),
+        role: "member",
+        email: "accepted@example.com",
+        expiresAt: new Date(now.getTime() + 86400000),
+        usedBy: "user-2",
+        usedAt: now,
+        createdBy: userId,
+        createdAt: now,
+      });
+
+      const res = await authFetch("/api/admin/invites/invite-2", {
+        apiKey,
+        method: "DELETE",
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.success).toBe(true);
+    });
+
+    it("returns 404 for nonexistent invite id", async () => {
+      const res = await authFetch("/api/admin/invites/nonexistent", {
+        apiKey,
+        method: "DELETE",
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("rejects non-admin for revoke endpoint", async () => {
+      await cleanDb();
+      const { apiKey: memberApiKey } = await createTestUser({ role: "member" });
+
+      const res = await authFetch("/api/admin/invites/any-id", {
+        apiKey: memberApiKey,
+        method: "DELETE",
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
   describe("admin guard", () => {
     it("rejects non-admin users", async () => {
       await cleanDb();
