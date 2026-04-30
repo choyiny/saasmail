@@ -7,11 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-04-28
-
-### Added
-
-- Full-text email search via FTS5: the search box now surfaces people whose emails match the query by subject or body text, not just by name or email address. An `emails_fts` FTS5 virtual table is created with INSERT/UPDATE/DELETE triggers to keep the index in sync; existing emails are backfilled on migration. For members, FTS results are scoped to their permitted inboxes to prevent cross-inbox content leakage. The search box placeholder is updated to "Search…" and a clear (×) button appears when text is entered.
+## [0.3.1] - 2026-04-30
 
 ### Dependencies
 
@@ -21,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bumped `@hono/swagger-ui` from 0.5.3 to 0.6.1.
 - Bumped `actions/cache` from 4 to 5.
 - Bumped `actions/checkout` from 4 to 6.
+
+## [0.3.0] - 2026-04-29
+
+### Added
+
+- Full-text email search via FTS5: the search box now surfaces people whose emails match the query by subject or body text, not just by name or email address. An `emails_fts` FTS5 virtual table is created with INSERT/UPDATE/DELETE triggers to keep the index in sync; existing emails are backfilled on migration. For members, FTS results are scoped to their permitted inboxes to prevent cross-inbox content leakage. The search box placeholder is updated to "Search…" and a clear (×) button appears when text is entered.
 
 ## [0.2.2] - 2026-04-26
 
@@ -149,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/choyiny/saasmail/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/choyiny/saasmail/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/choyiny/saasmail/compare/v0.2.0...v0.2.1
