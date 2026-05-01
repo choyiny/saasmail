@@ -1,0 +1,107 @@
+# saasmail fork — operator deploy tooling.
+#
+# Layered on top of upstream saasmail. Heavy lifting lives in the shared
+# joeblew999/.github/mise-tasks library imported below. This file only adds:
+#   - tools pin
+#   - env vars
+#   - phased deploy orchestrators (1-install, 6-build, 10-deploy)
+#   - vapid:generate (Web Push key bootstrap, saasmail-specific)
+#
+# Deploy lifecycle (one time):
+#   1. cp config/template.env config/production.env  # fill identity values
+#   2. fnox set --provider keychain CLOUDFLARE_API_TOKEN  # one-time per machine
+#      fnox set --provider keychain CLOUDFLARE_ACCOUNT_ID
+#   3. mise run cf:provision-d1-r2     # creates R2 + D1, writes IDs back
+#   4. mise run cf:provision-queues    # creates EMAIL_QUEUE
+#   5. mise run cf:access-setup        # creates Access App + writes fnox values
+#   6. mise run cf:secrets-put-mapped  # fnox -> Worker secrets
+#   7. mise run vapid:generate         # generates + sets VAPID keys
+#   8. mise run 10-deploy
+#   9. (manual) Configure Email Routing rule in dashboard
+
+[task_config]
+# Shared joeblew999 task library. v0.8.0 brings:
+#   - cf:provision-d1-r2 (now lenient about partial bindings)
+#   - cf:provision-queues (NEW — for EMAIL_QUEUE)
+includes = ["git::https://github.com/joeblew999/.github.git//mise-tasks?ref=v0.8.1"]
+
+[tools]
+node                = "24"
+"npm:wrangler"      = "4.84.1"
+"github:jdx/fnox"   = "1.23"
+"aqua:cli/cli"      = "2"
+"aqua:jqlang/jq"    = "1"
+"aqua:a8m/envsubst" = "1"
+"cargo:usage-cli"   = "3"
+
+[env]
+DEFAULT_ENV    = "production"
+FNOX_SYNC_KEYS = ""
+
+# ── Per-fork inline tasks (everything else comes from shared) ────────────────
+
+[tasks."env:dump"]
+description = "Print all keys + values from config/<env>.env (default: production)."
+run = '''
+file=$(mise run -q env:resolve)
+echo "# $file"
+cat "$file"
+'''
+
+[tasks."env:list"]
+description = "List every env config (config/<name>.env)."
+run         = "ls -1 config/*.env 2>/dev/null | grep -v template.env || echo 'no env files yet — copy config/template.env'"
+
+[tasks."1-install"]
+description = "Install yarn deps (first time)."
+run         = "yarn install"
+
+[tasks."6-build"]
+description = "Build the Vite SPA (dist/) — required before deploy."
+depends     = ["1-install", "wrangler:gen"]
+run         = "yarn build"
+
+[tasks."10-deploy"]
+description = "Build + deploy the Worker. Validates CF token first."
+depends     = ["cf:token-check", "6-build"]
+run         = "wrangler deploy"
+
+[tasks."10b-redeploy"]
+description = "Re-deploy without rebuilding (fast iteration after wrangler.toml/secret changes)."
+depends     = ["wrangler:gen"]
+run         = "wrangler deploy"
+
+[tasks."dev"]
+description = "Run saasmail locally (Vite + wrangler dev)."
+depends     = ["wrangler:gen"]
+run         = "yarn dev"
+
+[tasks."vapid:generate"]
+description = "Generate VAPID key pair for Web Push, write public key to config/<env>.env, push private as Worker secret."
+run = '''
+file=$(mise run -q env:resolve)
+set -a; . "$file"; set +a
+
+# Generate via the upstream's own script.
+out=$(yarn -s vapid:generate 2>&1 || true)
+public=$(echo "$out" | grep -E '^VAPID_PUBLIC_KEY=' | cut -d= -f2-)
+private=$(echo "$out" | grep -E '^VAPID_PRIVATE_KEY=' | cut -d= -f2-)
+if [ -z "$public" ] || [ -z "$private" ]; then
+  echo "ERROR: vapid:generate did not produce both keys. Output:" >&2
+  echo "$out" >&2
+  exit 1
+fi
+
+# Write public to config (it's safe to commit-ish — it's the VAPID_PUBLIC_KEY env var).
+sed -i.bak -E "s|^VAPID_PUBLIC_KEY=.*|VAPID_PUBLIC_KEY=$public|" "$file"
+rm -f "$file.bak"
+echo "✓ Wrote VAPID_PUBLIC_KEY to $file"
+
+# Push private as Worker secret.
+echo "$private" | wrangler secret put VAPID_PRIVATE_KEY
+echo "✓ Pushed VAPID_PRIVATE_KEY to Worker secrets"
+'''
+
+[tasks."prove:all"]
+description = "Run all prove:* checks (deployed + bindings + access-policy + secrets)."
+depends     = ["prove:deployed", "prove:bindings", "prove:access-policy", "prove:secrets"]

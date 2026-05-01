@@ -16,3 +16,8 @@ playwright-report/
 
 # Local superpowers docs (specs, plans)
 docs/superpowers/
+
+# joeblew999 fork overlay — operator-specific, never commit
+config/*.env
+!config/template.env
+mise.local.toml

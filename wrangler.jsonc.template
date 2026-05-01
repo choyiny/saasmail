@@ -1,0 +1,94 @@
+{
+  // saasmail Worker config — TEMPLATE.
+  //
+  // DO NOT EDIT wrangler.jsonc directly. Edit this template, then:
+  //   mise run wrangler:gen   # envsubst this template -> wrangler.jsonc
+  // Variables come from config/<env>.env (default env: production).
+
+  "name": "$WORKER_NAME",
+  "main": "worker/src/index.ts",
+  "account_id": "$CLOUDFLARE_ACCOUNT_ID",
+  "compatibility_date": "2026-04-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "$METADATA_DB_NAME",
+      "database_id": "$METADATA_DB_ID"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "R2",
+      "bucket_name": "$BACKUP_BUCKET_NAME"
+    }
+  ],
+
+  // CF Email Sending binding — outbound email via Cloudflare (no Resend).
+  // Requires the domain in $EMAIL_DOMAIN to be onboarded at Email Service.
+  "send_email": [
+    { "name": "EMAIL" }
+  ],
+
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+
+  "email_routing": {
+    "enabled": true
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "queues": {
+    "producers": [
+      {
+        "binding": "EMAIL_QUEUE",
+        "queue": "$EMAIL_QUEUE_NAME"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "$EMAIL_QUEUE_NAME",
+        "max_batch_size": 10,
+        "max_retries": 3
+      }
+    ]
+  },
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "NOTIFICATIONS_HUB",
+        "class_name": "NotificationsHub"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["NotificationsHub"]
+    }
+  ],
+
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+
+  "vars": {
+    "BASE_URL": "$BASE_URL",
+    "TRUSTED_ORIGINS": "$TRUSTED_ORIGINS",
+    "COOKIE_PREFIX": "$COOKIE_PREFIX",
+    "VAPID_PUBLIC_KEY": "$VAPID_PUBLIC_KEY",
+    "VAPID_SUBJECT": "$VAPID_SUBJECT"
+  }
+}
