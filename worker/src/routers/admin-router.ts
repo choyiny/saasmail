@@ -144,7 +144,10 @@ const revokeInviteRoute = createRoute({
     params: z.object({ id: z.string() }),
   },
   responses: {
-    ...json200Response(z.object({ success: z.literal(true) }), "Invite revoked"),
+    ...json200Response(
+      z.object({ success: z.literal(true) }),
+      "Invite revoked",
+    ),
     404: {
       description: "Invite not found",
       content: { "application/json": { schema: ErrorSchema } },
