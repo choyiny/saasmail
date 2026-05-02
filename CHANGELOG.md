@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-02
+
+### Dependencies
+
+- Bumped `better-auth` and `@better-auth/passkey` from 1.6.7 to 1.6.9.
+- Bumped Cloudflare dev group: `@cloudflare/vite-plugin` 1.33.1 → 1.33.2, `@cloudflare/vitest-pool-workers` 0.14.9 → 0.15.0, `@cloudflare/workers-types` 4.20260423.1 → 4.20260426.1, `wrangler` 4.84.1 → 4.85.0.
+- Bumped `@asteasolutions/zod-to-openapi` from 7.3.0 to 8.5.0.
+- Bumped `@hono/swagger-ui` from 0.5.3 to 0.6.1.
+- Bumped `actions/cache` from 4 to 5.
+- Bumped `actions/checkout` from 4 to 6.
+
 ## [0.3.1] - 2026-04-30
 
 ### Dependencies
@@ -151,7 +162,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/choyiny/saasmail/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/choyiny/saasmail/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/choyiny/saasmail/compare/v0.2.1...v0.2.2
