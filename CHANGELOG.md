@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-03
+
+### Added
+
+- Admins can now revoke invitations from the admin users page. Each invite row has a kebab menu with a "Revoke" action that hard-deletes the invitation after a confirmation prompt. `DELETE /api/admin/invites/{id}` endpoint added (admin-gated); returns `{ success: true }` or 404 if the invite does not exist.
+
 ## [0.3.1] - 2026-04-30
 
 ### Dependencies
@@ -151,7 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/choyiny/saasmail/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/choyiny/saasmail/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/choyiny/saasmail/compare/v0.2.1...v0.2.2
