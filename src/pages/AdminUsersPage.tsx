@@ -7,6 +7,7 @@ import {
   createInvite,
   updateUserRole,
   deleteUser,
+  revokeInvite,
 } from "@/lib/api";
 import type { User, Invite } from "@/lib/api";
 import {
@@ -88,6 +89,12 @@ export default function AdminUsersPage() {
   async function handleDelete(userId: string) {
     if (!confirm("Are you sure you want to delete this user?")) return;
     await deleteUser(userId);
+    await loadData();
+  }
+
+  async function handleRevoke(inviteId: string) {
+    if (!confirm("Revoke this invitation? This cannot be undone.")) return;
+    await revokeInvite(inviteId);
     await loadData();
   }
 
@@ -320,17 +327,37 @@ export default function AdminUsersPage() {
                         {formatDate(invite.expiresAt)}
                       </p>
                     </div>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                        st === "used"
-                          ? "bg-accent/20 text-accent"
-                          : st === "expired"
-                            ? "bg-bg-muted text-text-tertiary"
-                            : "border border-border text-text-secondary"
-                      }`}
-                    >
-                      {st}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                          st === "used"
+                            ? "bg-accent/20 text-accent"
+                            : st === "expired"
+                              ? "bg-bg-muted text-text-tertiary"
+                              : "border border-border text-text-secondary"
+                        }`}
+                      >
+                        {st}
+                      </span>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button className="rounded px-1.5 py-0.5 text-xs text-text-tertiary hover:bg-bg-muted hover:text-text-secondary">
+                            ...
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="bg-white ring-1 ring-gray-200 border-border text-text-primary"
+                        >
+                          <DropdownMenuItem
+                            onClick={() => handleRevoke(invite.id)}
+                            className="text-xs text-destructive focus:bg-bg-muted"
+                          >
+                            Revoke
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 );
               })
