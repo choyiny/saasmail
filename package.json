@@ -81,7 +81,7 @@
     "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^18.3.20",
     "@types/react-dom": "^18.3.6",
-    "@vitejs/plugin-react-swc": "^3.9.0",
+    "@vitejs/plugin-react-swc": "^4.3.0",
     "@vitest/runner": "^4.1.5",
     "@vitest/snapshot": "^4.1.5",
     "autoprefixer": "^10.4.21",
