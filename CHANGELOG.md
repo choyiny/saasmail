@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-04
+
+### Added
+
+- Admins can now revoke pending invitations from the admin users page: each invite row has a "Revoke" action that opens a confirm dialog and calls the new `DELETE /api/admin/invites/{id}` endpoint (admin-gated, hard-deletes the row, 404 if unknown).
+
+### Fixed
+
+- Person-list search bar no longer triggers iOS Safari's auto-zoom: font size raised to 16 px on mobile (compact desktop sizing restored at the `sm` breakpoint).
+
 ## [0.3.2] - 2026-05-02
 
 ### Dependencies
@@ -162,7 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/choyiny/saasmail/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/choyiny/saasmail/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/choyiny/saasmail/compare/v0.2.2...v0.3.0

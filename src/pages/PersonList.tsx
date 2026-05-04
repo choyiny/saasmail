@@ -123,7 +123,7 @@ export default function PersonList({
             placeholder="Search..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 pr-7 text-xs text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+            className="h-10 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 pr-9 text-base text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent sm:h-8 sm:pr-7 sm:text-xs"
           />
           {search && (
             <button
@@ -131,7 +131,7 @@ export default function PersonList({
               onClick={() => setSearch("")}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
             >
-              <X size={12} />
+              <X className="h-4 w-4 sm:h-3 sm:w-3" />
             </button>
           )}
         </div>
