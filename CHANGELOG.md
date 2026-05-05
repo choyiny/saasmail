@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-05-05
+
+### Fixed
+
+- Person-list search bar on iOS Safari: inputs with `font-size` below 16 px triggered automatic viewport zoom on focus. The search bar now uses 16 px text and a taller, more tappable input on mobile, reverting to the compact desktop size at the `sm` breakpoint.
+
+### Dependencies
+
+- Bumped the tiptap group (`@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.22.4 to 3.22.5.
+- Bumped `react` and `react-dom` from 18.3.1 to 19.2.5; bumped `@types/react` from 18.3.20 to 19.2.14.
+- Bumped `@vitejs/plugin-react-swc` from 3.11.0 to 4.3.0.
+
 ## [0.3.2] - 2026-05-02
 
 ### Dependencies
@@ -162,7 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/choyiny/saasmail/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/choyiny/saasmail/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/choyiny/saasmail/compare/v0.2.2...v0.3.0
