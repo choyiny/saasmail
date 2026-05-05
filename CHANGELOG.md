@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-05
+
+### Dependencies
+
+- Bumped Cloudflare dev group: `@cloudflare/vite-plugin` 1.33.2 → 1.35.0, `@cloudflare/vitest-pool-workers` 0.15.0 → 0.15.2, `@cloudflare/workers-types` 4.20260426.1 → 4.20260504.1, `wrangler` 4.85.0 → 4.87.0.
+- Updated Node.js version to 22 in all GitHub Actions workflows.
+
 ## [0.3.3] - 2026-05-05
 
 ### Fixed
