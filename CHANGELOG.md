@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-06
+
+### Dependencies
+
+- Bumped Cloudflare dev group: `@cloudflare/vite-plugin` 1.33.2 → 1.35.0, `@cloudflare/vitest-pool-workers` 0.15.0 → 0.15.2, `@cloudflare/workers-types` 4.20260426.1 → 4.20260504.1, `wrangler` 4.85.0 → 4.87.0.
+- Updated Node.js to v22 in all GitHub Actions workflows.
+
 ## [0.3.3] - 2026-05-05
 
 ### Fixed
@@ -174,7 +181,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/choyiny/saasmail/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/choyiny/saasmail/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/choyiny/saasmail/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
