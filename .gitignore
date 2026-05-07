@@ -16,6 +16,8 @@ playwright-report/
 
 # Local superpowers docs (specs, plans)
 docs/superpowers/
+.yarn/
+.yarnrc.yml
 
 # Per-developer Claude Code preview launch config
 .claude/launch.json
