@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-06
+
+### Fixed
+
+- Compose recipients are now surfaced in the people list: sending via compose upserts a people row for the recipient and the `/api/people/grouped` aggregation now unions sent emails so sent activity contributes to `totalCount`, `lastEmailAt`, and `recipientCount`.
+
 ## [0.3.3] - 2026-05-05
 
 ### Fixed
@@ -174,7 +180,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/choyiny/saasmail/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/choyiny/saasmail/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/choyiny/saasmail/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
