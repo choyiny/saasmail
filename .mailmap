@@ -1,0 +1,13 @@
+# Canonical author mapping. Tools that respect .mailmap (git log,
+# git shortlog, git blame, GitHub's per-file blame view in some
+# contexts) display the canonical identity instead of whatever
+# email a contributor's local git happened to be configured with
+# at commit time.
+#
+# Format: <Canonical Name> <canonical@email> <commit-time-email>
+#
+# References:
+# - https://git-scm.com/docs/gitmailmap
+# - https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-personal-account-on-github/managing-email-preferences/setting-your-commit-email-address
+
+Mahmoud Halat <17732306+MahmoudHalat@users.noreply.github.com> <mahmoudhalat@MacBook-Pro.local>
