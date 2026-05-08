@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-08
+
+### Changed
+
+- Compose modal converted to a right-side drawer matching the Reply composer: Radix Dialog primitives, fixed-right layout, same header/metadata/editor/footer pattern. ⌘/Ctrl+Enter sends; Send disabled until To and body are filled.
+- Inbox page chrome trimmed: page title removed, Compose button moved into the toolbar row, bottom gap eliminated.
+- Compact density pass: tighter padding and spacing throughout to fit more content on screen at default Mac scale.
+- Footer slimmed: tighter vertical padding, smaller pill padding and font sizes, ~30 px shorter overall.
+
+### Fixed
+
+- Inbox card height restored to a hard `h-[calc(100vh-13rem)]` so inner scroll regions function correctly and the footer stays fully in view below the fold.
+- LoginPage error message now applies `text-destructive` for correct theme colouring.
+- Sign out menu item added to the user dropdown (exposes `logout-button` test ID for E2E).
+- User email surfaced as the accessible title on the dropdown trigger.
+- WebGL shader disabled in headless/low-capability browsers to prevent CI rendering failures.
+- Templates link wired into the navigation bar.
+- E2E selector and actionability drift fixed across multiple tests to align with the updated UI chrome.
+
 ## [0.4.0] - 2026-05-07
 
 A large UX/visual overhaul plus a new bulk-actions API. Frontend, brand,
@@ -216,7 +235,9 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/choyiny/saasmail/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/choyiny/saasmail/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/choyiny/saasmail/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/choyiny/saasmail/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/choyiny/saasmail/compare/v0.3.0...v0.3.1
