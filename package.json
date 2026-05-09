@@ -62,7 +62,7 @@
     "codemirror": "^6.0.2",
     "dompurify": "^3.4.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.14",
+    "hono": "^4.12.18",
     "lucide-react": "^1.8.0",
     "mimetext": "^3.0.28",
     "nanoid": "^5.1.5",
