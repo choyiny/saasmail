@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-11
+
+### Changed
+
+- Bump hono from 4.12.14 to 4.12.18.
+- Add `.mailmap` to canonicalize historical author attribution.
+
 ## [0.4.1] - 2026-05-08
 
 ### Changed
