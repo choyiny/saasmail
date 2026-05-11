@@ -42,6 +42,14 @@ export async function handleEmail(
   const parsed = await parseEmail(message);
   const now = Math.floor(Date.now() / 1000);
 
+  // Canonicalize inbox addresses to lowercase before storage so casing
+  // variants of the same recipient don't fork into separate group-row
+  // buckets (the grouped query keys by `(conversation_id, inbox)`, and
+  // conversation_id is computed from lowercased inputs already — we
+  // need the stored column to match).
+  const recipientCanonical = parsed.to.trim().toLowerCase();
+  const fromAddressCanonical = parsed.from.address.trim().toLowerCase();
+
   // Deduplicate by Message-ID
   if (parsed.messageId) {
     const existing = await db
@@ -66,7 +74,7 @@ export async function handleEmail(
     .insert(people)
     .values({
       id: personId,
-      email: parsed.from.address,
+      email: fromAddressCanonical,
       name: parsed.from.name || null,
       lastEmailAt: now,
       unreadCount: 1,
@@ -87,11 +95,13 @@ export async function handleEmail(
       },
     });
 
-  // Get the actual person ID (could be existing)
+  // Get the actual person ID (could be existing). Lookup by the
+  // canonical (lowercased) email so legacy mixed-case rows still
+  // resolve to the same person.
   const personRow = await db
     .select({ id: people.id })
     .from(people)
-    .where(eq(people.email, parsed.from.address))
+    .where(eq(people.email, fromAddressCanonical))
     .limit(1);
   const actualPersonId = personRow[0]!.id;
 
@@ -170,17 +180,22 @@ export async function handleEmail(
     );
   })();
   const allParticipants = [
-    parsed.from.address,
+    fromAddressCanonical,
     ...parsed.cc.map((c) => c.email),
   ];
   const externals = externalsOnly(allParticipants, ourDomains);
-  const conversationId = await computeConversationId(parsed.to, externals);
+  const conversationId = await computeConversationId(
+    recipientCanonical,
+    externals,
+  );
 
-  // Insert email (with rewritten HTML and auth results)
+  // Insert email (with rewritten HTML and auth results). Store the
+  // canonical (lowercased) recipient so it matches the conversation
+  // group key.
   await db.insert(emails).values({
     id: emailId,
     personId: actualPersonId,
-    recipient: parsed.to,
+    recipient: recipientCanonical,
     subject: parsed.subject,
     bodyHtml,
     bodyText: parsed.bodyText,
@@ -207,7 +222,7 @@ export async function handleEmail(
           db
             .select({ userId: inboxPermissions.userId })
             .from(inboxPermissions)
-            .where(eq(inboxPermissions.email, parsed.to)),
+            .where(eq(inboxPermissions.email, recipientCanonical)),
           db
             .select({ id: users.id })
             .from(users)
@@ -224,10 +239,10 @@ export async function handleEmail(
           );
         }
         const deliverPayload = JSON.stringify({
-          inbox: parsed.to,
+          inbox: recipientCanonical,
           threadId: actualPersonId,
           personId: actualPersonId,
-          senderName: parsed.from.name || parsed.from.address,
+          senderName: parsed.from.name || fromAddressCanonical,
           subject: parsed.subject ?? "",
           bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
         });
@@ -262,6 +277,6 @@ export async function handleEmail(
   await cancelSequencesForPerson(db, actualPersonId);
 
   console.log(
-    `Processed email from ${parsed.from.address} to ${parsed.to} (${parsed.attachments.length} attachments)`,
+    `Processed email from ${fromAddressCanonical} to ${recipientCanonical} (${parsed.attachments.length} attachments)`,
   );
 }

@@ -252,6 +252,47 @@ describe("emails router", () => {
       expect(data.isRead).toBeNull();
       expect(data.cc).toEqual([]);
     });
+
+    it("returns 404 when a non-admin tries to fetch a sent email from an inbox they don't own", async () => {
+      // Negative-path complement to the happy case above. The
+      // sent_emails fallback in getEmailRoute applies the same
+      // ownership check as the reply route — only surface a sent row
+      // to a caller who still owns the inbox that sent it. Guards
+      // against id-guessing a teammate's outgoing message.
+      const { apiKey, userId } = await createTestUser({
+        id: "u-getsent-1",
+        role: "member",
+        email: "member-getsent@x.com",
+      });
+      await grantInbox(userId, "a@x.com");
+      await createTestPerson({
+        id: "p-getsent-1",
+        email: "target@external.com",
+      });
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      await db.insert(sentEmails).values({
+        id: "se-other-inbox-get",
+        personId: "p-getsent-1",
+        // fromAddress belongs to a different inbox the caller does NOT have
+        // permission for. They must not be able to see it via id-guess.
+        fromAddress: "b@x.com",
+        toAddress: "target@external.com",
+        subject: "Other user's outgoing",
+        bodyHtml: "<p>private</p>",
+        bodyText: null,
+        messageId: "<orig@b.test>",
+        resendId: "r-other-2",
+        status: "sent",
+        sentAt: now,
+        createdAt: now,
+      });
+
+      const res = await authFetch("/api/emails/se-other-inbox-get", {
+        apiKey,
+      });
+      expect(res.status).toBe(404);
+    });
   });
 
   describe("PATCH /api/emails/:id", () => {

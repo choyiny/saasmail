@@ -28,6 +28,7 @@ import {
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
+import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { cn } from "@/lib/utils";
 
 interface ReplyComposerProps {
@@ -91,6 +92,14 @@ export default function ReplyComposer({
     const match = senderIdentities.find((s) => s.email === fromAddress);
     setSignatureHtml(match?.signatureHtml ?? null);
   }, [fromAddress, senderIdentities]);
+
+  // Sanitize the signature once per change. Server sanitizes on write
+  // too; this is defense-in-depth for the browser render path
+  // (dangerouslySetInnerHTML) and for the outbound body we POST.
+  const safeSignatureHtml = useMemo(
+    () => (signatureHtml ? sanitizeEmailHtml(signatureHtml) : null),
+    [signatureHtml],
+  );
 
   // Thread context — the email being replied to + prior messages from the
   // same person/inbox so the user can reference them while drafting.
@@ -197,8 +206,8 @@ export default function ReplyComposer({
         // signatures" toggle can strip it cleanly. Skip when the inbox has
         // none configured. Templates already include their own boilerplate
         // so we don't append.
-        const finalBody = signatureHtml
-          ? `${bodyHtml}<div data-signature>${signatureHtml}</div>`
+        const finalBody = safeSignatureHtml
+          ? `${bodyHtml}<div data-signature>${safeSignatureHtml}</div>`
           : bodyHtml;
         await replyToEmail(emailId, {
           bodyHtml: finalBody,
@@ -350,12 +359,13 @@ export default function ReplyComposer({
                     onUpdate={setBodyHtml}
                     placeholder="Write your reply…"
                   />
-                  {signatureHtml && (
+                  {safeSignatureHtml && (
                     <div
                       data-signature
                       data-testid="reply-signature-preview"
                       className="mt-4 border-t border-border/60 pt-3 opacity-70"
-                      dangerouslySetInnerHTML={{ __html: signatureHtml }}
+                      // Pre-sanitized via sanitizeEmailHtml above.
+                      dangerouslySetInnerHTML={{ __html: safeSignatureHtml }}
                     />
                   )}
                 </div>

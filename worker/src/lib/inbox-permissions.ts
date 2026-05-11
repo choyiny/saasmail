@@ -19,7 +19,14 @@ export async function resolveAllowedInboxes(
     .select({ email: inboxPermissions.email })
     .from(inboxPermissions)
     .where(eq(inboxPermissions.userId, user.id));
-  return { isAdmin: false, inboxes: rows.map((r) => r.email) };
+  // Lowercase at resolution time so every downstream allow-check is
+  // case-insensitive without needing each caller to remember to
+  // normalize. Older `inbox_permissions.email` rows may be mixed
+  // case from before insert-time canonicalization.
+  return {
+    isAdmin: false,
+    inboxes: rows.map((r) => r.email.toLowerCase()),
+  };
 }
 
 export function inboxFilter(
@@ -36,7 +43,11 @@ export function assertInboxAllowed(
   email: string,
 ): void {
   if (allowed.isAdmin) return;
-  if (!allowed.inboxes.includes(email)) {
+  // Compare lowercased so a member who registered `Support@x.com` in
+  // permissions still passes when the route asserts `support@x.com`
+  // (callers now canonicalize inputs at the boundary, but be
+  // defensive in case future callers don't).
+  if (!allowed.inboxes.includes(email.toLowerCase())) {
     throw new HTTPException(403, { message: "Inbox not allowed" });
   }
 }

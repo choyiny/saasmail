@@ -4,6 +4,10 @@ import { senderIdentities } from "../db/sender-identities.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { emails } from "../db/emails.schema";
 import { json200Response, json201Response } from "../lib/helpers";
+import {
+  MAX_SIGNATURE_HTML_LENGTH,
+  sanitizeSignatureHtml,
+} from "../lib/sanitize-signature";
 import type { Variables } from "../variables";
 
 export const adminInboxesRouter = new OpenAPIHono<{
@@ -157,7 +161,14 @@ const PatchInboxBodySchema = z
   .object({
     displayName: z.string().nullable().optional(),
     displayMode: z.enum(["thread", "chat"]).optional(),
-    signatureHtml: z.string().nullable().optional(),
+    // Length cap prevents a single admin from blowing up storage and
+    // the outbound-email payload. Real content is sanitized further
+    // by `sanitizeSignatureHtml` in the handler.
+    signatureHtml: z
+      .string()
+      .max(MAX_SIGNATURE_HTML_LENGTH)
+      .nullable()
+      .optional(),
   })
   .refine(
     (b) =>
@@ -221,11 +232,15 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     body.displayMode !== undefined
       ? body.displayMode
       : (currentRow?.displayMode ?? "chat");
+  // Sanitize at write time. Strips scripts / event handlers /
+  // javascript: URLs before storage so a compromised admin token
+  // can't turn this field into a stored-XSS vector for the rest of
+  // the org. See sanitize-signature.ts for the threat model.
   const nextSignatureHtml =
     body.signatureHtml !== undefined
-      ? body.signatureHtml === ""
+      ? body.signatureHtml === "" || body.signatureHtml === null
         ? null
-        : body.signatureHtml
+        : await sanitizeSignatureHtml(body.signatureHtml)
       : (currentRow?.signatureHtml ?? null);
 
   // All fields at defaults → delete the row to keep the table sparse.

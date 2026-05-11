@@ -4,17 +4,12 @@ import {
   fetchConversationEmails,
   markEmailRead,
   deleteEmail,
-  fetchStats,
   type GroupedConversation,
   type Email,
   type ConversationDetail as ConversationDetailData,
-  type InboxDisplayMode,
 } from "@/lib/api";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
-import ReplyComposer from "@/components/ReplyComposer";
-import ThreadInboxSection, {
-  type ThreadInboxGroup,
-} from "@/components/ThreadInboxSection";
+import { type ThreadInboxGroup } from "@/components/ThreadInboxSection";
 import ChatInboxSection from "@/components/ChatInboxSection";
 import type { ComposePrefill } from "@/pages/ComposeModal";
 import { onEmailSent } from "@/lib/email-events";
@@ -56,11 +51,6 @@ export default function ConversationDetail({
   const [data, setData] = useState<ConversationDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
-  const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
-  const [inboxMode, setInboxMode] = useState<InboxDisplayMode>("chat");
-  const [senderIdentities, setSenderIdentities] = useState<
-    Array<{ email: string; displayName: string | null }>
-  >([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   function refetch() {
@@ -69,7 +59,6 @@ export default function ConversationDetail({
 
   useEffect(() => {
     setLoading(true);
-    setReplyToEmailId(null);
     fetchConversationEmails(conversation.id)
       .then(setData)
       .finally(() => setLoading(false));
@@ -103,21 +92,6 @@ export default function ConversationDetail({
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.inbox, conversation.id]);
-
-  useEffect(() => {
-    fetchStats().then((stats) => {
-      setSenderIdentities(stats.senderIdentities ?? []);
-      // Resolve the display mode the operator configured for this inbox.
-      // Falls back to "chat" if missing — the same default as PersonDetail.
-      const allInboxes = stats.senderIdentities ?? [];
-      const match = allInboxes.find((i) => i.email === conversation.inbox);
-      if (match) {
-        // Stats doesn't expose displayMode; we'd need to fetch separately.
-        // For now leave the default.
-        void match;
-      }
-    });
-  }, [conversation.inbox]);
 
   async function handleMarkRead(email: Email) {
     if (email.type !== "received" || email.isRead !== 0) return;
@@ -178,15 +152,6 @@ export default function ConversationDetail({
     }
     return m;
   }, [conversation.participants]);
-
-  // Reply targets default to the most recent received email's CC + sender.
-  const replyTarget = useMemo(() => {
-    if (!data) return null;
-    for (let i = data.emails.length - 1; i >= 0; i--) {
-      if (data.emails[i].type === "received") return data.emails[i];
-    }
-    return null;
-  }, [data]);
 
   if (loading || !data || !group) {
     return (
@@ -252,88 +217,36 @@ export default function ConversationDetail({
       {/* The merged timeline. Use chat-mode by default for groups since it
           handles "rapid back-and-forth between multiple people" better than
           the thread-mode collapsed view. */}
+      {/* Group conversations always render in chat mode. The reply
+          path is the same as PersonDetail's chat path — ChatQuickReply
+          inline, or "open in full compose" via onOpenCompose. */}
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col">
-        {inboxMode === "chat" ? (
-          <ChatInboxSection
-            key={conversation.id}
-            group={group}
-            personEmail={conversation.participants[0]?.email ?? ""}
-            internalDomains={internalDomains}
-            senderResolver={(e) => {
-              if (e.type === "sent") return null; // bubble shows "You"
-              if (e.personId) {
-                const r = senderById.get(e.personId);
-                if (r) return r;
-              }
-              if (e.fromAddress) return { email: e.fromAddress, name: null };
-              return null;
-            }}
-            onOpenHtml={setHtmlPreviewEmail}
-            onMarkRead={handleMarkRead}
-            onDelete={handleDelete}
-            onSent={refetch}
-            onOpenCompose={onOpenCompose}
-          />
-        ) : (
-          <ThreadInboxSection
-            group={group}
-            personEmail={conversation.participants[0]?.email ?? ""}
-            internalDomains={internalDomains}
-            isOlderExpanded={true}
-            onToggleOlder={() => {}}
-            onOpenHtml={setHtmlPreviewEmail}
-            onMarkRead={handleMarkRead}
-            onReply={setReplyToEmailId}
-            onDelete={handleDelete}
-            senderResolver={(e) => {
-              if (e.type === "sent") return null;
-              if (e.personId) {
-                const r = senderById.get(e.personId);
-                if (r) return r;
-              }
-              if (e.fromAddress) return { email: e.fromAddress, name: null };
-              return null;
-            }}
-          />
-        )}
-      </div>
-
-      {/* Reply drawer */}
-      {replyToEmailId && replyTarget && (
-        <ReplyComposer
-          emailId={replyToEmailId}
-          personName={
-            replyTarget.personId
-              ? (senderById.get(replyTarget.personId)?.name ?? null)
-              : null
-          }
-          personEmail={
-            replyTarget.personId
-              ? (senderById.get(replyTarget.personId)?.email ??
-                replyTarget.fromAddress ??
-                "")
-              : (replyTarget.fromAddress ?? "")
-          }
-          recipients={[conversation.inbox]}
-          senderIdentities={senderIdentities}
+        <ChatInboxSection
+          key={conversation.id}
+          group={group}
+          personEmail={conversation.participants[0]?.email ?? ""}
           internalDomains={internalDomains}
-          onClose={() => setReplyToEmailId(null)}
+          senderResolver={(e) => {
+            if (e.type === "sent") return null; // bubble shows "You"
+            if (e.personId) {
+              const r = senderById.get(e.personId);
+              if (r) return r;
+            }
+            if (e.fromAddress) return { email: e.fromAddress, name: null };
+            return null;
+          }}
+          onOpenHtml={setHtmlPreviewEmail}
+          onMarkRead={handleMarkRead}
+          onDelete={handleDelete}
           onSent={refetch}
+          onOpenCompose={onOpenCompose}
         />
-      )}
+      </div>
 
       <EmailHtmlModal
         email={htmlPreviewEmail}
         open={htmlPreviewEmail !== null}
         onClose={() => setHtmlPreviewEmail(null)}
-      />
-
-      {/* Hidden — reserved if we want a chat/thread toggle later. */}
-      <button
-        type="button"
-        className="hidden"
-        onClick={() => setInboxMode((m) => (m === "chat" ? "thread" : "chat"))}
-        aria-hidden
       />
     </div>
   );

@@ -69,8 +69,14 @@ export default function EmailHtmlModal({
   const [threadExpanded, setThreadExpanded] = useState(false);
   const [threadLoading, setThreadLoading] = useState(false);
 
-  // Reset internal state when the email changes.
-  useMemo(() => {
+  // Reset internal state when the email changes. Previously this
+  // was a `useMemo`-as-side-effect, which is wrong for two reasons:
+  // it calls setState during render (React 18+ warns + double-runs
+  // under StrictMode), and it runs *before* the new render rather
+  // than after, which can leave the focal email's body briefly
+  // rendered with the previous thread's expansion state. useEffect
+  // gives us the post-render reset point React intends.
+  useEffect(() => {
     setView("rendered");
     setCopied(false);
     setFullscreen(false);

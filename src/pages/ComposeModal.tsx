@@ -11,6 +11,7 @@ import {
 import { sendEmail, fetchStats, type CcEntry } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
+import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 
 /**
  * Optional seed values applied when the compose drawer opens. Used by
@@ -81,6 +82,15 @@ export default function ComposeModal({
   // TipTap emits "<p></p>" for an empty editor — treat that as empty.
   const bodyIsEmpty = !bodyHtml || bodyHtml === "<p></p>";
 
+  // Sanitize the signature once per change, then reuse for both the
+  // preview pane and the outbound concatenation. The server also
+  // sanitizes on write — this is defense-in-depth for browser
+  // execution paths (preview pane uses dangerouslySetInnerHTML).
+  const safeSignatureHtml = useMemo(
+    () => (signatureHtml ? sanitizeEmailHtml(signatureHtml) : null),
+    [signatureHtml],
+  );
+
   useEffect(() => {
     if (open) {
       fetchStats().then((stats) => {
@@ -135,8 +145,10 @@ export default function ComposeModal({
       // Concatenate the typed body + auto-attached signature on send.
       // The signature is wrapped in `data-signature` so the chat-feed
       // toggle can strip it back out cleanly.
-      const finalBody = signatureHtml
-        ? `${bodyHtml}<div data-signature>${signatureHtml}</div>`
+      // Use the sanitized signature — even the outbound payload that
+      // never touches the browser DOM gets the cleaned version.
+      const finalBody = safeSignatureHtml
+        ? `${bodyHtml}<div data-signature>${safeSignatureHtml}</div>`
         : bodyHtml;
       await sendEmail({
         to,
@@ -268,14 +280,15 @@ export default function ComposeModal({
             data-testid="compose-body"
           >
             <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
-            {signatureHtml && (
+            {safeSignatureHtml && (
               <div
                 data-signature
                 data-testid="compose-signature-preview"
                 className="mt-4 border-t border-border/60 pt-3 opacity-70"
                 // Read-only signature preview. Auto-attached at send time;
                 // edited via the admin Inboxes page rather than inline.
-                dangerouslySetInnerHTML={{ __html: signatureHtml }}
+                // Pre-sanitized via sanitizeEmailHtml — see safeSignatureHtml.
+                dangerouslySetInnerHTML={{ __html: safeSignatureHtml }}
               />
             )}
           </div>

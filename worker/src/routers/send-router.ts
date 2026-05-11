@@ -51,9 +51,17 @@ export const sendRouter = new OpenAPIHono<{
 
 const CcEntrySchema = z.object({
   email: z.string().email(),
-  name: z.string().nullable().optional(),
+  // Constrain the rendered "Name <addr>" header — long display names
+  // can blow up the wire format and email headers in general.
+  name: z.string().max(200).nullable().optional(),
 });
 type CcEntry = z.infer<typeof CcEntrySchema>;
+
+// Practical cap on CC participants per message. Real-world replies-
+// all rarely exceed a dozen; 50 is a generous ceiling that still
+// blocks address-list spam payloads (stored as JSON in `cc`, then
+// concatenated into outbound headers).
+const MAX_CC_ENTRIES = 50;
 
 /** Format a CC entry as a header-friendly "Name <addr>" string. */
 function formatCc(c: CcEntry): string {
@@ -63,7 +71,7 @@ function formatCc(c: CcEntry): string {
 const SendEmailSchema = z.object({
   to: z.string().email(),
   fromAddress: z.string().email(),
-  cc: z.array(CcEntrySchema).optional(),
+  cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
   subject: z.string().transform((s) => s.replace(/[\r\n]+/g, " ")),
   bodyHtml: z.string(),
   bodyText: z.string().optional(),
@@ -97,8 +105,19 @@ const sendEmailRoute = createRoute({
 
 sendRouter.openapi(sendEmailRoute, async (c) => {
   const db = c.get("db");
-  const { to, fromAddress, cc, subject, bodyHtml, bodyText } =
-    c.req.valid("json");
+  const raw = c.req.valid("json");
+  // Canonicalize inbox + recipient addresses to lowercase before
+  // any downstream use — keeps stored rows consistent with the
+  // (already-lowercased) conversation_id and prevents casing
+  // variants from forking group rows. CC emails get the same
+  // treatment so de-dup and roster diff work case-insensitively.
+  const fromAddress = raw.fromAddress.trim().toLowerCase();
+  const to = raw.to.trim().toLowerCase();
+  const cc = raw.cc?.map((c) => ({
+    email: c.email.trim().toLowerCase(),
+    name: c.name ?? null,
+  }));
+  const { subject, bodyHtml, bodyText } = raw;
   const allowed = c.get("allowedInboxes")!;
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
@@ -209,7 +228,7 @@ const replyEmailRoute = createRoute({
             bodyHtml: z.string().optional(),
             bodyText: z.string().optional(),
             fromAddress: z.string().email(),
-            cc: z.array(CcEntrySchema).optional(),
+            cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
             templateSlug: z.string().optional(),
             variables: z.record(z.string(), z.string()).optional(),
           }),
@@ -225,8 +244,16 @@ const replyEmailRoute = createRoute({
 sendRouter.openapi(replyEmailRoute, async (c) => {
   const db = c.get("db");
   const { emailId } = c.req.valid("param");
-  const { bodyHtml, bodyText, fromAddress, cc, templateSlug, variables } =
-    c.req.valid("json");
+  const raw = c.req.valid("json");
+  // Same canonicalization story as the send route — lowercase the
+  // inbox + recipient + CC emails before downstream use so stored
+  // rows match the lowercased conversation_id.
+  const fromAddress = raw.fromAddress.trim().toLowerCase();
+  const cc = raw.cc?.map((c) => ({
+    email: c.email.trim().toLowerCase(),
+    name: c.name ?? null,
+  }));
+  const { bodyHtml, bodyText, templateSlug, variables } = raw;
   const allowed = c.get("allowedInboxes")!;
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
@@ -256,7 +283,8 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     origPersonId = orig.personId;
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
-    toAddress = person[0].email;
+    // Canonicalize the recipient — older rows may be mixed-case.
+    toAddress = person[0].email.toLowerCase();
   } else {
     const sentRow = await db
       .select()
@@ -277,7 +305,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     origPersonId = orig.personId;
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
-    toAddress = orig.toAddress;
+    toAddress = orig.toAddress.toLowerCase();
   }
 
   // Determine subject and body

@@ -140,14 +140,26 @@ export async function parseEmail(
 
   // Extract CC list from the parsed MIME structure. postal-mime exposes
   // `parsed.cc` as an array of `{ address, name }` (or undefined). We
-  // normalize names to null so the column matches the rest of the schema.
+  // - filter to entries with a syntactically-valid email (don't trust
+  //   header data — malformed Cc: lines pollute displayed rosters
+  //   and the de-dupe-by-email logic elsewhere),
+  // - lowercase the address so casing variants of the same recipient
+  //   don't fork conversation_id buckets,
+  // - cap the array so a single inbound message can't slam storage
+  //   with thousands of header-entries.
   const cc: ParsedEmailAddress[] = (
     (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? []
   )
-    .filter((c): c is { address: string; name?: string } => !!c.address)
+    .filter((c): c is { address: string; name?: string } => {
+      if (!c.address || typeof c.address !== "string") return false;
+      // Cheap RFC 5322-ish gate. Defers strict validation to downstream
+      // schemas; we only need to reject the obviously-not-email cases.
+      return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
+    })
+    .slice(0, 50)
     .map((c) => ({
-      email: c.address,
-      name: c.name && c.name.trim() ? c.name.trim() : null,
+      email: c.address.trim().toLowerCase(),
+      name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
     }));
 
   return {
