@@ -7,7 +7,6 @@ import {
   ArrowDown,
   Check,
   CheckCheck,
-  Code2,
 } from "lucide-react";
 import type { Email } from "@/lib/api";
 import type { ThreadInboxGroup } from "@/components/ThreadInboxSection";
@@ -208,25 +207,16 @@ function Bubble({
         </span>
       )}
       {showHtmlPreview ? (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenHtml(email);
-          }}
+        <div
           data-testid="chat-html-preview"
-          className={`group/preview relative w-full max-w-[85%] overflow-hidden rounded-2xl bg-white text-left text-text-primary shadow-sm ring-1 ring-border transition-shadow hover:shadow-md sm:max-w-[78%] ${
+          className={`relative w-full max-w-[85%] overflow-hidden rounded-2xl bg-white text-left text-text-primary shadow-sm ring-1 ring-border sm:max-w-[78%] ${
             isUnread ? "outline outline-2 outline-violet/40" : ""
           }`}
         >
-          {/* HTML email badge (top-right) */}
-          <span className="pointer-events-none absolute right-2 top-2 z-[1] inline-flex items-center gap-1 rounded-[6px] bg-bg-muted/90 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary ring-1 ring-border backdrop-blur-sm">
-            <Code2 size={10} />
-            HTML email
-          </span>
-          {/* Capped, sanitized inline preview */}
+          {/* Capped, sanitized inline preview — blurred so the user opens the original to read it */}
           <div
-            className="prose prose-sm relative max-h-[200px] max-w-none overflow-hidden px-4 py-3 text-xs text-text-secondary [&_*]:max-w-full [&_a]:pointer-events-none [&_img]:max-h-24 [&_img]:max-w-full [&_table]:!w-full [&_table]:!table-fixed"
+            className="prose prose-sm pointer-events-none relative max-h-[200px] max-w-none overflow-hidden px-4 py-3 text-xs text-text-secondary blur-sm select-none [&_*]:max-w-full [&_a]:pointer-events-none [&_img]:max-h-24 [&_img]:max-w-full [&_table]:!w-full [&_table]:!table-fixed"
+            aria-hidden
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
           {/* Fade-out gradient */}
@@ -234,11 +224,7 @@ function Bubble({
             className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-white via-white/85 to-transparent"
             aria-hidden
           />
-          {/* "View formatted email" overlay button */}
-          <span className="absolute bottom-2 left-1/2 z-[1] -translate-x-1/2 whitespace-nowrap rounded-full bg-text-primary px-3 py-1 text-[11px] font-medium text-white shadow-sm transition-transform group-hover/preview:scale-[1.02]">
-            View formatted email
-          </span>
-        </button>
+        </div>
       ) : (
         <div
           className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm sm:max-w-[78%] ${
@@ -314,33 +300,31 @@ function Bubble({
           ) : (
             <Check size={11} className="text-text-tertiary" />
           ))}
-        <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-          {email.bodyHtml && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenHtml(email);
-              }}
-              className="flex items-center gap-1 hover:text-text-secondary"
-              title="View original"
-            >
-              <Maximize2 size={10} />
-              View original
-            </button>
-          )}
+        {email.bodyHtml && (
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              onDelete(email.id);
+              onOpenHtml(email);
             }}
-            className="flex items-center gap-1 hover:text-red-500"
-            title="Delete email"
+            className="flex items-center gap-1 hover:text-text-secondary"
+            title="View original"
           >
-            <Trash2 size={10} />
+            <Maximize2 size={10} />
+            View original
           </button>
-        </div>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(email.id);
+          }}
+          className="flex items-center gap-1 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+          title="Delete email"
+        >
+          <Trash2 size={10} />
+        </button>
         {isUnread && !isSent && (
           <span
             className="h-1.5 w-1.5 rounded-full"
