@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-12
+
+### Security
+
+- Closed stored-XSS surface on per-inbox signatures: a new HTMLRewriter-based sanitizer (`worker/src/lib/sanitize-signature.ts`) strips dangerous tags (`script`, `style`, `iframe`, etc.), every `on*` event handler, `style` attributes, and unsafe URL schemes (`javascript:`, `vbscript:`, non-image `data:`). Signatures are sanitized at write time in the PATCH inbox endpoint (with a 20 000-character schema cap) and on the client in `ComposeModal` and `ReplyComposer` as defense-in-depth.
+- `inbox-permissions.ts` lowercases addresses at resolution time, closing a latent permission-check bypass for mixed-case `inbox_permissions.email` rows.
+
+### Fixed
+
+- `EmailHtmlModal`: converted a `useMemo` side-effect to `useEffect`, eliminating a "Cannot update a component while rendering" warning under React StrictMode.
+- Send and reply routes now cap CC arrays at 50 entries and normalize `fromAddress`, `to`, and every CC email to lowercase at the route boundary, ensuring consistent `computeConversationId` results.
+- Inbound CC entries are now lowercased, trimmed, name-truncated, and filtered through a regex email-shape gate before storage; capped at 50 entries per inbound message.
+- Non-admin member can no longer fetch a sent email authored from an inbox they do not own via `GET /api/emails/:id` (previously returned 200; now returns 404).
+- Removed dead `inboxMode` toggle, unreachable `ThreadInboxSection` branch, and related state from `ConversationDetail` (~130 lines).
+
+### Changed
+
+- Drizzle meta snapshots reconciled for migrations 0021–0024, fixing a `parent snapshot collision` that prevented `drizzle-kit generate` from running; missing `app_settings` table export added to `worker/src/db/index.ts`.
+
 ## [0.4.1] - 2026-05-08
 
 ### Changed
@@ -235,7 +254,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/choyiny/saasmail/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/choyiny/saasmail/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/choyiny/saasmail/compare/v0.3.3...v0.4.0
 [0.3.3]: https://github.com/choyiny/saasmail/compare/v0.3.2...v0.3.3
