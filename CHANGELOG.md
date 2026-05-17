@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-17
+
+### Added
+
+- Rich text editor now supports drag-and-drop, paste, and file-picker image insertion; images are base64-embedded inline (2 MB cap) so they travel with the email body without requiring an R2 upload.
+
 ## [0.4.2] - 2026-05-12
 
 ### Security
