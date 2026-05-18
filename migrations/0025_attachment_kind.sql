@@ -1,0 +1,1 @@
+ALTER TABLE attachments ADD COLUMN kind TEXT NOT NULL DEFAULT 'inbound';

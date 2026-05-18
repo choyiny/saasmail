@@ -5,6 +5,7 @@ export const attachments = sqliteTable(
   {
     id: text("id").primaryKey(),
     emailId: text("email_id").notNull(),
+    kind: text("kind").notNull().default("inbound"), // "inbound" | "sent"
     filename: text("filename").notNull(),
     contentType: text("content_type").notNull(),
     size: integer("size").notNull(),
