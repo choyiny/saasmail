@@ -12,6 +12,8 @@ import {
 import TiptapEditor from "@/components/TiptapEditor";
 import CcInput from "@/components/CcInput";
 import ThreadMessage from "@/components/ThreadMessage";
+import AttachmentPicker from "@/components/AttachmentPicker";
+import AttachmentChips from "@/components/AttachmentChips";
 import {
   TrayMaximizeButton,
   TrayMetaRow,
@@ -30,6 +32,8 @@ import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { cn } from "@/lib/utils";
+
+const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
 
 interface ReplyComposerProps {
   emailId: string;
@@ -80,6 +84,8 @@ export default function ReplyComposer({
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const totalAttachmentBytes = files.reduce((s, f) => s + f.size, 0);
   // Compact tray vs. full-viewport. Toggled by the maximize button.
   const [fullscreen, setFullscreen] = useState(false);
 
@@ -213,6 +219,9 @@ export default function ReplyComposer({
           bodyHtml: finalBody,
           fromAddress,
           ...(ccPayload ? { cc: ccPayload } : {}),
+          ...(files.length > 0
+            ? { files: files.map((file) => ({ file })) }
+            : {}),
         });
       } else {
         if (!selectedSlug) {
@@ -225,8 +234,12 @@ export default function ReplyComposer({
           variables: templateVars,
           fromAddress,
           ...(ccPayload ? { cc: ccPayload } : {}),
+          ...(files.length > 0
+            ? { files: files.map((file) => ({ file })) }
+            : {}),
         });
       }
+      setFiles([]);
       // Notify the rest of the app — PersonDetail uses this to
       // auto-switch the active inbox tab when the user replied from a
       // different inbox than the one they were viewing.
@@ -354,20 +367,35 @@ export default function ReplyComposer({
                   </div>
                 )}
                 <div className="flex-1">
-                  <TiptapEditor
-                    content={bodyHtml}
-                    onUpdate={setBodyHtml}
-                    placeholder="Write your reply…"
-                  />
-                  {safeSignatureHtml && (
-                    <div
-                      data-signature
-                      data-testid="reply-signature-preview"
-                      className="mt-4 border-t border-border/60 pt-3 opacity-70"
-                      // Pre-sanitized via sanitizeEmailHtml above.
-                      dangerouslySetInnerHTML={{ __html: safeSignatureHtml }}
+                  <AttachmentPicker
+                    enableDragDrop
+                    buttonClassName="hidden"
+                    onFilesAdded={(added) =>
+                      setFiles((prev) => [...prev, ...added])
+                    }
+                  >
+                    <TiptapEditor
+                      content={bodyHtml}
+                      onUpdate={setBodyHtml}
+                      placeholder="Write your reply…"
                     />
-                  )}
+                    <AttachmentChips
+                      files={files}
+                      capBytes={ATTACHMENT_CAP_BYTES}
+                      onRemove={(idx) =>
+                        setFiles((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                    />
+                    {safeSignatureHtml && (
+                      <div
+                        data-signature
+                        data-testid="reply-signature-preview"
+                        className="mt-4 border-t border-border/60 pt-3 opacity-70"
+                        // Pre-sanitized via sanitizeEmailHtml above.
+                        dangerouslySetInnerHTML={{ __html: safeSignatureHtml }}
+                      />
+                    )}
+                  </AttachmentPicker>
                 </div>
               </div>
             ) : (
@@ -477,6 +505,12 @@ export default function ReplyComposer({
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <AttachmentPicker
+                onFilesAdded={(added) =>
+                  setFiles((prev) => [...prev, ...added])
+                }
+                buttonClassName="inline-flex items-center justify-center rounded-[6px] p-1.5 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              />
               <button
                 type="button"
                 onClick={onClose}
@@ -488,7 +522,9 @@ export default function ReplyComposer({
                 type="button"
                 onClick={handleSend}
                 data-testid="reply-send-button"
-                disabled={sending}
+                disabled={
+                  sending || totalAttachmentBytes > ATTACHMENT_CAP_BYTES
+                }
                 className="inline-flex items-center gap-1.5 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Send size={12} />
