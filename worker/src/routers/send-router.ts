@@ -15,6 +15,8 @@ import { formatFromAddress } from "../lib/format-from-address";
 import { assertInboxAllowed } from "../lib/inbox-permissions";
 import { generateMessageId } from "../lib/message-id";
 import { computeConversationId, externalsOnly } from "../lib/conversation-id";
+import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
+import { attachments } from "../db/attachments.schema";
 
 /**
  * Fetch the set of "internal" domains (domains owned by our
@@ -81,6 +83,7 @@ const SentEmailResponseSchema = z.object({
   id: z.string(),
   resendId: z.string().nullable(),
   status: z.string(),
+  attachmentIds: z.array(z.string()),
 });
 
 // Compose and send a new email
@@ -88,12 +91,15 @@ const sendEmailRoute = createRoute({
   method: "post",
   path: "/",
   tags: ["Send"],
-  description: "Compose and send a new email via Resend.",
+  description:
+    "Compose and send a new email. multipart/form-data body with a JSON 'payload' field and zero or more 'files' fields.",
   request: {
     body: {
       content: {
-        "application/json": {
-          schema: SendEmailSchema,
+        "multipart/form-data": {
+          schema: z.object({
+            payload: z.string().describe("JSON-encoded SendEmailSchema"),
+          }),
         },
       },
     },
@@ -105,12 +111,19 @@ const sendEmailRoute = createRoute({
 
 sendRouter.openapi(sendEmailRoute, async (c) => {
   const db = c.get("db");
-  const raw = c.req.valid("json");
-  // Canonicalize inbox + recipient addresses to lowercase before
-  // any downstream use — keeps stored rows consistent with the
-  // (already-lowercased) conversation_id and prevents casing
-  // variants from forking group rows. CC emails get the same
-  // treatment so de-dup and roster diff work case-insensitively.
+  const sender = createEmailSender(c.env);
+
+  const parsed = await parseSendBody(
+    c,
+    SendEmailSchema,
+    sender.maxAttachmentBytes(),
+  );
+  if (!parsed.ok) {
+    const { status, body } = sendParseErrorResponse(parsed.err);
+    return c.json(body, status);
+  }
+  const { payload: raw, files } = parsed.value;
+
   const fromAddress = raw.fromAddress.trim().toLowerCase();
   const to = raw.to.trim().toLowerCase();
   const cc = raw.cc?.map((c) => ({
@@ -123,8 +136,8 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   const now = Math.floor(Date.now() / 1000);
 
   const messageId = generateMessageId(fromAddress);
-  const sender = createEmailSender(c.env);
   const formattedFrom = await formatFromAddress(db, fromAddress);
+
   const result = await sender.send({
     from: formattedFrom,
     to,
@@ -133,11 +146,18 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     html: bodyHtml,
     text: bodyText,
     headers: { "Message-ID": messageId },
+    ...(files.length > 0
+      ? {
+          attachments: files.map((f) => ({
+            filename: f.filename,
+            contentType: f.contentType,
+            content: f.bytes,
+          })),
+        }
+      : {}),
   });
 
-  // Find or create the person row for this recipient. Composing to a brand-new
-  // address must register them as a correspondent so they show up in the
-  // people list (which is keyed on people.id).
+  // Find or create the person row for this recipient.
   const existingPerson = await db
     .select({ id: people.id })
     .from(people)
@@ -162,7 +182,6 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
         updatedAt: now,
       })
       .onConflictDoNothing({ target: people.email });
-    // Re-read in case of a race with another insert.
     const refetched = await db
       .select({ id: people.id })
       .from(people)
@@ -171,9 +190,6 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     personId = refetched[0]!.id;
   }
 
-  // Compute conversation_id from the external participant set on this
-  // outbound message. The "from" side is us (internal); we count the
-  // primary recipient and any external CC addresses.
   const internalDomains = await fetchInternalDomains(db);
   const externals = externalsOnly(
     [to, ...(cc ?? []).map((c) => c.email)],
@@ -181,7 +197,6 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   );
   const conversationId = await computeConversationId(fromAddress, externals);
 
-  // Store sent email
   const id = nanoid();
   await db.insert(sentEmails).values({
     id,
@@ -200,7 +215,8 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     createdAt: now,
   });
 
-  // Cancel any active sequences for this recipient
+  const attachmentIds = await persistSentAttachments(db, c.env, id, files, now);
+
   await cancelSequencesForPerson(db, personId);
 
   return c.json(
@@ -208,6 +224,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
       id,
       resendId: result.id,
       status: result.error ? "failed" : "sent",
+      attachmentIds,
     },
     201,
   );
@@ -416,7 +433,50 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       id,
       resendId: result.id,
       status: result.error ? "failed" : "sent",
+      attachmentIds: [],
     },
     201,
   );
 });
+
+async function persistSentAttachments(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  env: CloudflareBindings,
+  sentEmailId: string,
+  files: {
+    filename: string;
+    contentType: string;
+    bytes: Uint8Array;
+    size: number;
+  }[],
+  now: number,
+): Promise<string[]> {
+  if (files.length === 0) return [];
+  const rows = files.map((f) => {
+    const attachmentId = nanoid();
+    const r2Key = `attachments/sent/${sentEmailId}/${attachmentId}/${f.filename}`;
+    return { attachmentId, r2Key, file: f };
+  });
+  await Promise.all(
+    rows.map((r) =>
+      env.R2.put(r.r2Key, r.file.bytes, {
+        httpMetadata: { contentType: r.file.contentType },
+      }),
+    ),
+  );
+  await db.insert(attachments).values(
+    rows.map((r) => ({
+      id: r.attachmentId,
+      emailId: sentEmailId,
+      kind: "sent" as const,
+      filename: r.file.filename,
+      contentType: r.file.contentType,
+      size: r.file.size,
+      r2Key: r.r2Key,
+      contentId: null,
+      createdAt: now,
+    })),
+  );
+  return rows.map((r) => r.attachmentId);
+}

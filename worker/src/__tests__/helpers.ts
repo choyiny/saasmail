@@ -223,7 +223,7 @@ export async function authFetch(
     headers.set("Authorization", `Bearer ${apiKey}`);
   }
 
-  if (init.body && !headers.has("Content-Type")) {
+  if (typeof init.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -231,6 +231,27 @@ export async function authFetch(
     ...init,
     headers,
   });
+}
+
+/**
+ * Build a multipart/form-data body for POST /api/send.
+ * The JSON payload goes in the `payload` field; files go in `files` fields.
+ */
+export function buildSendForm(
+  payload: Record<string, unknown>,
+  files: Array<{ name: string; type?: string; bytes: Uint8Array }> = [],
+): FormData {
+  const fd = new FormData();
+  fd.append("payload", JSON.stringify(payload));
+  for (const f of files) {
+    fd.append(
+      "files",
+      new File([f.bytes], f.name, {
+        type: f.type ?? "application/octet-stream",
+      }),
+    );
+  }
+  return fd;
 }
 
 /** Clean all tables between tests. */

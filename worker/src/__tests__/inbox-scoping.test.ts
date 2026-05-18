@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   applyMigrations,
   authFetch,
+  buildSendForm,
   cleanDb,
   createTestEmail,
   createTestPerson,
@@ -292,7 +293,7 @@ describe("send scoping", () => {
     const res = await authFetch("/api/send", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({
+      body: buildSendForm({
         to: "target@external.com",
         fromAddress: "b@x.com",
         subject: "hi",

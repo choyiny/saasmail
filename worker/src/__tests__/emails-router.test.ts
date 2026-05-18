@@ -7,6 +7,7 @@ import {
   createTestEmail,
   authFetch,
   getDb,
+  buildSendForm,
 } from "./helpers";
 import { sentEmails } from "../db/sent-emails.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
@@ -448,7 +449,7 @@ describe("send stores generated message-id", () => {
     const res = await authFetch("/api/send", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({
+      body: buildSendForm({
         to: "target@external.com",
         fromAddress: "a@x.com",
         subject: "hello",
