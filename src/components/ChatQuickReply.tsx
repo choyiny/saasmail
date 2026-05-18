@@ -2,6 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { Maximize2 } from "lucide-react";
 import { replyToEmail, sendEmail } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
+import AttachmentPicker from "@/components/AttachmentPicker";
+import AttachmentChips from "@/components/AttachmentChips";
+
+const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
 
 interface ChatQuickReplyProps {
   inboxAddress: string; // From address, fixed to this section's inbox
@@ -47,7 +51,11 @@ export default function ChatQuickReply({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  const totalAttachmentBytes = files.reduce((s, f) => s + f.size, 0);
+  const overCap = totalAttachmentBytes > ATTACHMENT_CAP_BYTES;
 
   // Auto-grow: set height to scrollHeight, clamped to ~6 lines (~ 132px).
   useEffect(() => {
@@ -59,7 +67,7 @@ export default function ChatQuickReply({
     el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
   }, [text]);
 
-  const canSend = text.trim().length > 0 && !sending;
+  const canSend = text.trim().length > 0 && !sending && !overCap;
 
   async function handleSend() {
     if (!canSend) return;
@@ -71,6 +79,9 @@ export default function ChatQuickReply({
           bodyHtml: plainTextToHtml(text),
           bodyText: text,
           fromAddress: inboxAddress,
+          ...(files.length > 0
+            ? { files: files.map((file) => ({ file })) }
+            : {}),
         });
       } else {
         await sendEmail({
@@ -79,6 +90,9 @@ export default function ChatQuickReply({
           subject: "(no subject)",
           bodyHtml: plainTextToHtml(text),
           bodyText: text,
+          ...(files.length > 0
+            ? { files: files.map((file) => ({ file })) }
+            : {}),
         });
       }
       dispatchEmailSent({
@@ -87,6 +101,7 @@ export default function ChatQuickReply({
         origin: "chat-quick-reply",
       });
       setText("");
+      setFiles([]);
       onSent();
     } catch (e) {
       setError("Failed to send message");
@@ -106,6 +121,17 @@ export default function ChatQuickReply({
 
   return (
     <div className="border-t border-border bg-card px-4 py-3 sm:px-6">
+      {files.length > 0 && (
+        <div className="mb-2">
+          <AttachmentChips
+            files={files}
+            capBytes={ATTACHMENT_CAP_BYTES}
+            onRemove={(idx) =>
+              setFiles((prev) => prev.filter((_, i) => i !== idx))
+            }
+          />
+        </div>
+      )}
       <div className="flex items-end gap-2 rounded-[10px] bg-bg-subtle/60 p-2 ring-1 ring-border focus-within:ring-2 focus-within:ring-text-primary/15">
         <textarea
           ref={ref}
@@ -117,6 +143,9 @@ export default function ChatQuickReply({
             latestReceivedEmailId ? "Type a reply…" : "Type a message…"
           }
           className="flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm text-text-primary outline-none placeholder:text-text-tertiary disabled:text-text-tertiary"
+        />
+        <AttachmentPicker
+          onFilesAdded={(added) => setFiles((prev) => [...prev, ...added])}
         />
         {onOpenCompose && (
           <button
