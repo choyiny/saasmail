@@ -4,7 +4,14 @@ import { signIn } from "@/lib/auth-client";
 import { WordmarkLarge } from "@/components/Wordmark";
 import { useBranding } from "@/lib/branding";
 
-type Status = "checking" | "available" | "unavailable";
+type Status = "checking" | "available" | "unavailable" | "migration-required";
+
+type SetupStatusResponse = {
+  setupRequired?: boolean;
+  error?: string;
+  code?: string;
+  command?: string;
+};
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
@@ -14,6 +21,8 @@ export default function OnboardingPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [migrationRequired, setMigrationRequired] =
+    useState<SetupStatusResponse | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -21,8 +30,13 @@ export default function OnboardingPage() {
     (async () => {
       try {
         const res = await fetch("/api/setup/status");
-        const data = (await res.json()) as { setupRequired: boolean };
+        const data = (await res.json()) as SetupStatusResponse;
         if (cancelled) return;
+        if (!res.ok && data.code === "DATABASE_MIGRATION_REQUIRED") {
+          setMigrationRequired(data);
+          setStatus("migration-required");
+          return;
+        }
         setStatus(data.setupRequired ? "available" : "unavailable");
       } catch {
         if (!cancelled) setStatus("unavailable");
@@ -44,8 +58,14 @@ export default function OnboardingPage() {
         body: JSON.stringify({ name, email, password }),
       });
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        const data = (await res
+          .json()
+          .catch(() => ({}))) as SetupStatusResponse;
         setError(data.error || "Setup failed");
+        if (res.status === 503 && data.code === "DATABASE_MIGRATION_REQUIRED") {
+          setMigrationRequired(data);
+          setStatus("migration-required");
+        }
         if (res.status === 403) setStatus("unavailable");
         return;
       }
@@ -64,6 +84,33 @@ export default function OnboardingPage() {
 
   if (status === "checking") {
     return <p className="text-sm text-white/60">Loading…</p>;
+  }
+
+  if (status === "migration-required") {
+    return (
+      <div className="flex w-full max-w-sm flex-col items-center gap-8">
+        <WordmarkLarge />
+        <div className="w-full rounded-2xl bg-white/10 p-8 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl">
+          <h2 className="text-xl font-extrabold tracking-tight text-white">
+            Database migration required
+          </h2>
+          <p className="mt-3 text-sm font-light text-white/60">
+            {migrationRequired?.error ||
+              "The production database has not been initialized yet."}
+          </p>
+          <div className="mt-5 rounded-md bg-white/5 px-3 py-2 text-xs font-medium text-white ring-1 ring-white/15">
+            {migrationRequired?.command || "yarn db:migrate:prod"}
+          </div>
+          <p className="mt-4 text-xs font-light text-white/40">
+            For a guided first deploy, run{" "}
+            <code className="rounded bg-white/10 px-1 py-0.5 text-white/70">
+              /saasmail-onboarding
+            </code>{" "}
+            in Claude Code, then reload this page.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   if (status === "unavailable") {

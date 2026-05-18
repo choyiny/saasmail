@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { applyMigrations, cleanDb, createTestUser, authFetch } from "./helpers";
 
@@ -25,6 +26,26 @@ describe("setup router", () => {
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.setupRequired).toBe(false);
+    });
+
+    it("tells operators to run production migrations when users table is missing", async () => {
+      await env.DB.exec("DROP TABLE users");
+
+      try {
+        const res = await authFetch("/api/setup/status");
+        expect(res.status).toBe(503);
+        const data = (await res.json()) as {
+          error?: string;
+          code?: string;
+          command?: string;
+        };
+        expect(data.code).toBe("DATABASE_MIGRATION_REQUIRED");
+        expect(data.command).toBe("yarn db:migrate:prod");
+        expect(data.error).toContain("yarn db:migrate:prod");
+        expect(data.error).toContain("/saasmail-onboarding");
+      } finally {
+        await applyMigrations();
+      }
     });
   });
 

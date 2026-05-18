@@ -228,6 +228,8 @@ yarn db:migrate:dev
 yarn db:migrate:prod
 ```
 
+Run the production migration before opening the deployed app for the first setup. If the production D1 database has not been initialized, the onboarding screen will show **Database migration required** with the same command.
+
 ### 7. Configure email routing
 
 In the [Cloudflare dashboard](https://dash.cloudflare.com/), go to your domain's **Email Routing** settings and add a catch-all rule that routes to your saasmail worker.

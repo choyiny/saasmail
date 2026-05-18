@@ -14,6 +14,28 @@ const StatusSchema = z.object({
   setupRequired: z.boolean(),
 });
 
+const MigrationRequiredSchema = z.object({
+  error: z.string(),
+  code: z.literal("DATABASE_MIGRATION_REQUIRED"),
+  command: z.literal("yarn db:migrate:prod"),
+});
+
+const MIGRATION_REQUIRED_RESPONSE = {
+  error:
+    "Database migrations have not been applied yet. Run `yarn db:migrate:prod` to create the production D1 tables, or run `/saasmail-onboarding` to walk through setup, then reload saasmail.",
+  code: "DATABASE_MIGRATION_REQUIRED",
+  command: "yarn db:migrate:prod",
+} as const;
+
+function isMissingUsersTableError(err: unknown): boolean {
+  let current: unknown = err;
+  while (current instanceof Error) {
+    if (current.message.includes("no such table: users")) return true;
+    current = current.cause;
+  }
+  return String(current).includes("no such table: users");
+}
+
 const SetupRequestSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email(),
@@ -40,13 +62,24 @@ const statusRoute = createRoute({
   description: "Check whether initial setup is required (no users exist).",
   responses: {
     ...json200Response(StatusSchema, "Setup status"),
+    503: {
+      description: "Database migrations have not been applied",
+      content: { "application/json": { schema: MigrationRequiredSchema } },
+    },
   },
 });
 
 setupRouter.openapi(statusRoute, async (c) => {
   const db = c.get("db");
-  const count = await countUsers(db);
-  return c.json({ setupRequired: count === 0 }, 200);
+  try {
+    const count = await countUsers(db);
+    return c.json({ setupRequired: count === 0 }, 200);
+  } catch (err) {
+    if (isMissingUsersTableError(err)) {
+      return c.json(MIGRATION_REQUIRED_RESPONSE, 503);
+    }
+    throw err;
+  }
 });
 
 const createRouteDef = createRoute({
@@ -74,6 +107,10 @@ const createRouteDef = createRoute({
       description: "Invalid request",
       content: { "application/json": { schema: ErrorSchema } },
     },
+    503: {
+      description: "Database migrations have not been applied",
+      content: { "application/json": { schema: MigrationRequiredSchema } },
+    },
   },
 });
 
@@ -81,7 +118,15 @@ setupRouter.openapi(createRouteDef, async (c) => {
   const db = c.get("db");
 
   // Guard: reject if any users already exist.
-  const count = await countUsers(db);
+  let count: number;
+  try {
+    count = await countUsers(db);
+  } catch (err) {
+    if (isMissingUsersTableError(err)) {
+      return c.json(MIGRATION_REQUIRED_RESPONSE, 503);
+    }
+    throw err;
+  }
   if (count > 0) {
     return c.json({ error: "Setup has already been completed" }, 403);
   }
