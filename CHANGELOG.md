@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-05-13
+
+### Fixed
+
+- HTML preview in chat inbox no longer shows a blurred overlay; content is readable at a glance with a persistent "View original" action, and the redundant "HTML email" tag has been removed (`ChatInboxSection`).
+- Removed the fade-out gradient overlay that partially obscured HTML preview content in the chat view.
+
+### Dependencies
+
+- Bumped `kysely` from 0.28.16 to 0.28.17.
+- Bumped `better-auth` group with 2 updates.
+- Bumped `@codemirror/view` in the codemirror group.
+- Bumped the tiptap group with 4 updates.
+- Bumped the cloudflare dev-dependency group across 1 directory with 4 updates.
+
 ## [0.4.2] - 2026-05-12
 
 ### Security
