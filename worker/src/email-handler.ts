@@ -122,6 +122,7 @@ export async function handleEmail(
     await db.insert(attachments).values({
       id: attachmentId,
       emailId,
+      kind: "inbound",
       filename: safeFilename,
       contentType: att.contentType,
       size: att.content.byteLength,
