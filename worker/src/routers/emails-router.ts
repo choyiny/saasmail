@@ -229,11 +229,43 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
     }
   }
 
-  const result = paginated.map((e) => ({
-    ...e,
-    attachmentCount: attachmentCounts[e.id] ?? 0,
-    attachments: attachmentDetails[e.id] ?? [],
-  }));
+  // Same lookup for sent emails so the chat/thread surface includes outgoing
+  // attachments. Mirrors conversations-router; sent rows only have
+  // kind='sent' attachment rows, so no kind filter is needed.
+  const sentIds = paginated.filter((e) => e.type === "sent").map((e) => e.id);
+  let sentAttachmentDetails: Record<string, any[]> = {};
+  if (sentIds.length > 0) {
+    const attRows = await db
+      .select()
+      .from(attachments)
+      .where(
+        sql`${attachments.emailId} IN (${sql.join(
+          sentIds.map((id) => sql`${id}`),
+          sql`,`,
+        )})`,
+      );
+
+    for (const att of attRows) {
+      if (!sentAttachmentDetails[att.emailId]) {
+        sentAttachmentDetails[att.emailId] = [];
+      }
+      sentAttachmentDetails[att.emailId].push(att);
+    }
+  }
+
+  const result = paginated.map((e) => {
+    const atts =
+      e.type === "sent"
+        ? (sentAttachmentDetails[e.id] ?? [])
+        : (attachmentDetails[e.id] ?? []);
+    const count =
+      e.type === "sent" ? atts.length : (attachmentCounts[e.id] ?? 0);
+    return {
+      ...e,
+      attachmentCount: count,
+      attachments: atts,
+    };
+  });
 
   // Collect distinct inbox addresses referenced by the returned emails.
   const inboxAddrs = new Set<string>();
@@ -334,6 +366,10 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
   }
 
   const sent = sentRow[0];
+  const sentAtts = await db
+    .select()
+    .from(attachments)
+    .where(eq(attachments.emailId, id));
   return c.json(
     {
       id: sent.id,
@@ -348,7 +384,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
       isRead: null,
       cc: parseCc(sent.cc),
       timestamp: sent.sentAt,
-      attachments: [],
+      attachments: sentAtts,
     },
     200,
   );
