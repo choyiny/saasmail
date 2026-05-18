@@ -95,3 +95,27 @@ describe("CloudflareSender", () => {
     expect(result.error?.message).toBe("sender not allowed");
   });
 });
+
+describe("maxAttachmentBytes", () => {
+  it("returns 25MB for Resend", () => {
+    const sender = createEmailSender({
+      RESEND_API_KEY: "re_test",
+    } as any);
+    expect(sender.maxAttachmentBytes()).toBe(25 * 1024 * 1024);
+  });
+
+  it("returns ~18MB for Cloudflare", () => {
+    const sender = createEmailSender({
+      EMAIL: { send: async () => ({ messageId: "x" }) },
+    } as any);
+    // 25MB / 1.4 = ~18.7MB raw budget so post-base64 fits 25MB.
+    expect(sender.maxAttachmentBytes()).toBe(
+      Math.floor((25 * 1024 * 1024) / 1.4),
+    );
+  });
+
+  it("returns 0 for NoopSender", () => {
+    const sender = createEmailSender({} as any);
+    expect(sender.maxAttachmentBytes()).toBe(0);
+  });
+});

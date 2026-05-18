@@ -13,6 +13,13 @@ function parseFrom(input: string): { name?: string; address: string } {
   return { address: input.trim() };
 }
 
+export interface SendEmailAttachment {
+  filename: string;
+  contentType: string;
+  /** Raw bytes. */
+  content: ArrayBuffer | Uint8Array;
+}
+
 export interface SendEmailParams {
   from: string;
   to: string;
@@ -22,6 +29,7 @@ export interface SendEmailParams {
   html: string;
   text?: string;
   headers?: Record<string, string>;
+  attachments?: SendEmailAttachment[];
 }
 
 export interface SendEmailResult {
@@ -32,6 +40,22 @@ export interface SendEmailResult {
 export interface EmailSender {
   provider: "resend" | "cloudflare" | "none" | "demo";
   send(params: SendEmailParams): Promise<SendEmailResult>;
+  maxAttachmentBytes(): number;
+}
+
+function toBase64(bytes: ArrayBuffer | Uint8Array): string {
+  const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  // btoa expects a binary string; chunk to avoid call-stack overflow on
+  // large buffers.
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < u8.length; i += chunk) {
+    binary += String.fromCharCode.apply(
+      null,
+      Array.from(u8.subarray(i, i + chunk)),
+    );
+  }
+  return btoa(binary);
 }
 
 class ResendSender implements EmailSender {
@@ -51,6 +75,14 @@ class ResendSender implements EmailSender {
       html: params.html,
       text: params.text,
       headers: params.headers,
+      ...(params.attachments && params.attachments.length > 0
+        ? {
+            attachments: params.attachments.map((a) => ({
+              filename: a.filename,
+              content: toBase64(a.content),
+            })),
+          }
+        : {}),
     });
     if (result.error) {
       return {
@@ -59,6 +91,10 @@ class ResendSender implements EmailSender {
       };
     }
     return { id: result.data?.id ?? null, error: null };
+  }
+
+  maxAttachmentBytes(): number {
+    return 25 * 1024 * 1024;
   }
 }
 
@@ -89,6 +125,15 @@ class CloudflareSender implements EmailSender {
       if (params.html) {
         msg.addMessage({ contentType: "text/html", data: params.html });
       }
+      if (params.attachments) {
+        for (const a of params.attachments) {
+          msg.addAttachment({
+            filename: a.filename,
+            contentType: a.contentType,
+            data: toBase64(a.content),
+          });
+        }
+      }
       if (params.headers) {
         for (const [key, value] of Object.entries(params.headers)) {
           msg.setHeader(key, value);
@@ -102,12 +147,20 @@ class CloudflareSender implements EmailSender {
       return { id: null, error: { message } };
     }
   }
+
+  maxAttachmentBytes(): number {
+    return Math.floor((25 * 1024 * 1024) / 1.4);
+  }
 }
 
 class NoopSender implements EmailSender {
   readonly provider = "none" as const;
   async send(_: SendEmailParams): Promise<SendEmailResult> {
     return { id: null, error: { message: "No email provider configured" } };
+  }
+
+  maxAttachmentBytes(): number {
+    return 0;
   }
 }
 
@@ -116,10 +169,18 @@ class DemoSender implements EmailSender {
   async send(params: SendEmailParams): Promise<SendEmailResult> {
     const ccLabel =
       params.cc && params.cc.length > 0 ? `, cc: ${params.cc.join(", ")}` : "";
+    const attLabel =
+      params.attachments && params.attachments.length > 0
+        ? `, attachments: ${params.attachments.map((a) => a.filename).join(", ")}`
+        : "";
     console.log(
-      `[demo] Pretending to send email from ${params.from} to ${params.to}${ccLabel} (subject: "${params.subject}")`,
+      `[demo] Pretending to send email from ${params.from} to ${params.to}${ccLabel}${attLabel} (subject: "${params.subject}")`,
     );
     return { id: `demo_${nanoid(10)}`, error: null };
+  }
+
+  maxAttachmentBytes(): number {
+    return 25 * 1024 * 1024;
   }
 }
 
