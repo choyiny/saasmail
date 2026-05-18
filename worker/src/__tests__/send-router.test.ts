@@ -6,6 +6,7 @@ import {
   cleanDb,
   createTestUser,
   createTestPerson,
+  createTestEmail,
   authFetch,
   getDb,
   buildSendForm,
@@ -184,6 +185,53 @@ describe("send router", () => {
         body: buildSendForm(payload, [{ name: "big.bin", bytes: big }]),
       });
       expect(res.status).toBe(413);
+    });
+  });
+
+  describe("POST /api/send/reply/:emailId", () => {
+    it("persists attachments on a reply", async () => {
+      const person = await createTestPerson({
+        id: "p1",
+        email: "a@example.com",
+      });
+      await createTestEmail({
+        id: "rcv-1",
+        personId: person.id,
+        recipient: "me@saasmail.test",
+        subject: "hi",
+        messageId: "abc@example.com",
+      });
+
+      const res = await authFetch("/api/send/reply/rcv-1", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm(
+          { fromAddress: "me@saasmail.test", bodyHtml: "<p>reply</p>" },
+          [
+            {
+              name: "evidence.png",
+              type: "image/png",
+              bytes: new Uint8Array([9, 9, 9]),
+            },
+          ],
+        ),
+      });
+      expect(res.status).toBe(201);
+
+      const body = (await res.json()) as {
+        id: string;
+        attachmentIds: string[];
+      };
+      expect(body.attachmentIds).toHaveLength(1);
+
+      const db = getDb();
+      const rows = await db
+        .select()
+        .from(attachments)
+        .where(eq(attachments.emailId, body.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0].kind).toBe("sent");
+      expect(rows[0].filename).toBe("evidence.png");
     });
   });
 

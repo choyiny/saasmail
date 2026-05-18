@@ -412,7 +412,7 @@ describe("reply stores generated message-id", () => {
     const res = await authFetch("/api/send/reply/e-r", {
       apiKey,
       method: "POST",
-      body: JSON.stringify({
+      body: buildSendForm({
         fromAddress: "a@x.com",
         bodyHtml: "<p>reply</p>",
       }),
@@ -496,7 +496,7 @@ describe("send stores generated message-id", () => {
       const res = await authFetch("/api/send/reply/sent-1", {
         apiKey,
         method: "POST",
-        body: JSON.stringify({
+        body: buildSendForm({
           fromAddress: "a@x.com",
           bodyHtml: "<p>follow up</p>",
         }),
@@ -541,7 +541,7 @@ describe("send stores generated message-id", () => {
       const res = await authFetch("/api/send/reply/sent-legacy", {
         apiKey,
         method: "POST",
-        body: JSON.stringify({
+        body: buildSendForm({
           fromAddress: "a@x.com",
           bodyHtml: "<p>follow up</p>",
         }),
@@ -588,7 +588,7 @@ describe("send stores generated message-id", () => {
       const res = await authFetch("/api/send/reply/sent-other-inbox", {
         apiKey,
         method: "POST",
-        body: JSON.stringify({
+        body: buildSendForm({
           fromAddress: "a@x.com",
           bodyHtml: "<p>follow up</p>",
         }),
@@ -606,7 +606,7 @@ describe("send stores generated message-id", () => {
       const res = await authFetch("/api/send/reply/does-not-exist", {
         apiKey,
         method: "POST",
-        body: JSON.stringify({
+        body: buildSendForm({
           fromAddress: "a@x.com",
           bodyHtml: "<p>follow up</p>",
         }),

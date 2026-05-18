@@ -99,7 +99,7 @@ const sendEmailRoute = createRoute({
         "multipart/form-data": {
           schema: z.object({
             payload: z.string().describe("JSON-encoded SendEmailSchema"),
-            files: z.array(z.any()).optional(),
+            files: z.union([z.array(z.any()), z.any()]).optional(),
           }),
         },
       },
@@ -233,24 +233,30 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   );
 });
 
+const ReplyEmailSchema = z.object({
+  bodyHtml: z.string().optional(),
+  bodyText: z.string().optional(),
+  fromAddress: z.string().email(),
+  cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
+  templateSlug: z.string().optional(),
+  variables: z.record(z.string(), z.string()).optional(),
+});
+
 // Reply to an existing email
 const replyEmailRoute = createRoute({
   method: "post",
   path: "/reply/{emailId}",
   tags: ["Send"],
-  description: "Reply to a received email.",
+  description:
+    "Reply to a received email. multipart/form-data body with 'payload' JSON and optional 'files'.",
   request: {
     params: z.object({ emailId: z.string() }),
     body: {
       content: {
-        "application/json": {
+        "multipart/form-data": {
           schema: z.object({
-            bodyHtml: z.string().optional(),
-            bodyText: z.string().optional(),
-            fromAddress: z.string().email(),
-            cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
-            templateSlug: z.string().optional(),
-            variables: z.record(z.string(), z.string()).optional(),
+            payload: z.string().describe("JSON-encoded reply body"),
+            files: z.union([z.array(z.any()), z.any()]).optional(),
           }),
         },
       },
@@ -264,7 +270,18 @@ const replyEmailRoute = createRoute({
 sendRouter.openapi(replyEmailRoute, async (c) => {
   const db = c.get("db");
   const { emailId } = c.req.valid("param");
-  const raw = c.req.valid("json");
+  const sender = createEmailSender(c.env);
+  const parsed = await parseSendBody(
+    c,
+    ReplyEmailSchema,
+    sender.maxAttachmentBytes(),
+  );
+  if (!parsed.ok) {
+    const { status, body } = sendParseErrorResponse(parsed.err);
+    return c.json(body, status);
+  }
+  const raw = parsed.value.payload;
+  const files = parsed.value.files;
   // Same canonicalization story as the send route — lowercase the
   // inbox + recipient + CC emails before downstream use so stored
   // rows match the lowercased conversation_id.
@@ -380,7 +397,6 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   }
 
   const messageId = generateMessageId(fromAddress);
-  const sender = createEmailSender(c.env);
   const formattedFrom = await formatFromAddress(db, fromAddress);
   const result = await sender.send({
     from: formattedFrom,
@@ -395,6 +411,15 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
         ? { "In-Reply-To": origInReplyToMessageId }
         : {}),
     },
+    ...(files.length > 0
+      ? {
+          attachments: files.map((f) => ({
+            filename: f.filename,
+            contentType: f.contentType,
+            content: f.bytes,
+          })),
+        }
+      : {}),
   });
 
   // Compute conversation_id for this reply.
@@ -428,6 +453,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     createdAt: now,
   });
 
+  const attachmentIds = !result.error
+    ? await persistSentAttachments(db, c.env, id, files, now)
+    : [];
+
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, origPersonId);
 
@@ -436,7 +465,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       id,
       resendId: result.id,
       status: result.error ? "failed" : "sent",
-      attachmentIds: [],
+      attachmentIds,
     },
     201,
   );
