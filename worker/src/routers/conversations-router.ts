@@ -163,6 +163,29 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     }
   }
 
+  // Same lookup for sent emails so the thread surface includes outgoing
+  // attachments (Task 8). Sent rows only ever have kind='sent' attachment
+  // rows, so we don't filter by kind — mirrors the received path above.
+  const sentIds = sent.map((e) => e.id);
+  let sentAttachmentDetails: Record<string, any[]> = {};
+  if (sentIds.length > 0) {
+    const attRows = await db
+      .select()
+      .from(attachments)
+      .where(
+        sql`${attachments.emailId} IN (${sql.join(
+          sentIds.map((sid) => sql`${sid}`),
+          sql`,`,
+        )})`,
+      );
+    for (const att of attRows) {
+      if (!sentAttachmentDetails[att.emailId]) {
+        sentAttachmentDetails[att.emailId] = [];
+      }
+      sentAttachmentDetails[att.emailId].push(att);
+    }
+  }
+
   // Merge into the same email shape as listPersonEmailsRoute, oldest first.
   const merged = [
     ...received.map((e) => ({
@@ -194,8 +217,8 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
       isRead: null,
       cc: parseCc(e.cc),
       timestamp: e.timestamp,
-      attachmentCount: 0,
-      attachments: [],
+      attachmentCount: sentAttachmentDetails[e.id]?.length ?? 0,
+      attachments: sentAttachmentDetails[e.id] ?? [],
     })),
   ].sort((a, b) => a.timestamp - b.timestamp);
 
