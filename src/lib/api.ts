@@ -293,6 +293,11 @@ export async function markConversationsRead(
   });
 }
 
+export interface AttachedFile {
+  /** Raw browser File object; included in multipart body. */
+  file: File;
+}
+
 export async function sendEmail(data: {
   to: string;
   fromAddress: string;
@@ -300,11 +305,15 @@ export async function sendEmail(data: {
   subject: string;
   bodyHtml: string;
   bodyText?: string;
-}): Promise<{ id: string }> {
+  files?: AttachedFile[];
+}): Promise<{ id: string; attachmentIds: string[]; status: string }> {
+  const { files = [], ...payload } = data;
+  const fd = new FormData();
+  fd.append("payload", JSON.stringify(payload));
+  for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch("/api/send", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    body: fd, // do not set Content-Type; the browser sets the multipart boundary
   });
 }
 
@@ -317,12 +326,16 @@ export async function replyToEmail(
     cc?: CcEntry[];
     templateSlug?: string;
     variables?: Record<string, string>;
+    files?: AttachedFile[];
   },
-): Promise<{ id: string }> {
+): Promise<{ id: string; attachmentIds: string[]; status: string }> {
+  const { files = [], ...payload } = data;
+  const fd = new FormData();
+  fd.append("payload", JSON.stringify(payload));
+  for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch(`/api/send/reply/${emailId}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    body: fd,
   });
 }
 
