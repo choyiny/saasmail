@@ -176,6 +176,13 @@
       "when": 1778534511686,
       "tag": "0024_app_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1779085083856,
+      "tag": "0025_jazzy_hellcat",
+      "breakpoints": true
     }
   ]
 }
