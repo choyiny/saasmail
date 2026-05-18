@@ -12,6 +12,12 @@ import { sendEmail, fetchStats, type CcEntry } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
+import AttachmentPicker from "@/components/AttachmentPicker";
+import AttachmentChips from "@/components/AttachmentChips";
+
+// Effective backend cap is ~18MB on the Cloudflare email path; we cap the
+// UI at 25MB and let the server reject the rest with a clear 413.
+const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
 
 /**
  * Optional seed values applied when the compose drawer opens. Used by
@@ -65,6 +71,7 @@ export default function ComposeModal({
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
   // Compact tray vs. full-viewport. Toggled by the maximize button in
   // the header; reset every time the drawer reopens.
   const [fullscreen, setFullscreen] = useState(false);
@@ -81,6 +88,8 @@ export default function ComposeModal({
 
   // TipTap emits "<p></p>" for an empty editor — treat that as empty.
   const bodyIsEmpty = !bodyHtml || bodyHtml === "<p></p>";
+
+  const totalAttachmentBytes = files.reduce((s, f) => s + f.size, 0);
 
   // Sanitize the signature once per change, then reuse for both the
   // preview pane and the outbound concatenation. The server also
@@ -119,6 +128,7 @@ export default function ComposeModal({
       setSignatureHtml(null);
       setError("");
       setFullscreen(false);
+      setFiles([]);
     }
     // We intentionally don't track `fromAddress` here — it's only used
     // as a sticky fallback above, not as a trigger to re-run.
@@ -156,8 +166,10 @@ export default function ComposeModal({
         ...(cc.length > 0 ? { cc } : {}),
         subject,
         bodyHtml: finalBody,
+        ...(files.length > 0 ? { files: files.map((file) => ({ file })) } : {}),
       });
       dispatchEmailSent({ fromAddress, to, origin: "compose" });
+      setFiles([]);
       onClose();
     } catch {
       setError("Failed to send email");
@@ -279,18 +291,31 @@ export default function ComposeModal({
             className="smooth-scroll flex min-h-0 flex-1 flex-col overflow-y-auto bg-card px-4 py-3 sm:px-5"
             data-testid="compose-body"
           >
-            <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
-            {safeSignatureHtml && (
-              <div
-                data-signature
-                data-testid="compose-signature-preview"
-                className="mt-4 border-t border-border/60 pt-3 opacity-70"
-                // Read-only signature preview. Auto-attached at send time;
-                // edited via the admin Inboxes page rather than inline.
-                // Pre-sanitized via sanitizeEmailHtml — see safeSignatureHtml.
-                dangerouslySetInnerHTML={{ __html: safeSignatureHtml }}
+            <AttachmentPicker
+              enableDragDrop
+              buttonClassName="hidden"
+              onFilesAdded={(added) => setFiles((prev) => [...prev, ...added])}
+            >
+              <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
+              <AttachmentChips
+                files={files}
+                capBytes={ATTACHMENT_CAP_BYTES}
+                onRemove={(idx) =>
+                  setFiles((prev) => prev.filter((_, i) => i !== idx))
+                }
               />
-            )}
+              {safeSignatureHtml && (
+                <div
+                  data-signature
+                  data-testid="compose-signature-preview"
+                  className="mt-4 border-t border-border/60 pt-3 opacity-70"
+                  // Read-only signature preview. Auto-attached at send time;
+                  // edited via the admin Inboxes page rather than inline.
+                  // Pre-sanitized via sanitizeEmailHtml — see safeSignatureHtml.
+                  dangerouslySetInnerHTML={{ __html: safeSignatureHtml }}
+                />
+              )}
+            </AttachmentPicker>
           </div>
 
           {/* Slim footer — single row, just send + cancel + hint. */}
@@ -313,6 +338,12 @@ export default function ComposeModal({
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <AttachmentPicker
+                onFilesAdded={(added) =>
+                  setFiles((prev) => [...prev, ...added])
+                }
+                buttonClassName="inline-flex items-center justify-center rounded-[6px] p-1.5 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              />
               <button
                 type="button"
                 onClick={onClose}
@@ -324,7 +355,12 @@ export default function ComposeModal({
                 type="button"
                 data-testid="compose-send-button"
                 onClick={handleSend}
-                disabled={sending || bodyIsEmpty || !to}
+                disabled={
+                  sending ||
+                  bodyIsEmpty ||
+                  !to ||
+                  totalAttachmentBytes > ATTACHMENT_CAP_BYTES
+                }
                 className="inline-flex items-center gap-1.5 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Send size={12} />
