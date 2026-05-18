@@ -215,7 +215,9 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     createdAt: now,
   });
 
-  const attachmentIds = await persistSentAttachments(db, c.env, id, files, now);
+  const attachmentIds = !result.error
+    ? await persistSentAttachments(db, c.env, id, files, now)
+    : [];
 
   await cancelSequencesForPerson(db, personId);
 

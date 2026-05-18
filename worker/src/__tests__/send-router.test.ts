@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import {
   applyMigrations,
@@ -23,6 +24,16 @@ describe("send router", () => {
   beforeEach(async () => {
     await cleanDb();
     ({ apiKey } = await createTestUser());
+    // Use DemoSender so send() always succeeds in tests. The global test env
+    // sets RESEND_API_KEY to a fake key (ResendSender would error); DEMO_MODE
+    // is kept "0" globally so sequence-processor and enroll-route tests
+    // exercise real queue behaviour. We override only for this describe block
+    // and restore it in afterEach.
+    (env as any).DEMO_MODE = "1";
+  });
+
+  afterEach(() => {
+    (env as any).DEMO_MODE = "0";
   });
 
   describe("POST /api/send", () => {
