@@ -99,6 +99,7 @@ const sendEmailRoute = createRoute({
         "multipart/form-data": {
           schema: z.object({
             payload: z.string().describe("JSON-encoded SendEmailSchema"),
+            files: z.array(z.any()).optional(),
           }),
         },
       },
@@ -442,8 +443,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
 });
 
 async function persistSentAttachments(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
+  db: Variables["db"],
   env: CloudflareBindings,
   sentEmailId: string,
   files: {
