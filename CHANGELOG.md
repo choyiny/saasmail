@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-19
+
+### Added
+
+- Outbound email attachments (≤25 MB, up to 50 files): compose, reply, and quick-reply drawers now include a paperclip button and drag-and-drop target for attaching files. Attachments are persisted to R2 and the `attachments` table; sent attachments are surfaced in thread and conversation detail responses.
+- `attachments.kind` column (`'inbound'` / `'sent'`) distinguishes received from sent attachments in the database.
+- `POST /api/send` and `POST /api/send/reply/:emailId` now accept `multipart/form-data` with the JSON payload in a `payload` field and files in `files` fields; total upload capped at 25 MB.
+- Shared `AttachmentPicker` and `AttachmentChips` UI components reused across compose, reply, and quick-reply.
+
+### Dependencies
+
+- Bumped `@playwright/test` from 1.59.1 to 1.60.0.
+- Bumped `@vitest/runner`, `@vitest/snapshot`, and `vitest` from 4.1.5 to 4.1.6.
+- Bumped `@better-auth/passkey` and `better-auth` from 1.6.10 to 1.6.11.
+- Bumped `@cloudflare/vite-plugin` from 1.36.3 to 1.37.1.
+- Bumped `@cloudflare/vitest-pool-workers` from 0.16.3 to 0.16.6.
+- Bumped `@cloudflare/workers-types` from 4.20260511.1 to 4.20260518.1.
+- Bumped `wrangler` from 4.90.0 to 4.92.0.
+- Bumped `@codemirror/view` from 6.42.1 to 6.43.0.
+- Bumped the tiptap group (`@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.23.1 to 3.23.4.
+
 ## [0.4.3] - 2026-05-13
 
 ### Fixed
@@ -269,7 +290,9 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/choyiny/saasmail/compare/v0.4.3...v0.5.0
+[0.4.3]: https://github.com/choyiny/saasmail/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/choyiny/saasmail/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/choyiny/saasmail/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/choyiny/saasmail/compare/v0.3.3...v0.4.0
