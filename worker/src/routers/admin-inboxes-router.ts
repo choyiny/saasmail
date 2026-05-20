@@ -1,8 +1,11 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { emails } from "../db/emails.schema";
+import { sentEmails } from "../db/sent-emails.schema";
+import { attachments } from "../db/attachments.schema";
+import { people } from "../db/people.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import {
   MAX_SIGNATURE_HTML_LENGTH,
@@ -342,7 +345,10 @@ const deleteInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Delete an inbox (sender_identity row + its inbox_permissions). Inbound emails are not removed.",
+    "Delete an inbox completely: sender_identity row, inbox_permissions, " +
+    "all received emails (with attachments + R2 objects), and sent emails " +
+    "from this address. People's email counts are decremented to stay " +
+    "consistent. Returns 404 only when none of these exist.",
   request: {
     params: z.object({ email: z.string() }),
   },
@@ -361,19 +367,97 @@ const deleteInboxRoute = createRoute({
 
 adminInboxesRouter.openapi(deleteInboxRoute, async (c) => {
   const db = c.get("db");
+  const r2 = c.env.R2;
   const { email } = c.req.valid("param");
 
-  const existing = await db
-    .select({ email: senderIdentities.email })
-    .from(senderIdentities)
-    .where(eq(senderIdentities.email, email))
-    .limit(1);
-  if (existing.length === 0) {
+  const [recvRow, sentRow, idRow, permRow] = await Promise.all([
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(emails)
+      .where(eq(emails.recipient, email)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(sentEmails)
+      .where(eq(sentEmails.fromAddress, email)),
+    db
+      .select({ email: senderIdentities.email })
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, email))
+      .limit(1),
+    db
+      .select({ email: inboxPermissions.email })
+      .from(inboxPermissions)
+      .where(eq(inboxPermissions.email, email))
+      .limit(1),
+  ]);
+
+  const hasReceived = (recvRow[0]?.n ?? 0) > 0;
+  const hasSent = (sentRow[0]?.n ?? 0) > 0;
+  const hasIdentity = idRow.length > 0;
+  const hasPermissions = permRow.length > 0;
+
+  if (!hasReceived && !hasSent && !hasIdentity && !hasPermissions) {
     return c.json({ error: "Inbox not found" }, 404);
   }
 
-  await db.delete(inboxPermissions).where(eq(inboxPermissions.email, email));
-  await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+  if (hasReceived) {
+    // R2 first (best-effort) so a worker crash leaves DB consistent.
+    const atts = await db
+      .select({ r2Key: attachments.r2Key })
+      .from(attachments)
+      .innerJoin(emails, eq(attachments.emailId, emails.id))
+      .where(eq(emails.recipient, email));
+    for (const att of atts) {
+      try {
+        await r2.delete(att.r2Key);
+      } catch (err) {
+        console.warn(`R2 delete failed for ${att.r2Key}:`, err);
+      }
+    }
+
+    // Decrement people counts before deleting the emails they reference.
+    await db.run(sql`
+      UPDATE ${people}
+      SET
+        total_count = MAX(total_count - (
+          SELECT COUNT(*) FROM ${emails}
+          WHERE ${emails.recipient} = ${email} AND ${emails.personId} = ${people.id}
+        ), 0),
+        unread_count = MAX(unread_count - (
+          SELECT COUNT(*) FROM ${emails}
+          WHERE ${emails.recipient} = ${email}
+            AND ${emails.personId} = ${people.id}
+            AND ${emails.isRead} = 0
+        ), 0)
+      WHERE ${people.id} IN (
+        SELECT DISTINCT ${emails.personId} FROM ${emails}
+        WHERE ${emails.recipient} = ${email}
+      )
+    `);
+
+    await db
+      .delete(attachments)
+      .where(
+        inArray(
+          attachments.emailId,
+          db
+            .select({ id: emails.id })
+            .from(emails)
+            .where(eq(emails.recipient, email)),
+        ),
+      );
+    await db.delete(emails).where(eq(emails.recipient, email));
+  }
+
+  if (hasSent) {
+    await db.delete(sentEmails).where(eq(sentEmails.fromAddress, email));
+  }
+  if (hasIdentity) {
+    await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+  }
+  if (hasPermissions) {
+    await db.delete(inboxPermissions).where(eq(inboxPermissions.email, email));
+  }
 
   return c.json({ success: true as const }, 200);
 });
