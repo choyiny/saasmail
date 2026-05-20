@@ -10,6 +10,10 @@ import {
 } from "./helpers";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
+import { emails } from "../db/emails.schema";
+import { sentEmails } from "../db/sent-emails.schema";
+import { attachments } from "../db/attachments.schema";
+import { people } from "../db/people.schema";
 import { eq } from "drizzle-orm";
 
 beforeEach(async () => {
@@ -377,5 +381,179 @@ describe("admin inboxes router", () => {
       .where(eq(inboxPermissions.email, "a@x.com"));
     const userIds = rows.map((r) => r.userId).sort();
     expect(userIds).toEqual(["u-m1", "u-m2"]);
+  });
+
+  it("DELETE returns 404 when no trace of the inbox exists anywhere", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("ghost@x.com")}`,
+      { apiKey, method: "DELETE" },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE wipes auto-discovered inbox (received emails only)", async () => {
+    // Regression: an inbox that only exists because emails were received
+    // for it (no sender_identity row, no permissions) used to 404. It
+    // should now succeed and the inbox should disappear from the list.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await createTestPerson();
+    await createTestEmail({
+      id: "e1",
+      recipient: "drop@x.com",
+      messageId: "m1@x",
+    });
+    await createTestEmail({
+      id: "e2",
+      recipient: "drop@x.com",
+      messageId: "m2@x",
+    });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("drop@x.com")}`,
+      { apiKey, method: "DELETE" },
+    );
+    expect(res.status).toBe(200);
+
+    const remaining = await getDb()
+      .select()
+      .from(emails)
+      .where(eq(emails.recipient, "drop@x.com"));
+    expect(remaining).toHaveLength(0);
+  });
+
+  it("DELETE cascades to attachments and sent_emails", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await createTestPerson();
+    await createTestEmail({ id: "e1", recipient: "ops@x.com" });
+
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(attachments).values({
+      id: "att-1",
+      emailId: "e1",
+      kind: "inbound",
+      filename: "f.pdf",
+      contentType: "application/pdf",
+      size: 100,
+      r2Key: "attachments/e1/att-1/f.pdf",
+      createdAt: now,
+    });
+    await getDb().insert(sentEmails).values({
+      id: "s-1",
+      personId: "sender-1",
+      fromAddress: "ops@x.com",
+      toAddress: "customer@example.com",
+      subject: "hi",
+      sentAt: now,
+      createdAt: now,
+    });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("ops@x.com")}`,
+      { apiKey, method: "DELETE" },
+    );
+    expect(res.status).toBe(200);
+
+    const attRows = await getDb()
+      .select()
+      .from(attachments)
+      .where(eq(attachments.emailId, "e1"));
+    expect(attRows).toHaveLength(0);
+
+    const sentRows = await getDb()
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.fromAddress, "ops@x.com"));
+    expect(sentRows).toHaveLength(0);
+  });
+
+  it("DELETE decrements people counts and never goes below zero", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(people).values({
+      id: "p-1",
+      email: "alice@example.com",
+      totalCount: 3,
+      unreadCount: 2,
+      lastEmailAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    // Two emails to-be-deleted (one unread), one email at a different
+    // recipient that must NOT affect counts.
+    await createTestEmail({
+      id: "e1",
+      personId: "p-1",
+      recipient: "killme@x.com",
+      isRead: 0,
+      messageId: "m1@x",
+    });
+    await createTestEmail({
+      id: "e2",
+      personId: "p-1",
+      recipient: "killme@x.com",
+      isRead: 1,
+      messageId: "m2@x",
+    });
+    await createTestEmail({
+      id: "e3",
+      personId: "p-1",
+      recipient: "keep@x.com",
+      isRead: 0,
+      messageId: "m3@x",
+    });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("killme@x.com")}`,
+      { apiKey, method: "DELETE" },
+    );
+    expect(res.status).toBe(200);
+
+    const [updated] = await getDb()
+      .select()
+      .from(people)
+      .where(eq(people.id, "p-1"));
+    // totalCount was 3, minus the 2 deleted -> 1.
+    // unreadCount was 2, minus the 1 unread deleted -> 1.
+    expect(updated.totalCount).toBe(1);
+    expect(updated.unreadCount).toBe(1);
+  });
+
+  it("DELETE still removes a configured inbox (sender_identity path)", async () => {
+    // Existing behavior must continue to work.
+    const { apiKey } = await createTestUser({
+      id: "u-admin",
+      role: "admin",
+      email: "admin@x.com",
+    });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "named@x.com",
+      displayName: "Named",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await getDb().insert(inboxPermissions).values({
+      email: "named@x.com",
+      userId: "u-admin",
+      createdAt: now,
+    });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("named@x.com")}`,
+      { apiKey, method: "DELETE" },
+    );
+    expect(res.status).toBe(200);
+
+    const id = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "named@x.com"));
+    const perm = await getDb()
+      .select()
+      .from(inboxPermissions)
+      .where(eq(inboxPermissions.email, "named@x.com"));
+    expect(id).toHaveLength(0);
+    expect(perm).toHaveLength(0);
   });
 });
