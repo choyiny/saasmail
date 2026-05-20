@@ -64,17 +64,10 @@ export default function SequencesPage() {
             <p className="mb-1 text-sm font-medium text-text-primary">
               No sequences yet
             </p>
-            <p className="mb-4 text-xs font-light text-text-tertiary">
+            <p className="text-xs font-light text-text-tertiary">
               Build your first multi-step campaign to nurture contacts
               automatically.
             </p>
-            <button
-              onClick={() => navigate("/sequences/new")}
-              className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-text-primary/90"
-            >
-              <Plus size={14} />
-              New sequence
-            </button>
           </div>
         ) : (
           <div className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
