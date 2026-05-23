@@ -26,6 +26,7 @@ import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { notificationsRouter } from "./routers/notifications-router";
+import { suppressionsRouter } from "./routers/suppressions-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
@@ -205,6 +206,12 @@ app.route("/api/notifications", notificationsRouter);
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
+
+// Suppressions CRUD — admin-only (not under /api/admin/ for UX but enforced
+// here with the same role guard).
+app.use("/api/suppressions/*", requireAdmin);
+app.use("/api/suppressions", requireAdmin);
+app.route("/api/suppressions", suppressionsRouter);
 
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ status: "ok" }));
