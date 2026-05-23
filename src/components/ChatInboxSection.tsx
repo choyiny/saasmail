@@ -213,9 +213,12 @@ function Bubble({
             isUnread ? "outline outline-2 outline-violet/40" : ""
           }`}
         >
-          {/* Capped, sanitized inline preview */}
+          {/* Sanitized inline preview. Images render at their natural
+              size, constrained only by the bubble width so aspect ratio
+              is preserved — capping height made hero/inline images
+              unreadably small. */}
           <div
-            className="prose prose-sm relative max-h-[200px] max-w-none overflow-hidden px-4 py-3 text-xs text-text-secondary [&_*]:max-w-full [&_a]:pointer-events-none [&_img]:max-h-24 [&_img]:max-w-full [&_table]:!w-full [&_table]:!table-fixed"
+            className="prose prose-sm relative max-w-none px-4 py-3 text-xs text-text-secondary [&_*]:max-w-full [&_a]:pointer-events-none [&_img]:h-auto [&_img]:max-w-full [&_table]:!w-full [&_table]:!table-fixed"
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
         </div>
