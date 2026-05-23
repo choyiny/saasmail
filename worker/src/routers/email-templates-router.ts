@@ -417,8 +417,11 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
     fromAddress,
     toAddress: to,
     subject: renderedSubject,
-    bodyHtml: renderedHtml,
-    bodyText: null,
+    // Record what was on the wire (helper may have interpolated
+    // {{unsubscribe_url}} or auto-appended a footer), not the pre-helper
+    // template render.
+    bodyHtml: sendResult.renderedHtml ?? renderedHtml,
+    bodyText: sendResult.renderedText ?? null,
     resendId: result.id,
     status: result.error ? "failed" : "sent",
     sentAt: now,

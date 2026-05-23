@@ -231,10 +231,19 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     transactional,
   });
 
-  // Every recipient was suppressed — no send happened. Skip sent_emails write
-  // and sequence cancellation. Log the dropped recipients so they appear in
-  // worker logs for v1 (no audit-table write yet).
+  // Every recipient was suppressed — no send happened. Skip sent_emails write,
+  // but still cancel any pending sequence enrollments for the recipient so we
+  // stop scheduling steps that will all individually re-suppress at dispatch.
   if (sendResult.delivered.length === 0) {
+    const existingPerson = await db
+      .select({ id: people.id })
+      .from(people)
+      .where(eq(people.email, to))
+      .limit(1);
+    if (existingPerson[0]) {
+      await cancelSequencesForPerson(db, existingPerson[0].id);
+    }
+
     console.log(
       "[send] all recipients suppressed",
       JSON.stringify({ from: fromAddress, suppressed: sendResult.suppressed }),
@@ -254,12 +263,16 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
 
   // The transport was called; reflect its result in sent_emails.
   const result = sendResult.result!;
+  // When the primary `to` was suppressed, the helper promoted a surviving cc
+  // to be the actual primary recipient. Use that for audit + person lookup so
+  // the row reflects who actually got the email.
+  const recordedTo = sendResult.delivered[0];
 
-  // Find or create the person row for this recipient.
+  // Find or create the person row for the actual recipient.
   const existingPerson = await db
     .select({ id: people.id })
     .from(people)
-    .where(eq(people.email, to))
+    .where(eq(people.email, recordedTo))
     .limit(1);
 
   let personId: string;
@@ -271,7 +284,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
       .insert(people)
       .values({
         id: personId,
-        email: to,
+        email: recordedTo,
         name: null,
         lastEmailAt: now,
         unreadCount: 0,
@@ -283,14 +296,14 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     const refetched = await db
       .select({ id: people.id })
       .from(people)
-      .where(eq(people.email, to))
+      .where(eq(people.email, recordedTo))
       .limit(1);
     personId = refetched[0]!.id;
   }
 
   const internalDomains = await fetchInternalDomains(db);
   const externals = externalsOnly(
-    [to, ...(cc ?? []).map((c) => c.email)],
+    [recordedTo, ...(cc ?? []).map((c) => c.email)],
     internalDomains,
   );
   const conversationId = await computeConversationId(fromAddress, externals);
@@ -300,10 +313,10 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     id,
     personId,
     fromAddress,
-    toAddress: to,
+    toAddress: recordedTo,
     subject,
-    bodyHtml,
-    bodyText: bodyText ?? null,
+    bodyHtml: sendResult.renderedHtml ?? bodyHtml,
+    bodyText: sendResult.renderedText ?? bodyText ?? null,
     messageId,
     resendId: result.id,
     status: result.error ? "failed" : "sent",

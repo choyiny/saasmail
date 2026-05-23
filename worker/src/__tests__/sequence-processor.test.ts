@@ -209,14 +209,15 @@ describe("sequence processor - processSequenceEmail suppression", () => {
       // Transport must NOT have been called
       expect(fakeSender.send).not.toHaveBeenCalled();
 
-      // sequence_emails row should be in `suppressed` state with sentAt set
+      // sequence_emails row should be in `suppressed` state. sentAt is
+      // intentionally NOT written — the transport was never called.
       const row = await db
         .select()
         .from(sequenceEmails)
         .where(eq(sequenceEmails.id, "se-1"))
         .limit(1);
       expect(row[0].status).toBe("suppressed");
-      expect(row[0].sentAt).not.toBeNull();
+      expect(row[0].sentAt).toBeNull();
 
       // No sent_emails row should have been written
       const sentRows = await db.select().from(sentEmails);

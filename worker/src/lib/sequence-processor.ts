@@ -200,9 +200,12 @@ export async function processSequenceEmail(
         suppressed: sendResult.suppressed,
       }),
     );
+    // sentAt's semantic is "time the transport was called" — no transport
+    // call happened on a suppressed step, so leave sentAt alone (it should
+    // stay null).
     await db
       .update(sequenceEmails)
-      .set({ status: "suppressed", sentAt: now })
+      .set({ status: "suppressed" })
       .where(eq(sequenceEmails.id, sequenceEmailId));
 
     // Treat as terminal for enrollment completion: fall through to the same
@@ -211,7 +214,9 @@ export async function processSequenceEmail(
   } else {
     const result = sendResult.result!;
 
-    // Store sent email record
+    // Store sent email record. The helper may have mutated the body to
+    // interpolate {{unsubscribe_url}} or auto-append a footer — record
+    // exactly what was on the wire, not the pre-helper template render.
     const sentId = nanoid();
     await db.insert(sentEmails).values({
       id: sentId,
@@ -219,8 +224,8 @@ export async function processSequenceEmail(
       fromAddress,
       toAddress: person.email,
       subject: renderedSubject,
-      bodyHtml: renderedHtml,
-      bodyText: null,
+      bodyHtml: sendResult.renderedHtml ?? renderedHtml,
+      bodyText: sendResult.renderedText ?? null,
       messageId,
       resendId: result.id,
       status: result.error ? "failed" : "sent",

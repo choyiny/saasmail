@@ -473,5 +473,41 @@ describe("sequences router", () => {
       expect(data[0].totalSteps).toBe(2);
       expect(data[0].sentSteps).toBe(0);
     });
+
+    it("counts 'suppressed' rows toward sentSteps (terminal state)", async () => {
+      const seq = await createSequenceWithTemplates();
+      await createTestPerson({ id: "s1", email: "a@test.com", name: "Alice" });
+
+      const enrollRes = await authFetch(`/api/sequences/${seq.id}/enroll`, {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          personId: "s1",
+          fromAddress: "me@saasmail.test",
+        }),
+      });
+      const enrollData = await enrollRes.json();
+
+      // Manually mark one of the scheduled emails as suppressed (simulating
+      // what processSequenceEmail would do when the recipient is on the list).
+      const db = getDb();
+      const rows = await db
+        .select()
+        .from(sequenceEmails)
+        .where(eq(sequenceEmails.enrollmentId, enrollData.enrollment.id));
+      // Pick the first step deterministically by stepOrder.
+      const first = rows.sort((a, b) => a.stepOrder - b.stepOrder)[0];
+      await db
+        .update(sequenceEmails)
+        .set({ status: "suppressed" })
+        .where(eq(sequenceEmails.id, first.id));
+
+      const res = await authFetch(`/api/sequences/${seq.id}/enrollments`, {
+        apiKey,
+      });
+      const data = await res.json();
+      expect(data[0].totalSteps).toBe(2);
+      expect(data[0].sentSteps).toBe(1);
+    });
   });
 });
