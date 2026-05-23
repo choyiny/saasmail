@@ -3,6 +3,7 @@ import { suppressions } from "../db/suppressions.schema";
 import { applyMigrations, cleanDb, getDb } from "./helpers";
 import { sendWithSuppressionCheck } from "../lib/send";
 import type { SendEmailParams } from "../lib/email-sender";
+import { verifyToken } from "../lib/unsubscribe-token";
 
 const sent: SendEmailParams[] = [];
 const fakeSender = {
@@ -38,6 +39,13 @@ async function suppress(email: string) {
   });
 }
 
+function extractUnsubToken(headerValue: string | undefined): string {
+  expect(headerValue).toBeDefined();
+  const match = headerValue!.match(/token=([^>&]+)/);
+  expect(match).not.toBeNull();
+  return decodeURIComponent(match![1]);
+}
+
 describe("sendWithSuppressionCheck", () => {
   it("blocks send when sole recipient is suppressed", async () => {
     await suppress("alice@example.com");
@@ -46,7 +54,7 @@ describe("sendWithSuppressionCheck", () => {
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com"],
+      to: "alice@example.com",
       subject: "Hi",
       html: "<p>hi {{unsubscribe_url}}</p>",
     });
@@ -55,31 +63,77 @@ describe("sendWithSuppressionCheck", () => {
     expect(fakeSender.send).not.toHaveBeenCalled();
   });
 
-  it("partitions a mixed recipient list across to and cc", async () => {
+  it("drops suppressed cc but keeps unsuppressed primary `to`", async () => {
     await suppress("bob@example.com");
     const result = await sendWithSuppressionCheck({
       db: getDb(),
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com", "bob@example.com"],
-      cc: ["carol@example.com", "bob@example.com"],
+      to: "alice@example.com",
+      cc: ["bob@example.com", "carol@example.com"],
       subject: "Hi",
       html: "<p>hi {{unsubscribe_url}}</p>",
     });
-    // Only one delivered `to` (alice) — transport called once.
-    expect(result.delivered.sort()).toEqual([
-      "alice@example.com",
-      "carol@example.com",
-    ]);
-    // bob appears in both `to` and `cc` → reported twice in `suppressed`.
-    expect(result.suppressed.sort()).toEqual([
-      "bob@example.com",
-      "bob@example.com",
-    ]);
+    expect(result.delivered).toEqual(["alice@example.com", "carol@example.com"]);
+    expect(result.suppressed).toEqual(["bob@example.com"]);
     expect(fakeSender.send).toHaveBeenCalledTimes(1);
     expect(sent[0].to).toBe("alice@example.com");
     expect(sent[0].cc).toEqual(["carol@example.com"]);
+  });
+
+  it("promotes first surviving cc when primary `to` is suppressed", async () => {
+    await suppress("alice@example.com");
+    const result = await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender: fakeSender,
+      from: "test@host",
+      to: "alice@example.com",
+      cc: ["bob@example.com", "carol@example.com"],
+      subject: "Hi",
+      html: "<p>hi {{unsubscribe_url}}</p>",
+    });
+    expect(result.delivered).toEqual(["bob@example.com", "carol@example.com"]);
+    expect(result.suppressed).toEqual(["alice@example.com"]);
+    expect(fakeSender.send).toHaveBeenCalledTimes(1);
+    expect(sent[0].to).toBe("bob@example.com");
+    expect(sent[0].cc).toEqual(["carol@example.com"]);
+  });
+
+  it("unsubscribe token in headers and body matches the transport's `to`", async () => {
+    // Regression: when the primary `to` is suppressed and a cc gets promoted,
+    // the token must encode the promoted recipient, NOT the original `to`.
+    await suppress("alice@example.com");
+    await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender: fakeSender,
+      from: "test@host",
+      to: "alice@example.com",
+      cc: ["bob@example.com", "carol@example.com"],
+      subject: "Hi",
+      html: "<p>Click {{unsubscribe_url}}</p>",
+    });
+    const call = sent[0];
+    expect(call.to).toBe("bob@example.com");
+
+    const headerToken = extractUnsubToken(call.headers?.["List-Unsubscribe"]);
+    const decodedHeader = await verifyToken(
+      headerToken,
+      fakeEnv.UNSUBSCRIBE_SECRET,
+    );
+    expect(decodedHeader?.email).toBe("bob@example.com");
+
+    // And the body URL token should match too.
+    const bodyMatch = call.html.match(/token=([^"&<>\s]+)/);
+    expect(bodyMatch).not.toBeNull();
+    const bodyToken = decodeURIComponent(bodyMatch![1]);
+    const decodedBody = await verifyToken(
+      bodyToken,
+      fakeEnv.UNSUBSCRIBE_SECRET,
+    );
+    expect(decodedBody?.email).toBe("bob@example.com");
   });
 
   it("with transactional=true, bypasses suppression entirely", async () => {
@@ -89,7 +143,7 @@ describe("sendWithSuppressionCheck", () => {
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com"],
+      to: "alice@example.com",
       subject: "Reset",
       html: "<p>token</p>",
       transactional: true,
@@ -105,7 +159,7 @@ describe("sendWithSuppressionCheck", () => {
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com"],
+      to: "alice@example.com",
       subject: "Hi",
       html: "<p>Click {{unsubscribe_url}}</p>",
     });
@@ -129,7 +183,7 @@ describe("sendWithSuppressionCheck", () => {
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com"],
+      to: "alice@example.com",
       subject: "Reset",
       html: "<p>Click here</p>",
       text: "Click here",
@@ -148,7 +202,7 @@ describe("sendWithSuppressionCheck", () => {
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com"],
+      to: "alice@example.com",
       subject: "Hi",
       html: "<p>No link here</p>",
     });
@@ -165,7 +219,7 @@ describe("sendWithSuppressionCheck", () => {
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com"],
+      to: "alice@example.com",
       subject: "Hi",
       html: "<p>Link: {{unsubscribe_url}}</p>",
     });
@@ -179,7 +233,7 @@ describe("sendWithSuppressionCheck", () => {
       env: fakeEnv,
       sender: fakeSender,
       from: "test@host",
-      to: ["alice@example.com"],
+      to: "alice@example.com",
       subject: "Hi",
       html: "<p>hi</p>",
       text: "Hello no link",

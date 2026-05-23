@@ -11,7 +11,7 @@ export interface SendInput {
   env: { UNSUBSCRIBE_SECRET: string; BASE_URL: string };
   sender: EmailSender;
   from: SendEmailParams["from"];
-  to: string[];
+  to: string;
   cc?: string[];
   subject: string;
   html?: string;
@@ -66,21 +66,19 @@ export async function sendWithSuppressionCheck(
   } = input;
   let { html, text } = input;
 
-  const deliveredTo: string[] = [];
+  // Partition recipients into delivered vs suppressed. Transactional sends
+  // bypass the suppression list entirely.
+  let primaryTo: string | null;
   const deliveredCc: string[] = [];
   const suppressed: string[] = [];
 
   if (transactional === true) {
-    deliveredTo.push(...to);
+    primaryTo = to;
     if (cc && cc.length > 0) deliveredCc.push(...cc);
   } else {
-    for (const addr of to) {
-      if (await isSuppressed(db, addr)) {
-        suppressed.push(addr);
-      } else {
-        deliveredTo.push(addr);
-      }
-    }
+    primaryTo = (await isSuppressed(db, to)) ? null : to;
+    if (primaryTo === null) suppressed.push(to);
+
     if (cc) {
       for (const addr of cc) {
         if (await isSuppressed(db, addr)) {
@@ -90,10 +88,16 @@ export async function sendWithSuppressionCheck(
         }
       }
     }
+
+    // If the primary `to` was suppressed, promote the first surviving cc to
+    // be the new `to`; remaining cc stays in the cc list.
+    if (primaryTo === null && deliveredCc.length > 0) {
+      primaryTo = deliveredCc.shift() as string;
+    }
   }
 
   // Nothing to send if every recipient was suppressed.
-  if (deliveredTo.length === 0 && deliveredCc.length === 0) {
+  if (primaryTo === null) {
     return { delivered: [], suppressed };
   }
 
@@ -102,10 +106,10 @@ export async function sendWithSuppressionCheck(
     : undefined;
 
   if (transactional !== true) {
-    // Pick the primary recipient for token generation. Prefer the first `to`,
-    // fall back to the first `cc` if `to` is empty after partitioning.
-    const primary = deliveredTo[0] ?? deliveredCc[0];
-    const token = await signToken(primary, env.UNSUBSCRIBE_SECRET);
+    // Build the unsubscribe token from the FINAL primary recipient — the one
+    // actually receiving the email as `to`. This ensures the recipient who
+    // clicks unsubscribe is the one who gets suppressed.
+    const token = await signToken(primaryTo, env.UNSUBSCRIBE_SECRET);
     const url = buildUnsubscribeUrl(env.BASE_URL, token);
 
     if (typeof html === "string") {
@@ -129,48 +133,22 @@ export async function sendWithSuppressionCheck(
     };
   }
 
-  // The transport accepts a single `to` per call. Loop over delivered `to`
-  // recipients; if there are none but there are `cc` recipients, send a single
-  // call using the first `cc` as the primary address.
-  let lastResult: SendEmailResult | undefined;
   const ccArg = deliveredCc.length > 0 ? deliveredCc : undefined;
 
-  if (deliveredTo.length === 0) {
-    // Edge case: only cc recipients survived. Use the first cc as `to` so the
-    // transport has a recipient; remaining cc stays in the cc list.
-    const [primary, ...rest] = deliveredCc;
-    lastResult = await sender.send({
-      from,
-      to: primary,
-      ...(rest.length > 0 ? { cc: rest } : {}),
-      subject,
-      html: html ?? "",
-      ...(text !== undefined ? { text } : {}),
-      ...(finalHeaders ? { headers: finalHeaders } : {}),
-      ...(attachments ? { attachments } : {}),
-    });
-  } else {
-    for (let i = 0; i < deliveredTo.length; i++) {
-      const recipient = deliveredTo[i];
-      // Only include cc on the first call to avoid duplicate cc deliveries
-      // when `to` has multiple entries.
-      const includeCc = i === 0 && ccArg !== undefined;
-      lastResult = await sender.send({
-        from,
-        to: recipient,
-        ...(includeCc ? { cc: ccArg } : {}),
-        subject,
-        html: html ?? "",
-        ...(text !== undefined ? { text } : {}),
-        ...(finalHeaders ? { headers: finalHeaders } : {}),
-        ...(attachments ? { attachments } : {}),
-      });
-    }
-  }
+  const result = await sender.send({
+    from,
+    to: primaryTo,
+    ...(ccArg ? { cc: ccArg } : {}),
+    subject,
+    html: html ?? "",
+    ...(text !== undefined ? { text } : {}),
+    ...(finalHeaders ? { headers: finalHeaders } : {}),
+    ...(attachments ? { attachments } : {}),
+  });
 
   return {
-    delivered: [...deliveredTo, ...deliveredCc],
+    delivered: [primaryTo, ...deliveredCc],
     suppressed,
-    result: lastResult,
+    result,
   };
 }
