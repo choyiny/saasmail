@@ -71,15 +71,22 @@ describe("sendWithSuppressionCheck", () => {
       sender: fakeSender,
       from: "test@host",
       to: "alice@example.com",
-      cc: ["bob@example.com", "carol@example.com"],
+      cc: [{ email: "bob@example.com" }, { email: "carol@example.com" }],
       subject: "Hi",
       html: "<p>hi {{unsubscribe_url}}</p>",
     });
-    expect(result.delivered).toEqual(["alice@example.com", "carol@example.com"]);
+    expect(result.delivered).toEqual([
+      "alice@example.com",
+      "carol@example.com",
+    ]);
     expect(result.suppressed).toEqual(["bob@example.com"]);
-    expect(fakeSender.send).toHaveBeenCalledTimes(1);
+    // Marketing path now does one call per delivered recipient.
+    expect(fakeSender.send).toHaveBeenCalledTimes(2);
     expect(sent[0].to).toBe("alice@example.com");
-    expect(sent[0].cc).toEqual(["carol@example.com"]);
+    expect(sent[1].to).toBe("carol@example.com");
+    // No cc on per-recipient marketing calls.
+    expect(sent[0].cc).toBeUndefined();
+    expect(sent[1].cc).toBeUndefined();
   });
 
   it("promotes first surviving cc when primary `to` is suppressed", async () => {
@@ -90,15 +97,17 @@ describe("sendWithSuppressionCheck", () => {
       sender: fakeSender,
       from: "test@host",
       to: "alice@example.com",
-      cc: ["bob@example.com", "carol@example.com"],
+      cc: [{ email: "bob@example.com" }, { email: "carol@example.com" }],
       subject: "Hi",
       html: "<p>hi {{unsubscribe_url}}</p>",
     });
     expect(result.delivered).toEqual(["bob@example.com", "carol@example.com"]);
     expect(result.suppressed).toEqual(["alice@example.com"]);
-    expect(fakeSender.send).toHaveBeenCalledTimes(1);
+    expect(fakeSender.send).toHaveBeenCalledTimes(2);
     expect(sent[0].to).toBe("bob@example.com");
-    expect(sent[0].cc).toEqual(["carol@example.com"]);
+    expect(sent[1].to).toBe("carol@example.com");
+    expect(sent[0].cc).toBeUndefined();
+    expect(sent[1].cc).toBeUndefined();
   });
 
   it("unsubscribe token in headers and body matches the transport's `to`", async () => {
@@ -111,7 +120,7 @@ describe("sendWithSuppressionCheck", () => {
       sender: fakeSender,
       from: "test@host",
       to: "alice@example.com",
-      cc: ["bob@example.com", "carol@example.com"],
+      cc: [{ email: "bob@example.com" }, { email: "carol@example.com" }],
       subject: "Hi",
       html: "<p>Click {{unsubscribe_url}}</p>",
     });
@@ -134,6 +143,86 @@ describe("sendWithSuppressionCheck", () => {
       fakeEnv.UNSUBSCRIBE_SECRET,
     );
     expect(decodedBody?.email).toBe("bob@example.com");
+  });
+
+  it("CC with display name still triggers suppression check", async () => {
+    // Regression: pre-formatting CC as "Name <addr>" before the suppression
+    // check meant isSuppressed never matched the bare-email column.
+    await suppress("bob@example.com");
+    const result = await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender: fakeSender,
+      from: "test@host",
+      to: "alice@example.com",
+      cc: [{ email: "bob@example.com", name: "Bob" }],
+      subject: "Hi",
+      html: "<p>hi</p>",
+    });
+    expect(result.suppressed).toContain("bob@example.com");
+    expect(result.delivered).toEqual(["alice@example.com"]);
+    // Only one transport call, to alice — bob must NOT have been sent.
+    expect(fakeSender.send).toHaveBeenCalledTimes(1);
+    expect(sent[0].to).toBe("alice@example.com");
+    const allRecipients = sent.flatMap((s) => [s.to, ...(s.cc ?? [])]);
+    expect(allRecipients.some((r) => r.includes("bob@example.com"))).toBe(false);
+  });
+
+  it("multi-recipient marketing send: each recipient gets a per-recipient token", async () => {
+    await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender: fakeSender,
+      from: "test@host",
+      to: "alice@example.com",
+      cc: [{ email: "bob@example.com" }, { email: "carol@example.com" }],
+      subject: "Hi",
+      html: "<p>Click {{unsubscribe_url}}</p>",
+    });
+
+    expect(fakeSender.send).toHaveBeenCalledTimes(3);
+    const recipients = sent.map((s) => s.to);
+    expect(recipients).toEqual([
+      "alice@example.com",
+      "bob@example.com",
+      "carol@example.com",
+    ]);
+
+    // Each call has no cc — every recipient sees themselves as the sole to.
+    for (const call of sent) {
+      expect(call.cc).toBeUndefined();
+    }
+
+    // Each call's List-Unsubscribe header token decodes back to that call's `to`.
+    for (const call of sent) {
+      const headerToken = extractUnsubToken(
+        call.headers?.["List-Unsubscribe"],
+      );
+      const decoded = await verifyToken(
+        headerToken,
+        fakeEnv.UNSUBSCRIBE_SECRET,
+      );
+      expect(decoded?.email).toBe(call.to);
+    }
+  });
+
+  it("multi-recipient transactional send: single call with cc preserved", async () => {
+    await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender: fakeSender,
+      from: "test@host",
+      to: "alice@example.com",
+      cc: [{ email: "bob@example.com" }, { email: "carol@example.com", name: "Carol" }],
+      subject: "Reset",
+      html: "<p>token</p>",
+      transactional: true,
+    });
+    expect(fakeSender.send).toHaveBeenCalledTimes(1);
+    expect(sent[0].to).toBe("alice@example.com");
+    // cc preserved as formatted strings; display name on carol becomes "Carol <…>".
+    expect(sent[0].cc).toEqual(["bob@example.com", "Carol <carol@example.com>"]);
+    expect(sent[0].headers?.["List-Unsubscribe"]).toBeUndefined();
   });
 
   it("with transactional=true, bypasses suppression entirely", async () => {

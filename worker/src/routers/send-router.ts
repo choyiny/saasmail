@@ -204,8 +204,6 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
 
-  const ccHeaderList =
-    cc && cc.length > 0 ? cc.map(formatCc) : undefined;
   const attachmentList =
     files.length > 0
       ? files.map((f) => ({
@@ -221,7 +219,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     sender,
     from: formattedFrom,
     to,
-    cc: ccHeaderList,
+    cc,
     subject,
     html: bodyHtml,
     text: bodyText,
@@ -501,13 +499,21 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await sender.send({
+  // Replies are 1:1 conversational responses to an inbound — the recipient
+  // initiated by emailing first, so route through sendWithSuppressionCheck
+  // with transactional: true. That bypasses the suppression list AND skips
+  // the unsubscribe footer / List-Unsubscribe header (this is a reply, not
+  // a bulk send).
+  const sendResult = await sendWithSuppressionCheck({
+    db,
+    env: c.env,
+    sender,
     from: formattedFrom,
     to: toAddress,
-    ...(cc && cc.length > 0 ? { cc: cc.map(formatCc) } : {}),
+    cc,
     subject: finalSubject,
     html: finalBodyHtml,
-    text: bodyText,
+    ...(bodyText !== undefined ? { text: bodyText } : {}),
     headers: {
       "Message-ID": messageId,
       ...(origInReplyToMessageId
@@ -524,7 +530,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
           })),
         }
       : {}),
+    transactional: true,
   });
+  // transactional: true always yields delivered=[to], suppressed=[].
+  const result = sendResult.result!;
 
   // Compute conversation_id for this reply.
   const internalDomainsReply = await fetchInternalDomains(db);

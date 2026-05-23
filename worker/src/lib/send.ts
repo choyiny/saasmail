@@ -6,13 +6,23 @@ import type {
   SendEmailResult,
 } from "./email-sender";
 
+/**
+ * A CC entry the caller hands us. We need the bare `email` for suppression
+ * lookups AND for per-recipient token signing; the optional `name` is only
+ * used when we format the final `"Name <addr>"` header value for the wire.
+ */
+export interface CcRecipient {
+  email: string;
+  name?: string | null;
+}
+
 export interface SendInput {
   db: Database;
   env: { UNSUBSCRIBE_SECRET: string; BASE_URL: string };
   sender: EmailSender;
   from: SendEmailParams["from"];
   to: string;
-  cc?: string[];
+  cc?: CcRecipient[];
   subject: string;
   html?: string;
   text?: string;
@@ -25,6 +35,14 @@ export interface SendOutput {
   delivered: string[];
   suppressed: string[];
   result?: SendEmailResult;
+  /**
+   * For audit logging: the rendered html/text actually sent to the FIRST
+   * delivered recipient. For multi-recipient marketing sends each recipient
+   * gets their own per-recipient token, so this is a representative copy of
+   * one wire payload, not all of them.
+   */
+  renderedHtml?: string;
+  renderedText?: string;
 }
 
 const UNSUB_PLACEHOLDER = /\{\{unsubscribe_url\}\}/g;
@@ -46,6 +64,11 @@ function appendTextFooter(text: string, url: string): string {
   return text + `\n\n---\nUnsubscribe: ${url}`;
 }
 
+/** Format a CcRecipient as a header-friendly `"Name <addr>"` string. */
+function formatCcForTransport(c: CcRecipient): string {
+  return c.name ? `${c.name} <${c.email}>` : c.email;
+}
+
 export async function sendWithSuppressionCheck(
   input: SendInput,
 ): Promise<SendOutput> {
@@ -57,16 +80,17 @@ export async function sendWithSuppressionCheck(
     to,
     cc,
     subject,
+    html,
+    text,
     headers,
     attachments,
     transactional,
   } = input;
-  let { html, text } = input;
 
   // Partition recipients into delivered vs suppressed. Transactional sends
   // bypass the suppression list entirely.
   let primaryTo: string | null;
-  const deliveredCc: string[] = [];
+  const deliveredCc: CcRecipient[] = [];
   const suppressed: string[] = [];
 
   if (transactional === true) {
@@ -77,11 +101,11 @@ export async function sendWithSuppressionCheck(
     if (primaryTo === null) suppressed.push(to);
 
     if (cc) {
-      for (const addr of cc) {
-        if (await isSuppressed(db, addr)) {
-          suppressed.push(addr);
+      for (const entry of cc) {
+        if (await isSuppressed(db, entry.email)) {
+          suppressed.push(entry.email);
         } else {
-          deliveredCc.push(addr);
+          deliveredCc.push(entry);
         }
       }
     }
@@ -89,7 +113,8 @@ export async function sendWithSuppressionCheck(
     // If the primary `to` was suppressed, promote the first surviving cc to
     // be the new `to`; remaining cc stays in the cc list.
     if (primaryTo === null && deliveredCc.length > 0) {
-      primaryTo = deliveredCc.shift() as string;
+      const promoted = deliveredCc.shift()!;
+      primaryTo = promoted.email;
     }
   }
 
@@ -98,54 +123,96 @@ export async function sendWithSuppressionCheck(
     return { delivered: [], suppressed };
   }
 
-  let finalHeaders: Record<string, string> | undefined = headers
-    ? { ...headers }
-    : undefined;
+  let lastResult: SendEmailResult | undefined;
+  let renderedHtml: string | undefined;
+  let renderedText: string | undefined;
 
-  if (transactional !== true) {
-    // Build the unsubscribe token from the FINAL primary recipient — the one
-    // actually receiving the email as `to`. This ensures the recipient who
-    // clicks unsubscribe is the one who gets suppressed.
-    const token = await signToken(primaryTo, env.UNSUBSCRIBE_SECRET);
-    const url = buildUnsubscribeUrl(env.BASE_URL, token);
+  if (transactional === true) {
+    // Transactional: single transport call, no per-recipient personalization,
+    // no List-Unsubscribe headers, no footer auto-append.
+    const ccArg =
+      deliveredCc.length > 0
+        ? deliveredCc.map(formatCcForTransport)
+        : undefined;
 
-    if (typeof html === "string") {
-      html = html.replace(UNSUB_PLACEHOLDER, url);
-      if (!html.includes(url)) {
-        html = appendHtmlFooter(html, url);
+    lastResult = await sender.send({
+      from,
+      to: primaryTo,
+      ...(ccArg ? { cc: ccArg } : {}),
+      subject,
+      html: html ?? "",
+      ...(text !== undefined ? { text } : {}),
+      ...(headers ? { headers } : {}),
+      ...(attachments ? { attachments } : {}),
+    });
+
+    renderedHtml = html;
+    renderedText = text;
+  } else {
+    // Marketing: one transport call per delivered recipient, each with its
+    // own per-recipient unsubscribe token + headers + body interpolation.
+    // Every recipient sees themselves as the sole `to` (no cc list), so
+    // clicking the unsubscribe link suppresses them — not somebody else.
+    const allDelivered: Array<{ email: string; cc?: CcRecipient }> = [
+      { email: primaryTo },
+      ...deliveredCc.map((c) => ({ email: c.email, cc: c })),
+    ];
+
+    for (let i = 0; i < allDelivered.length; i++) {
+      const recipient = allDelivered[i];
+      const token = await signToken(recipient.email, env.UNSUBSCRIBE_SECRET);
+      const url = buildUnsubscribeUrl(env.BASE_URL, token);
+
+      let recipientHtml = html;
+      let recipientText = text;
+      if (typeof recipientHtml === "string") {
+        recipientHtml = recipientHtml.replace(UNSUB_PLACEHOLDER, url);
+        if (!recipientHtml.includes(url)) {
+          recipientHtml = appendHtmlFooter(recipientHtml, url);
+        }
+      }
+      if (typeof recipientText === "string") {
+        recipientText = recipientText.replace(UNSUB_PLACEHOLDER, url);
+        if (!recipientText.includes(url)) {
+          recipientText = appendTextFooter(recipientText, url);
+        }
+      }
+
+      const recipientHeaders: Record<string, string> = {
+        ...(headers ?? {}),
+        "List-Unsubscribe": `<${url}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      };
+
+      // The header-formatted "to" is `"Name <addr>"` only when this entry
+      // came from a cc with a display name; the original `to` is a bare
+      // string by signature.
+      const toForTransport = recipient.cc
+        ? formatCcForTransport(recipient.cc)
+        : recipient.email;
+
+      lastResult = await sender.send({
+        from,
+        to: toForTransport,
+        subject,
+        html: recipientHtml ?? "",
+        ...(recipientText !== undefined ? { text: recipientText } : {}),
+        headers: recipientHeaders,
+        ...(attachments ? { attachments } : {}),
+      });
+
+      if (i === 0) {
+        renderedHtml = recipientHtml;
+        renderedText = recipientText;
       }
     }
-
-    if (typeof text === "string") {
-      text = text.replace(UNSUB_PLACEHOLDER, url);
-      if (!text.includes(url)) {
-        text = appendTextFooter(text, url);
-      }
-    }
-
-    finalHeaders = {
-      ...(headers ?? {}),
-      "List-Unsubscribe": `<${url}>`,
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-    };
   }
 
-  const ccArg = deliveredCc.length > 0 ? deliveredCc : undefined;
-
-  const result = await sender.send({
-    from,
-    to: primaryTo,
-    ...(ccArg ? { cc: ccArg } : {}),
-    subject,
-    html: html ?? "",
-    ...(text !== undefined ? { text } : {}),
-    ...(finalHeaders ? { headers: finalHeaders } : {}),
-    ...(attachments ? { attachments } : {}),
-  });
-
   return {
-    delivered: [primaryTo, ...deliveredCc],
+    delivered: [primaryTo, ...deliveredCc.map((c) => c.email)],
     suppressed,
-    result,
+    result: lastResult,
+    ...(renderedHtml !== undefined ? { renderedHtml } : {}),
+    ...(renderedText !== undefined ? { renderedText } : {}),
   };
 }
