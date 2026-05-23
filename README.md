@@ -76,6 +76,19 @@ Create reusable HTML email templates with `{{variable}}` interpolation. Edit tem
 
 Build multi-step drip campaigns. Enroll a contact into a sequence and saasmail sends templated emails on a schedule. Supports step skipping, delay overrides, custom variables, and automatic cancellation when the contact replies. Enrollment is enforced against the member's allowed inboxes.
 
+### Suppressions and Unsubscribe
+
+saasmail tracks unsubscribed and manually-suppressed recipients in a `suppressions` table. Suppression checks run on every outbound dispatch path: `POST /api/send`, scheduled sequence steps, and admin template test-sends. Admins manage the list at `/admin/suppressions` (CRUD also exposed at `/api/suppressions`).
+
+- **List-Unsubscribe headers**: marketing sends automatically include `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) headers so Gmail/Yahoo bulk-sender rules and major mail clients render native unsubscribe affordances.
+- **Unsubscribe footer**: templates can use `{{unsubscribe_url}}` in HTML or plaintext bodies. If the rendered output doesn't include the URL, saasmail auto-appends a minimal unsubscribe footer.
+- **Unsubscribe page**: recipients land on `/unsubscribe?token=…`. The page POSTs to `/api/unsubscribe` on JavaScript mount (so URL-preview crawlers don't trigger it) and offers a "Re-subscribe" button. One-click unsubscribe (RFC 8058) also works via `POST /api/unsubscribe?token=…` directly — no session, no UI; the token signs the recipient's email.
+- **Transactional sends**: account-critical mail (password resets, OTPs, system notifications) should pass `transactional: true` in the `POST /api/send` body. This bypasses the suppression check, skips the unsubscribe headers, and skips the footer auto-append. Anyone you genuinely _need_ to email will still get the message.
+
+> **Behavior shift for API integrators**: `POST /api/send` now adds `List-Unsubscribe` headers and (if the body lacks the URL) appends an unsubscribe footer to every send UNLESS the caller passes `transactional: true`. If your integration sends password resets, OTPs, or other account-critical mail through `/api/send`, set the flag explicitly on those calls to preserve the previous behavior.
+
+The Worker signs unsubscribe tokens with `UNSUBSCRIBE_SECRET` (see [Configuration](#devvars)) and builds absolute URLs from the existing `BASE_URL` setting.
+
 ### User Management
 
 Admin-controlled onboarding via one-time invite links. New members sign up with email + password, and can register a passkey for passwordless login on subsequent sessions. Roles: `admin` (full access + user management) and `member` (scoped by inbox assignment).
@@ -214,11 +227,13 @@ Edit `.dev.vars`:
 - `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` — your Bavimail bearer token and alias UUID (only if using Bavimail; both must be set)
 - `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending or Bavimail)
 - `BETTER_AUTH_SECRET` — generate a random string (`openssl rand -hex 32`)
+- `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
 
 For production, set these as Cloudflare secrets:
 
 ```bash
 wrangler secret put BETTER_AUTH_SECRET
+wrangler secret put UNSUBSCRIBE_SECRET
 wrangler secret put RESEND_API_KEY      # only if using Resend
 wrangler secret put BAVIMAIL_API_KEY    # only if using Bavimail
 wrangler secret put BAVIMAIL_ALIAS_ID   # only if using Bavimail
@@ -344,6 +359,7 @@ Local development secrets. Created from `.dev.vars.example`. This file is gitign
 - `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
 - `RESEND_API_KEY` — Resend API key (if using Resend)
 - `BETTER_AUTH_SECRET` — Secret for session signing
+- `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the suppressions/unsubscribe feature.
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. **Never set this in production.**
 
 ## Roadmap
