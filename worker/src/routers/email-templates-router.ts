@@ -8,6 +8,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import { interpolate, extractVariables } from "../lib/interpolate";
+import { sendWithSuppressionCheck } from "../lib/send";
 import type { Variables } from "../variables";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
@@ -302,9 +303,11 @@ const sendTemplateRoute = createRoute({
   responses: {
     ...json201Response(
       z.object({
-        id: z.string(),
+        id: z.string().nullable(),
         resendId: z.string().nullable(),
         status: z.string(),
+        delivered: z.array(z.string()),
+        suppressed: z.array(z.string()),
       }),
       "Email sent",
     ),
@@ -365,12 +368,36 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   const renderedHtml = interpolate(template.bodyHtml, variables);
 
   const sender = createEmailSender(c.env);
-  const result = await sender.send({
+  const sendResult = await sendWithSuppressionCheck({
+    db,
+    env: c.env,
+    sender,
     from: fromAddress,
     to,
     subject: renderedSubject,
     html: renderedHtml,
   });
+
+  // Recipient is on the suppression list — no transport call, no sent_emails
+  // write. Tell the admin caller so the UI can surface "suppressed".
+  if (sendResult.delivered.length === 0) {
+    console.log(
+      "[template-send] recipient suppressed",
+      JSON.stringify({ from: fromAddress, suppressed: sendResult.suppressed }),
+    );
+    return c.json(
+      {
+        id: null,
+        resendId: null,
+        status: "suppressed",
+        delivered: [],
+        suppressed: sendResult.suppressed,
+      },
+      201,
+    );
+  }
+
+  const result = sendResult.result!;
 
   // Find person if they exist
   const existingPerson = await db
@@ -403,6 +430,8 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
       id,
       resendId: result.id,
       status: result.error ? "failed" : "sent",
+      delivered: sendResult.delivered,
+      suppressed: sendResult.suppressed,
     },
     201,
   );

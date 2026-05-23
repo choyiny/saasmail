@@ -5,7 +5,10 @@ import {
   createTestUser,
   createTestTemplate,
   authFetch,
+  getDb,
 } from "./helpers";
+import { suppressions } from "../db/suppressions.schema";
+import { sentEmails } from "../db/sent-emails.schema";
 
 describe("email templates router", () => {
   let apiKey: string;
@@ -136,6 +139,49 @@ describe("email templates router", () => {
         method: "DELETE",
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("POST /api/email-templates/:slug/send", () => {
+    it("returns status=suppressed and does not write sent_emails when recipient is suppressed", async () => {
+      const db = getDb();
+      await createTestTemplate({
+        slug: "welcome",
+        subject: "Hi",
+        bodyHtml: "<p>Hi {{name}}</p>",
+      });
+
+      const now = Math.floor(Date.now() / 1000);
+      await db.insert(suppressions).values({
+        id: "sup-1",
+        email: "blocked@test.com",
+        reason: "unsubscribe",
+        source: "test",
+        note: null,
+        createdAt: now,
+      });
+
+      const res = await authFetch("/api/email-templates/welcome/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "blocked@test.com",
+          fromAddress: "support@example.com",
+          variables: { name: "Blocked" },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.status).toBe("suppressed");
+      expect(data.id).toBeNull();
+      expect(data.resendId).toBeNull();
+      expect(data.delivered).toEqual([]);
+      expect(data.suppressed).toEqual(["blocked@test.com"]);
+
+      // No sent_emails row should have been written for the suppressed send
+      const sentRows = await db.select().from(sentEmails);
+      expect(sentRows).toHaveLength(0);
     });
   });
 });

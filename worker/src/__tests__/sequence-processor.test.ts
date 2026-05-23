@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import {
   applyMigrations,
@@ -12,8 +12,13 @@ import { sequences } from "../db/sequences.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { suppressions } from "../db/suppressions.schema";
 import { eq } from "drizzle-orm";
-import { handleScheduled } from "../lib/sequence-processor";
+import {
+  handleScheduled,
+  processSequenceEmail,
+} from "../lib/sequence-processor";
+import type { EmailSender, SendEmailParams } from "../lib/email-sender";
 
 describe("sequence processor - handleScheduled", () => {
   beforeAll(async () => {
@@ -123,5 +128,174 @@ describe("sequence processor - handleScheduled", () => {
   it("does nothing when no pending emails", async () => {
     // Should not throw
     await handleScheduled(env as unknown as CloudflareBindings);
+  });
+});
+
+describe("sequence processor - processSequenceEmail suppression", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createTestUser();
+  });
+
+  it(
+    "marks the row as suppressed without calling the transport when " +
+      "the recipient is on the suppression list",
+    async () => {
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+
+      await createTestPerson({ id: "p1", email: "suppressed@test.com" });
+      await createTestTemplate({ slug: "welcome" });
+
+      // Suppress the recipient
+      await db.insert(suppressions).values({
+        id: "sup-1",
+        email: "suppressed@test.com",
+        reason: "unsubscribe",
+        source: "test",
+        note: null,
+        createdAt: now,
+      });
+
+      await db.insert(sequences).values({
+        id: "seq-1",
+        name: "Test",
+        steps: JSON.stringify([
+          { order: 1, templateSlug: "welcome", delayHours: 0 },
+        ]),
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      await db.insert(sequenceEnrollments).values({
+        id: "enr-1",
+        sequenceId: "seq-1",
+        personId: "p1",
+        status: "active",
+        variables: "{}",
+        fromAddress: "test@test.com",
+        enrolledAt: now,
+      });
+
+      await db.insert(sequenceEmails).values({
+        id: "se-1",
+        enrollmentId: "enr-1",
+        stepOrder: 1,
+        templateSlug: "welcome",
+        scheduledAt: now - 100,
+        status: "queued",
+      });
+
+      const fakeSender: EmailSender = {
+        provider: "none",
+        maxAttachmentBytes: () => 25_000_000,
+        send: vi.fn(async (_params: SendEmailParams) => ({
+          id: "should-not-be-called",
+          error: null,
+        })),
+      };
+
+      await processSequenceEmail(
+        db,
+        fakeSender,
+        env as unknown as CloudflareBindings,
+        "se-1",
+      );
+
+      // Transport must NOT have been called
+      expect(fakeSender.send).not.toHaveBeenCalled();
+
+      // sequence_emails row should be in `suppressed` state with sentAt set
+      const row = await db
+        .select()
+        .from(sequenceEmails)
+        .where(eq(sequenceEmails.id, "se-1"))
+        .limit(1);
+      expect(row[0].status).toBe("suppressed");
+      expect(row[0].sentAt).not.toBeNull();
+
+      // No sent_emails row should have been written
+      const sentRows = await db.select().from(sentEmails);
+      expect(sentRows).toHaveLength(0);
+
+      // Enrollment should be completed (no remaining steps)
+      const enrollmentRow = await db
+        .select()
+        .from(sequenceEnrollments)
+        .where(eq(sequenceEnrollments.id, "enr-1"))
+        .limit(1);
+      expect(enrollmentRow[0].status).toBe("completed");
+    },
+  );
+
+  it("still sends to non-suppressed recipients via the helper", async () => {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+
+    await createTestPerson({ id: "p1", email: "ok@test.com" });
+    await createTestTemplate({ slug: "welcome" });
+
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Test",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-1",
+      sequenceId: "seq-1",
+      personId: "p1",
+      status: "active",
+      variables: "{}",
+      fromAddress: "test@test.com",
+      enrolledAt: now,
+    });
+
+    await db.insert(sequenceEmails).values({
+      id: "se-1",
+      enrollmentId: "enr-1",
+      stepOrder: 1,
+      templateSlug: "welcome",
+      scheduledAt: now - 100,
+      status: "queued",
+    });
+
+    const fakeSender: EmailSender = {
+      provider: "none",
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (_params: SendEmailParams) => ({
+        id: "fake-resend-id",
+        error: null,
+      })),
+    };
+
+    await processSequenceEmail(
+      db,
+      fakeSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    expect(fakeSender.send).toHaveBeenCalledTimes(1);
+
+    const row = await db
+      .select()
+      .from(sequenceEmails)
+      .where(eq(sequenceEmails.id, "se-1"))
+      .limit(1);
+    expect(row[0].status).toBe("sent");
+    expect(row[0].sentEmailId).not.toBeNull();
+
+    const sentRows = await db.select().from(sentEmails);
+    expect(sentRows).toHaveLength(1);
+    expect(sentRows[0].toAddress).toBe("ok@test.com");
   });
 });

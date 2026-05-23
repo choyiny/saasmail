@@ -12,6 +12,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { interpolate } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
+import { sendWithSuppressionCheck } from "./send";
 
 export interface SequenceEmailMessage {
   sequenceEmailId: string;
@@ -75,7 +76,7 @@ export async function handleQueueBatch(
 
   for (const msg of batch.messages) {
     try {
-      await processSequenceEmail(db, sender, msg.body.sequenceEmailId);
+      await processSequenceEmail(db, sender, env, msg.body.sequenceEmailId);
       msg.ack();
     } catch (err) {
       console.error(
@@ -87,9 +88,10 @@ export async function handleQueueBatch(
   }
 }
 
-async function processSequenceEmail(
+export async function processSequenceEmail(
   db: ReturnType<typeof drizzle>,
   sender: EmailSender,
+  env: CloudflareBindings,
   sequenceEmailId: string,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
@@ -176,7 +178,10 @@ async function processSequenceEmail(
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await sender.send({
+  const sendResult = await sendWithSuppressionCheck({
+    db,
+    env,
+    sender,
     from: formattedFrom,
     to: person.email,
     subject: renderedSubject,
@@ -184,36 +189,59 @@ async function processSequenceEmail(
     headers: { "Message-ID": messageId },
   });
 
-  // Store sent email record
-  const sentId = nanoid();
-  await db.insert(sentEmails).values({
-    id: sentId,
-    personId: person.id,
-    fromAddress,
-    toAddress: person.email,
-    subject: renderedSubject,
-    bodyHtml: renderedHtml,
-    bodyText: null,
-    messageId,
-    resendId: result.id,
-    status: result.error ? "failed" : "sent",
-    sentAt: now,
-    createdAt: now,
-  });
-
-  // Update outbox row
-  if (result.error) {
+  // Recipient is on the suppression list — skip transport, mark suppressed,
+  // do NOT retry. Suppression is a final state.
+  if (sendResult.delivered.length === 0) {
+    console.log(
+      "[sequence] recipient suppressed",
+      JSON.stringify({
+        sequenceEmailId,
+        from: fromAddress,
+        suppressed: sendResult.suppressed,
+      }),
+    );
     await db
       .update(sequenceEmails)
-      .set({ status: "failed" })
+      .set({ status: "suppressed", sentAt: now })
       .where(eq(sequenceEmails.id, sequenceEmailId));
-    return;
-  }
 
-  await db
-    .update(sequenceEmails)
-    .set({ status: "sent", sentAt: now, sentEmailId: sentId })
-    .where(eq(sequenceEmails.id, sequenceEmailId));
+    // Treat as terminal for enrollment completion: fall through to the same
+    // remaining-step check below so an enrollment whose only outstanding step
+    // was suppressed still gets completed.
+  } else {
+    const result = sendResult.result!;
+
+    // Store sent email record
+    const sentId = nanoid();
+    await db.insert(sentEmails).values({
+      id: sentId,
+      personId: person.id,
+      fromAddress,
+      toAddress: person.email,
+      subject: renderedSubject,
+      bodyHtml: renderedHtml,
+      bodyText: null,
+      messageId,
+      resendId: result.id,
+      status: result.error ? "failed" : "sent",
+      sentAt: now,
+      createdAt: now,
+    });
+
+    // Update outbox row
+    if (result.error) {
+      await db
+        .update(sequenceEmails)
+        .set({ status: "failed" })
+        .where(eq(sequenceEmails.id, sequenceEmailId));
+      return;
+    }
+
+    await db
+      .update(sequenceEmails)
+      .set({ status: "sent", sentAt: now, sentEmailId: sentId })
+      .where(eq(sequenceEmails.id, sequenceEmailId));
+  }
 
   // Check if this was the last step — if so, mark enrollment completed
   const remainingPending = await db
