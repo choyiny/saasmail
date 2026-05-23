@@ -414,6 +414,16 @@ export default function ChatInboxSection({
     [group.emails],
   );
 
+  // CC carried into the inline reply so chat-bubble sends default to
+  // "reply-all" — matches the full ReplyComposer's behavior. Strip our
+  // own inbox so we don't CC ourselves.
+  const replyCc = useMemo(() => {
+    const ownInbox = group.inbox.toLowerCase();
+    return (replyTarget?.cc ?? []).filter(
+      (c) => c.email.toLowerCase() !== ownInbox,
+    );
+  }, [replyTarget, group.inbox]);
+
   // Build the seed values for the full compose drawer. We pull the most
   // recent received email's recipient list so switching to compose
   // carries the original CC roster + subject through (minus our own
@@ -425,10 +435,7 @@ export default function ChatInboxSection({
           : null;
         const to =
           sender?.email ?? replyTarget?.fromAddress ?? _personEmail ?? "";
-        const ownInbox = group.inbox.toLowerCase();
-        const cc = (replyTarget?.cc ?? []).filter(
-          (c) => c.email.toLowerCase() !== ownInbox,
-        );
+        const cc = replyCc;
         const baseSubject = replyTarget?.subject ?? "";
         const subject =
           baseSubject && !/^re:\s/i.test(baseSubject)
@@ -570,6 +577,7 @@ export default function ChatInboxSection({
           inboxAddress={group.inbox}
           latestReceivedEmailId={replyTarget?.id ?? null}
           personEmail={_personEmail}
+          replyCc={replyCc}
           onSent={onSent}
           onOpenCompose={handleOpenInCompose}
         />
