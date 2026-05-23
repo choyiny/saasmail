@@ -38,15 +38,12 @@ function buildUnsubscribeUrl(baseUrl: string, token: string): string {
 function appendHtmlFooter(html: string, url: string): string {
   return (
     html +
-    `<hr/>\n<p style="font-size:12px;color:#666">You received this email because you're on our list. <a href="${url}">Unsubscribe</a></p>`
+    `<hr/>\n<p style="font-size:12px;color:#666"><a href="${url}">Unsubscribe</a></p>`
   );
 }
 
 function appendTextFooter(text: string, url: string): string {
-  return (
-    text +
-    `\n\n---\nYou received this email because you're on our list.\nUnsubscribe: ${url}`
-  );
+  return text + `\n\n---\nUnsubscribe: ${url}`;
 }
 
 export async function sendWithSuppressionCheck(
