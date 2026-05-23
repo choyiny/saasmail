@@ -219,6 +219,12 @@ app.route("/api/suppressions", suppressionsRouter);
 // Allowlisted in `isUnauthenticatedPath` above.
 app.route("/api/unsubscribe", unsubscribeRouter);
 
+// Also mount at `/unsubscribe` so the same URL we put in the `List-Unsubscribe`
+// email header (which doubles as the body link → SPA at GET /unsubscribe) handles
+// RFC 8058 one-click POSTs from mail clients like Fastmail / Gmail / Apple Mail.
+// GET requests don't match the router and fall through to the SPA assets handler.
+app.route("/unsubscribe", unsubscribeRouter);
+
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ status: "ok" }));
 

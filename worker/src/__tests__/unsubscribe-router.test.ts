@@ -109,4 +109,45 @@ describe("public unsubscribe endpoints", () => {
     );
     expect(r.status).toBe(200); // not 401 — the allowlist must let this through
   });
+
+  // RFC 8058 one-click clients (Gmail, Fastmail, Apple Mail) POST directly to
+  // the URL in the `List-Unsubscribe` header, which is the same URL we use for
+  // the SPA body link (`/unsubscribe?token=...`). Without a Worker handler at
+  // that path, those POSTs fell through to the SPA route and returned 405,
+  // which the clients render as "We were unable to unsubscribe you."
+  it("POST /unsubscribe (bare, no /api prefix) writes a suppression row", async () => {
+    const token = await signToken("alice@example.com", SECRET);
+    const r = await exports.default.fetch(
+      `http://localhost/unsubscribe?token=${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "List-Unsubscribe=One-Click",
+      },
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { email: string; status: string };
+    expect(body).toMatchObject({
+      email: "alice@example.com",
+      status: "suppressed",
+    });
+    const rows = await getDb().query.suppressions.findMany();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("POST /unsubscribe/undo (bare, no /api prefix) deletes the row", async () => {
+    const token = await signToken("alice@example.com", SECRET);
+    // Insert first
+    await exports.default.fetch(
+      `http://localhost/unsubscribe?token=${encodeURIComponent(token)}`,
+      { method: "POST" },
+    );
+    const r = await exports.default.fetch(
+      `http://localhost/unsubscribe/undo?token=${encodeURIComponent(token)}`,
+      { method: "POST" },
+    );
+    expect(r.status).toBe(200);
+    const rows = await getDb().query.suppressions.findMany();
+    expect(rows).toHaveLength(0);
+  });
 });
