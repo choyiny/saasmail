@@ -30,6 +30,7 @@ import SequenceEditorPage from "@/pages/SequenceEditorPage";
 import InboxesPage from "./pages/InboxesPage";
 import SettingsPage from "@/pages/SettingsPage";
 import MessageLinkPage from "@/pages/MessageLinkPage";
+import UnsubscribePage from "@/pages/UnsubscribePage";
 
 const queryClient = new QueryClient();
 
@@ -126,6 +127,12 @@ function App() {
             {/* Public legal pages — light readable layout, no auth */}
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
+
+            {/* Public unsubscribe landing — token-authenticated, no session.
+                Lives outside AuthGuard so recipients (who are never logged in)
+                can land here from email links. See worker/src/routers/
+                unsubscribe-router.ts for the API. */}
+            <Route path="/unsubscribe" element={<UnsubscribePage />} />
 
             {/* Authenticated routes with shared layout */}
             <Route element={<AuthGuard />}>
