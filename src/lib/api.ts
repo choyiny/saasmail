@@ -721,3 +721,40 @@ export interface AdminUser {
 export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
 }
+
+// --- Suppressions ---
+
+export interface Suppression {
+  id: string;
+  email: string;
+  reason: "unsubscribe" | "manual";
+  source: string | null;
+  note: string | null;
+  createdAt: number;
+}
+
+export interface SuppressionsPage {
+  items: Suppression[];
+  nextCursor: string | null;
+}
+
+export async function fetchSuppressions(
+  cursor?: string | null,
+): Promise<SuppressionsPage> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch(`/api/suppressions${qs}`);
+}
+
+export async function createSuppression(email: string): Promise<Suppression> {
+  return apiFetch("/api/suppressions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function deleteSuppression(
+  id: string,
+): Promise<{ deleted: true }> {
+  return apiFetch(`/api/suppressions/${id}`, { method: "DELETE" });
+}

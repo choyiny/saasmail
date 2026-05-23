@@ -19,6 +19,7 @@ import TemplateEditorPage from "@/pages/TemplateEditorPage";
 import SetupPasskeyPage from "@/pages/SetupPasskeyPage";
 import InviteAcceptPage from "@/pages/InviteAcceptPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
+import SuppressionsPage from "@/pages/SuppressionsPage";
 import ApiKeysPage from "@/pages/ApiKeysPage";
 import DashboardLayout from "@/components/DashboardLayout";
 import PublicLayout from "@/components/PublicLayout";
@@ -138,6 +139,10 @@ function App() {
             <Route element={<AuthGuard />}>
               <Route element={<DashboardLayout />}>
                 <Route path="/admin/users" element={<AdminUsersPage />} />
+                <Route
+                  path="/admin/suppressions"
+                  element={<SuppressionsPage />}
+                />
                 <Route path="/templates" element={<TemplatesPage />} />
                 <Route path="/templates/new" element={<TemplateEditorPage />} />
                 <Route
