@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Maximize2 } from "lucide-react";
-import { replyToEmail, sendEmail } from "@/lib/api";
+import { replyToEmail, sendEmail, type CcEntry } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
 import AttachmentPicker from "@/components/AttachmentPicker";
 import AttachmentChips from "@/components/AttachmentChips";
@@ -11,6 +11,13 @@ interface ChatQuickReplyProps {
   inboxAddress: string; // From address, fixed to this section's inbox
   latestReceivedEmailId: string | null; // What we reply to; if null, send as new email
   personEmail: string; // Recipient address when no reply target exists
+  /**
+   * CC list to carry over from the original message — chat bubbles
+   * default to "reply-all" semantics so group conversations stay
+   * group conversations. Should already be filtered to exclude this
+   * section's own inbox address. Ignored when there's no reply target.
+   */
+  replyCc?: CcEntry[];
   onSent: () => void; // Refetch + scroll
   /**
    * Optional handoff to the global compose drawer. When provided, the
@@ -45,6 +52,7 @@ export default function ChatQuickReply({
   inboxAddress,
   latestReceivedEmailId,
   personEmail,
+  replyCc,
   onSent,
   onOpenCompose,
 }: ChatQuickReplyProps) {
@@ -75,10 +83,15 @@ export default function ChatQuickReply({
     setError(null);
     try {
       if (latestReceivedEmailId) {
+        // Default to reply-all semantics for the chat bubble: carry the
+        // original CC roster (already filtered by the parent to exclude
+        // our own inbox) so group conversations don't silently collapse
+        // to a 1:1. Users who want plain "reply" open the full composer.
         await replyToEmail(latestReceivedEmailId, {
           bodyHtml: plainTextToHtml(text),
           bodyText: text,
           fromAddress: inboxAddress,
+          ...(replyCc && replyCc.length > 0 ? { cc: replyCc } : {}),
           ...(files.length > 0
             ? { files: files.map((file) => ({ file })) }
             : {}),
