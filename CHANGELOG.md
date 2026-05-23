@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-05-23
+
+### Added
+
+- TipTap editor images are now resizable via drag handles.
+
+### Fixed
+
+- Quick reply in chat-bubble view now defaults to reply-all, matching the behaviour of the full reply composer.
+- Image aspect ratio is preserved in chat-bubble HTML previews.
+
 ## [0.5.0] - 2026-05-19
 
 ### Added
@@ -290,7 +301,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/choyiny/saasmail/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/choyiny/saasmail/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/choyiny/saasmail/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/choyiny/saasmail/compare/v0.4.1...v0.4.2
