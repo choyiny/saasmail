@@ -27,6 +27,7 @@ import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { notificationsRouter } from "./routers/notifications-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
+import { unsubscribeRouter } from "./routers/unsubscribe-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
@@ -54,6 +55,7 @@ function isUnauthenticatedPath(path: string): boolean {
     path.startsWith("/api/auth") ||
     path.startsWith("/api/setup") ||
     path.startsWith("/api/invites") ||
+    path.startsWith("/api/unsubscribe") ||
     path === "/api/health" ||
     path === "/api/config"
   );
@@ -212,6 +214,10 @@ app.route("/api/admin/inboxes", adminInboxesRouter);
 app.use("/api/suppressions/*", requireAdmin);
 app.use("/api/suppressions", requireAdmin);
 app.route("/api/suppressions", suppressionsRouter);
+
+// Public unsubscribe endpoints — token-authenticated, no session/API key.
+// Allowlisted in `isUnauthenticatedPath` above.
+app.route("/api/unsubscribe", unsubscribeRouter);
 
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ status: "ok" }));
