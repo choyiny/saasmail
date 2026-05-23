@@ -1,7 +1,7 @@
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import Image from "@tiptap/extension-image";
+import { ResizableImage } from "./ResizableImage";
 import { useEffect, useRef, useState } from "react";
 
 interface TiptapEditorProps {
@@ -92,7 +92,7 @@ export default function TiptapEditor({
         placeholder: placeholderText || "Start writing",
         emptyEditorClass: "is-editor-empty",
       }),
-      Image.configure({
+      ResizableImage.configure({
         inline: false,
         allowBase64: true,
         HTMLAttributes: { class: "notion-image" },
