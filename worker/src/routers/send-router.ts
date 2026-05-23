@@ -17,6 +17,7 @@ import { generateMessageId } from "../lib/message-id";
 import { computeConversationId, externalsOnly } from "../lib/conversation-id";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { attachments } from "../db/attachments.schema";
+import { sendWithSuppressionCheck } from "../lib/send";
 
 /**
  * Fetch the set of "internal" domains (domains owned by our
@@ -114,14 +115,22 @@ const SendEmailSchema = z
         "Address that receives the response when the recipient hits Reply. If omitted, replies go to fromAddress. Useful for contact-form-style flows where messages are sent from a tenant-owned address like noreply@ but replies should go to the actual submitter.",
       example: "submitter@example.com",
     }),
+    // Transactional sends bypass the suppression list (password resets, OTPs,
+    // receipts). Marketing-style sends default to false and respect the list.
+    transactional: z.boolean().optional().default(false).openapi({
+      description:
+        "When true, bypasses the suppression list (for transactional mail like password resets, OTPs, and receipts). Defaults to false, which respects the suppression list.",
+    }),
   })
   .openapi("SendEmailSchema");
 
 const SentEmailResponseSchema = z.object({
-  id: z.string(),
+  id: z.string().nullable(),
   resendId: z.string().nullable(),
   status: z.string(),
   attachmentIds: z.array(z.string()),
+  delivered: z.array(z.string()).default([]),
+  suppressed: z.array(z.string()).default([]),
 });
 
 // Compose and send a new email
@@ -186,7 +195,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     email: c.email.trim().toLowerCase(),
     name: c.name ?? null,
   }));
-  const { subject, bodyHtml, bodyText } = raw;
+  const { subject, bodyHtml, bodyText, transactional } = raw;
   const replyTo = raw.replyTo?.trim().toLowerCase();
   const allowed = c.get("allowedInboxes")!;
   assertInboxAllowed(allowed, fromAddress);
@@ -195,10 +204,24 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
 
-  const result = await sender.send({
+  const ccHeaderList =
+    cc && cc.length > 0 ? cc.map(formatCc) : undefined;
+  const attachmentList =
+    files.length > 0
+      ? files.map((f) => ({
+          filename: f.filename,
+          contentType: f.contentType,
+          content: f.bytes,
+        }))
+      : undefined;
+
+  const sendResult = await sendWithSuppressionCheck({
+    db,
+    env: c.env,
+    sender,
     from: formattedFrom,
     to,
-    ...(cc && cc.length > 0 ? { cc: cc.map(formatCc) } : {}),
+    cc: ccHeaderList,
     subject,
     html: bodyHtml,
     text: bodyText,
@@ -206,16 +229,33 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
       "Message-ID": messageId,
       ...(replyTo ? { "Reply-To": replyTo } : {}),
     },
-    ...(files.length > 0
-      ? {
-          attachments: files.map((f) => ({
-            filename: f.filename,
-            contentType: f.contentType,
-            content: f.bytes,
-          })),
-        }
-      : {}),
+    attachments: attachmentList,
+    transactional,
   });
+
+  // Every recipient was suppressed — no send happened. Skip sent_emails write
+  // and sequence cancellation. Log the dropped recipients so they appear in
+  // worker logs for v1 (no audit-table write yet).
+  if (sendResult.delivered.length === 0) {
+    console.log(
+      "[send] all recipients suppressed",
+      JSON.stringify({ from: fromAddress, suppressed: sendResult.suppressed }),
+    );
+    return c.json(
+      {
+        id: null,
+        resendId: null,
+        status: "suppressed",
+        attachmentIds: [],
+        delivered: [],
+        suppressed: sendResult.suppressed,
+      },
+      201,
+    );
+  }
+
+  // The transport was called; reflect its result in sent_emails.
+  const result = sendResult.result!;
 
   // Find or create the person row for this recipient.
   const existingPerson = await db
@@ -287,6 +327,8 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
       resendId: result.id,
       status: result.error ? "failed" : "sent",
       attachmentIds,
+      delivered: sendResult.delivered,
+      suppressed: sendResult.suppressed,
     },
     201,
   );
