@@ -479,7 +479,37 @@ body {
   border-radius: 6px;
 }
 
-.notion-editor img.ProseMirror-selectednode {
+.notion-editor img.ProseMirror-selectednode,
+.notion-editor .notion-image-wrapper[data-selected="true"] .notion-image {
   outline: 2px solid var(--color-accent, #7c5cfc);
   outline-offset: 2px;
+}
+
+.notion-editor .notion-image-wrapper {
+  /* Margin moves up to the wrapper so the handle visually attaches to
+     the image rather than the surrounding block flow. */
+  margin: 0.75em 0;
+}
+.notion-editor .notion-image-wrapper .notion-image {
+  margin: 0;
+}
+
+.notion-editor .notion-image-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  background: var(--color-accent, #7c5cfc);
+  border: 2px solid var(--color-bg, #fff);
+  border-radius: 2px;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  touch-action: none;
+  z-index: 1;
+}
+.notion-editor .notion-image-wrapper:hover .notion-image-resize-handle,
+.notion-editor .notion-image-resize-handle[data-visible="true"] {
+  opacity: 1;
 }
