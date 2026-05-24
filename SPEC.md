@@ -286,8 +286,8 @@ This ensures every campaign send appears in the person's existing email timeline
 | GET | `/subscribe/confirm/:token` | Confirm double opt-in |
 
 **Subscribe flow (double opt-in enabled):**
-1. Public `POST /subscribe/:form_id` → validate email + name → upsert `people` row → insert `list_members` with `status: pending` → send confirmation email (uses `confirmationTemplateSlug`) with HMAC-signed confirm token → return 200 `{ status: "pending" }`
-2. Recipient clicks link → `GET /subscribe/confirm/:token` → verify HMAC → set `list_members.status = 'subscribed'` → redirect to `redirectUrl` or show success page
+1. Public `POST /subscribe/:form_id` → validate email + name → upsert `people` row → insert `list_members` with `status: pending` → send confirmation email (uses `confirmationTemplateSlug`) with HMAC-signed confirm token (payload includes `exp: now + 48h`) → return 200 `{ status: "pending" }`
+2. Recipient clicks link → `GET /subscribe/confirm/:token` → verify HMAC and check `exp` (return 410 Gone if expired so the subscriber knows to re-subscribe) → set `list_members.status = 'subscribed'` → redirect to `redirectUrl` or show success page
 
 **Subscribe flow (single opt-in):**
 1. `POST /subscribe/:form_id` → upsert `people` → insert `list_members` with `status: subscribed` → return 200 `{ status: "subscribed" }`
@@ -328,7 +328,7 @@ PR #95 uses `{v:1, email}`. Campaign sends use `{v:2, email, list_id, campaign_i
 
 **Unsubscribe handler (extended in `unsubscribe-router.ts`):**
 - v1 token (no `list_id`) → writes to global `suppressions` table (existing PR #95 behavior, unchanged)
-- v2 token (has `list_id`) → sets `list_members.status = 'unsubscribed'` for that list; does **not** write to global `suppressions`; increments `campaigns.statsUnsubscribes` for the `campaign_id` in the token
+- v2 token (has `list_id`) → **idempotency check:** if `list_members.status` is already `'unsubscribed'`, return 200 without touching any counter; otherwise sets `list_members.status = 'unsubscribed'`; does **not** write to global `suppressions`; increments `campaigns.statsUnsubscribes` for the `campaign_id` in the token
 
 **`List-Unsubscribe` header on campaign sends:**
 The header URL uses a v2 token. The `/unsubscribe` page (from PR #95) handles both versions transparently.
@@ -339,6 +339,7 @@ The header URL uses a v2 token. The `/unsubscribe` page (from PR #95) handles bo
 - [ ] The unsubscribed member is excluded from all future sends to that list
 - [ ] Re-subscribe button on the unsubscribe page sets status back to `subscribed`
 - [ ] v1 tokens (from PR #95 transactional sends) still work without change
+- [ ] Clicking the unsubscribe link twice does not double-increment `campaigns.statsUnsubscribes`
 
 ---
 
@@ -363,9 +364,11 @@ The header URL uses a v2 token. The `/unsubscribe` page (from PR #95) handles bo
 1. `POST /api/campaigns/:id/send` or cron trigger for scheduled campaigns:
    - Set `campaigns.status = 'sending'`
    - Query all `list_members` where `status = 'subscribed'` and `list_id = campaign.list_id`
+   - Insert all `campaign_recipients` rows (`status: 'queued'`) in a single **`db.batch([...])`** call — do not insert row-by-row; batch size ≤ 100 statements per D1 batch call to stay within limits
    - Enqueue one Cloudflare Queue message per member: `{ campaign_id, person_id, email }`
    - Set `campaigns.stats_total = member_count`
 2. Queue consumer per message:
+   - **Idempotency check:** if `campaign_recipients` already has `status = 'sent'` for this `(campaignId, personId)` pair, skip processing and acknowledge the message — prevents duplicate sends on Cloudflare Queue retry
    - Call `sendWithSuppressionCheck` (from PR #95) with `transactional: false`
    - Inject tracking pixel and rewrite links (see below)
    - On success: create a `sent_emails` row with `personId`, `fromAddress`, `subject`, `messageId`, and `campaignId`; set `campaign_recipients.status = 'sent'` and `sentEmailId`; increment `stats_delivered`
@@ -384,10 +387,10 @@ The header URL uses a v2 token. The `/unsubscribe` page (from PR #95) handles bo
 - Before enqueue, the HTML template is rendered with variables
 - A `<img src="{{BASE_URL}}/track/open/TOKEN" width="1" height="1" style="display:none" />` is appended to the HTML body
 - `TOKEN` = HMAC-signed `{v:1, campaign_id, person_id}` (same key as `UNSUBSCRIBE_SECRET`)
-- `GET /track/open/:token` (public, no auth): verify token → upsert `campaign_events` (dedup by `unique(campaign_id, person_id, 'open', null)`) → increment `campaigns.stats_opens` if new → return 1×1 transparent GIF
+- `GET /track/open/:token` (public, no auth): verify token → return a base64-encoded 1×1 transparent GIF **immediately** with `Cache-Control: no-store, must-revalidate` and `Pragma: no-cache` headers → upsert `campaign_events` and increment `campaigns.stats_opens` if new via **`ctx.waitUntil()`** so the analytics write never delays the pixel response
 
 **Click tracking:**
-- All `<a href>` links in the HTML body are rewritten to `{{BASE_URL}}/track/click/TOKEN`
+- All `<a href>` links in the HTML body are rewritten to `{{BASE_URL}}/track/click/TOKEN` using Cloudflare's native **`HTMLRewriter`** API (streaming, Rust-backed parser) to keep per-subscriber CPU time low; do not use string-replace or a DOM parser
 - `TOKEN` = HMAC-signed `{v:1, campaign_id, person_id, url: original_url}`
 - `GET /track/click/:token` (public): verify → upsert event (dedup by `unique(campaign_id, person_id, 'click', url)`) → increment `campaigns.stats_clicks` if new → 302 redirect to original URL
 - Links with `{{unsubscribe_url}}` are **not** rewritten (preserve unsubscribe flow)
@@ -396,7 +399,7 @@ The header URL uses a v2 token. The `/unsubscribe` page (from PR #95) handles bo
 Open and click counts are **best-effort engagement signals, not ground truth:**
 - Apple Mail Privacy Protection (MPP) pre-fetches tracking pixels — open counts will overcount significantly for consumer-facing lists.
 - Some email clients and corporate proxies pre-fetch links, inflating click counts.
-- The pixel response must include `Cache-Control: no-store, no-cache` and `Pragma: no-cache` headers to minimise proxy caching.
+- The pixel endpoint returns `Cache-Control: no-store, must-revalidate` and `Pragma: no-cache` (specified above); this minimises proxy caching but cannot prevent MPP.
 - The admin UI labels these as **"~opens"** and **"~clicks"** (approximate) to set operator expectations.
 
 **Campaign stats view (`CampaignDetailPage`):**
@@ -543,7 +546,7 @@ export const lists = sqliteTable("lists", {
 **Framework:** Vitest for unit + integration; Playwright for e2e.
 
 **Unit tests** (`worker/src/__tests__/`):
-- HMAC token helpers: round-trip, tampered sig, wrong secret, malformed input
+- HMAC token helpers: round-trip, tampered sig, wrong secret, malformed input, expired token (48 h TTL on confirm tokens)
 - `campaign-sender.ts`: correct member enumeration, suppressed-member exclusion, `campaign_recipients` rows pre-populated as `queued`
 - `track-token.ts`: round-trip, dedup logic
 
@@ -587,6 +590,7 @@ export const lists = sqliteTable("lists", {
 - Adding open tracking or click tracking to non-campaign sends (transactional)
 - Changing the HMAC token format for existing v1 tokens (must remain backward compatible)
 - Adding per-inbox RBAC to campaigns (deferred to v2)
+- Bounce/complaint webhook integration to auto-update `list_members.status` (deferred to v2; target behaviour: hard bounce → `unsubscribed` + global suppression, complaint → global suppression)
 - Preference center UI on the unsubscribe page (deferred to v2)
 - `mailto:` form in `List-Unsubscribe` header (deferred to v2 per PR #95)
 
