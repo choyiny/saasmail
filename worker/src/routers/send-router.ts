@@ -52,11 +52,16 @@ export const sendRouter = new OpenAPIHono<{
 }>();
 
 const CcEntrySchema = z.object({
-  email: z.string().email(),
+  email: z.string().email().openapi({ example: "cc@example.com" }),
   // Constrain the rendered "Name <addr>" header — long display names
   // can blow up the wire format and email headers in general.
-  name: z.string().max(200).nullable().optional(),
-});
+  name: z
+    .string()
+    .max(200)
+    .nullable()
+    .optional()
+    .openapi({ description: "Display name rendered as 'Name <email>' in headers.", example: "Jane Smith" }),
+}).openapi("CcEntry");
 type CcEntry = z.infer<typeof CcEntrySchema>;
 
 // Practical cap on CC participants per message. Real-world replies-
@@ -70,14 +75,38 @@ function formatCc(c: CcEntry): string {
   return c.name ? `${c.name} <${c.email}>` : c.email;
 }
 
-const SendEmailSchema = z.object({
-  to: z.string().email(),
-  fromAddress: z.string().email(),
-  cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
-  subject: z.string().transform((s) => s.replace(/[\r\n]+/g, " ")),
-  bodyHtml: z.string(),
-  bodyText: z.string().optional(),
-});
+const SendEmailSchema = z
+  .object({
+    to: z
+      .string()
+      .email()
+      .openapi({ description: "Recipient email address.", example: "recipient@example.com" }),
+    fromAddress: z
+      .string()
+      .email()
+      .openapi({
+        description:
+          "Sender address. Must be a sender identity configured in this SaaSMail instance.",
+        example: "noreply@yourdomain.com",
+      }),
+    cc: z
+      .array(CcEntrySchema)
+      .max(MAX_CC_ENTRIES)
+      .optional()
+      .openapi({ description: `CC recipients. Maximum ${MAX_CC_ENTRIES} entries.` }),
+    subject: z
+      .string()
+      .openapi({ description: "Email subject line. Newlines are collapsed to spaces.", example: "Welcome to our service" })
+      .transform((s) => s.replace(/[\r\n]+/g, " ")),
+    bodyHtml: z
+      .string()
+      .openapi({ description: "HTML body of the email.", example: "<p>Hello, world!</p>" }),
+    bodyText: z
+      .string()
+      .optional()
+      .openapi({ description: "Plain-text fallback body. Recommended for accessibility and deliverability.", example: "Hello, world!" }),
+  })
+  .openapi("SendEmailSchema");
 
 const SentEmailResponseSchema = z.object({
   id: z.string(),
@@ -92,14 +121,33 @@ const sendEmailRoute = createRoute({
   path: "/",
   tags: ["Send"],
   description:
-    "Compose and send a new email. multipart/form-data body with a JSON 'payload' field and zero or more 'files' fields.",
+    "Compose and send a new email. The request body is multipart/form-data with a JSON `payload` field containing a SendEmailSchema object, and zero or more `files` fields for attachments.",
   request: {
     body: {
       content: {
         "multipart/form-data": {
           schema: z.object({
-            payload: z.string().describe("JSON-encoded SendEmailSchema"),
-            files: z.union([z.array(z.any()), z.any()]).optional(),
+            payload: z
+              .string()
+              .openapi({
+                description:
+                  "JSON-encoded SendEmailSchema. Required fields: `to`, `fromAddress`, `subject`, `bodyHtml`. See the SendEmailSchema component for the full field reference.",
+                example: JSON.stringify(
+                  {
+                    to: "recipient@example.com",
+                    fromAddress: "noreply@yourdomain.com",
+                    subject: "Welcome to our service",
+                    bodyHtml: "<p>Hello!</p>",
+                    bodyText: "Hello!",
+                  },
+                  null,
+                  2,
+                ),
+              }),
+            files: z
+              .union([z.array(z.any()), z.any()])
+              .optional()
+              .openapi({ description: "Zero or more file attachments." }),
           }),
         },
       },
