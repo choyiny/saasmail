@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-05-25
+
+### Dependencies
+
+- Bumped `@vitest/runner`, `@vitest/snapshot`, and `vitest` from 4.1.6 to 4.1.7.
+- Bumped `@cloudflare/vite-plugin` from 1.37.1 to 1.38.0, `@cloudflare/vitest-pool-workers` from 0.16.6 to 0.16.9, `@cloudflare/workers-types` from 4.20260518.1 to 4.20260525.1, and `wrangler` from 4.92.0 to 4.94.0.
+- Bumped `tsx` from 4.21.0 to 4.22.3.
+- Bumped the tiptap group (`@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.23.4 to 3.23.6.
+
 ## [0.5.1] - 2026-05-23
 
 ### Added
@@ -301,7 +310,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/choyiny/saasmail/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/choyiny/saasmail/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/choyiny/saasmail/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/choyiny/saasmail/compare/v0.4.2...v0.4.3
