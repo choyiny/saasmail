@@ -201,7 +201,7 @@ async function extractBavimailError(res: Response): Promise<string> {
   return `Bavimail request failed: ${res.status} ${res.statusText}`.trim();
 }
 
-class BavimailSender implements EmailSender {
+export class BavimailSender implements EmailSender {
   readonly provider = "bavimail" as const;
   constructor(
     private apiKey: string,

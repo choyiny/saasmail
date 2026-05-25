@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { createEmailSender } from "../lib/email-sender";
+import { createEmailSender, BavimailSender } from "../lib/email-sender";
 
 describe("createEmailSender", () => {
   it("picks Resend when RESEND_API_KEY is set", () => {
@@ -156,16 +156,7 @@ describe("maxAttachmentBytes", () => {
 
 describe("BavimailSender", () => {
   function makeBavimailSender(fetchFn: typeof fetch) {
-    // Reach into the module to construct directly with a custom fetch.
-    // createEmailSender uses globalThis.fetch which is harder to stub
-    // inside the Cloudflare Workers test pool.
-    const sender = createEmailSender({
-      BAVIMAIL_API_KEY: "bm_test",
-      BAVIMAIL_ALIAS_ID: "alias-uuid",
-    } as any);
-    // Inject the mock fetch on the instance for tests.
-    (sender as unknown as { fetchFn: typeof fetch }).fetchFn = fetchFn;
-    return sender;
+    return new BavimailSender("bm_test", "alias-uuid", fetchFn);
   }
 
   it("sends a basic email with bearer token and correct body", async () => {
