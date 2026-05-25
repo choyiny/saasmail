@@ -231,4 +231,94 @@ describe("BavimailSender", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.in_reply_to).toBe("<orig@msg>");
   });
+
+  it("uploads attachments first, then sends email with attachment IDs", async () => {
+    const uploadResponse = new Response(
+      JSON.stringify({
+        attachments: [
+          { id: "att-1", filename: "a.txt" },
+          { id: "att-2", filename: "b.txt" },
+        ],
+        uploaded_at: "2026-05-25T00:00:00Z",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+    const sendResponse = new Response(JSON.stringify({ id: "bm-msg-xyz" }), {
+      status: 201,
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(uploadResponse)
+      .mockResolvedValueOnce(sendResponse);
+
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "with attachments",
+      html: "<p>h</p>",
+      attachments: [
+        {
+          filename: "a.txt",
+          contentType: "text/plain",
+          content: new TextEncoder().encode("alpha"),
+        },
+        {
+          filename: "b.txt",
+          contentType: "text/plain",
+          content: new TextEncoder().encode("bravo"),
+        },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.id).toBe("bm-msg-xyz");
+
+    // First call: upload
+    const [uploadUrl, uploadInit] = fetchMock.mock.calls[0];
+    expect(uploadUrl).toBe("https://api.bavimail.com/attachments");
+    expect((uploadInit as RequestInit).method).toBe("POST");
+    // Crucial: do NOT manually set Content-Type for FormData — fetch sets the
+    // boundary automatically. Manually setting it omits the boundary and
+    // breaks the upload.
+    const uploadHeaders = (uploadInit as RequestInit).headers as Record<
+      string,
+      string
+    >;
+    expect(uploadHeaders["Content-Type"]).toBeUndefined();
+    expect(uploadHeaders["Authorization"]).toBe("Bearer bm_test");
+    expect((uploadInit as RequestInit).body).toBeInstanceOf(FormData);
+    const fd = (uploadInit as RequestInit).body as FormData;
+    const files = fd.getAll("files");
+    expect(files).toHaveLength(2);
+
+    // Second call: send
+    const [sendUrl, sendInit] = fetchMock.mock.calls[1];
+    expect(sendUrl).toBe("https://api.bavimail.com/emails");
+    const sendBody = JSON.parse((sendInit as RequestInit).body as string);
+    expect(sendBody.attachments).toEqual([
+      { attachment_id: "att-1", is_inline: false },
+      { attachment_id: "att-2", is_inline: false },
+    ]);
+  });
+
+  it("makes only one fetch call when there are no attachments", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "x" }), { status: 201 }),
+      );
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://api.bavimail.com/emails");
+  });
 });

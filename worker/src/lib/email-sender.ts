@@ -211,6 +211,15 @@ export class BavimailSender implements EmailSender {
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
     try {
+      let attachmentIds: string[] = [];
+      if (params.attachments && params.attachments.length > 0) {
+        const uploadResult = await this.uploadAttachments(params.attachments);
+        if (uploadResult.error) {
+          return { id: null, error: uploadResult.error };
+        }
+        attachmentIds = uploadResult.ids;
+      }
+
       const toAddress = parseFrom(params.to).address;
       const ccAddresses = (params.cc ?? []).map((c) => parseFrom(c).address);
 
@@ -227,6 +236,12 @@ export class BavimailSender implements EmailSender {
       if (inReplyTo) {
         payload.in_reply_to = inReplyTo;
       }
+      if (attachmentIds.length > 0) {
+        payload.attachments = attachmentIds.map((id) => ({
+          attachment_id: id,
+          is_inline: false,
+        }));
+      }
 
       const res = await this.fetchFn("https://api.bavimail.com/emails", {
         method: "POST",
@@ -242,14 +257,61 @@ export class BavimailSender implements EmailSender {
         return { id: null, error: { message } };
       }
 
-      const data = (await res.json().catch(() => ({}))) as {
-        id?: string;
-      };
+      const data = (await res.json().catch(() => ({}))) as { id?: string };
       return { id: data.id ?? null, error: null };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       return { id: null, error: { message } };
     }
+  }
+
+  private async uploadAttachments(
+    attachments: SendEmailAttachment[],
+  ): Promise<
+    | { ids: string[]; error: null }
+    | { ids: never[]; error: { message: string } }
+  > {
+    const form = new FormData();
+    for (const a of attachments) {
+      const u8 =
+        a.content instanceof Uint8Array ? a.content : new Uint8Array(a.content);
+      // Blob copy to detach from any shared buffer.
+      const blob = new Blob([u8], { type: a.contentType });
+      form.append("files", blob, a.filename);
+    }
+
+    // IMPORTANT: do NOT set Content-Type — fetch sets it with the multipart
+    // boundary automatically when the body is FormData.
+    const res = await this.fetchFn("https://api.bavimail.com/attachments", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`,
+      },
+      body: form,
+    });
+
+    if (!res.ok) {
+      const message = await extractBavimailError(res);
+      return { ids: [], error: { message } };
+    }
+
+    const data = (await res.json().catch(() => ({}))) as {
+      attachments?: Array<{ id?: string }>;
+    };
+    const ids = (data.attachments ?? [])
+      .map((a) => a.id)
+      .filter((id): id is string => typeof id === "string");
+
+    if (ids.length !== attachments.length) {
+      return {
+        ids: [],
+        error: {
+          message: `Bavimail upload returned ${ids.length} ids for ${attachments.length} attachments`,
+        },
+      };
+    }
+
+    return { ids, error: null };
   }
 
   maxAttachmentBytes(): number {
