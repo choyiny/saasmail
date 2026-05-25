@@ -153,3 +153,91 @@ describe("maxAttachmentBytes", () => {
     expect(sender.maxAttachmentBytes()).toBe(25 * 1024 * 1024);
   });
 });
+
+describe("BavimailSender", () => {
+  function makeBavimailSender(fetchFn: typeof fetch) {
+    // Reach into the module to construct directly with a custom fetch.
+    // createEmailSender uses globalThis.fetch which is harder to stub
+    // inside the Cloudflare Workers test pool.
+    const sender = createEmailSender({
+      BAVIMAIL_API_KEY: "bm_test",
+      BAVIMAIL_ALIAS_ID: "alias-uuid",
+    } as any);
+    // Inject the mock fetch on the instance for tests.
+    (sender as unknown as { fetchFn: typeof fetch }).fetchFn = fetchFn;
+    return sender;
+  }
+
+  it("sends a basic email with bearer token and correct body", async () => {
+    const sendResponse = new Response(JSON.stringify({ id: "bm-msg-123" }), {
+      status: 201,
+      headers: { "Content-Type": "application/json" },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(sendResponse);
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: '"Alice" <a@b.com>',
+      to: '"Bob" <c@d.com>',
+      subject: "hello",
+      html: "<p>hi</p>",
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.id).toBe("bm-msg-123");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.bavimail.com/emails");
+    expect((init as RequestInit).method).toBe("POST");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe("Bearer bm_test");
+    expect(headers["Content-Type"]).toBe("application/json");
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({
+      alias_id: "alias-uuid",
+      to_email: "c@d.com",
+      subject: "hello",
+      body: "<p>hi</p>",
+    });
+  });
+
+  it("includes cc_emails when cc is present, omits when empty", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "x" }), { status: 201 }),
+      );
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      cc: ['"Eve" <e@f.com>', "g@h.com"],
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.cc_emails).toEqual(["e@f.com", "g@h.com"]);
+  });
+
+  it("includes in_reply_to when headers contain In-Reply-To", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "x" }), { status: 201 }),
+      );
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      headers: { "In-Reply-To": "<orig@msg>" },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.in_reply_to).toBe("<orig@msg>");
+  });
+});

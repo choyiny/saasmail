@@ -184,6 +184,23 @@ class DemoSender implements EmailSender {
   }
 }
 
+async function extractBavimailError(res: Response): Promise<string> {
+  try {
+    const data = (await res.json()) as {
+      message?: string;
+      error?: string | { message?: string };
+    };
+    if (typeof data.error === "string") return data.error;
+    if (data.error && typeof data.error === "object" && data.error.message) {
+      return data.error.message;
+    }
+    if (data.message) return data.message;
+  } catch {
+    // fall through
+  }
+  return `Bavimail request failed: ${res.status} ${res.statusText}`.trim();
+}
+
 class BavimailSender implements EmailSender {
   readonly provider = "bavimail" as const;
   constructor(
@@ -192,12 +209,47 @@ class BavimailSender implements EmailSender {
     private fetchFn: typeof fetch = fetch,
   ) {}
 
-  async send(_params: SendEmailParams): Promise<SendEmailResult> {
-    // Implemented in Task 2.
-    return {
-      id: null,
-      error: { message: "Bavimail send not yet implemented" },
-    };
+  async send(params: SendEmailParams): Promise<SendEmailResult> {
+    try {
+      const toAddress = parseFrom(params.to).address;
+      const ccAddresses = (params.cc ?? []).map((c) => parseFrom(c).address);
+
+      const payload: Record<string, unknown> = {
+        alias_id: this.aliasId,
+        to_email: toAddress,
+        subject: params.subject,
+        body: params.html,
+      };
+      if (ccAddresses.length > 0) {
+        payload.cc_emails = ccAddresses;
+      }
+      const inReplyTo = params.headers?.["In-Reply-To"];
+      if (inReplyTo) {
+        payload.in_reply_to = inReplyTo;
+      }
+
+      const res = await this.fetchFn("https://api.bavimail.com/emails", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const message = await extractBavimailError(res);
+        return { id: null, error: { message } };
+      }
+
+      const data = (await res.json().catch(() => ({}))) as {
+        id?: string;
+      };
+      return { id: data.id ?? null, error: null };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      return { id: null, error: { message } };
+    }
   }
 
   maxAttachmentBytes(): number {
