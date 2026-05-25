@@ -321,4 +321,83 @@ describe("BavimailSender", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.bavimail.com/emails");
   });
+
+  it("returns error and skips /emails when /attachments returns non-2xx", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "file too large" }), {
+        status: 413,
+      }),
+    );
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      attachments: [
+        {
+          filename: "a.txt",
+          contentType: "text/plain",
+          content: new TextEncoder().encode("alpha"),
+        },
+      ],
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toBe("file too large");
+    // Only the upload call was made.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns error when /emails returns non-2xx", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "invalid alias" }), {
+        status: 400,
+      }),
+    );
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toBe("invalid alias");
+  });
+
+  it("falls back to status text when the error body cannot be parsed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("not json", { status: 500 }));
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toMatch(/500/);
+  });
+
+  it("normalizes thrown fetch errors", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toBe("network down");
+  });
 });
