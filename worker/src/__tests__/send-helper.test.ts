@@ -165,7 +165,9 @@ describe("sendWithSuppressionCheck", () => {
     expect(fakeSender.send).toHaveBeenCalledTimes(1);
     expect(sent[0].to).toBe("alice@example.com");
     const allRecipients = sent.flatMap((s) => [s.to, ...(s.cc ?? [])]);
-    expect(allRecipients.some((r) => r.includes("bob@example.com"))).toBe(false);
+    expect(allRecipients.some((r) => r.includes("bob@example.com"))).toBe(
+      false,
+    );
   });
 
   it("multi-recipient marketing send: each recipient gets a per-recipient token", async () => {
@@ -195,9 +197,7 @@ describe("sendWithSuppressionCheck", () => {
 
     // Each call's List-Unsubscribe header token decodes back to that call's `to`.
     for (const call of sent) {
-      const headerToken = extractUnsubToken(
-        call.headers?.["List-Unsubscribe"],
-      );
+      const headerToken = extractUnsubToken(call.headers?.["List-Unsubscribe"]);
       const decoded = await verifyToken(
         headerToken,
         fakeEnv.UNSUBSCRIBE_SECRET,
@@ -213,7 +213,10 @@ describe("sendWithSuppressionCheck", () => {
       sender: fakeSender,
       from: "test@host",
       to: "alice@example.com",
-      cc: [{ email: "bob@example.com" }, { email: "carol@example.com", name: "Carol" }],
+      cc: [
+        { email: "bob@example.com" },
+        { email: "carol@example.com", name: "Carol" },
+      ],
       subject: "Reset",
       html: "<p>token</p>",
       transactional: true,
@@ -221,7 +224,10 @@ describe("sendWithSuppressionCheck", () => {
     expect(fakeSender.send).toHaveBeenCalledTimes(1);
     expect(sent[0].to).toBe("alice@example.com");
     // cc preserved as formatted strings; display name on carol becomes "Carol <…>".
-    expect(sent[0].cc).toEqual(["bob@example.com", "Carol <carol@example.com>"]);
+    expect(sent[0].cc).toEqual([
+      "bob@example.com",
+      "Carol <carol@example.com>",
+    ]);
     expect(sent[0].headers?.["List-Unsubscribe"]).toBeUndefined();
   });
 

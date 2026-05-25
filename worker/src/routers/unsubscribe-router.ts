@@ -71,10 +71,7 @@ unsubscribeRouter.openapi(unsubscribeRoute, async (c) => {
 
   if (existing.length > 0) {
     // Idempotent — do not overwrite the original source/note.
-    return c.json(
-      { email, status: "suppressed" as const },
-      200,
-    );
+    return c.json({ email, status: "suppressed" as const }, 200);
   }
 
   await db

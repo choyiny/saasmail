@@ -36,11 +36,16 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-export async function signToken(email: string, secret: string): Promise<string> {
+export async function signToken(
+  email: string,
+  secret: string,
+): Promise<string> {
   const payload = JSON.stringify({ e: email.toLowerCase(), v: 1 });
   const payloadBytes = encoder.encode(payload);
   const key = await hmacKey(secret);
-  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, payloadBytes));
+  const sig = new Uint8Array(
+    await crypto.subtle.sign("HMAC", key, payloadBytes),
+  );
   return `${b64urlEncode(payloadBytes)}.${b64urlEncode(sig)}`;
 }
 

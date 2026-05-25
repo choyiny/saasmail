@@ -68,14 +68,16 @@ describe("public unsubscribe endpoints", () => {
   });
 
   it("POST /api/unsubscribe/undo deletes the row", async () => {
-    await getDb().insert(suppressions).values({
-      id: "s1",
-      email: "alice@example.com",
-      reason: "unsubscribe",
-      source: "user-link",
-      note: null,
-      createdAt: Math.floor(Date.now() / 1000),
-    });
+    await getDb()
+      .insert(suppressions)
+      .values({
+        id: "s1",
+        email: "alice@example.com",
+        reason: "unsubscribe",
+        source: "user-link",
+        note: null,
+        createdAt: Math.floor(Date.now() / 1000),
+      });
     const token = await signToken("alice@example.com", SECRET);
     const r = await exports.default.fetch(
       `http://localhost/api/unsubscribe/undo?token=${encodeURIComponent(token)}`,

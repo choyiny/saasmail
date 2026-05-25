@@ -216,4 +216,3 @@ suppressionsRouter.openapi(deleteRouteDef, async (c) => {
   await db.delete(suppressions).where(eq(suppressions.id, id));
   return c.json({ deleted: true as const }, 200);
 });
-

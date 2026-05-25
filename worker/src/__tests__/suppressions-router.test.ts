@@ -25,7 +25,10 @@ describe("suppressions router", () => {
       reason: string;
       source: string;
     };
-    expect(body).toMatchObject({ email: "alice@example.com", reason: "manual" });
+    expect(body).toMatchObject({
+      email: "alice@example.com",
+      reason: "manual",
+    });
     expect(body.source).toMatch(/^admin:/);
   });
 
@@ -43,9 +46,9 @@ describe("suppressions router", () => {
     });
     expect([200, 201]).toContain(r.status);
     const rows = await getDb().query.suppressions.findMany();
-    expect(rows.filter((row) => row.email === "alice@example.com")).toHaveLength(
-      1,
-    );
+    expect(
+      rows.filter((row) => row.email === "alice@example.com"),
+    ).toHaveLength(1);
   });
 
   it("POST /api/suppressions lowercases the input email", async () => {
@@ -88,14 +91,16 @@ describe("suppressions router", () => {
 
   it("DELETE /api/suppressions/:id removes the row", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
-    await getDb().insert(suppressions).values({
-      id: "s1",
-      email: "alice@example.com",
-      reason: "manual",
-      source: "test",
-      note: null,
-      createdAt: Math.floor(Date.now() / 1000),
-    });
+    await getDb()
+      .insert(suppressions)
+      .values({
+        id: "s1",
+        email: "alice@example.com",
+        reason: "manual",
+        source: "test",
+        note: null,
+        createdAt: Math.floor(Date.now() / 1000),
+      });
     const r = await authFetch("/api/suppressions/s1", {
       apiKey,
       method: "DELETE",

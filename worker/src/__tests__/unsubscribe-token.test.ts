@@ -6,12 +6,16 @@ const SECRET = "test-secret-do-not-use-in-prod";
 describe("unsubscribe-token", () => {
   it("round-trips: signed token verifies back to the input email", async () => {
     const t = await signToken("alice@example.com", SECRET);
-    expect(await verifyToken(t, SECRET)).toEqual({ email: "alice@example.com" });
+    expect(await verifyToken(t, SECRET)).toEqual({
+      email: "alice@example.com",
+    });
   });
 
   it("lowercases the email in the payload", async () => {
     const t = await signToken("Alice@Example.COM", SECRET);
-    expect(await verifyToken(t, SECRET)).toEqual({ email: "alice@example.com" });
+    expect(await verifyToken(t, SECRET)).toEqual({
+      email: "alice@example.com",
+    });
   });
 
   it("rejects a tampered signature", async () => {
