@@ -1,3 +1,8 @@
+# Outbound provider — Bavimail takes precedence over Resend and Cloudflare
+# Email Sending when BOTH BAVIMAIL_API_KEY and BAVIMAIL_ALIAS_ID are set.
+BAVIMAIL_API_KEY=
+BAVIMAIL_ALIAS_ID=
+
 RESEND_API_KEY=re_xxxx
 BETTER_AUTH_SECRET=generate-a-random-secret
 
