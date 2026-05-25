@@ -36,6 +36,32 @@ describe("createEmailSender", () => {
     expect(result.id).toBeNull();
     expect(result.error?.message).toBe("No email provider configured");
   });
+
+  it("picks Bavimail when BAVIMAIL_API_KEY and BAVIMAIL_ALIAS_ID are set, even over Resend and Cloudflare", () => {
+    const sender = createEmailSender({
+      BAVIMAIL_API_KEY: "bm_test",
+      BAVIMAIL_ALIAS_ID: "alias-uuid",
+      RESEND_API_KEY: "re_test",
+      EMAIL: { send: vi.fn() },
+    } as unknown as CloudflareBindings);
+    expect(sender.provider).toBe("bavimail");
+  });
+
+  it("falls through to Resend if BAVIMAIL_ALIAS_ID is missing", () => {
+    const sender = createEmailSender({
+      BAVIMAIL_API_KEY: "bm_test",
+      RESEND_API_KEY: "re_test",
+    } as unknown as CloudflareBindings);
+    expect(sender.provider).toBe("resend");
+  });
+
+  it("falls through to Resend if BAVIMAIL_API_KEY is missing", () => {
+    const sender = createEmailSender({
+      BAVIMAIL_ALIAS_ID: "alias-uuid",
+      RESEND_API_KEY: "re_test",
+    } as unknown as CloudflareBindings);
+    expect(sender.provider).toBe("resend");
+  });
 });
 
 describe("CloudflareSender", () => {
@@ -117,5 +143,13 @@ describe("maxAttachmentBytes", () => {
   it("returns 0 for NoopSender", () => {
     const sender = createEmailSender({} as any);
     expect(sender.maxAttachmentBytes()).toBe(0);
+  });
+
+  it("returns 25MB for Bavimail", () => {
+    const sender = createEmailSender({
+      BAVIMAIL_API_KEY: "bm_test",
+      BAVIMAIL_ALIAS_ID: "alias-uuid",
+    } as any);
+    expect(sender.maxAttachmentBytes()).toBe(25 * 1024 * 1024);
   });
 });

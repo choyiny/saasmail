@@ -38,7 +38,7 @@ export interface SendEmailResult {
 }
 
 export interface EmailSender {
-  provider: "resend" | "cloudflare" | "none" | "demo";
+  provider: "resend" | "cloudflare" | "none" | "demo" | "bavimail";
   send(params: SendEmailParams): Promise<SendEmailResult>;
   maxAttachmentBytes(): number;
 }
@@ -184,11 +184,40 @@ class DemoSender implements EmailSender {
   }
 }
 
+class BavimailSender implements EmailSender {
+  readonly provider = "bavimail" as const;
+  constructor(
+    private apiKey: string,
+    private aliasId: string,
+    private fetchFn: typeof fetch = fetch,
+  ) {}
+
+  async send(_params: SendEmailParams): Promise<SendEmailResult> {
+    // Implemented in Task 2.
+    return {
+      id: null,
+      error: { message: "Bavimail send not yet implemented" },
+    };
+  }
+
+  maxAttachmentBytes(): number {
+    return 25 * 1024 * 1024;
+  }
+}
+
 export function createEmailSender(
-  env: CloudflareBindings & { RESEND_API_KEY?: string; EMAIL?: SendEmail },
+  env: CloudflareBindings & {
+    RESEND_API_KEY?: string;
+    EMAIL?: SendEmail;
+    BAVIMAIL_API_KEY?: string;
+    BAVIMAIL_ALIAS_ID?: string;
+  },
 ): EmailSender {
   if (isDemoMode(env)) {
     return new DemoSender();
+  }
+  if (env.BAVIMAIL_API_KEY && env.BAVIMAIL_ALIAS_ID) {
+    return new BavimailSender(env.BAVIMAIL_API_KEY, env.BAVIMAIL_ALIAS_ID);
   }
   if (env.RESEND_API_KEY) {
     return new ResendSender(env.RESEND_API_KEY);
