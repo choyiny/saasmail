@@ -109,7 +109,6 @@ export async function sendWithSuppressionCheck(
         }
       }
     }
-
   }
 
   // Nothing to send if every recipient was suppressed.
