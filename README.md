@@ -15,7 +15,7 @@
 
 Every interaction with a customer matters, and context compounds. saasmail pulls the promo blast, the billing receipt, and the support thread into the same conversation, so anyone on your team can respond with the full history already in hand.
 
-Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending** or **Resend**.
+Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending**, **Resend**, or **Bavimail**.
 
 <img width="5088" height="3106" alt="saasmail-new" src="https://github.com/user-attachments/assets/407a8b4e-3ba0-4ed9-ae8a-f39dee861e56" />
 
@@ -30,17 +30,18 @@ https://github.com/user-attachments/assets/fe3a3811-1902-4b0b-8b94-f8c72f1afab4
 
 ## Provider Matrix
 
-|               | Cloudflare | Resend |
-| ------------- | ---------- | ------ |
-| **Sending**   | ✅         | ✅     |
-| **Receiving** | ✅         | ❌     |
+|               | Cloudflare | Resend | Bavimail |
+| ------------- | ---------- | ------ | -------- |
+| **Sending**   | ✅         | ✅     | ✅       |
+| **Receiving** | ✅         | ❌     | ❌       |
 
 Pick one outbound provider at deploy time:
 
 - **Cloudflare Email Sending** — add a `send_email` binding (`EMAIL`) in `wrangler.jsonc` and onboard your domain at [Email Service](https://dash.cloudflare.com/?to=/:account/email-service).
 - **Resend** — set `RESEND_API_KEY` as a secret.
+- **Bavimail** — set `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` as secrets. The alias ID identifies the sending alias configured in your Bavimail dashboard.
 
-If `RESEND_API_KEY` is set it takes precedence; otherwise the `EMAIL` binding is used. If neither is configured, send attempts return a "No email provider configured" error.
+Selection precedence at runtime: **Bavimail** (when both env vars are set) > **Resend** (when `RESEND_API_KEY` is set) > **Cloudflare Email Sending** (when the `EMAIL` binding exists). If none are configured, send attempts return a "No email provider configured" error.
 
 ## How much does it cost?
 
@@ -88,7 +89,7 @@ Issue scoped API keys for programmatic access to send email, manage templates, e
 | Layer               | Technology                                                                |
 | ------------------- | ------------------------------------------------------------------------- |
 | **Receive email**   | Cloudflare Email Workers                                                  |
-| **Send email**      | Cloudflare Email Sending or Resend                                        |
+| **Send email**      | Cloudflare Email Sending, Resend, or Bavimail                             |
 | **Runtime**         | Cloudflare Workers + Hono                                                 |
 | **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.1)                                   |
 | **Database**        | Cloudflare D1 (SQLite)                                                    |
@@ -155,6 +156,7 @@ Don't have Claude Code? The manual steps below cover the same ground.
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm install -g wrangler`)
 - A [Cloudflare](https://dash.cloudflare.com/) account with Email Routing available for your domain
 - _Optional:_ a [Resend](https://resend.com/) account and API key (only if you prefer Resend over Cloudflare Email Sending)
+- _Optional:_ a [Bavimail](https://bavimail.com/) account, API key, and alias ID (only if you prefer Bavimail)
 
 ### 1. Clone and install
 
@@ -209,14 +211,17 @@ cp .dev.vars.example .dev.vars
 
 Edit `.dev.vars`:
 
-- `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending)
+- `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` — your Bavimail bearer token and alias UUID (only if using Bavimail; both must be set)
+- `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending or Bavimail)
 - `BETTER_AUTH_SECRET` — generate a random string (`openssl rand -hex 32`)
 
 For production, set these as Cloudflare secrets:
 
 ```bash
 wrangler secret put BETTER_AUTH_SECRET
-wrangler secret put RESEND_API_KEY   # only if using Resend
+wrangler secret put RESEND_API_KEY      # only if using Resend
+wrangler secret put BAVIMAIL_API_KEY    # only if using Bavimail
+wrangler secret put BAVIMAIL_ALIAS_ID   # only if using Bavimail
 ```
 
 ### 6. Run migrations
@@ -335,6 +340,8 @@ To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used a
 
 Local development secrets. Created from `.dev.vars.example`. This file is gitignored.
 
+- `BAVIMAIL_API_KEY` — Bavimail API bearer token (required for Bavimail, must be paired with `BAVIMAIL_ALIAS_ID`)
+- `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
 - `RESEND_API_KEY` — Resend API key (if using Resend)
 - `BETTER_AUTH_SECRET` — Secret for session signing
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. **Never set this in production.**
