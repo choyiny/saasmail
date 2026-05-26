@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Admins can revoke invitations from the admin users page.
 
+## [0.5.2] - 2026-05-26
+
+### Dependencies
+
+- Bumped `@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, and `@tiptap/starter-kit` from 3.23.4 to 3.23.6.
+- Bumped `@cloudflare/vite-plugin` from 1.37.1 to 1.38.0.
+- Bumped `@cloudflare/vitest-pool-workers` from 0.16.6 to 0.16.9.
+- Bumped `@cloudflare/workers-types` from 4.20260518.1 to 4.20260525.1.
+- Bumped `wrangler` from 4.92.0 to the latest in the cloudflare group.
+- Bumped `tsx` from 4.21.0 to 4.22.3.
+- Bumped `@vitest/runner`, `@vitest/snapshot`, and `vitest` from 4.1.6 to 4.1.7.
+
 ## [0.5.1] - 2026-05-23
 
 ### Added
