@@ -110,12 +110,6 @@ export async function sendWithSuppressionCheck(
       }
     }
 
-    // If the primary `to` was suppressed, promote the first surviving cc to
-    // be the new `to`; remaining cc stays in the cc list.
-    if (primaryTo === null && deliveredCc.length > 0) {
-      const promoted = deliveredCc.shift()!;
-      primaryTo = promoted.email;
-    }
   }
 
   // Nothing to send if every recipient was suppressed.

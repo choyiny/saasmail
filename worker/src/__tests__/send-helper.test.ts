@@ -89,7 +89,7 @@ describe("sendWithSuppressionCheck", () => {
     expect(sent[1].cc).toBeUndefined();
   });
 
-  it("promotes first surviving cc when primary `to` is suppressed", async () => {
+  it("cancels the entire send when primary `to` is suppressed, even with unsuppressed cc", async () => {
     await suppress("alice@example.com");
     const result = await sendWithSuppressionCheck({
       db: getDb(),
@@ -101,48 +101,9 @@ describe("sendWithSuppressionCheck", () => {
       subject: "Hi",
       html: "<p>hi {{unsubscribe_url}}</p>",
     });
-    expect(result.delivered).toEqual(["bob@example.com", "carol@example.com"]);
-    expect(result.suppressed).toEqual(["alice@example.com"]);
-    expect(fakeSender.send).toHaveBeenCalledTimes(2);
-    expect(sent[0].to).toBe("bob@example.com");
-    expect(sent[1].to).toBe("carol@example.com");
-    expect(sent[0].cc).toBeUndefined();
-    expect(sent[1].cc).toBeUndefined();
-  });
-
-  it("unsubscribe token in headers and body matches the transport's `to`", async () => {
-    // Regression: when the primary `to` is suppressed and a cc gets promoted,
-    // the token must encode the promoted recipient, NOT the original `to`.
-    await suppress("alice@example.com");
-    await sendWithSuppressionCheck({
-      db: getDb(),
-      env: fakeEnv,
-      sender: fakeSender,
-      from: "test@host",
-      to: "alice@example.com",
-      cc: [{ email: "bob@example.com" }, { email: "carol@example.com" }],
-      subject: "Hi",
-      html: "<p>Click {{unsubscribe_url}}</p>",
-    });
-    const call = sent[0];
-    expect(call.to).toBe("bob@example.com");
-
-    const headerToken = extractUnsubToken(call.headers?.["List-Unsubscribe"]);
-    const decodedHeader = await verifyToken(
-      headerToken,
-      fakeEnv.UNSUBSCRIBE_SECRET,
-    );
-    expect(decodedHeader?.email).toBe("bob@example.com");
-
-    // And the body URL token should match too.
-    const bodyMatch = call.html.match(/token=([^"&<>\s]+)/);
-    expect(bodyMatch).not.toBeNull();
-    const bodyToken = decodeURIComponent(bodyMatch![1]);
-    const decodedBody = await verifyToken(
-      bodyToken,
-      fakeEnv.UNSUBSCRIBE_SECRET,
-    );
-    expect(decodedBody?.email).toBe("bob@example.com");
+    expect(result.delivered).toEqual([]);
+    expect(result.suppressed).toContain("alice@example.com");
+    expect(fakeSender.send).not.toHaveBeenCalled();
   });
 
   it("CC with display name still triggers suppression check", async () => {
