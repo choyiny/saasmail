@@ -158,54 +158,56 @@ export async function sendWithSuppressionCheck(
       ...deliveredCc.map((c) => ({ email: c.email, cc: c })),
     ];
 
-    for (let i = 0; i < allDelivered.length; i++) {
-      const recipient = allDelivered[i];
-      const token = await signToken(recipient.email, env.UNSUBSCRIBE_SECRET);
-      const url = buildUnsubscribeUrl(env.BASE_URL, token);
+    const results = await Promise.all(
+      allDelivered.map(async (recipient) => {
+        const token = await signToken(recipient.email, env.UNSUBSCRIBE_SECRET);
+        const url = buildUnsubscribeUrl(env.BASE_URL, token);
 
-      let recipientHtml = html;
-      let recipientText = text;
-      if (typeof recipientHtml === "string") {
-        recipientHtml = recipientHtml.replace(UNSUB_PLACEHOLDER, url);
-        if (!recipientHtml.includes(url)) {
-          recipientHtml = appendHtmlFooter(recipientHtml, url);
+        let recipientHtml = html;
+        let recipientText = text;
+        if (typeof recipientHtml === "string") {
+          recipientHtml = recipientHtml.replace(UNSUB_PLACEHOLDER, url);
+          if (!recipientHtml.includes(url)) {
+            recipientHtml = appendHtmlFooter(recipientHtml, url);
+          }
         }
-      }
-      if (typeof recipientText === "string") {
-        recipientText = recipientText.replace(UNSUB_PLACEHOLDER, url);
-        if (!recipientText.includes(url)) {
-          recipientText = appendTextFooter(recipientText, url);
+        if (typeof recipientText === "string") {
+          recipientText = recipientText.replace(UNSUB_PLACEHOLDER, url);
+          if (!recipientText.includes(url)) {
+            recipientText = appendTextFooter(recipientText, url);
+          }
         }
-      }
 
-      const recipientHeaders: Record<string, string> = {
-        ...(headers ?? {}),
-        "List-Unsubscribe": `<${url}>`,
-        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      };
+        const recipientHeaders: Record<string, string> = {
+          ...(headers ?? {}),
+          "List-Unsubscribe": `<${url}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        };
 
-      // The header-formatted "to" is `"Name <addr>"` only when this entry
-      // came from a cc with a display name; the original `to` is a bare
-      // string by signature.
-      const toForTransport = recipient.cc
-        ? formatCcForTransport(recipient.cc)
-        : recipient.email;
+        // The header-formatted "to" is `"Name <addr>"` only when this entry
+        // came from a cc with a display name; the original `to` is a bare
+        // string by signature.
+        const toForTransport = recipient.cc
+          ? formatCcForTransport(recipient.cc)
+          : recipient.email;
 
-      lastResult = await sender.send({
-        from,
-        to: toForTransport,
-        subject,
-        html: recipientHtml ?? "",
-        ...(recipientText !== undefined ? { text: recipientText } : {}),
-        headers: recipientHeaders,
-        ...(attachments ? { attachments } : {}),
-      });
+        const result = await sender.send({
+          from,
+          to: toForTransport,
+          subject,
+          html: recipientHtml ?? "",
+          ...(recipientText !== undefined ? { text: recipientText } : {}),
+          headers: recipientHeaders,
+          ...(attachments ? { attachments } : {}),
+        });
 
-      if (i === 0) {
-        renderedHtml = recipientHtml;
-        renderedText = recipientText;
-      }
-    }
+        return { result, recipientHtml, recipientText };
+      }),
+    );
+
+    lastResult = results[0].result;
+    renderedHtml = results[0].recipientHtml;
+    renderedText = results[0].recipientText;
   }
 
   return {
