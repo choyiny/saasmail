@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Admins can revoke invitations from the admin users page.
+
 ## [0.5.1] - 2026-05-23
 
 ### Added
