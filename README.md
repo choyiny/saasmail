@@ -17,11 +17,12 @@ Every interaction with a customer matters, and context compounds. saasmail pulls
 
 Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending** or **Resend**.
 
-<img alt="saasmail" src="docs/screenshots/saasmail.jpeg" />
+<img width="5088" height="3106" alt="saasmail-new" src="https://github.com/user-attachments/assets/407a8b4e-3ba0-4ed9-ae8a-f39dee861e56" />
 
 ## Sponsors
 
-<a href="https://givefeedback.dev/saas"><img width="200" height="44" alt="givefeedback.dev" src="https://github.com/user-attachments/assets/7da9ef06-cc47-4aa5-94b1-2108a302439c" /></a>GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks and prevent scope creep.
+<a href="https://givefeedback.dev/saas"><img width="200" height="44" alt="givefeedback.dev" src="https://github.com/user-attachments/assets/7da9ef06-cc47-4aa5-94b1-2108a302439c" /></a>
+GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks and prevent scope creep.
 
 ## Demo Video
 
