@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
 import {
   Inbox,
+  Link2,
   Maximize2,
   Paperclip,
   Trash2,
@@ -15,6 +16,7 @@ import CcChips, { RosterDiffNotice } from "@/components/CcChips";
 import { rosterOf, diffRosters } from "@/lib/roster";
 import type { ComposePrefill } from "@/pages/ComposeModal";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
+import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import {
   HIDE_SIGNATURES_EVENT,
   readHideSignatures,
@@ -191,8 +193,10 @@ function Bubble({
 
   return (
     <div
+      id={messageDomId(email.id)}
       data-testid="chat-bubble"
-      className={`group flex flex-col px-4 py-1 sm:px-6 ${
+      data-email-id={email.id}
+      className={`group flex flex-col px-4 py-1 sm:px-6 scroll-mt-20 ${
         isSent ? "items-end" : "items-start"
       }`}
       onClick={handleClick}
@@ -311,6 +315,18 @@ function Bubble({
             View original
           </button>
         )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            void copyMessageLink(email.id);
+          }}
+          data-testid="message-copy-link"
+          className="flex items-center gap-1 opacity-0 transition-opacity hover:text-text-secondary group-hover:opacity-100"
+          title="Copy link to this message"
+        >
+          <Link2 size={10} />
+        </button>
         <button
           type="button"
           onClick={(e) => {

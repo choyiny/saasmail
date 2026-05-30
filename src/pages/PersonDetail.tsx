@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { CheckCheck } from "lucide-react";
 import {
   fetchPersonEmails,
@@ -12,6 +13,7 @@ import {
   type PersonEnrollmentInfo,
   type InboxDisplayMode,
 } from "@/lib/api";
+import { messageDomId, readMessageHash } from "@/lib/message-link";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
 import SequenceStatus from "@/components/SequenceStatus";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
@@ -231,6 +233,54 @@ export default function PersonDetail({
       setActiveInbox(inboxGroups[0].inbox);
     }
   }, [inboxGroups, activeInbox]);
+
+  // Deep-link landing: if the URL has `#m=<emailId>` and that message
+  // belongs to this person, switch to its inbox tab, auto-expand the
+  // older-messages drawer when needed (thread mode), and scroll/flash
+  // the bubble. Fires once per (person, hash) pair so paging or
+  // re-renders don't keep yanking the scroll position.
+  const location = useLocation();
+  const lastHashHandled = useRef<string | null>(null);
+  useEffect(() => {
+    if (emails.length === 0) return;
+    const targetEmailId = readMessageHash(location.hash);
+    if (!targetEmailId) return;
+    const key = `${person.id}:${targetEmailId}`;
+    if (lastHashHandled.current === key) return;
+    const target = emails.find((e) => e.id === targetEmailId);
+    if (!target) return;
+    lastHashHandled.current = key;
+
+    const targetInbox = inboxOf(target);
+    setActiveInbox(targetInbox);
+
+    // Thread mode collapses older messages behind a toggle. If the
+    // target isn't the latest in its group, force the drawer open so
+    // the bubble is actually in the DOM when we try to scroll to it.
+    const group = inboxGroups.find((g) => g.inbox === targetInbox);
+    if (group && group.emails[0]?.id !== target.id) {
+      setExpandedOlder((prev) =>
+        prev[targetInbox] ? prev : { ...prev, [targetInbox]: true },
+      );
+    }
+
+    // Two rAFs: first lets React commit the tab switch / expand; second
+    // lets the new bubble mount before we measure for scrollIntoView.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(messageDomId(target.id));
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.remove("message-link-flash");
+        // Reflow so re-adding the class restarts the animation.
+        void el.offsetWidth;
+        el.classList.add("message-link-flash");
+        window.setTimeout(() => {
+          el.classList.remove("message-link-flash");
+        }, 2400);
+      });
+    });
+  }, [emails, location.hash, inboxGroups, person.id]);
 
   // Listen for the global "email sent" event so we can:
   //   1) Refetch emails immediately — already happens via the existing
