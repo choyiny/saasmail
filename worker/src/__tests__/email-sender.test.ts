@@ -102,6 +102,34 @@ describe("CloudflareSender", () => {
     expect(serialized).toContain("text/html");
   });
 
+  it("serializes a Reply-To header without throwing", async () => {
+    // Regression: Reply-To is a single-mailbox header in mimetext, so a bare
+    // string threw MIMETEXT_INVALID_HEADER_VALUE and was swallowed as a failed
+    // send. It must be wrapped in a Mailbox and round-trip into the raw MIME.
+    const fakeBinding = {
+      send: vi.fn().mockResolvedValue({ messageId: "msg-rt" }),
+    };
+    const sender = createEmailSender({
+      EMAIL: fakeBinding,
+    } as unknown as CloudflareBindings);
+
+    const result = await sender.send({
+      from: "noreply@readerful.com",
+      to: "team@readerful.com",
+      subject: "contact form",
+      html: "<p>hi</p>",
+      headers: {
+        "Message-ID": "<new@msg>",
+        "Reply-To": "submitter@example.com",
+      },
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.id).toBe("msg-rt");
+    const sent = fakeBinding.send.mock.calls[0][0];
+    expect(JSON.stringify(sent)).toContain("Reply-To: <submitter@example.com>");
+  });
+
   it("catches thrown errors and returns normalized result", async () => {
     const fakeBinding = {
       send: vi.fn().mockRejectedValue(new Error("sender not allowed")),
