@@ -29,6 +29,7 @@ import SequenceDetailPage from "@/pages/SequenceDetailPage";
 import SequenceEditorPage from "@/pages/SequenceEditorPage";
 import InboxesPage from "./pages/InboxesPage";
 import SettingsPage from "@/pages/SettingsPage";
+import MessageLinkPage from "@/pages/MessageLinkPage";
 
 const queryClient = new QueryClient();
 
@@ -149,6 +150,10 @@ function App() {
                 {/* Deep link from Web Push notifications — see
                     worker/src/do/notifications.ts where data.url is set. */}
                 <Route path="/inbox/:inbox/:personId" element={<InboxPage />} />
+                {/* Shareable link to a specific message — resolves the
+                    email's person/inbox and forwards to the route above
+                    with a `#m=<id>` hash for scroll/flash. */}
+                <Route path="/m/:emailId" element={<MessageLinkPage />} />
                 <Route path="/*" element={<InboxPage />} />
               </Route>
             </Route>

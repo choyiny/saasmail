@@ -125,4 +125,38 @@ test.describe.serial("global search", () => {
     await page.getByTestId(TEST_IDS.personSearchClear).click();
     await expect(bobRow).toBeVisible();
   });
+
+  test("?q= query param seeds the search box and filters the list", async ({
+    page,
+  }) => {
+    await page.goto("/?q=alice");
+
+    const input = page.getByTestId(TEST_IDS.personSearchInput);
+    await expect(input).toHaveValue("alice");
+
+    const aliceRow = page.locator(
+      `[data-testid="${TEST_IDS.personRow}"][data-person-id="p_alice"]`,
+    );
+    const bobRow = page.locator(
+      `[data-testid="${TEST_IDS.personRow}"][data-person-id="p_bob"]`,
+    );
+    await expect(aliceRow).toBeVisible();
+    await expect(bobRow).not.toBeVisible();
+  });
+
+  test("?search= alias also seeds the search box", async ({ page }) => {
+    await page.goto("/?search=billing");
+
+    const input = page.getByTestId(TEST_IDS.personSearchInput);
+    await expect(input).toHaveValue("billing");
+
+    const bobRow = page.locator(
+      `[data-testid="${TEST_IDS.personRow}"][data-person-id="p_bob"]`,
+    );
+    const aliceRow = page.locator(
+      `[data-testid="${TEST_IDS.personRow}"][data-person-id="p_alice"]`,
+    );
+    await expect(bobRow).toBeVisible();
+    await expect(aliceRow).not.toBeVisible();
+  });
 });

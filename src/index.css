@@ -513,3 +513,21 @@ body {
 .notion-editor .notion-image-resize-handle[data-visible="true"] {
   opacity: 1;
 }
+
+/* Deep-link landing flash — applied to a message bubble (id="m-<emailId>")
+   after PersonDetail scrolls to a `?#m=<id>` target so the user can see
+   which message the link pointed at. */
+@keyframes message-link-flash {
+  0% {
+    box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.55);
+    background-color: rgba(124, 92, 252, 0.12);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 92, 252, 0);
+    background-color: transparent;
+  }
+}
+.message-link-flash {
+  animation: message-link-flash 2200ms ease-out 1;
+  border-radius: 6px;
+}

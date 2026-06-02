@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
-import { Maximize2, Paperclip, Trash2 } from "lucide-react";
+import { Link2, Maximize2, Paperclip, Trash2 } from "lucide-react";
 import CcChips from "@/components/CcChips";
 import type { Email } from "@/lib/api";
+import { copyMessageLink, messageDomId } from "@/lib/message-link";
 
 interface MessageBubbleProps {
   email: Email;
@@ -94,8 +95,10 @@ export default function MessageBubble({
 
   return (
     <div
+      id={messageDomId(email.id)}
       data-testid="thread-message"
-      className={`group ${compact ? "px-3 py-1.5" : "px-4 sm:px-6 py-2"} hover:bg-bg-muted/50 transition-colors ${
+      data-email-id={email.id}
+      className={`group ${compact ? "px-3 py-1.5" : "px-4 sm:px-6 py-2"} hover:bg-bg-muted/50 transition-colors scroll-mt-20 ${
         isUnread ? "bg-accent/5" : ""
       }`}
       onClick={handleClick}
@@ -209,6 +212,18 @@ export default function MessageBubble({
           className="text-[11px] text-text-tertiary hover:text-text-secondary"
         >
           Reply
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            void copyMessageLink(email.id);
+          }}
+          data-testid="message-copy-link"
+          className="flex items-center gap-1 text-[11px] text-text-tertiary hover:text-text-secondary"
+          title="Copy link to this message"
+        >
+          <Link2 size={12} />
+          Copy link
         </button>
         <button
           onClick={(e) => {

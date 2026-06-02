@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useOutletContext } from "react-router-dom";
+import { useParams, useOutletContext, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
 import type { ComposePrefill } from "@/pages/ComposeModal";
@@ -62,7 +62,12 @@ export default function InboxPage() {
   });
   const [stats, setStats] = useState<Stats | null>(null);
   const [filters, setFilters] = useState<InboxFilters>({});
-  const [search, setSearch] = useState("");
+  // Deep-link support: seed search from `?q=` (or `?search=`) so an
+  // external admin link like `/?q=user@example.com` lands pre-filtered.
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(
+    () => searchParams.get("q") ?? searchParams.get("search") ?? "",
+  );
   const [view, setView] = useState<InboxView>("list");
   const [sortSpec, setSortSpec] = useState<InboxSortSpec>(() => {
     // Persisted as JSON now ({key, direction}). For back-compat, also
