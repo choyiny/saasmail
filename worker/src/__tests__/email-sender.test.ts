@@ -232,6 +232,26 @@ describe("BavimailSender", () => {
     expect(body.in_reply_to).toBe("<orig@msg>");
   });
 
+  it("includes reply_to when headers contain Reply-To", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ id: "x" }), { status: 201 }),
+      );
+    const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      headers: { "Reply-To": "submitter@example.com" },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.reply_to).toBe("submitter@example.com");
+  });
+
   it("uploads attachments first, then sends email with attachment IDs", async () => {
     const uploadResponse = new Response(
       JSON.stringify({

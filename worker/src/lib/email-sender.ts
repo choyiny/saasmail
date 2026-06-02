@@ -236,6 +236,10 @@ export class BavimailSender implements EmailSender {
       if (inReplyTo) {
         payload.in_reply_to = inReplyTo;
       }
+      const replyTo = params.headers?.["Reply-To"];
+      if (replyTo) {
+        payload.reply_to = replyTo;
+      }
       if (attachmentIds.length > 0) {
         payload.attachments = attachmentIds.map((id) => ({
           attachment_id: id,

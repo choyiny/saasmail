@@ -152,6 +152,36 @@ describe("send router", () => {
       expect(rows[0].size).toBe(5);
     });
 
+    it("accepts an optional replyTo address", async () => {
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          to: "newperson@example.com",
+          fromAddress: "me@saasmail.test",
+          subject: "Hello",
+          bodyHtml: "<p>Hi</p>",
+          replyTo: "submitter@example.com",
+        }),
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("rejects an invalid replyTo with 400", async () => {
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          to: "newperson@example.com",
+          fromAddress: "me@saasmail.test",
+          subject: "Hello",
+          bodyHtml: "<p>Hi</p>",
+          replyTo: "not-an-email",
+        }),
+      });
+      expect(res.status).toBe(400);
+    });
+
     it("rejects more than 50 files with 400", async () => {
       const payload = {
         to: "a@example.com",
@@ -189,6 +219,31 @@ describe("send router", () => {
   });
 
   describe("POST /api/send/reply/:emailId", () => {
+    it("accepts an optional replyTo address", async () => {
+      const person = await createTestPerson({
+        id: "p-rt",
+        email: "submitter@example.com",
+      });
+      await createTestEmail({
+        id: "rcv-rt",
+        personId: person.id,
+        recipient: "me@saasmail.test",
+        subject: "Contact form submission",
+        messageId: "contact-rt@example.com",
+      });
+
+      const res = await authFetch("/api/send/reply/rcv-rt", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          fromAddress: "me@saasmail.test",
+          bodyHtml: "<p>thanks</p>",
+          replyTo: "team@example.com",
+        }),
+      });
+      expect(res.status).toBe(201);
+    });
+
     it("persists attachments on a reply", async () => {
       const person = await createTestPerson({
         id: "p1",
