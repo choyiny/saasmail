@@ -7,18 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-06-01
+## [0.6.0] - 2026-06-02
 
 ### Added
 
 - Support optional `Reply-To` header on `POST /api/send` and the reply route.
+- Inbound `Reply-To` is now surfaced on the single-email endpoint (`GET /api/emails/:id`).
 - Inbox can be deep-linked to a filtered view via `?q=` query parameter; individual messages now have shareable per-message links.
 - Admins can revoke invitations from the admin users page.
+- Added `/use-saasmail` skill documenting how to call a deployed saasmail instance from Claude.
 
 ### Fixed
 
 - Prevented iOS auto-zoom on focused inputs across forms.
 - Sequence step delays now accumulate correctly so emails space out as configured instead of all sending at once.
+- Wrapped `Reply-To` values in a mimetext `Mailbox` on the Cloudflare sender path so sends with a `replyTo` no longer silently fail.
 
 ### Dependencies
 
