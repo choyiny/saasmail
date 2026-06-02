@@ -109,6 +109,11 @@ const SendEmailSchema = z
         "Plain-text fallback body. Recommended for accessibility and deliverability.",
       example: "Hello, world!",
     }),
+    replyTo: z.string().email().optional().openapi({
+      description:
+        "Address that receives the response when the recipient hits Reply. If omitted, replies go to fromAddress. Useful for contact-form-style flows where messages are sent from a tenant-owned address like noreply@ but replies should go to the actual submitter.",
+      example: "submitter@example.com",
+    }),
   })
   .openapi("SendEmailSchema");
 
@@ -182,6 +187,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     name: c.name ?? null,
   }));
   const { subject, bodyHtml, bodyText } = raw;
+  const replyTo = raw.replyTo?.trim().toLowerCase();
   const allowed = c.get("allowedInboxes")!;
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
@@ -196,7 +202,10 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     subject,
     html: bodyHtml,
     text: bodyText,
-    headers: { "Message-ID": messageId },
+    headers: {
+      "Message-ID": messageId,
+      ...(replyTo ? { "Reply-To": replyTo } : {}),
+    },
     ...(files.length > 0
       ? {
           attachments: files.map((f) => ({
@@ -290,6 +299,7 @@ const ReplyEmailSchema = z.object({
   cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
   templateSlug: z.string().optional(),
   variables: z.record(z.string(), z.string()).optional(),
+  replyTo: z.string().email().optional(),
 });
 
 // Reply to an existing email
@@ -341,6 +351,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     name: c.name ?? null,
   }));
   const { bodyHtml, bodyText, templateSlug, variables } = raw;
+  const replyTo = raw.replyTo?.trim().toLowerCase();
   const allowed = c.get("allowedInboxes")!;
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
@@ -460,6 +471,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       ...(origInReplyToMessageId
         ? { "In-Reply-To": origInReplyToMessageId }
         : {}),
+      ...(replyTo ? { "Reply-To": replyTo } : {}),
     },
     ...(files.length > 0
       ? {
