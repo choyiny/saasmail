@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import { nanoid } from "nanoid";
 import { EmailMessage } from "cloudflare:email";
-import { createMimeMessage } from "mimetext";
+import { createMimeMessage, Mailbox } from "mimetext";
 import { isDemoMode } from "./is-dev";
 
 function parseFrom(input: string): { name?: string; address: string } {
@@ -136,7 +136,16 @@ class CloudflareSender implements EmailSender {
       }
       if (params.headers) {
         for (const [key, value] of Object.entries(params.headers)) {
-          msg.setHeader(key, value);
+          // Reply-To is a predefined address-type header in mimetext, so a bare
+          // string fails its mailbox validate/dump (unlike plain headers like
+          // Message-ID / In-Reply-To). Wrap it in a Mailbox so it serializes.
+          if (key.toLowerCase() === "reply-to") {
+            // mimetext defines Reply-To as a single-mailbox header
+            // (validateMailboxSingle), so it needs one Mailbox, not an array.
+            msg.setHeader(key, new Mailbox(value));
+          } else {
+            msg.setHeader(key, value);
+          }
         }
       }
       const message = new EmailMessage(address, params.to, msg.asRaw());
@@ -144,6 +153,13 @@ class CloudflareSender implements EmailSender {
       return { id: result?.messageId ?? null, error: null };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      // Surface the cause: this path was previously swallowed, making send
+      // failures invisible in logs and the API response.
+      console.error(
+        "[CloudflareSender] send failed:",
+        message,
+        e instanceof Error ? e.stack : "",
+      );
       return { id: null, error: { message } };
     }
   }
