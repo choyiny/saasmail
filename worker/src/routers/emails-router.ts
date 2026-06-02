@@ -48,7 +48,41 @@ export const EmailSchema = z.object({
   cc: z.array(CcEntrySchema),
   timestamp: z.number(),
   attachmentCount: z.number().optional(),
+  replyTo: z
+    .string()
+    .nullable()
+    .optional()
+    .openapi({
+      description:
+        "Address from the inbound Reply-To header, when present (e.g. a " +
+        "contact form's actual submitter behind a noreply@ sender). Parsed " +
+        "from stored raw headers and returned by the single-email endpoint; " +
+        "null when there is no Reply-To.",
+    }),
 });
+
+/**
+ * Pull the Reply-To address out of an email's stored raw headers.
+ * `raw_headers` is a JSON object of all inbound headers (see email-handler),
+ * so no schema change is needed to surface this. Returns the bare address
+ * (lower-cased), unwrapping a "Name <addr>" form. Null when absent/malformed.
+ */
+function extractReplyTo(rawHeaders: string | null): string | null {
+  if (!rawHeaders) return null;
+  try {
+    const headers = JSON.parse(rawHeaders) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() === "reply-to" && typeof value === "string") {
+        const angle = value.match(/<([^>]+)>/);
+        const addr = (angle ? angle[1] : value).trim().toLowerCase();
+        return addr || null;
+      }
+    }
+  } catch {
+    // Malformed raw_headers — treat as no Reply-To rather than failing the read.
+  }
+  return null;
+}
 
 const InboxMetaSchema = z.object({
   email: z.string(),
@@ -337,6 +371,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
         timestamp: row[0].receivedAt,
         fromAddress: null,
         toAddress: null,
+        replyTo: extractReplyTo(row[0].rawHeaders),
         cc: parseCc(row[0].cc),
         attachments: atts,
       },
@@ -382,6 +417,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
       bodyHtml: sent.bodyHtml,
       bodyText: sent.bodyText,
       isRead: null,
+      replyTo: null,
       cc: parseCc(sent.cc),
       timestamp: sent.sentAt,
       attachments: sentAtts,

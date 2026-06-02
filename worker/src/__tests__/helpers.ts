@@ -165,6 +165,7 @@ export async function createTestEmail(
     bodyText?: string;
     messageId?: string;
     isRead?: number;
+    rawHeaders?: string;
   } = {},
 ) {
   const db = getDb();
@@ -176,7 +177,7 @@ export async function createTestEmail(
     subject: opts.subject ?? "Test Subject",
     bodyHtml: "<p>Hello</p>",
     bodyText: opts.bodyText ?? "Hello",
-    rawHeaders: "{}",
+    rawHeaders: opts.rawHeaders ?? "{}",
     messageId: opts.messageId ?? "msg-1@example.com",
     isRead: opts.isRead ?? 0,
     receivedAt: now,
