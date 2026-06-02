@@ -214,6 +214,33 @@ describe("emails router", () => {
       expect(data.attachments).toEqual([]);
     });
 
+    it("surfaces replyTo from the inbound Reply-To header", async () => {
+      await createTestPerson({ id: "s1", email: "noreply@readerful.com" });
+      await createTestEmail({
+        id: "e-rt",
+        personId: "s1",
+        rawHeaders: JSON.stringify({
+          "reply-to": "Submitter Name <submitter@example.com>",
+        }),
+      });
+
+      const res = await authFetch("/api/emails/e-rt", { apiKey });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      // Bare address, unwrapped from "Name <addr>" and lower-cased.
+      expect(data.replyTo).toBe("submitter@example.com");
+    });
+
+    it("returns replyTo null when there is no Reply-To header", async () => {
+      await createTestPerson({ id: "s1", email: "a@test.com" });
+      await createTestEmail({ id: "e-no-rt", personId: "s1" });
+
+      const res = await authFetch("/api/emails/e-no-rt", { apiKey });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.replyTo).toBeNull();
+    });
+
     it("returns 404 for missing email", async () => {
       const res = await authFetch("/api/emails/nonexistent", { apiKey });
       expect(res.status).toBe(404);
