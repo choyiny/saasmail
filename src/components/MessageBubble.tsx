@@ -217,7 +217,7 @@ export default function MessageBubble({
         >
           Reply
         </button>
-        {!isSent && onReassign && (
+        {onReassign && (
           <button
             onClick={(e) => {
               e.stopPropagation();

@@ -91,8 +91,8 @@ export default function ReassignPersonModal({
           Reassign message
         </h2>
         <p className="mb-4 text-sm text-text-secondary">
-          Move this message to a different person — replies will go to them.
-          Currently from{" "}
+          Attribute this message to a different person so replies reach them.
+          Currently under{" "}
           <span className="font-medium text-text-primary">{currentSender}</span>
           .
         </p>

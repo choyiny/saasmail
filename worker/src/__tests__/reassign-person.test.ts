@@ -10,6 +10,7 @@ import {
 } from "./helpers";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
+import { sentEmails } from "../db/sent-emails.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { eq } from "drizzle-orm";
 
@@ -308,5 +309,120 @@ describe("reassign email to person", () => {
   it("404s for an unknown email id", async () => {
     const res = await reassign("nope", apiKey, { email: "real@example.com" });
     expect(res.status).toBe(404);
+  });
+});
+
+async function createSent(opts: {
+  id: string;
+  personId?: string | null;
+  fromAddress?: string;
+  toAddress?: string;
+}) {
+  const now = Math.floor(Date.now() / 1000);
+  await getDb()
+    .insert(sentEmails)
+    .values({
+      id: opts.id,
+      personId: opts.personId ?? null,
+      fromAddress: opts.fromAddress ?? "support@saasmail.test",
+      toAddress: opts.toAddress ?? "support@saasmail.test",
+      subject: "Sent subject",
+      bodyHtml: "<p>hi</p>",
+      bodyText: "hi",
+      status: "sent",
+      sentAt: now,
+      createdAt: now,
+    });
+}
+
+describe("reassign sent message (re-target recipient)", () => {
+  let apiKey: string;
+
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    ({ apiKey } = await createTestUser());
+  });
+
+  it("re-targets a sent message: sets person and rewrites toAddress", async () => {
+    // Contact-form pattern: sent from support@ to support@, real person in body.
+    await createTestPerson({ id: "p-support", email: "support@saasmail.test" });
+    await createSent({
+      id: "s1",
+      personId: "p-support",
+      fromAddress: "support@saasmail.test",
+      toAddress: "support@saasmail.test",
+    });
+
+    const res = await reassign("s1", apiKey, {
+      email: "mike@gmail.com",
+      name: "Mike",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      type: string;
+      email: { personId: string; toAddress: string; fromAddress: string };
+      person: { id: string; created: boolean };
+    };
+    expect(body.type).toBe("sent");
+    expect(body.person.created).toBe(true);
+    expect(body.email.toAddress).toBe("mike@gmail.com"); // reply target rewritten
+
+    const db = getDb();
+    const sent = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, "s1"))
+      .get();
+    expect(sent?.toAddress).toBe("mike@gmail.com");
+    expect(sent?.personId).toBe(body.person.id);
+    // The new person (sent-only) exists and can be found for replies.
+    const mike = await db
+      .select()
+      .from(people)
+      .where(eq(people.email, "mike@gmail.com"))
+      .get();
+    expect(mike?.id).toBe(body.person.id);
+  });
+
+  it("changes the sending identity when fromAddress is provided", async () => {
+    await grantInbox("test-user-1", "other@saasmail.test");
+    await createSent({
+      id: "s1",
+      fromAddress: "support@saasmail.test",
+      toAddress: "x@example.com",
+    });
+    const res = await reassign("s1", apiKey, {
+      fromAddress: "other@saasmail.test",
+    });
+    expect(res.status).toBe(200);
+    const db = getDb();
+    const sent = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, "s1"))
+      .get();
+    expect(sent?.fromAddress).toBe("other@saasmail.test");
+    expect(sent?.toAddress).toBe("x@example.com"); // unchanged
+  });
+
+  it("404s when the caller does not own the sending inbox", async () => {
+    await createSent({ id: "s1", fromAddress: "support@saasmail.test" });
+    const { apiKey: memberKey } = await createTestUser({
+      id: "member-s",
+      role: "member",
+      email: "members@example.com",
+    });
+    const res = await reassign("s1", memberKey, { email: "mike@gmail.com" });
+    expect(res.status).toBe(404);
+  });
+
+  it("400s when neither email nor fromAddress is provided", async () => {
+    await createSent({ id: "s1" });
+    const res = await reassign("s1", apiKey, {});
+    expect(res.status).toBe(400);
   });
 });

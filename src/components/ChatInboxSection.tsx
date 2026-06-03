@@ -331,7 +331,7 @@ function Bubble({
         >
           <Link2 size={10} />
         </button>
-        {!isSent && onReassign && (
+        {onReassign && (
           <button
             type="button"
             onClick={(e) => {
