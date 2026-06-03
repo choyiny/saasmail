@@ -70,6 +70,8 @@ export interface Email {
   timestamp: number;
   attachmentCount?: number;
   attachments?: Attachment[];
+  /** Inbound Reply-To address, surfaced by the single-email endpoint. */
+  replyTo?: string | null;
 }
 
 export type InboxDisplayMode = "thread" | "chat";
@@ -263,6 +265,24 @@ export async function deleteEmail(
   id: string,
 ): Promise<{ success: boolean; attachmentsDeleted: number }> {
   return apiFetch(`/api/emails/${id}`, { method: "DELETE" });
+}
+
+export interface ReassignPersonResult {
+  success: boolean;
+  email: { id: string; personId: string };
+  person: { id: string; email: string; name: string | null; created: boolean };
+}
+
+/** Re-associate a single received email with a different/new person (by email). */
+export async function reassignEmailPerson(
+  emailId: string,
+  body: { email: string; name?: string | null },
+): Promise<ReassignPersonResult> {
+  return apiFetch(`/api/emails/${emailId}/person`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function deletePerson(id: string): Promise<{ success: boolean }> {
