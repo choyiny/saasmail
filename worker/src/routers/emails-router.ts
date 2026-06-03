@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, desc, like, and, sql, inArray } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
@@ -597,4 +598,174 @@ emailsRouter.openapi(deleteEmailRoute, async (c) => {
   }
 
   return c.json(result, 200);
+});
+
+// --- Re-associate a received email with a different/new person ---
+const ReassignPersonResponseSchema = z.object({
+  success: z.boolean(),
+  email: z.object({ id: z.string(), personId: z.string() }),
+  person: z.object({
+    id: z.string(),
+    email: z.string(),
+    name: z.string().nullable(),
+    created: z.boolean(),
+  }),
+});
+
+const reassignPersonRoute = createRoute({
+  method: "patch",
+  path: "/{id}/person",
+  tags: ["Emails"],
+  description:
+    "Re-associate a single received email with a different or new person, " +
+    "identified by email address (find-or-create). Useful when a message — " +
+    "e.g. a contact-form submission behind a generic sender — should thread " +
+    "under the real correspondent; replies then route to them. Conversation " +
+    "threading is left intact and per-person counts are recomputed.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            email: z.string().email().openapi({
+              description:
+                "Email address of the person to attribute this message to.",
+              example: "submitter@example.com",
+            }),
+            name: z
+              .string()
+              .max(200)
+              .nullable()
+              .optional()
+              .openapi({
+                description:
+                  "Display name for the person. Applied only when creating a new " +
+                  "person, or filling in a blank name on an existing one — never " +
+                  "overwrites an existing name.",
+              }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    ...json200Response(ReassignPersonResponseSchema, "Re-associated"),
+  },
+});
+
+emailsRouter.openapi(reassignPersonRoute, async (c) => {
+  const db = c.get("db");
+  const { id } = c.req.valid("param");
+  const { email: rawEmail, name } = c.req.valid("json");
+  const allowed = c.get("allowedInboxes")!;
+
+  // Only received emails carry a real correspondent + personId; sent emails
+  // aren't re-associable, so look only in the received `emails` table.
+  const row = await db
+    .select({
+      id: emails.id,
+      personId: emails.personId,
+      recipient: emails.recipient,
+    })
+    .from(emails)
+    .where(eq(emails.id, id))
+    .limit(1);
+  if (row.length === 0) {
+    return c.json({ error: "Email not found" }, 404);
+  }
+  const target = row[0];
+
+  // Authz: caller must own the inbox this message landed in (mirrors GET/DELETE).
+  if (!allowed.isAdmin && !allowed.inboxes.includes(target.recipient)) {
+    return c.json({ error: "Email not found" }, 404);
+  }
+
+  const destEmail = rawEmail.trim().toLowerCase();
+  const now = Math.floor(Date.now() / 1000);
+
+  // Find-or-create the destination person by the unique `people.email`.
+  const existing = await db
+    .select({ id: people.id, name: people.name })
+    .from(people)
+    .where(eq(people.email, destEmail))
+    .limit(1);
+
+  let personId: string;
+  let personName: string | null;
+  let created = false;
+  if (existing.length > 0) {
+    personId = existing[0].id;
+    personName = existing[0].name;
+    // Fill in a name only when one was supplied and none exists — never clobber.
+    if (name && !existing[0].name) {
+      await db
+        .update(people)
+        .set({ name, updatedAt: now })
+        .where(eq(people.id, personId));
+      personName = name;
+    }
+  } else {
+    personId = nanoid();
+    personName = name ?? null;
+    created = true;
+    await db.insert(people).values({
+      id: personId,
+      email: destEmail,
+      name: personName,
+      lastEmailAt: now,
+      unreadCount: 0,
+      totalCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  const responseBody = {
+    success: true as const,
+    email: { id: target.id, personId },
+    person: { id: personId, email: destEmail, name: personName, created },
+  };
+
+  // Already attributed to this person — nothing to move.
+  if (personId === target.personId) {
+    return c.json(responseBody, 200);
+  }
+
+  const oldPersonId = target.personId;
+
+  // Move the single email. `conversation_id` is orthogonal (a hash of the
+  // inbox + external participants) and intentionally left unchanged.
+  await db.update(emails).set({ personId }).where(eq(emails.id, target.id));
+
+  // Recompute denormalized counts for both persons from source-of-truth.
+  // totalCount/unreadCount track received emails only (sent never increments
+  // them), so counting `emails` rows is canonical. lastEmailAt follows the
+  // newest remaining received email; left as-is when a person has none.
+  const recompute = async (pid: string) => {
+    const [counts] = await db.all<{
+      total: number;
+      unread: number;
+      last: number | null;
+    }>(sql`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread,
+             MAX(received_at) AS last
+      FROM ${emails}
+      WHERE person_id = ${pid}
+    `);
+    await db
+      .update(people)
+      .set({
+        totalCount: counts?.total ?? 0,
+        unreadCount: counts?.unread ?? 0,
+        ...(counts?.last != null ? { lastEmailAt: counts.last } : {}),
+        updatedAt: now,
+      })
+      .where(eq(people.id, pid));
+  };
+  await recompute(oldPersonId);
+  await recompute(personId);
+
+  return c.json(responseBody, 200);
 });

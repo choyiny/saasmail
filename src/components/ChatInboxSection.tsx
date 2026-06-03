@@ -5,6 +5,7 @@ import {
   Maximize2,
   Paperclip,
   Trash2,
+  UserPen,
   ArrowDown,
   Check,
   CheckCheck,
@@ -40,6 +41,7 @@ interface ChatInboxSectionProps {
   onOpenHtml: (email: Email) => void;
   onMarkRead: (email: Email) => void;
   onDelete: (emailId: string) => void;
+  onReassign?: (email: Email) => void;
   onSent: () => void;
   /**
    * Optional handoff to the global compose drawer. When provided, the
@@ -107,6 +109,7 @@ interface BubbleProps {
   onOpenHtml: (email: Email) => void;
   onMarkRead: (email: Email) => void;
   onDelete: (emailId: string) => void;
+  onReassign?: (email: Email) => void;
 }
 
 function Bubble({
@@ -116,6 +119,7 @@ function Bubble({
   onOpenHtml,
   onMarkRead,
   onDelete,
+  onReassign,
 }: BubbleProps) {
   // Resolve the sender label for received bubbles. In a group conversation,
   // each received bubble is from a different person; senderResolver lets
@@ -327,6 +331,20 @@ function Bubble({
         >
           <Link2 size={10} />
         </button>
+        {!isSent && onReassign && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onReassign(email);
+            }}
+            data-testid="message-reassign"
+            className="flex items-center gap-1 opacity-0 transition-opacity hover:text-text-secondary group-hover:opacity-100"
+            title="Reassign to another person"
+          >
+            <UserPen size={10} />
+          </button>
+        )}
         <button
           type="button"
           onClick={(e) => {
@@ -372,6 +390,7 @@ export default function ChatInboxSection({
   onOpenHtml,
   onMarkRead,
   onDelete,
+  onReassign,
   onSent,
   onOpenCompose,
 }: ChatInboxSectionProps) {
@@ -556,6 +575,7 @@ export default function ChatInboxSection({
                 onOpenHtml={onOpenHtml}
                 onMarkRead={onMarkRead}
                 onDelete={onDelete}
+                onReassign={onReassign}
               />
             ),
           )}

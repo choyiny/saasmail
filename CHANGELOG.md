@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transactional: boolean` flag on `POST /api/send` (default `false`) to bypass suppression checks and unsubscribe injection for account-critical mail (password resets, OTPs, system notifications).
 - `suppressed: string[]` field on the `POST /api/send` response, listing recipients that were dropped because they're on the suppression list.
 - Sequence dispatcher and template preview/test send now respect the suppression list — unsubscribed recipients no longer receive scheduled or test sends.
+- Re-associate a received email with a different or new person from the message actions (a small "Reassign" control on each received message). New `PATCH /api/emails/:id/person` accepts `{ email, name? }`, finds-or-creates the person by email, moves just that message, and recomputes per-person counts; conversation threading is left intact. Because replies resolve their recipient through the message's person, re-attributing a message routes replies to the right correspondent — handy for contact-form submissions behind a generic sender. The reassign dialog pre-fills from the message's inbound `Reply-To` when present.
 
 ### Changed
 
