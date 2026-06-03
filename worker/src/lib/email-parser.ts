@@ -23,6 +23,7 @@ export interface ParsedEmail {
   headers: Record<string, string>;
   attachments: ParsedAttachment[];
   auth: AuthResults;
+  spamScore: number | null;
 }
 
 export interface ParsedAttachment {
@@ -121,6 +122,13 @@ function parseAuthResults(headers: Record<string, string>): AuthResults {
   };
 }
 
+function parseSpamScore(headers: Record<string, string>): number | null {
+  const raw = headers["x-spam-score"] ?? headers["X-Spam-Score"];
+  if (!raw) return null;
+  const n = Number.parseFloat(raw.trim());
+  return Number.isFinite(n) ? n : null;
+}
+
 export async function parseEmail(
   message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
@@ -182,5 +190,6 @@ export async function parseEmail(
       disposition: att.disposition || null,
     })),
     auth: parseAuthResults(headers),
+    spamScore: parseSpamScore(headers),
   };
 }
