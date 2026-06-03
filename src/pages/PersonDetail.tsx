@@ -213,16 +213,17 @@ export default function PersonDetail({
     const moved = reassignEmail;
     if (moved) {
       const wasUnread = moved.type === "received" && moved.isRead === 0;
-      // The email now belongs to another person — drop it from this thread
+      // The message now belongs to another person — drop it from this thread
       // and let the parent decrement this person's counts (same as a delete
       // from this view's perspective).
       setEmails((prev) => prev.filter((e) => e.id !== moved.id));
       onEmailDelete(person.id, wasUnread);
     }
+    const target = result.person?.email ?? result.email.toAddress;
     showToast({
       kind: "success",
-      message: `Moved to ${result.person.email}`,
-      description: result.person.created
+      message: target ? `Moved to ${target}` : "Message re-targeted",
+      description: result.person?.created
         ? "Created a new person and moved this message to them."
         : "Replies to this message now go to them.",
       durationMs: 5000,
@@ -543,6 +544,7 @@ export default function PersonDetail({
         email={htmlPreviewEmail}
         open={htmlPreviewEmail !== null}
         onClose={() => setHtmlPreviewEmail(null)}
+        onUpdated={refetchEmails}
       />
 
       <ReassignPersonModal

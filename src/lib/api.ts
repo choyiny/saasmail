@@ -269,14 +269,30 @@ export async function deleteEmail(
 
 export interface ReassignPersonResult {
   success: boolean;
-  email: { id: string; personId: string };
-  person: { id: string; email: string; name: string | null; created: boolean };
+  type: "received" | "sent";
+  email: {
+    id: string;
+    personId: string | null;
+    toAddress: string | null;
+    fromAddress: string | null;
+  };
+  person: {
+    id: string;
+    email: string;
+    name: string | null;
+    created: boolean;
+  } | null;
 }
 
-/** Re-associate a single received email with a different/new person (by email). */
+/**
+ * Re-target a message to a different/new person. For received messages, `email`
+ * re-attributes the sender's person. For sent messages, `email` also rewrites
+ * the recipient (`toAddress`) so replies route there, and `fromAddress` can
+ * switch the sending identity.
+ */
 export async function reassignEmailPerson(
   emailId: string,
-  body: { email: string; name?: string | null },
+  body: { email?: string; name?: string | null; fromAddress?: string },
 ): Promise<ReassignPersonResult> {
   return apiFetch(`/api/emails/${emailId}/person`, {
     method: "PATCH",
