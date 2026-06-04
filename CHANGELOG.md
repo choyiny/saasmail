@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Suppression list with admin UI at `/admin/suppressions` and CRUD API at `/api/suppressions` (admin-only).
+- Public unsubscribe page at `/unsubscribe?token=…` with one-click POST handling and a re-subscribe button.
+- `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) headers on marketing sends.
+- Template variable `{{unsubscribe_url}}` available in marketing email templates. If the rendered body doesn't include the URL, an unsubscribe footer is auto-appended (HTML and plaintext).
+- `transactional: boolean` flag on `POST /api/send` (default `false`) to bypass suppression checks and unsubscribe injection for account-critical mail (password resets, OTPs, system notifications).
+- `suppressed: string[]` field on the `POST /api/send` response, listing recipients that were dropped because they're on the suppression list.
+- Sequence dispatcher and template preview/test send now respect the suppression list — unsubscribed recipients no longer receive scheduled or test sends.
+
+### Changed
+
+- **Behavior shift for API integrators:** sends through `POST /api/send` now have `List-Unsubscribe` headers added and (if the body lacks the URL) an unsubscribe footer auto-appended UNLESS the caller passes `transactional: true`. To preserve previous behavior for transactional mail (password resets, OTPs, etc.), set the flag explicitly on every transactional send.
+- `POST /api/send` response: `id` is now nullable. When every recipient is suppressed, the response is `{ id: null, status: "suppressed", delivered: [], suppressed: [...] }` with no message dispatched.
+- The `sequence_emails.status` enum now includes `suppressed` for steps dropped due to suppression.
+
+### Configuration
+
+- New required env var: `UNSUBSCRIBE_SECRET` — Worker secret used to sign one-click unsubscribe tokens (HMAC). Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Generate with `openssl rand -hex 32`.
+- The existing `BASE_URL` var is reused to build absolute unsubscribe URLs — no new `APP_URL` introduced.
+
 ## [0.6.0] - 2026-06-02
 
 ### Added

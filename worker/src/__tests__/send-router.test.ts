@@ -14,6 +14,7 @@ import {
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
+import { suppressions } from "../db/suppressions.schema";
 
 describe("send router", () => {
   let apiKey: string;
@@ -314,6 +315,101 @@ describe("send router", () => {
       expect(body.data).toHaveLength(1);
       expect(body.data[0].email).toBe("newperson@example.com");
       expect(body.data[0].totalCount).toBe(1);
+    });
+  });
+
+  describe("POST /api/send with suppressions", () => {
+    async function insertSuppression(email: string) {
+      await getDb()
+        .insert(suppressions)
+        .values({
+          id: `sup-${email}`,
+          email,
+          reason: "unsubscribe",
+          source: "test",
+          note: null,
+          createdAt: Math.floor(Date.now() / 1000),
+        });
+    }
+
+    it("returns suppressed list and skips delivery when the only recipient is on the suppression list", async () => {
+      await insertSuppression("alice@example.com");
+
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          to: "alice@example.com",
+          fromAddress: "me@saasmail.test",
+          subject: "Hi",
+          bodyHtml: "<p>hi</p>",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        id: string | null;
+        delivered: string[];
+        suppressed: string[];
+        status: string;
+      };
+      expect(body.suppressed).toContain("alice@example.com");
+      expect(body.delivered).toEqual([]);
+      expect(body.status).toBe("suppressed");
+      expect(body.id).toBeNull();
+
+      // No sent_emails row was written.
+      const sent = await getDb()
+        .select()
+        .from(sentEmails)
+        .where(eq(sentEmails.toAddress, "alice@example.com"));
+      expect(sent).toHaveLength(0);
+    });
+
+    it("transactional=true bypasses suppression", async () => {
+      await insertSuppression("alice@example.com");
+
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          to: "alice@example.com",
+          fromAddress: "me@saasmail.test",
+          subject: "Reset",
+          bodyHtml: "<p>token</p>",
+          transactional: true,
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        delivered: string[];
+        suppressed: string[];
+        status: string;
+      };
+      expect(body.suppressed).toEqual([]);
+      expect(body.delivered).toContain("alice@example.com");
+      expect(body.status).toBe("sent");
+    });
+
+    it("marketing send to a non-suppressed recipient still delivers", async () => {
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          to: "fresh@example.com",
+          fromAddress: "me@saasmail.test",
+          subject: "Hi",
+          bodyHtml: "<p>hi</p>",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        delivered: string[];
+        suppressed: string[];
+        status: string;
+      };
+      expect(body.delivered).toContain("fresh@example.com");
+      expect(body.suppressed).toEqual([]);
+      expect(body.status).toBe("sent");
     });
   });
 });

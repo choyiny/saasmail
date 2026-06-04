@@ -675,7 +675,12 @@ sequencesRouter.openapi(listEnrollmentsRoute, async (c) => {
       personEmail: personRow[0]?.email ?? "unknown",
       personName: personRow[0]?.name ?? null,
       totalSteps: emailRows.length,
-      sentSteps: emailRows.filter((e) => e.status === "sent").length,
+      // 'suppressed' is a completed-but-not-delivered terminal state —
+      // count it toward sentSteps so completed-via-suppression enrollments
+      // show full progress in the UI.
+      sentSteps: emailRows.filter(
+        (e) => e.status === "sent" || e.status === "suppressed",
+      ).length,
     });
   }
 

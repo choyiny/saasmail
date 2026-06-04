@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon,
   Shield,
   Users,
+  Ban,
   Menu,
   User,
   LogOut,
@@ -163,6 +164,13 @@ export default function TopNav() {
                       <Users className="h-4 w-4" />
                       Users
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => navigate("/admin/suppressions")}
+                      className="cursor-pointer"
+                    >
+                      <Ban className="h-4 w-4" />
+                      Suppressions
+                    </DropdownMenuItem>
                   </>
                 )}
                 <DropdownMenuSeparator />
@@ -264,6 +272,13 @@ export default function TopNav() {
                   >
                     <Users className="h-4 w-4" />
                     Users
+                  </button>
+                  <button
+                    onClick={() => navigate("/admin/suppressions")}
+                    className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+                  >
+                    <Ban className="h-4 w-4" />
+                    Suppressions
                   </button>
                 </>
               )}

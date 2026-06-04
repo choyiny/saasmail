@@ -32,6 +32,7 @@ jobs:
           DEMO_MODE=1
           DISABLE_PASSKEY_GATE=true
           BETTER_AUTH_SECRET=ci-only-secret-not-used-for-real-auth
+          UNSUBSCRIBE_SECRET=ci-only-unsubscribe-secret-not-used-for-real-tokens
           EOF
 
       - name: Cache Playwright browsers

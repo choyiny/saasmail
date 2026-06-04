@@ -26,7 +26,12 @@ export default function SequenceStatus({
 
   if (loading || !info || !info.enrollment) return null;
 
-  const sent = info.scheduledEmails.filter((e) => e.status === "sent").length;
+  // 'suppressed' is a completed-but-not-delivered terminal state — count it
+  // toward the progress display so completed-via-suppression enrollments
+  // don't look stuck.
+  const sent = info.scheduledEmails.filter(
+    (e) => e.status === "sent" || e.status === "suppressed",
+  ).length;
   const total = info.scheduledEmails.length;
   const nextPending = info.scheduledEmails.find(
     (e) => e.status === "pending" || e.status === "queued",

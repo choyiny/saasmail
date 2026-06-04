@@ -17,6 +17,7 @@ import { generateMessageId } from "../lib/message-id";
 import { computeConversationId, externalsOnly } from "../lib/conversation-id";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { attachments } from "../db/attachments.schema";
+import { sendWithSuppressionCheck } from "../lib/send";
 
 /**
  * Fetch the set of "internal" domains (domains owned by our
@@ -114,14 +115,22 @@ const SendEmailSchema = z
         "Address that receives the response when the recipient hits Reply. If omitted, replies go to fromAddress. Useful for contact-form-style flows where messages are sent from a tenant-owned address like noreply@ but replies should go to the actual submitter.",
       example: "submitter@example.com",
     }),
+    // Transactional sends bypass the suppression list (password resets, OTPs,
+    // receipts). Marketing-style sends default to false and respect the list.
+    transactional: z.boolean().optional().default(false).openapi({
+      description:
+        "When true, bypasses the suppression list (for transactional mail like password resets, OTPs, and receipts). Defaults to false, which respects the suppression list.",
+    }),
   })
   .openapi("SendEmailSchema");
 
 const SentEmailResponseSchema = z.object({
-  id: z.string(),
+  id: z.string().nullable(),
   resendId: z.string().nullable(),
   status: z.string(),
   attachmentIds: z.array(z.string()),
+  delivered: z.array(z.string()).default([]),
+  suppressed: z.array(z.string()).default([]),
 });
 
 // Compose and send a new email
@@ -186,7 +195,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     email: c.email.trim().toLowerCase(),
     name: c.name ?? null,
   }));
-  const { subject, bodyHtml, bodyText } = raw;
+  const { subject, bodyHtml, bodyText, transactional } = raw;
   const replyTo = raw.replyTo?.trim().toLowerCase();
   const allowed = c.get("allowedInboxes")!;
   assertInboxAllowed(allowed, fromAddress);
@@ -195,10 +204,22 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
 
-  const result = await sender.send({
+  const attachmentList =
+    files.length > 0
+      ? files.map((f) => ({
+          filename: f.filename,
+          contentType: f.contentType,
+          content: f.bytes,
+        }))
+      : undefined;
+
+  const sendResult = await sendWithSuppressionCheck({
+    db,
+    env: c.env,
+    sender,
     from: formattedFrom,
     to,
-    ...(cc && cc.length > 0 ? { cc: cc.map(formatCc) } : {}),
+    cc,
     subject,
     html: bodyHtml,
     text: bodyText,
@@ -206,22 +227,52 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
       "Message-ID": messageId,
       ...(replyTo ? { "Reply-To": replyTo } : {}),
     },
-    ...(files.length > 0
-      ? {
-          attachments: files.map((f) => ({
-            filename: f.filename,
-            contentType: f.contentType,
-            content: f.bytes,
-          })),
-        }
-      : {}),
+    attachments: attachmentList,
+    transactional,
   });
 
-  // Find or create the person row for this recipient.
+  // Every recipient was suppressed — no send happened. Skip sent_emails write,
+  // but still cancel any pending sequence enrollments for the recipient so we
+  // stop scheduling steps that will all individually re-suppress at dispatch.
+  if (sendResult.delivered.length === 0) {
+    const existingPerson = await db
+      .select({ id: people.id })
+      .from(people)
+      .where(eq(people.email, to))
+      .limit(1);
+    if (existingPerson[0]) {
+      await cancelSequencesForPerson(db, existingPerson[0].id);
+    }
+
+    console.log(
+      "[send] all recipients suppressed",
+      JSON.stringify({ from: fromAddress, suppressed: sendResult.suppressed }),
+    );
+    return c.json(
+      {
+        id: null,
+        resendId: null,
+        status: "suppressed",
+        attachmentIds: [],
+        delivered: [],
+        suppressed: sendResult.suppressed,
+      },
+      201,
+    );
+  }
+
+  // The transport was called; reflect its result in sent_emails.
+  const result = sendResult.result!;
+  // When the primary `to` was suppressed, the helper promoted a surviving cc
+  // to be the actual primary recipient. Use that for audit + person lookup so
+  // the row reflects who actually got the email.
+  const recordedTo = sendResult.delivered[0];
+
+  // Find or create the person row for the actual recipient.
   const existingPerson = await db
     .select({ id: people.id })
     .from(people)
-    .where(eq(people.email, to))
+    .where(eq(people.email, recordedTo))
     .limit(1);
 
   let personId: string;
@@ -233,7 +284,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
       .insert(people)
       .values({
         id: personId,
-        email: to,
+        email: recordedTo,
         name: null,
         lastEmailAt: now,
         unreadCount: 0,
@@ -245,14 +296,14 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     const refetched = await db
       .select({ id: people.id })
       .from(people)
-      .where(eq(people.email, to))
+      .where(eq(people.email, recordedTo))
       .limit(1);
     personId = refetched[0]!.id;
   }
 
   const internalDomains = await fetchInternalDomains(db);
   const externals = externalsOnly(
-    [to, ...(cc ?? []).map((c) => c.email)],
+    [recordedTo, ...(cc ?? []).map((c) => c.email)],
     internalDomains,
   );
   const conversationId = await computeConversationId(fromAddress, externals);
@@ -262,10 +313,10 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     id,
     personId,
     fromAddress,
-    toAddress: to,
+    toAddress: recordedTo,
     subject,
-    bodyHtml,
-    bodyText: bodyText ?? null,
+    bodyHtml: sendResult.renderedHtml ?? bodyHtml,
+    bodyText: sendResult.renderedText ?? bodyText ?? null,
     messageId,
     resendId: result.id,
     status: result.error ? "failed" : "sent",
@@ -287,6 +338,8 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
       resendId: result.id,
       status: result.error ? "failed" : "sent",
       attachmentIds,
+      delivered: sendResult.delivered,
+      suppressed: sendResult.suppressed,
     },
     201,
   );
@@ -459,13 +512,21 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const result = await sender.send({
+  // Replies are 1:1 conversational responses to an inbound — the recipient
+  // initiated by emailing first, so route through sendWithSuppressionCheck
+  // with transactional: true. That bypasses the suppression list AND skips
+  // the unsubscribe footer / List-Unsubscribe header (this is a reply, not
+  // a bulk send).
+  const sendResult = await sendWithSuppressionCheck({
+    db,
+    env: c.env,
+    sender,
     from: formattedFrom,
     to: toAddress,
-    ...(cc && cc.length > 0 ? { cc: cc.map(formatCc) } : {}),
+    cc,
     subject: finalSubject,
     html: finalBodyHtml,
-    text: bodyText,
+    ...(bodyText !== undefined ? { text: bodyText } : {}),
     headers: {
       "Message-ID": messageId,
       ...(origInReplyToMessageId
@@ -482,7 +543,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
           })),
         }
       : {}),
+    transactional: true,
   });
+  // transactional: true always yields delivered=[to], suppressed=[].
+  const result = sendResult.result!;
 
   // Compute conversation_id for this reply.
   const internalDomainsReply = await fetchInternalDomains(db);

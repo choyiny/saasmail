@@ -19,6 +19,7 @@ import TemplateEditorPage from "@/pages/TemplateEditorPage";
 import SetupPasskeyPage from "@/pages/SetupPasskeyPage";
 import InviteAcceptPage from "@/pages/InviteAcceptPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
+import SuppressionsPage from "@/pages/SuppressionsPage";
 import ApiKeysPage from "@/pages/ApiKeysPage";
 import DashboardLayout from "@/components/DashboardLayout";
 import PublicLayout from "@/components/PublicLayout";
@@ -30,6 +31,7 @@ import SequenceEditorPage from "@/pages/SequenceEditorPage";
 import InboxesPage from "./pages/InboxesPage";
 import SettingsPage from "@/pages/SettingsPage";
 import MessageLinkPage from "@/pages/MessageLinkPage";
+import UnsubscribePage from "@/pages/UnsubscribePage";
 
 const queryClient = new QueryClient();
 
@@ -127,10 +129,20 @@ function App() {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
 
+            {/* Public unsubscribe landing — token-authenticated, no session.
+                Lives outside AuthGuard so recipients (who are never logged in)
+                can land here from email links. See worker/src/routers/
+                unsubscribe-router.ts for the API. */}
+            <Route path="/unsubscribe" element={<UnsubscribePage />} />
+
             {/* Authenticated routes with shared layout */}
             <Route element={<AuthGuard />}>
               <Route element={<DashboardLayout />}>
                 <Route path="/admin/users" element={<AdminUsersPage />} />
+                <Route
+                  path="/admin/suppressions"
+                  element={<SuppressionsPage />}
+                />
                 <Route path="/templates" element={<TemplatesPage />} />
                 <Route path="/templates/new" element={<TemplateEditorPage />} />
                 <Route
