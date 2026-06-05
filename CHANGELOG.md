@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-04
+
 ### Added
 
 - Suppression list with admin UI at `/admin/suppressions` and CRUD API at `/api/suppressions` (admin-only).
@@ -356,7 +358,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/choyiny/saasmail/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/choyiny/saasmail/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/choyiny/saasmail/compare/v0.5.0...v0.5.1
