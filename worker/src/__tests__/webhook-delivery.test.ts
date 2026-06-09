@@ -1,10 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildWebhookPayload, sendWebhook } from "../lib/webhook-delivery";
 import { signWebhookBody } from "../lib/webhook-signature";
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe("buildWebhookPayload", () => {
   it("builds the documented shape, slices preview, defaults subject", () => {
@@ -49,15 +45,16 @@ describe("sendWebhook", () => {
   });
 
   it("POSTs JSON and signs the body when a secret is set", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchImpl = vi
+      .fn<typeof fetch>()
       .mockResolvedValue(new Response(null, { status: 200 }));
     const result = await sendWebhook(
       { url: "https://hook.d.com", secret: "shh" },
       payload,
+      fetchImpl,
     );
     expect(result).toEqual({ ok: true, status: 200 });
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toBe("https://hook.d.com");
     expect(init?.method).toBe("POST");
     const headers = new Headers(init?.headers);
@@ -68,35 +65,40 @@ describe("sendWebhook", () => {
   });
 
   it("omits the signature header when no secret", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchImpl = vi
+      .fn<typeof fetch>()
       .mockResolvedValue(new Response(null, { status: 204 }));
     const result = await sendWebhook(
       { url: "https://hook.d.com", secret: null },
       payload,
+      fetchImpl,
     );
     expect(result).toEqual({ ok: true, status: 204 });
-    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    const headers = new Headers(fetchImpl.mock.calls[0][1]?.headers);
     expect(headers.has("X-SaaSMail-Signature")).toBe(false);
   });
 
   it("returns ok:false with the error message when fetch throws", async () => {
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("boom"));
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new Error("boom"));
     const result = await sendWebhook(
       { url: "https://hook.d.com", secret: null },
       payload,
+      fetchImpl,
     );
     expect(result.ok).toBe(false);
     expect(result.error).toContain("boom");
   });
 
   it("reports ok:false for non-2xx without throwing", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("nope", { status: 500 }),
-    );
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response("nope", { status: 500 }));
     const result = await sendWebhook(
       { url: "https://hook.d.com", secret: null },
       payload,
+      fetchImpl,
     );
     expect(result).toEqual({ ok: false, status: 500 });
   });

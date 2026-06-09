@@ -54,10 +54,15 @@ export function buildWebhookPayload(args: {
   };
 }
 
-/** Awaitable single POST. Never throws; returns a delivery result. */
+/**
+ * Awaitable single POST. Never throws; returns a delivery result.
+ * `fetchImpl` is injectable so tests don't have to mutate the global `fetch`
+ * (which leaks across the parallel vitest-pool-workers isolates).
+ */
 export async function sendWebhook(
   config: WebhookConfig,
   payload: WebhookPayload,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<{ ok: boolean; status?: number; error?: string }> {
   const body = JSON.stringify(payload);
   const headers: Record<string, string> = {
@@ -71,7 +76,7 @@ export async function sendWebhook(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(config.url, {
+    const res = await fetchImpl(config.url, {
       method: "POST",
       headers,
       body,
