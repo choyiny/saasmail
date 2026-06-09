@@ -117,7 +117,9 @@ Payload:
   "subject": "Help with my order",
   "textPreview": "Hi, I can't log in…",
   "conversationId": "…",
-  "attachments": [{ "filename": "screenshot.png", "contentType": "image/png", "size": 20481 }],
+  "attachments": [
+    { "filename": "screenshot.png", "contentType": "image/png", "size": 20481 }
+  ],
   "auth": { "spf": "pass", "dkim": "pass", "dmarc": "pass" },
   "url": "https://mail.yourdomain.com/m/abc123"
 }

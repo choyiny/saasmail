@@ -82,7 +82,10 @@ describe("webhooks router", () => {
 
   it("POST /test returns 400 when unconfigured", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
-    const res = await authFetch("/api/webhook/test", { apiKey, method: "POST" });
+    const res = await authFetch("/api/webhook/test", {
+      apiKey,
+      method: "POST",
+    });
     expect(res.status).toBe(400);
   });
 
@@ -96,7 +99,10 @@ describe("webhooks router", () => {
       method: "PUT",
       body: JSON.stringify({ url: "http://127.0.0.1:1/webhook" }),
     });
-    const res = await authFetch("/api/webhook/test", { apiKey, method: "POST" });
+    const res = await authFetch("/api/webhook/test", {
+      apiKey,
+      method: "POST",
+    });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean };
     expect(typeof body.ok).toBe("boolean");
