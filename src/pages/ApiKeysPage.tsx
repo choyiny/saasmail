@@ -325,8 +325,8 @@ function WebhookSection() {
         <p className="text-xs font-light text-text-secondary">
           Fire an HTTP <code>POST</code> to an external automation (n8n, Make,
           etc.) whenever a new inbound message is received. Global, single
-          best-effort attempt, disabled by default. When a signing secret is set,
-          requests carry an{" "}
+          best-effort attempt, disabled by default. When a signing secret is
+          set, requests carry an{" "}
           <code>X-SaaSMail-Signature: sha256=&lt;hmac&gt;</code> header over the
           raw body.
         </p>

@@ -71,7 +71,10 @@ export async function sendWebhook(
     "X-SaaSMail-Event": payload.event,
   };
   if (config.secret) {
-    headers["X-SaaSMail-Signature"] = await signWebhookBody(body, config.secret);
+    headers["X-SaaSMail-Signature"] = await signWebhookBody(
+      body,
+      config.secret,
+    );
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -84,7 +87,10 @@ export async function sendWebhook(
     });
     return { ok: res.ok, status: res.status };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
   } finally {
     clearTimeout(timer);
   }
