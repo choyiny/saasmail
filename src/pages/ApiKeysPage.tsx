@@ -6,11 +6,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Copy, Check, Key, RefreshCw, Trash2 } from "lucide-react";
-import { fetchApiKeyInfo, generateApiKey, revokeApiKey } from "@/lib/api";
+import {
+  fetchApiKeyInfo,
+  generateApiKey,
+  revokeApiKey,
+  fetchWebhookConfig,
+  saveWebhookConfig,
+  testWebhook,
+} from "@/lib/api";
 import type { ApiKeyInfo } from "@/lib/api";
+import { useSession } from "@/lib/auth-client";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 
 export default function ApiKeysPage() {
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "admin";
   const [keyInfo, setKeyInfo] = useState<ApiKeyInfo | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -185,6 +195,8 @@ export default function ApiKeysPage() {
                 for available endpoints.
               </p>
             </div>
+
+            {isAdmin && <WebhookSection />}
           </>
         )}
       </div>
@@ -230,5 +242,172 @@ export default function ApiKeysPage() {
         </DialogContent>
       </Dialog>
     </PageContainer>
+  );
+}
+
+function WebhookSection() {
+  const [url, setUrl] = useState("");
+  const [hasSecret, setHasSecret] = useState(false);
+  const [secret, setSecret] = useState(""); // blank = unchanged on save
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchWebhookConfig()
+      .then((cfg) => {
+        setUrl(cfg.url);
+        setHasSecret(cfg.hasSecret);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function onSave() {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    setTestResult(null);
+    try {
+      // Omit `secret` when the field is left blank so we don't clobber an
+      // existing secret; send it only when the admin typed something.
+      const body: { url: string; secret?: string } = { url: url.trim() };
+      if (secret.length > 0) body.secret = secret;
+      const cfg = await saveWebhookConfig(body);
+      setUrl(cfg.url);
+      setHasSecret(cfg.hasSecret);
+      setSecret("");
+      setSuccess(cfg.url ? "Webhook saved." : "Webhook disabled.");
+    } catch {
+      setError("Failed to save webhook.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onClearSecret() {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const cfg = await saveWebhookConfig({ url: url.trim(), secret: null });
+      setHasSecret(cfg.hasSecret);
+      setSecret("");
+      setSuccess("Signing secret cleared.");
+    } catch {
+      setError("Failed to clear secret.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onTest() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const res = await testWebhook();
+      setTestResult(
+        res.ok
+          ? `Test delivered (HTTP ${res.status}).`
+          : `Test failed: ${res.error ?? `HTTP ${res.status}`}.`,
+      );
+    } catch {
+      setTestResult("Test failed: request error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-base font-semibold text-text-primary">Webhook</h2>
+      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+        <p className="text-xs font-light text-text-secondary">
+          Fire an HTTP <code>POST</code> to an external automation (n8n, Make,
+          etc.) whenever a new inbound message is received. Global, single
+          best-effort attempt, disabled by default. When a signing secret is set,
+          requests carry an{" "}
+          <code>X-SaaSMail-Signature: sha256=&lt;hmac&gt;</code> header over the
+          raw body.
+        </p>
+
+        <div className="mt-4 space-y-2">
+          <label
+            htmlFor="webhook-url"
+            className="text-xs font-medium uppercase tracking-wider text-text-tertiary"
+          >
+            Destination URL
+          </label>
+          <input
+            id="webhook-url"
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://your-automation/webhook"
+            disabled={busy}
+            className="h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
+          />
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <label
+            htmlFor="webhook-secret"
+            className="text-xs font-medium uppercase tracking-wider text-text-tertiary"
+          >
+            Signing secret (optional)
+          </label>
+          <input
+            id="webhook-secret"
+            type="password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            placeholder={
+              hasSecret ? "•••••••• (set — leave blank to keep)" : "none"
+            }
+            disabled={busy}
+            className="h-10 w-full max-w-sm rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
+          />
+          {hasSecret && (
+            <button
+              type="button"
+              onClick={onClearSecret}
+              disabled={busy}
+              className="text-xs font-light text-text-secondary hover:text-text-primary hover:underline disabled:opacity-60"
+            >
+              Clear secret
+            </button>
+          )}
+        </div>
+
+        {error && (
+          <p className="mt-3 text-xs text-red-600" role="alert">
+            {error}
+          </p>
+        )}
+        {success && <p className="mt-3 text-xs text-emerald-600">{success}</p>}
+        {testResult && (
+          <p className="mt-3 text-xs text-text-secondary">{testResult}</p>
+        )}
+
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={busy}
+            className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={onTest}
+            disabled={busy || !url.trim()}
+            className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Send test
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
