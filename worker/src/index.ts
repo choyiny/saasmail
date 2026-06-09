@@ -27,6 +27,7 @@ import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { notificationsRouter } from "./routers/notifications-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
+import { webhooksRouter } from "./routers/webhooks-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
@@ -214,6 +215,11 @@ app.route("/api/admin/inboxes", adminInboxesRouter);
 app.use("/api/suppressions/*", requireAdmin);
 app.use("/api/suppressions", requireAdmin);
 app.route("/api/suppressions", suppressionsRouter);
+
+// Webhook config — admin-only global instance config.
+app.use("/api/webhook", requireAdmin);
+app.use("/api/webhook/*", requireAdmin);
+app.route("/api/webhook", webhooksRouter);
 
 // Public unsubscribe endpoints — token-authenticated, no session/API key.
 // Allowlisted in `isUnauthenticatedPath` above.
