@@ -275,6 +275,7 @@ export async function cleanDb() {
     DELETE FROM email_templates;
     DELETE FROM api_keys;
     DELETE FROM invitations;
+    DELETE FROM app_settings;
     DELETE FROM oauth_consents;
     DELETE FROM oauth_access_tokens;
     DELETE FROM oauth_refresh_tokens;
