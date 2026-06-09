@@ -516,6 +516,36 @@ export async function revokeApiKey(): Promise<{ success: boolean }> {
   return apiFetch("/api/api-keys", { method: "DELETE" });
 }
 
+// --- Webhook (admin, global instance config) ---
+
+export interface WebhookConfigInfo {
+  url: string;
+  hasSecret: boolean;
+}
+
+export async function fetchWebhookConfig(): Promise<WebhookConfigInfo> {
+  return apiFetch<WebhookConfigInfo>("/api/webhook");
+}
+
+export async function saveWebhookConfig(body: {
+  url: string;
+  secret?: string | null;
+}): Promise<WebhookConfigInfo> {
+  return apiFetch("/api/webhook", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function testWebhook(): Promise<{
+  ok: boolean;
+  status?: number;
+  error?: string;
+}> {
+  return apiFetch("/api/webhook/test", { method: "POST" });
+}
+
 // --- Sequences ---
 
 export interface SequenceStep {
