@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   PenSquare,
   ArrowUpDown,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -44,6 +45,11 @@ interface InboxToolbarProps {
    *  toggle button next to the dropdown for discoverability. */
   sortSpec: InboxSortSpec;
   onSortChange: (spec: InboxSortSpec) => void;
+  /** Manually re-fetch the people list. Desktop-only button; mobile uses
+   *  pull-to-refresh in the list itself. */
+  onRefresh?: () => void;
+  /** True while a refresh is in flight — spins the refresh icon. */
+  refreshing?: boolean;
   /** Optional Compose button. Rendered to the right of the view toggle. */
   onCompose?: () => void;
 }
@@ -73,6 +79,8 @@ export default function InboxToolbar({
   onViewChange,
   sortSpec,
   onSortChange,
+  onRefresh,
+  refreshing,
   onCompose,
 }: InboxToolbarProps) {
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -326,6 +334,27 @@ export default function InboxToolbar({
           </div>
         )}
       </div>
+
+      {/* Refresh — desktop only. Mobile refreshes via pull-to-refresh on the
+          list itself, so the button would be redundant there. */}
+      {onRefresh && (
+        <>
+          <span
+            className="mx-0.5 hidden h-4 w-px bg-border sm:block"
+            aria-hidden
+          />
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label="Refresh"
+            title="Refresh"
+            className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-60 sm:inline-flex"
+          >
+            <RefreshCw size={13} className={cn(refreshing && "animate-spin")} />
+          </button>
+        </>
+      )}
 
       {/* View toggle — pinned to the right edge. Hidden on mobile (the
           table view is unusable at narrow widths). */}
