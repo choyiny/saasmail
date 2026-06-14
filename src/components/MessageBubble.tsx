@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
-import { Link2, Maximize2, Paperclip, Trash2 } from "lucide-react";
+import { Link2, Maximize2, Paperclip, Trash2, UserPen } from "lucide-react";
 import CcChips from "@/components/CcChips";
 import type { Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
@@ -22,6 +22,9 @@ interface MessageBubbleProps {
   onMarkRead: (email: Email) => void;
   onReply: (emailId: string) => void;
   onDelete: (emailId: string) => void;
+  /** Re-associate this received email with a different/new person. When
+   *  omitted, the action is hidden (e.g. group-conversation views). */
+  onReassign?: (email: Email) => void;
   compact?: boolean;
   renderHtml?: boolean;
 }
@@ -39,6 +42,7 @@ export default function MessageBubble({
   onMarkRead,
   onReply,
   onDelete,
+  onReassign,
   compact = false,
   renderHtml = false,
 }: MessageBubbleProps) {
@@ -213,6 +217,20 @@ export default function MessageBubble({
         >
           Reply
         </button>
+        {onReassign && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onReassign(email);
+            }}
+            data-testid="message-reassign"
+            className="flex items-center gap-1 text-[11px] text-text-tertiary hover:text-text-secondary"
+            title="Reassign to another person"
+          >
+            <UserPen size={12} />
+            Reassign
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();

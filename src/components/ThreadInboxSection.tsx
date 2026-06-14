@@ -28,6 +28,7 @@ interface ThreadInboxSectionProps {
   onMarkRead: (email: Email) => void;
   onReply: (emailId: string) => void;
   onDelete: (emailId: string) => void;
+  onReassign?: (email: Email) => void;
 }
 
 export default function ThreadInboxSection({
@@ -41,6 +42,7 @@ export default function ThreadInboxSection({
   onMarkRead,
   onReply,
   onDelete,
+  onReassign,
 }: ThreadInboxSectionProps) {
   // Within a group, emails arrive newest-first. Show the latest expanded (HTML)
   // and collapse older messages behind a toggle.
@@ -92,6 +94,7 @@ export default function ThreadInboxSection({
                   onMarkRead={onMarkRead}
                   onReply={onReply}
                   onDelete={onDelete}
+                  onReassign={onReassign}
                 />
               </Fragment>
             );
@@ -119,6 +122,7 @@ export default function ThreadInboxSection({
               onMarkRead={onMarkRead}
               onReply={onReply}
               onDelete={onDelete}
+              onReassign={onReassign}
               renderHtml
             />
           </Fragment>
