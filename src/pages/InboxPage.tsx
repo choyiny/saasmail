@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useOutletContext, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 
@@ -116,6 +116,10 @@ export default function InboxPage() {
     Set<string>
   >(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  // Manual refresh (desktop button / mobile pull-to-refresh) — separate from
+  // `peopleLoading` so a refresh keeps the current list visible (just a
+  // spinner) instead of flashing the full-pane "Loading…" placeholder.
+  const [refreshing, setRefreshing] = useState(false);
 
   // Resizable sidebar — the user can drag the right edge to make the
   // people list narrower (down to "just avatar + unread badge" mode).
@@ -134,24 +138,39 @@ export default function InboxPage() {
     sortSpec.key,
   ]);
 
+  // The current people query, derived from search + filters + sort + page.
+  // Shared by the debounced auto-load below and the manual refresh path so
+  // both always hit the same parameters.
+  const peopleQuery = useMemo(
+    () => ({
+      q: search || undefined,
+      recipient: filters.recipient,
+      unread: filters.unread,
+      hasAttachment: filters.hasAttachment,
+      sort: sortSpec.key,
+      direction: sortSpec.direction,
+      page: peoplePage,
+      limit: PEOPLE_PAGE_SIZE,
+    }),
+    [
+      search,
+      filters.recipient,
+      filters.unread,
+      filters.hasAttachment,
+      sortSpec.key,
+      sortSpec.direction,
+      peoplePage,
+    ],
+  );
+
   // Fetch the people list at the InboxPage level so both Table view
   // (PeopleTable) and List view (PersonList sidebar) see the same data.
   // Previously the fetch lived inside PersonList, which meant Table view
   // showed an empty state because PersonList wasn't mounted.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     setPeopleLoading(true);
     const t = setTimeout(() => {
-      fetchGroupedPeople({
-        q: search || undefined,
-        recipient: filters.recipient,
-        unread: filters.unread,
-        hasAttachment: filters.hasAttachment,
-        sort: sortSpec.key,
-        direction: sortSpec.direction,
-        page: peoplePage,
-        limit: PEOPLE_PAGE_SIZE,
-      })
+      fetchGroupedPeople(peopleQuery)
         .then((res) => {
           setItems(res.data);
           setPeopleTotal(res.total);
@@ -160,15 +179,21 @@ export default function InboxPage() {
         .finally(() => setPeopleLoading(false));
     }, 200);
     return () => clearTimeout(t);
-  }, [
-    search,
-    peoplePage,
-    filters.recipient,
-    filters.unread,
-    filters.hasAttachment,
-    sortSpec.key,
-    sortSpec.direction,
-  ]);
+  }, [peopleQuery]);
+
+  // Manual refresh: re-fetch the current page immediately (no debounce) while
+  // keeping the existing rows on screen. Returns the promise so the mobile
+  // pull-to-refresh spinner can wait on it.
+  const refreshPeople = useCallback(() => {
+    setRefreshing(true);
+    return fetchGroupedPeople(peopleQuery)
+      .then((res) => {
+        setItems(res.data);
+        setPeopleTotal(res.total);
+        setAggregates(res.aggregates);
+      })
+      .finally(() => setRefreshing(false));
+  }, [peopleQuery]);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -421,6 +446,8 @@ export default function InboxPage() {
             }}
             sortSpec={sortSpec}
             onSortChange={setSortSpec}
+            onRefresh={refreshPeople}
+            refreshing={refreshing}
             onCompose={onCompose}
           />
         </div>
@@ -594,6 +621,7 @@ export default function InboxPage() {
                 selectedIds={selectedIds}
                 onToggleSelected={toggleSelected}
                 onMarkPersonRead={handleMarkPersonRead}
+                onRefresh={refreshPeople}
                 compact={isCompact}
               />
               {/* Drag handle — visible on hover, full-height column. */}
