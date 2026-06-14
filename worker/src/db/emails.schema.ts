@@ -14,6 +14,10 @@ export const emails = sqliteTable(
     spf: text("spf"),
     dkim: text("dkim"),
     dmarc: text("dmarc"),
+    /** Cloudflare's spam score for the inbound message, in [0, 1].
+     * NULL when the upstream did not surface a score. Mirrors the
+     * recent extension of the single-email endpoint (#124). */
+    spamScore: real("spam_score"),
     isRead: integer("is_read").notNull().default(0),
     /**
      * JSON-encoded array of {"email","name"} objects for additional
