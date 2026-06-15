@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-15
+
+### Added
+
+- Inbox refresh: mobile pull-to-refresh (rubber-band indicator while fetching) and a desktop refresh button in the inbox toolbar. Both share a single `refreshPeople` path that re-fetches in place without flashing the full-pane loading state.
+
+### Dependencies
+
+- Bumped the radix-ui group with 7 updates (`@radix-ui/react-avatar`, `@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-label`, `@radix-ui/react-scroll-area`, `@radix-ui/react-separator`, `@radix-ui/react-slot`).
+- Bumped the tiptap group with 5 updates (`@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.24.0 to 3.26.0.
+- Bumped the cloudflare dev-dependency group with 4 updates (`@cloudflare/vite-plugin` 1.39.0 → 1.40.0, `@cloudflare/vitest-pool-workers` 0.16.10 → 0.16.13, `@cloudflare/workers-types` 4.20260601.1 → 4.20260608.1, `wrangler`).
+- Bumped `hono` from 4.12.18 to 4.12.23.
+
 ## [0.7.0] - 2026-06-04
 
 ### Added
@@ -358,7 +371,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/choyiny/saasmail/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/choyiny/saasmail/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/choyiny/saasmail/compare/v0.5.1...v0.5.2
