@@ -38,5 +38,6 @@ export const emails = sqliteTable(
       table.recipient,
       table.receivedAt,
     ),
+    index("emails_conversation_idx").on(table.conversationId),
   ],
 );

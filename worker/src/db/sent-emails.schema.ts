@@ -29,5 +29,7 @@ export const sentEmails = sqliteTable(
   },
   (table) => [
     index("sent_emails_person_sent_idx").on(table.personId, table.sentAt),
+    index("sent_emails_conversation_idx").on(table.conversationId),
+    index("sent_emails_from_sent_idx").on(table.fromAddress, table.sentAt),
   ],
 );
