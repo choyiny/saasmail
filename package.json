@@ -84,8 +84,8 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^18.3.6",
     "@vitejs/plugin-react-swc": "^4.3.0",
-    "@vitest/runner": "^4.1.7",
-    "@vitest/snapshot": "^4.1.7",
+    "@vitest/runner": "^4.1.8",
+    "@vitest/snapshot": "^4.1.8",
     "autoprefixer": "^10.4.21",
     "drizzle-kit": "^0.31.1",
     "husky": "^9.1.7",
@@ -96,7 +96,7 @@
     "tsx": "^4.22.3",
     "typescript": "^5.8.3",
     "vite": "^7.0.0",
-    "vitest": "^4.1.7",
+    "vitest": "^4.1.8",
     "wrangler": "^4.84.1"
   }
 }
