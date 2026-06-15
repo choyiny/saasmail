@@ -79,13 +79,13 @@
     "@cloudflare/vite-plugin": "^1.40.2",
     "@cloudflare/vitest-pool-workers": "^0.16.15",
     "@cloudflare/workers-types": "^4.20260615.1",
-    "@playwright/test": "^1.60.0",
+    "@playwright/test": "^1.61.0",
     "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^18.3.6",
     "@vitejs/plugin-react-swc": "^4.3.0",
-    "@vitest/runner": "^4.1.7",
-    "@vitest/snapshot": "^4.1.7",
+    "@vitest/runner": "^4.1.9",
+    "@vitest/snapshot": "^4.1.9",
     "autoprefixer": "^10.4.21",
     "drizzle-kit": "^0.31.1",
     "husky": "^9.1.7",
@@ -96,7 +96,7 @@
     "tsx": "^4.22.3",
     "typescript": "^5.8.3",
     "vite": "^7.3.5",
-    "vitest": "^4.1.7",
+    "vitest": "^4.1.9",
     "wrangler": "^4.84.1"
   }
 }
