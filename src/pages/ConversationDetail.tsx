@@ -247,6 +247,7 @@ export default function ConversationDetail({
         email={htmlPreviewEmail}
         open={htmlPreviewEmail !== null}
         onClose={() => setHtmlPreviewEmail(null)}
+        onUpdated={refetch}
       />
     </div>
   );

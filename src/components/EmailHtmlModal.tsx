@@ -13,6 +13,8 @@ import {
   Send,
   FileText,
   Code,
+  UserPen,
+  Check,
 } from "lucide-react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import {
@@ -21,13 +23,21 @@ import {
   trayContentClass,
 } from "@/components/Tray";
 import ThreadMessage from "@/components/ThreadMessage";
-import { fetchPersonEmails, type Email } from "@/lib/api";
+import {
+  fetchPersonEmails,
+  fetchStats,
+  reassignEmailPerson,
+  type Email,
+} from "@/lib/api";
+import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 interface EmailHtmlModalProps {
   email: Email | null;
   open: boolean;
   onClose: () => void;
+  /** Called after the message's From/To (person) is changed in-place. */
+  onUpdated?: () => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -58,10 +68,24 @@ export default function EmailHtmlModal({
   email,
   open,
   onClose,
+  onUpdated,
 }: EmailHtmlModalProps) {
   const [view, setView] = useState<"rendered" | "plain">("rendered");
   const [copied, setCopied] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  // In-place re-targeting of who this message is from/to (and, for sent
+  // messages, the reply recipient). See the editable From/To rows below.
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+  const [toVal, setToVal] = useState("");
+  const [fromVal, setFromVal] = useState("");
+  const [identities, setIdentities] = useState<string[]>([]);
+  // Local overrides so the modal reflects a save without waiting on the parent.
+  const [override, setOverride] = useState<{
+    from?: string;
+    to?: string;
+  } | null>(null);
   // Surrounding thread (oldest → newest, including the focal message
   // we re-filter at render time). Always loadable so even chat-mode
   // viewers can see prior messages without leaving the modal.
@@ -82,7 +106,26 @@ export default function EmailHtmlModal({
     setFullscreen(false);
     setThreadExpanded(false);
     setThreadEmails([]);
+    setEditing(false);
+    setEditErr(null);
+    setOverride(null);
   }, [email?.id]);
+
+  // Sender identities power the "From" dropdown when re-targeting a sent
+  // message. Loaded once per open; harmless for received messages.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetchStats()
+      .then((s) => {
+        if (!cancelled)
+          setIdentities((s.senderIdentities ?? []).map((i) => i.email));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   // Load the surrounding thread for this person + inbox when the
   // modal opens. Same call ReplyComposer makes — the response gives
@@ -127,8 +170,12 @@ export default function EmailHtmlModal({
 
   const isSent = email.type === "sent";
   const downloadable = (email.attachments ?? []).filter((a) => !a.contentId);
-  const fromAddr = isSent ? email.fromAddress : email.fromAddress;
-  const toAddr = isSent ? email.toAddress : email.recipient;
+  // `override` reflects an in-place edit before the parent refetches. Inline
+  // From/To editing is offered for SENT messages (the contact-form case);
+  // received messages re-attribute via the per-message Reassign action.
+  const fromAddr = override?.from ?? email.fromAddress;
+  const toAddr = override?.to ?? (isSent ? email.toAddress : email.recipient);
+  const canEdit = isSent;
   const senderForAvatar = isSent ? "you" : (fromAddr ?? email.recipient ?? "?");
   const color = avatarColor(senderForAvatar);
 
@@ -160,6 +207,59 @@ export default function EmailHtmlModal({
       /* ignore */
     }
   }
+
+  function startEdit() {
+    setToVal(toAddr ?? "");
+    setFromVal(fromAddr ?? "");
+    setEditErr(null);
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    if (!email) return;
+    const body: { email?: string; fromAddress?: string } = {};
+    const newTo = toVal.trim().toLowerCase();
+    const newFrom = fromVal.trim().toLowerCase();
+    if (newTo && newTo !== (toAddr ?? "").toLowerCase()) body.email = newTo;
+    if (newFrom && newFrom !== (fromAddr ?? "").toLowerCase())
+      body.fromAddress = newFrom;
+    if (!body.email && !body.fromAddress) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    setEditErr(null);
+    try {
+      const res = await reassignEmailPerson(email.id, body);
+      setOverride({
+        ...(res.email.toAddress != null ? { to: res.email.toAddress } : {}),
+        ...(res.email.fromAddress != null
+          ? { from: res.email.fromAddress }
+          : {}),
+      });
+      setEditing(false);
+      showToast({
+        kind: "success",
+        message: body.email
+          ? `Recipient set to ${body.email}`
+          : "Sending address updated",
+        description: body.email
+          ? "Replies to this message will now go there."
+          : undefined,
+        durationMs: 4500,
+      });
+      onUpdated?.();
+    } catch {
+      setEditErr("Couldn't save — check the addresses and try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // From options: the current sender first, then the other identities.
+  const fromOptions = Array.from(
+    new Set([fromAddr, ...identities].filter(Boolean) as string[]),
+  );
 
   return (
     // Non-modal tray (Gmail-style): the inbox stays interactive while
@@ -217,15 +317,80 @@ export default function EmailHtmlModal({
           {/* Compact metadata. */}
           <div className="shrink-0 divide-y divide-border/60 border-b border-border bg-bg-subtle/30">
             <TrayMetaRow label="From">
-              <span className="block truncate py-2 pr-3 text-sm text-text-primary">
-                {fromAddr || (isSent ? "you" : "—")}
-              </span>
+              {editing && canEdit ? (
+                <select
+                  value={fromVal}
+                  onChange={(e) => setFromVal(e.target.value)}
+                  className="my-1 w-full rounded-md border border-border bg-white px-2 py-1 text-sm text-text-primary ring-1 ring-gray-200"
+                >
+                  {fromOptions.map((o) => (
+                    <option key={o} value={o}>
+                      {o}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="flex items-center justify-between gap-2 pr-3">
+                  <span className="block truncate py-2 text-sm text-text-primary">
+                    {fromAddr || (isSent ? "you" : "—")}
+                  </span>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={startEdit}
+                      data-testid="view-edit-recipient"
+                      title="Change From / To"
+                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                    >
+                      <UserPen size={13} />
+                    </button>
+                  )}
+                </div>
+              )}
             </TrayMetaRow>
             <TrayMetaRow label="To">
-              <span className="block truncate py-2 pr-3 text-sm text-text-primary">
-                {toAddr || "—"}
-              </span>
+              {editing && canEdit ? (
+                <input
+                  type="email"
+                  value={toVal}
+                  onChange={(e) => setToVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveEdit();
+                  }}
+                  placeholder="recipient@example.com"
+                  className="my-1 w-full rounded-md border border-border bg-white px-2 py-1 text-sm text-text-primary ring-1 ring-gray-200"
+                />
+              ) : (
+                <span className="block truncate py-2 pr-3 text-sm text-text-primary">
+                  {toAddr || "—"}
+                </span>
+              )}
             </TrayMetaRow>
+            {editing && canEdit && (
+              <div className="flex items-center justify-end gap-2 px-3 py-2">
+                {editErr && (
+                  <span className="mr-auto text-xs text-red-400">
+                    {editErr}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="rounded-md border border-border px-2.5 py-1 text-xs text-text-secondary hover:bg-bg-muted"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveEdit}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white hover:bg-accent/90 disabled:opacity-50"
+                >
+                  <Check size={12} />
+                  {saving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            )}
             <TrayMetaRow label="Time">
               <span className="block truncate py-2 pr-3 text-sm text-text-primary">
                 {fullDate} · {fullTime}

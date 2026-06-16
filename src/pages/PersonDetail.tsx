@@ -12,9 +12,11 @@ import {
   type Email,
   type PersonEnrollmentInfo,
   type InboxDisplayMode,
+  type ReassignPersonResult,
 } from "@/lib/api";
 import { messageDomId, readMessageHash } from "@/lib/message-link";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
+import ReassignPersonModal from "@/components/ReassignPersonModal";
 import SequenceStatus from "@/components/SequenceStatus";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import ReplyComposer from "@/components/ReplyComposer";
@@ -112,6 +114,7 @@ export default function PersonDetail({
   const [enrollmentInfo, setEnrollmentInfo] =
     useState<PersonEnrollmentInfo | null>(null);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
+  const [reassignEmail, setReassignEmail] = useState<Email | null>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [expandedOlder, setExpandedOlder] = useState<Record<string, boolean>>(
     {},
@@ -204,6 +207,27 @@ export default function PersonDetail({
     await deleteEmail(emailId);
     setEmails((prev) => prev.filter((e) => e.id !== emailId));
     onEmailDelete(person.id, wasUnread);
+  }
+
+  function handleReassignDone(result: ReassignPersonResult) {
+    const moved = reassignEmail;
+    if (moved) {
+      const wasUnread = moved.type === "received" && moved.isRead === 0;
+      // The message now belongs to another person — drop it from this thread
+      // and let the parent decrement this person's counts (same as a delete
+      // from this view's perspective).
+      setEmails((prev) => prev.filter((e) => e.id !== moved.id));
+      onEmailDelete(person.id, wasUnread);
+    }
+    const target = result.person?.email ?? result.email.toAddress;
+    showToast({
+      kind: "success",
+      message: target ? `Moved to ${target}` : "Message re-targeted",
+      description: result.person?.created
+        ? "Created a new person and moved this message to them."
+        : "Replies to this message now go to them.",
+      durationMs: 5000,
+    });
   }
 
   const inboxGroups = useMemo(() => groupEmailsByInbox(emails), [emails]);
@@ -464,6 +488,7 @@ export default function PersonDetail({
                   onOpenHtml={setHtmlPreviewEmail}
                   onMarkRead={handleMarkRead}
                   onDelete={handleDelete}
+                  onReassign={setReassignEmail}
                   onSent={refetchEmails}
                   onOpenCompose={onOpenCompose}
                 />
@@ -486,6 +511,7 @@ export default function PersonDetail({
                   onMarkRead={handleMarkRead}
                   onReply={setReplyToEmailId}
                   onDelete={handleDelete}
+                  onReassign={setReassignEmail}
                 />
               </ThreadPaneScroller>
             );
@@ -518,6 +544,15 @@ export default function PersonDetail({
         email={htmlPreviewEmail}
         open={htmlPreviewEmail !== null}
         onClose={() => setHtmlPreviewEmail(null)}
+        onUpdated={refetchEmails}
+      />
+
+      <ReassignPersonModal
+        email={reassignEmail}
+        currentSender={person.name || person.email}
+        open={reassignEmail !== null}
+        onClose={() => setReassignEmail(null)}
+        onDone={handleReassignDone}
       />
 
       <EnrollSequenceModal

@@ -70,6 +70,8 @@ export interface Email {
   timestamp: number;
   attachmentCount?: number;
   attachments?: Attachment[];
+  /** Inbound Reply-To address, surfaced by the single-email endpoint. */
+  replyTo?: string | null;
 }
 
 export type InboxDisplayMode = "thread" | "chat";
@@ -263,6 +265,40 @@ export async function deleteEmail(
   id: string,
 ): Promise<{ success: boolean; attachmentsDeleted: number }> {
   return apiFetch(`/api/emails/${id}`, { method: "DELETE" });
+}
+
+export interface ReassignPersonResult {
+  success: boolean;
+  type: "received" | "sent";
+  email: {
+    id: string;
+    personId: string | null;
+    toAddress: string | null;
+    fromAddress: string | null;
+  };
+  person: {
+    id: string;
+    email: string;
+    name: string | null;
+    created: boolean;
+  } | null;
+}
+
+/**
+ * Re-target a message to a different/new person. For received messages, `email`
+ * re-attributes the sender's person. For sent messages, `email` also rewrites
+ * the recipient (`toAddress`) so replies route there, and `fromAddress` can
+ * switch the sending identity.
+ */
+export async function reassignEmailPerson(
+  emailId: string,
+  body: { email?: string; name?: string | null; fromAddress?: string },
+): Promise<ReassignPersonResult> {
+  return apiFetch(`/api/emails/${emailId}/person`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function deletePerson(id: string): Promise<{ success: boolean }> {
