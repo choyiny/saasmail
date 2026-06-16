@@ -245,6 +245,23 @@ export default function ApiKeysPage() {
   );
 }
 
+// A self-contained prompt the user can paste into any AI assistant to get
+// signature-verification code in their own stack — keeps setup instructions
+// in-app without shipping per-language code samples or a docs site.
+const VERIFY_PROMPT = `Write code for my webhook endpoint to verify incoming SaaSMail webhooks.
+
+Each request includes a header:
+  X-SaaSMail-Signature: sha256=<hex>
+where <hex> is the HMAC-SHA256 of the EXACT raw request body (the raw bytes, before any JSON parsing), keyed with my webhook signing secret.
+
+The code should:
+1. Read the raw request body.
+2. Compute HMAC-SHA256(rawBody, secret) and hex-encode it.
+3. Compare "sha256=" + that hex to the header value using a constant-time comparison.
+4. Reject the request (401) if they don't match.
+
+My stack: <your language/framework, e.g. Node/Express, Python/FastAPI, Cloudflare Workers>`;
+
 function WebhookSection() {
   const [url, setUrl] = useState("");
   const [hasSecret, setHasSecret] = useState(false);
@@ -253,6 +270,13 @@ function WebhookSection() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
+
+  function copyVerifyPrompt() {
+    navigator.clipboard.writeText(VERIFY_PROMPT);
+    setPromptCopied(true);
+    setTimeout(() => setPromptCopied(false), 1500);
+  }
 
   useEffect(() => {
     fetchWebhookConfig()
@@ -377,6 +401,40 @@ function WebhookSection() {
               Clear secret
             </button>
           )}
+        </div>
+
+        {/* In-app verification guidance — no docs site, so hand the user an
+            AI prompt that generates verifier code for whatever stack they use. */}
+        <div className="mt-4 rounded-[6px] border border-border bg-bg-subtle p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-text-primary">
+              Verifying signatures
+            </p>
+            <button
+              type="button"
+              onClick={copyVerifyPrompt}
+              className="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-border px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+            >
+              {promptCopied ? (
+                <>
+                  <Check size={12} />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy size={12} />
+                  Copy prompt
+                </>
+              )}
+            </button>
+          </div>
+          <p className="mt-1 text-xs font-light text-text-secondary">
+            To check the signature on your receiver, paste this prompt into your
+            AI assistant — it generates verification code for your stack.
+          </p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-[6px] bg-card p-2.5 text-[11px] font-mono leading-relaxed text-text-secondary ring-1 ring-border">
+            {VERIFY_PROMPT}
+          </pre>
         </div>
 
         {error && (
