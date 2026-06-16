@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-06-16
+
+### Performance
+
+- Added database indexes for hot query paths to avoid full table scans: `emails.conversation_id`, `sent_emails.conversation_id` (thread lookups), `sent_emails.(from_address, sent_at)` (inbox-scoped sent listings), `users.role` (inbound-email admin fanout), `invitations.created_at`, and `suppressions.created_at` (list ordering). Indexes declared with `CREATE INDEX IF NOT EXISTS` so re-applying is safe.
+
+### Dependencies
+
+- Bumped the testing group with 4 updates: `@playwright/test` 1.60.0 → 1.61.0, `@vitest/runner`, `@vitest/snapshot`, and `vitest` 4.1.7 → 4.1.9.
+- Bumped the better-auth group with 2 updates: `@better-auth/passkey` and `better-auth` 1.6.11 → 1.6.18.
+- Bumped the tiptap group with 5 updates (`@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.26.0 to 3.26.1.
+- Bumped `@codemirror/view` from 6.43.0 to 6.43.1.
+- Bumped the cloudflare dev-dependency group with 4 updates: `@cloudflare/vite-plugin` 1.40.0 → 1.40.2, `@cloudflare/vitest-pool-workers` 0.16.13 → 0.16.15, `@cloudflare/workers-types` 4.20260608.1 → 4.20260615.1, `wrangler` 4.98.0 → 4.100.0.
+- Bumped `vite` from 7.3.2 to 7.3.5.
+- Bumped `dompurify` from 3.4.0 to 3.4.9.
+
 ## [0.8.0] - 2026-06-15
 
 ### Added
@@ -372,7 +388,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/choyiny/saasmail/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/choyiny/saasmail/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/choyiny/saasmail/compare/v0.5.2...v0.6.0
