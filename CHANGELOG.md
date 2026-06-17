@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-17
+
+### Added
+
+- Re-target a message to a different or new person. New `PATCH /api/emails/:id/person` accepts `{ email?, name?, fromAddress? }` and handles both received and sent messages: for a received message it re-attributes the sender's person; for a sent message — e.g. a contact-form notification mailed from a generic address with the real submitter in the body — it re-attributes the person AND rewrites the stored `toAddress` so a reply reaches them, with an optional `fromAddress` to switch the sending identity. Conversation threading is left intact and per-person counts recomputed. In the UI: a per-message "Reassign" control on both received and sent messages (pre-filled from the inbound `Reply-To` when present), plus inline-editable From/To rows in the message viewer for sent messages.
+
 ## [0.8.0] - 2026-06-15
 
 ### Added
@@ -372,7 +378,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/choyiny/saasmail/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/choyiny/saasmail/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/choyiny/saasmail/compare/v0.5.2...v0.6.0
