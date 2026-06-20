@@ -16,6 +16,7 @@ import {
   computeFanoutTargets,
 } from "./lib/notification-fanout";
 import { sanitizeFilename } from "./lib/sanitize-filename";
+import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -259,6 +260,32 @@ export async function handleEmail(
         console.warn("Real-time fanout error:", err);
       }
     })(),
+  );
+
+  // Best-effort outbound webhook for external automation (n8n / Make / etc.).
+  // No-op unless an admin has configured a destination URL. Mirrors the push
+  // fan-out: fire-and-forget via ctx.waitUntil so a slow/failing receiver
+  // never blocks ingestion. One event per received message (after dedupe).
+  deliverWebhook(
+    db,
+    ctx,
+    buildWebhookPayload({
+      emailId,
+      receivedAt: now,
+      inbox: recipientCanonical,
+      fromAddress: parsed.from.address,
+      fromName: parsed.from.name || null,
+      subject: parsed.subject,
+      bodyText: parsed.bodyText,
+      conversationId,
+      attachments: cappedAttachments.map((a) => ({
+        filename: sanitizeFilename(a.filename),
+        contentType: a.contentType,
+        size: a.content.byteLength,
+      })),
+      auth: parsed.auth,
+      baseUrl: env.BASE_URL,
+    }),
   );
 
   // Cancel any active sequences for this person

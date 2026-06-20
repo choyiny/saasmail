@@ -6,11 +6,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Copy, Check, Key, RefreshCw, Trash2 } from "lucide-react";
-import { fetchApiKeyInfo, generateApiKey, revokeApiKey } from "@/lib/api";
+import {
+  fetchApiKeyInfo,
+  generateApiKey,
+  revokeApiKey,
+  fetchWebhookConfig,
+  saveWebhookConfig,
+  testWebhook,
+} from "@/lib/api";
 import type { ApiKeyInfo } from "@/lib/api";
+import { useSession } from "@/lib/auth-client";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 
 export default function ApiKeysPage() {
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "admin";
   const [keyInfo, setKeyInfo] = useState<ApiKeyInfo | null>(null);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -185,6 +195,8 @@ export default function ApiKeysPage() {
                 for available endpoints.
               </p>
             </div>
+
+            {isAdmin && <WebhookSection />}
           </>
         )}
       </div>
@@ -230,5 +242,230 @@ export default function ApiKeysPage() {
         </DialogContent>
       </Dialog>
     </PageContainer>
+  );
+}
+
+// A self-contained prompt the user can paste into any AI assistant to get
+// signature-verification code in their own stack — keeps setup instructions
+// in-app without shipping per-language code samples or a docs site.
+const VERIFY_PROMPT = `Write code for my webhook endpoint to verify incoming SaaSMail webhooks.
+
+Each request includes a header:
+  X-SaaSMail-Signature: sha256=<hex>
+where <hex> is the HMAC-SHA256 of the EXACT raw request body (the raw bytes, before any JSON parsing), keyed with my webhook signing secret.
+
+The code should:
+1. Read the raw request body.
+2. Compute HMAC-SHA256(rawBody, secret) and hex-encode it.
+3. Compare "sha256=" + that hex to the header value using a constant-time comparison.
+4. Reject the request (401) if they don't match.
+
+My stack: <your language/framework, e.g. Node/Express, Python/FastAPI, Cloudflare Workers>`;
+
+function WebhookSection() {
+  const [url, setUrl] = useState("");
+  const [hasSecret, setHasSecret] = useState(false);
+  const [secret, setSecret] = useState(""); // blank = unchanged on save
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
+
+  function copyVerifyPrompt() {
+    navigator.clipboard.writeText(VERIFY_PROMPT);
+    setPromptCopied(true);
+    setTimeout(() => setPromptCopied(false), 1500);
+  }
+
+  useEffect(() => {
+    fetchWebhookConfig()
+      .then((cfg) => {
+        setUrl(cfg.url);
+        setHasSecret(cfg.hasSecret);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function onSave() {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    setTestResult(null);
+    try {
+      // Omit `secret` when the field is left blank so we don't clobber an
+      // existing secret; send it only when the admin typed something.
+      const body: { url: string; secret?: string } = { url: url.trim() };
+      if (secret.length > 0) body.secret = secret;
+      const cfg = await saveWebhookConfig(body);
+      setUrl(cfg.url);
+      setHasSecret(cfg.hasSecret);
+      setSecret("");
+      setSuccess(cfg.url ? "Webhook saved." : "Webhook disabled.");
+    } catch {
+      setError("Failed to save webhook.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onClearSecret() {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const cfg = await saveWebhookConfig({ url: url.trim(), secret: null });
+      setHasSecret(cfg.hasSecret);
+      setSecret("");
+      setSuccess("Signing secret cleared.");
+    } catch {
+      setError("Failed to clear secret.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onTest() {
+    setBusy(true);
+    setTestResult(null);
+    try {
+      const res = await testWebhook();
+      setTestResult(
+        res.ok
+          ? `Test delivered (HTTP ${res.status}).`
+          : `Test failed: ${res.error ?? `HTTP ${res.status}`}.`,
+      );
+    } catch {
+      setTestResult("Test failed: request error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-base font-semibold text-text-primary">Webhook</h2>
+      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+        <p className="text-xs font-light text-text-secondary">
+          Fire an HTTP <code>POST</code> to an external automation (n8n, Make,
+          etc.) whenever a new inbound message is received. Global, single
+          best-effort attempt, disabled by default. When a signing secret is
+          set, requests carry an{" "}
+          <code>X-SaaSMail-Signature: sha256=&lt;hmac&gt;</code> header over the
+          raw body.
+        </p>
+
+        <div className="mt-4 space-y-2">
+          <label
+            htmlFor="webhook-url"
+            className="text-xs font-medium uppercase tracking-wider text-text-tertiary"
+          >
+            Destination URL
+          </label>
+          <input
+            id="webhook-url"
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://your-automation/webhook"
+            disabled={busy}
+            className="h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
+          />
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <label
+            htmlFor="webhook-secret"
+            className="text-xs font-medium uppercase tracking-wider text-text-tertiary"
+          >
+            Signing secret (optional)
+          </label>
+          <input
+            id="webhook-secret"
+            type="password"
+            value={secret}
+            onChange={(e) => setSecret(e.target.value)}
+            placeholder={
+              hasSecret ? "•••••••• (set — leave blank to keep)" : "none"
+            }
+            disabled={busy}
+            className="h-10 w-full max-w-sm rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
+          />
+          {hasSecret && (
+            <button
+              type="button"
+              onClick={onClearSecret}
+              disabled={busy}
+              className="text-xs font-light text-text-secondary hover:text-text-primary hover:underline disabled:opacity-60"
+            >
+              Clear secret
+            </button>
+          )}
+        </div>
+
+        {/* In-app verification guidance — no docs site, so hand the user an
+            AI prompt that generates verifier code for whatever stack they use. */}
+        <div className="mt-4 rounded-[6px] border border-border bg-bg-subtle p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-text-primary">
+              Verifying signatures
+            </p>
+            <button
+              type="button"
+              onClick={copyVerifyPrompt}
+              className="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-border px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+            >
+              {promptCopied ? (
+                <>
+                  <Check size={12} />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy size={12} />
+                  Copy prompt
+                </>
+              )}
+            </button>
+          </div>
+          <p className="mt-1 text-xs font-light text-text-secondary">
+            To check the signature on your receiver, paste this prompt into your
+            AI assistant — it generates verification code for your stack.
+          </p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-[6px] bg-card p-2.5 text-[11px] font-mono leading-relaxed text-text-secondary ring-1 ring-border">
+            {VERIFY_PROMPT}
+          </pre>
+        </div>
+
+        {error && (
+          <p className="mt-3 text-xs text-red-600" role="alert">
+            {error}
+          </p>
+        )}
+        {success && <p className="mt-3 text-xs text-emerald-600">{success}</p>}
+        {testResult && (
+          <p className="mt-3 text-xs text-text-secondary">{testResult}</p>
+        )}
+
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={busy}
+            className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+          <button
+            type="button"
+            onClick={onTest}
+            disabled={busy || !url.trim()}
+            className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Send test
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
