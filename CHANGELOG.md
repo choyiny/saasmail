@@ -7,18 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-06-15
+## [0.8.0] - 2026-06-20
 
 ### Added
 
 - Inbox refresh: mobile pull-to-refresh (rubber-band indicator while fetching) and a desktop refresh button in the inbox toolbar. Both share a single `refreshPeople` path that re-fetches in place without flashing the full-pane loading state.
+- Re-target a message to a different or new person. New `PATCH /api/emails/:id/person` accepts `{ email?, name?, fromAddress? }` and handles both received and sent messages: for a received message it re-attributes the sender's person; for a sent message — e.g. a contact-form notification mailed from a generic address with the real submitter in the body — it re-attributes the person AND rewrites the stored `toAddress` so a reply reaches them, with an optional `fromAddress` to switch the sending identity. Conversation threading is left intact and per-person counts recomputed. In the UI: a per-message "Reassign" control on both received and sent messages (pre-filled from the inbound `Reply-To` when present), plus inline-editable From/To rows in the message viewer for sent messages.
+
+### Performance
+
+- Added database indexes for hot query paths to avoid full table scans: `emails.conversation_id` and `sent_emails.conversation_id` (group thread lookups), `sent_emails.(from_address, sent_at)` (inbox-scoped sent listings), `users.role` (inbound-email admin fan-out), and `invitations.created_at` / `suppressions.created_at` (list ordering). Migration `0027` uses `CREATE INDEX IF NOT EXISTS`, so re-applying is safe.
 
 ### Dependencies
 
 - Bumped the radix-ui group with 7 updates (`@radix-ui/react-avatar`, `@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-label`, `@radix-ui/react-scroll-area`, `@radix-ui/react-separator`, `@radix-ui/react-slot`).
-- Bumped the tiptap group with 5 updates (`@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.24.0 to 3.26.0.
-- Bumped the cloudflare dev-dependency group with 4 updates (`@cloudflare/vite-plugin` 1.39.0 → 1.40.0, `@cloudflare/vitest-pool-workers` 0.16.10 → 0.16.13, `@cloudflare/workers-types` 4.20260601.1 → 4.20260608.1, `wrangler`).
+- Bumped the tiptap group (`@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.24.0 to 3.26.1.
+- Bumped the cloudflare dev-dependency group (`@cloudflare/vite-plugin` 1.39.0 → 1.40.2, `@cloudflare/vitest-pool-workers` 0.16.10 → 0.16.15, `@cloudflare/workers-types` 4.20260601.1 → 4.20260615.1, `wrangler` → 4.100.0).
+- Bumped the better-auth group (`@better-auth/passkey`, `better-auth`) from 1.6.11 to 1.6.18.
+- Bumped the testing dev-dependency group (`@playwright/test` 1.60.0 → 1.61.0, `@vitest/runner`, `@vitest/snapshot`, `vitest` 4.1.7 → 4.1.9).
 - Bumped `hono` from 4.12.18 to 4.12.23.
+- Bumped `@codemirror/view` from 6.43.0 to 6.43.1.
+- Bumped `vite` from 7.3.2 to 7.3.5.
+- Bumped `dompurify` from 3.4.0 to 3.4.9.
 
 ## [0.7.0] - 2026-06-04
 
@@ -31,7 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `transactional: boolean` flag on `POST /api/send` (default `false`) to bypass suppression checks and unsubscribe injection for account-critical mail (password resets, OTPs, system notifications).
 - `suppressed: string[]` field on the `POST /api/send` response, listing recipients that were dropped because they're on the suppression list.
 - Sequence dispatcher and template preview/test send now respect the suppression list — unsubscribed recipients no longer receive scheduled or test sends.
-- Re-target a message to a different or new person. New `PATCH /api/emails/:id/person` accepts `{ email?, name?, fromAddress? }` and handles both received and sent messages: for a received message it re-attributes the sender's person; for a sent message — e.g. a contact-form notification mailed from a generic address with the real submitter in the body — it re-attributes the person AND rewrites the stored `toAddress` so a reply reaches them, with an optional `fromAddress` to switch the sending identity. Conversation threading is left intact and per-person counts recomputed. In the UI: a per-message "Reassign" control on both received and sent messages (pre-filled from the inbound `Reply-To` when present), plus inline-editable From/To rows in the message viewer for sent messages.
 
 ### Changed
 
