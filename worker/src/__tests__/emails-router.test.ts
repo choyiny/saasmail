@@ -72,6 +72,35 @@ describe("emails router", () => {
       expect(data[1].type).toBe("received");
     });
 
+    it("surfaces delivery status: 'failed' on sent, null on received", async () => {
+      const db = getDb();
+      await createTestPerson({ id: "s1", email: "a@test.com" });
+      await createTestEmail({ id: "e1", personId: "s1" });
+
+      const now = Math.floor(Date.now() / 1000);
+      await db.insert(sentEmails).values({
+        id: "se-failed",
+        personId: "s1",
+        fromAddress: "me@saasmail.test",
+        toAddress: "a@test.com",
+        subject: "Rejected",
+        bodyHtml: "<p>nope</p>",
+        bodyText: null,
+        resendId: null,
+        status: "failed",
+        sentAt: now + 10,
+        createdAt: now + 10,
+      });
+
+      const res = await authFetch("/api/emails/by-person/s1", { apiKey });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { emails: any[] };
+      const sent = body.emails.find((e) => e.type === "sent");
+      const received = body.emails.find((e) => e.type === "received");
+      expect(sent.status).toBe("failed");
+      expect(received.status).toBeNull();
+    });
+
     it("includes sent replies when filtering by recipient", async () => {
       const db = getDb();
       await createTestPerson({ id: "s1", email: "a@test.com" });

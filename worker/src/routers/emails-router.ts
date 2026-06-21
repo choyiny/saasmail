@@ -48,6 +48,15 @@ export const EmailSchema = z.object({
   isRead: z.number().nullable(),
   cc: z.array(CcEntrySchema),
   timestamp: z.number(),
+  status: z
+    .string()
+    .nullable()
+    .optional()
+    .openapi({
+      description:
+        "Delivery status for sent messages: 'sent' or 'failed' (the provider " +
+        "rejected it). Null for received messages.",
+    }),
   attachmentCount: z.number().optional(),
   replyTo: z
     .string()
@@ -178,6 +187,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       timestamp: sentEmails.sentAt,
       fromAddress: sentEmails.fromAddress,
       toAddress: sentEmails.toAddress,
+      status: sentEmails.status,
     })
     .from(sentEmails)
     .where(and(...sentConditions))
@@ -198,6 +208,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       isRead: e.isRead,
       cc: parseCc(e.cc),
       timestamp: e.timestamp,
+      status: null,
     })),
     ...sent.map((e) => ({
       id: e.id,
@@ -212,6 +223,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       isRead: null,
       cc: parseCc(e.cc),
       timestamp: e.timestamp,
+      status: e.status,
     })),
   ].sort((a, b) => b.timestamp - a.timestamp);
 
@@ -421,6 +433,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
       replyTo: null,
       cc: parseCc(sent.cc),
       timestamp: sent.sentAt,
+      status: sent.status,
       attachments: sentAtts,
     },
     200,
