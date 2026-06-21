@@ -193,6 +193,7 @@ export async function handleEmail(
     spf: parsed.auth.spf,
     dkim: parsed.auth.dkim,
     dmarc: parsed.auth.dmarc,
+    spamScore: parsed.spamScore,
     isRead: 0,
     cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
     conversationId,
