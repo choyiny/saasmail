@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-21
+
+### Added
+
+- Outbound webhook on inbound messages: configure a target URL via the admin API-keys page and saasmail will POST a `message.received` payload (signed with HMAC-SHA256) whenever a new email arrives. Downstream services can react in real time without polling.
+  - `GET /api/admin/webhooks` / `PUT /api/admin/webhooks` / `POST /api/admin/webhooks/test` admin endpoints backed by `app_settings`.
+  - HMAC-SHA256 `X-Saasmail-Signature` header on every delivery; delivery is best-effort (fire-and-forget, non-blocking).
+  - Frontend webhook config UI on the API-keys admin page.
+  - In-app signature-verification guidance: a copyable AI prompt generates verifier code for your stack.
+
+### Dependencies
+
+- Bumped `hono` from 4.12.23 to 4.12.25.
+- Bumped `dompurify` from 3.4.9 to 3.4.11.
+
 ## [0.8.0] - 2026-06-20
 
 ### Added
@@ -381,7 +396,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/choyiny/saasmail/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/choyiny/saasmail/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/choyiny/saasmail/compare/v0.5.2...v0.6.0
