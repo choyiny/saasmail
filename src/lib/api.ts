@@ -68,6 +68,8 @@ export interface Email {
   isRead: number | null;
   cc: CcEntry[];
   timestamp: number;
+  /** Delivery status for sent messages: "sent" | "failed". Null for received. */
+  status?: string | null;
   attachmentCount?: number;
   attachments?: Attachment[];
   /** Inbound Reply-To address, surfaced by the single-email endpoint. */

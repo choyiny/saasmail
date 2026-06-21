@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
-import { Link2, Maximize2, Paperclip, Trash2, UserPen } from "lucide-react";
+import {
+  AlertTriangle,
+  Link2,
+  Maximize2,
+  Paperclip,
+  Trash2,
+  UserPen,
+} from "lucide-react";
 import CcChips from "@/components/CcChips";
 import type { Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
@@ -50,6 +57,7 @@ export default function MessageBubble({
   const [expanded, setExpanded] = useState(false);
   const isSent = email.type === "sent";
   const isUnread = email.type === "received" && email.isRead === 0;
+  const failedToSend = isSent && email.status === "failed";
 
   const text =
     email.bodyText ||
@@ -103,7 +111,11 @@ export default function MessageBubble({
       data-testid="thread-message"
       data-email-id={email.id}
       className={`group ${compact ? "px-3 py-1.5" : "px-4 sm:px-6 py-2"} hover:bg-bg-muted/50 transition-colors scroll-mt-20 ${
-        isUnread ? "bg-accent/5" : ""
+        failedToSend
+          ? "border-l-2 border-red-500/60 bg-red-500/5"
+          : isUnread
+            ? "bg-accent/5"
+            : ""
       }`}
       onClick={handleClick}
     >
@@ -119,6 +131,16 @@ export default function MessageBubble({
         <span className="text-[11px] text-text-tertiary truncate min-w-0">
           To: {toAddress}
         </span>
+        {failedToSend && (
+          <span
+            data-testid="message-failed-badge"
+            title="This message was rejected by the email provider and was not delivered."
+            className="inline-flex items-center gap-1 rounded-[5px] bg-red-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-500 shrink-0"
+          >
+            <AlertTriangle size={10} />
+            Failed to send
+          </span>
+        )}
         <span className="text-[10px] text-text-tertiary shrink-0 ml-auto">
           {dateStr} {timeStr}
         </span>

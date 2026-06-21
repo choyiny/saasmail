@@ -1,4 +1,4 @@
-import { Send, Inbox as InboxIcon } from "lucide-react";
+import { Send, Inbox as InboxIcon, AlertTriangle } from "lucide-react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import type { Email } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,7 @@ export default function ThreadMessage({
   highlight,
 }: ThreadMessageProps) {
   const isSent = email.type === "sent";
+  const failedToSend = isSent && email.status === "failed";
   const sender = isSent
     ? `you (${email.fromAddress ?? "—"})`
     : (email.fromAddress ?? "Unknown");
@@ -43,13 +44,20 @@ export default function ThreadMessage({
         <span
           className={cn(
             "inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-            isSent
-              ? "bg-bg-muted text-text-secondary"
-              : "bg-violet/10 text-violet",
+            failedToSend
+              ? "bg-red-500/10 text-red-500"
+              : isSent
+                ? "bg-bg-muted text-text-secondary"
+                : "bg-violet/10 text-violet",
           )}
           style={!isSent ? { color: "#7c5cfc" } : undefined}
         >
-          {isSent ? (
+          {failedToSend ? (
+            <>
+              <AlertTriangle size={9} />
+              Failed to send
+            </>
+          ) : isSent ? (
             <>
               <Send size={9} />
               Sent
