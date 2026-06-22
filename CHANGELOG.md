@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-22
+
+### Added
+
+- `spam_score` column on the `emails` table: a nullable real value extracted from the upstream `X-Spam-Score` header and persisted on inbound insert. Migration `0028`.
+- Failed-send visual indicator: sends stored with `status='failed'` now surface a "Failed to send" badge with a red tint in both chat-bubble and thread views. `status` is also included in the conversation and single-email API responses.
+
+### Dependencies
+
+- Bumped `actions/checkout` from 6 to 7.
+- Bumped the radix-ui group with 7 updates (`@radix-ui/react-avatar` 1.1.12 → 1.2.0, `@radix-ui/react-dialog` 1.1.16 → 1.1.17, `@radix-ui/react-dropdown-menu` 2.1.17 → 2.1.18, `@radix-ui/react-label` 2.1.9 → 2.1.10, `@radix-ui/react-scroll-area` 1.2.11 → 1.2.12, `@radix-ui/react-separator` 1.1.9 → 1.1.10, `@radix-ui/react-slot` 1.2.5 → 1.3.0).
+- Bumped the tiptap group with 5 updates (`@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.26.1 to 3.27.1.
+- Bumped the cloudflare dev-dependency group with 4 updates (`@cloudflare/vite-plugin` 1.40.2 → 1.42.1, `@cloudflare/vitest-pool-workers` 0.16.15 → 0.16.18, `@cloudflare/workers-types` 4.20260615.1 → 4.20260621.1, `wrangler`).
+- Bumped the better-auth group (`@better-auth/passkey`, `better-auth`) from 1.6.18 to 1.6.20.
+
 ## [0.9.0] - 2026-06-21
 
 ### Added
@@ -396,7 +411,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/choyiny/saasmail/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/choyiny/saasmail/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/choyiny/saasmail/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
