@@ -23,7 +23,7 @@ export interface SendEmailResult {
 }
 
 export interface EmailSender {
-  provider: "resend" | "cloudflare" | "none" | "demo" | "bavimail";
+  provider: "resend" | "cloudflare" | "none" | "demo" | "bavimail" | "postmark";
   send(params: SendEmailParams): Promise<SendEmailResult>;
   maxAttachmentBytes(): number;
 }
