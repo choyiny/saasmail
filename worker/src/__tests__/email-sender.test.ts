@@ -494,6 +494,15 @@ describe("PostmarkSender", () => {
     });
   }
 
+  // NOTE: the production default `fetch` must be bound to globalThis — an
+  // unbound global fetch invoked as a method reference (`this.fetchFn(...)`)
+  // throws "Illegal invocation" in the Workers runtime (see the constructor).
+  // We deliberately do NOT unit-test the un-injected default path here:
+  // exercising it makes a real outbound fetch, which the vitest-pool-workers
+  // runtime blocks with a "Network connection lost" rejection that leaks across
+  // isolates and fails unrelated tests. The binding is covered by production
+  // verification instead.
+
   it("sends a basic email with the server token and correct body", async () => {
     const fetchMock = vi
       .fn()

@@ -13,10 +13,17 @@ async function extractPostmarkError(res: Response): Promise<string> {
 
 export class PostmarkSender implements EmailSender {
   readonly provider = "postmark" as const;
-  constructor(
-    private apiKey: string,
-    private fetchFn: typeof fetch = fetch,
-  ) {}
+  private apiKey: string;
+  private fetchFn: typeof fetch;
+
+  constructor(apiKey: string, fetchFn?: typeof fetch) {
+    this.apiKey = apiKey;
+    // Bind to globalThis: invoking the global `fetch` as a method reference
+    // (`this.fetchFn(...)`) throws "Illegal invocation" in the Cloudflare
+    // Workers runtime. Tests inject their own fetch, so the unbound default
+    // only ever runs in production — exactly where it would break.
+    this.fetchFn = fetchFn ?? fetch.bind(globalThis);
+  }
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
     try {
@@ -87,6 +94,11 @@ export class PostmarkSender implements EmailSender {
       return { id: data.MessageID ?? null, error: null };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      console.error(
+        "[PostmarkSender] send failed:",
+        message,
+        e instanceof Error ? e.stack : "",
+      );
       return { id: null, error: { message } };
     }
   }
