@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import { createEmailSender, BavimailSender } from "../lib/email-sender";
+import {
+  createEmailSender,
+  BavimailSender,
+  PostmarkSender,
+} from "../lib/email-sender";
 
 describe("createEmailSender", () => {
   it("picks Resend when RESEND_API_KEY is set", () => {
@@ -61,6 +65,24 @@ describe("createEmailSender", () => {
       RESEND_API_KEY: "re_test",
     } as unknown as CloudflareBindings);
     expect(sender.provider).toBe("resend");
+  });
+
+  it("picks Postmark when POSTMARK_API_KEY is set, even over Resend and Cloudflare", () => {
+    const sender = createEmailSender({
+      POSTMARK_API_KEY: "pm_test",
+      RESEND_API_KEY: "re_test",
+      EMAIL: { send: vi.fn() },
+    } as unknown as CloudflareBindings);
+    expect(sender.provider).toBe("postmark");
+  });
+
+  it("prefers Bavimail over Postmark when both are configured", () => {
+    const sender = createEmailSender({
+      BAVIMAIL_API_KEY: "bm_test",
+      BAVIMAIL_ALIAS_ID: "alias-uuid",
+      POSTMARK_API_KEY: "pm_test",
+    } as unknown as CloudflareBindings);
+    expect(sender.provider).toBe("bavimail");
   });
 });
 
@@ -179,6 +201,16 @@ describe("maxAttachmentBytes", () => {
       BAVIMAIL_ALIAS_ID: "alias-uuid",
     } as any);
     expect(sender.maxAttachmentBytes()).toBe(25 * 1024 * 1024);
+  });
+
+  it("returns ~7MB for Postmark", () => {
+    const sender = createEmailSender({
+      POSTMARK_API_KEY: "pm_test",
+    } as any);
+    // Postmark caps total message size at 10MB; base64 inflates ~1.4x.
+    expect(sender.maxAttachmentBytes()).toBe(
+      Math.floor((10 * 1024 * 1024) / 1.4),
+    );
   });
 });
 
@@ -437,6 +469,196 @@ describe("BavimailSender", () => {
   it("normalizes thrown fetch errors", async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
     const sender = makeBavimailSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toBe("network down");
+  });
+});
+
+describe("PostmarkSender", () => {
+  function makePostmarkSender(fetchFn: typeof fetch) {
+    return new PostmarkSender("pm_test", fetchFn);
+  }
+
+  function okResponse(body: Record<string, unknown>) {
+    return new Response(JSON.stringify({ ErrorCode: 0, ...body }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("sends a basic email with the server token and correct body", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(okResponse({ MessageID: "pm-msg-123" }));
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: '"Alice" <a@b.com>',
+      to: "c@d.com",
+      subject: "hello",
+      html: "<p>hi</p>",
+      text: "hi",
+    });
+
+    expect(result.error).toBeNull();
+    expect(result.id).toBe("pm-msg-123");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.postmarkapp.com/email");
+    expect((init as RequestInit).method).toBe("POST");
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers["X-Postmark-Server-Token"]).toBe("pm_test");
+    expect(headers["Content-Type"]).toBe("application/json");
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body).toEqual({
+      From: '"Alice" <a@b.com>',
+      To: "c@d.com",
+      Subject: "hello",
+      HtmlBody: "<p>hi</p>",
+      TextBody: "hi",
+    });
+  });
+
+  it("joins cc into a comma-separated Cc string", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ MessageID: "x" }));
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      cc: ['"Eve" <e@f.com>', "g@h.com"],
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.Cc).toBe('"Eve" <e@f.com>,g@h.com');
+  });
+
+  it("maps Reply-To to ReplyTo and routes other headers through Headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ MessageID: "x" }));
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      headers: {
+        "Reply-To": "submitter@example.com",
+        "In-Reply-To": "<orig@msg>",
+        "Message-ID": "<new@msg>",
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.ReplyTo).toBe("submitter@example.com");
+    expect(body.Headers).toEqual([
+      { Name: "In-Reply-To", Value: "<orig@msg>" },
+      { Name: "Message-ID", Value: "<new@msg>" },
+    ]);
+  });
+
+  it("base64-encodes attachments into the Attachments array", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ MessageID: "x" }));
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      attachments: [
+        {
+          filename: "a.txt",
+          contentType: "text/plain",
+          content: new TextEncoder().encode("alpha"),
+        },
+      ],
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.Attachments).toEqual([
+      {
+        Name: "a.txt",
+        Content: btoa("alpha"),
+        ContentType: "text/plain",
+      },
+    ]);
+  });
+
+  it("returns error from the Message field on a non-2xx response", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ ErrorCode: 300, Message: "Invalid 'From' address" }),
+          { status: 422 },
+        ),
+      );
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toBe("Invalid 'From' address");
+  });
+
+  it("treats a 200 with a non-zero ErrorCode as a failure", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ ErrorCode: 405, Message: "Not allowed to send" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toBe("Not allowed to send");
+  });
+
+  it("falls back to status text when the error body cannot be parsed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response("not json", { status: 500 }));
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    expect(result.id).toBeNull();
+    expect(result.error?.message).toMatch(/500/);
+  });
+
+  it("normalizes thrown fetch errors", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
+    const sender = makePostmarkSender(fetchMock as unknown as typeof fetch);
 
     const result = await sender.send({
       from: "a@b.com",

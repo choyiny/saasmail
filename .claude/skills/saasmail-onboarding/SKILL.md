@@ -16,7 +16,7 @@ Read `wrangler.jsonc.example` in the project root so you know the exact shape of
 Set expectations up front, so the user knows what they're committing to:
 
 - **~30–40 minutes** total; most of the wait is DNS propagation, not typing.
-- **Two decisions**: which domains will be used, and which outbound email provider (Cloudflare Email Sending, Resend, or Bavimail).
+- **Two decisions**: which domains will be used, and which outbound email provider (Cloudflare Email Sending, Resend, Bavimail, or Postmark).
 - **Three manual Cloudflare-dashboard steps** (Email Routing per inbound domain, Email Service per send-from domain, and checking the deployed worker).
 - **Cost**: a Cloudflare **Workers Paid plan (~$5/mo)** is required. saasmail uses Queues, which aren't on the free plan. Email Routing is free; Cloudflare Email Sending is usage-based.
 
@@ -81,8 +81,9 @@ Most single-domain setups use the same domain for all three, with the UI on a su
 - **Option A — Cloudflare Email Sending** (default; recommended for a pure-Cloudflare setup). Uses the `send_email` binding. Each send-from domain must be onboarded in Cloudflare Email Service (Step 8 below).
 - **Option B — Resend**. Set `RESEND_API_KEY` as a secret. Each send-from domain must be verified in the Resend dashboard instead.
 - **Option C — Bavimail**. Set both `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` as secrets. The alias ID identifies the sending alias configured in the Bavimail dashboard, which is also where each send-from domain is verified.
+- **Option D — Postmark**. Set `POSTMARK_API_KEY` (your Postmark server's API token) as a secret. Each send-from domain must be verified in the Postmark dashboard.
 
-Runtime precedence: **Bavimail** wins when both `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` are set; otherwise **Resend** wins when `RESEND_API_KEY` is set; otherwise the `send_email` binding is used. Default the user to Option A unless they already have a Resend or Bavimail account and prefer it.
+Runtime precedence: **Bavimail** wins when both `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` are set; otherwise **Postmark** wins when `POSTMARK_API_KEY` is set; otherwise **Resend** wins when `RESEND_API_KEY` is set; otherwise the `send_email` binding is used. Default the user to Option A unless they already have a Resend, Bavimail, or Postmark account and prefer it.
 
 ## Deployment Steps
 
@@ -192,9 +193,17 @@ wrangler secret put BAVIMAIL_API_KEY
 wrangler secret put BAVIMAIL_ALIAS_ID
 ```
 
-Paste the Bavimail API bearer token and alias UUID (from the Bavimail dashboard) when prompted. Both must be set — if only one is present, saasmail falls through to Resend or the `send_email` binding.
+Paste the Bavimail API bearer token and alias UUID (from the Bavimail dashboard) when prompted. Both must be set — if only one is present, saasmail falls through to Postmark, Resend, or the `send_email` binding.
 
-Do **not** set `RESEND_API_KEY` for Option A or C — its mere presence tells saasmail to use Resend, overriding the `send_email` binding. Likewise, do **not** set the Bavimail secrets for Option A or B — Bavimail wins over both when both Bavimail vars are present.
+If Decision 2 is **Option D (Postmark)**, run:
+
+```bash
+wrangler secret put POSTMARK_API_KEY
+```
+
+Paste the Postmark server API token (from the Postmark dashboard → your server → **API Tokens**) when prompted.
+
+Set the secret(s) for **only** the provider you chose. A provider's secrets being present is what selects it, in precedence order Bavimail > Postmark > Resend > the `send_email` binding — so a stray `RESEND_API_KEY` or `POSTMARK_API_KEY` will override the `send_email` binding for Option A.
 
 ### Step 6: Apply Database Migrations
 
@@ -281,6 +290,8 @@ If the worker isn't in the dropdown, Step 7 didn't actually succeed — go back 
 
 **Option C (Bavimail)**: verify each send-from domain in the Bavimail dashboard, add the DKIM/SPF records it provides, and confirm the sending alias (whose ID you set as `BAVIMAIL_ALIAS_ID`) is attached to the verified domain. Then skip the rest of this step.
 
+**Option D (Postmark)**: verify each send-from domain in the Postmark dashboard → **Sender Signatures / Domains**, and add the DKIM/SPF (Return-Path) records Postmark provides. Then skip the rest of this step.
+
 **Option A (Cloudflare Email Sending)**: repeat for each send-from domain from Decision 1:
 
 1. Open [Email Service](https://dash.cloudflare.com/?to=/:account/email-service) — **account-level**, not a per-zone setting.
@@ -303,7 +314,7 @@ Show the user exactly what was set up, substituting their real values:
 
 - Worker deployed at `<BASE_URL>`
 - Inbound: Cloudflare Email Routing → worker, on `<inbound domain(s)>`
-- Outbound: `<Cloudflare Email Sending | Resend | Bavimail>`, from `<send-from domain(s)>`
+- Outbound: `<Cloudflare Email Sending | Resend | Bavimail | Postmark>`, from `<send-from domain(s)>`
 - D1 database `saasmail-db` (binding `DB`)
 - R2 bucket `saasmail-attachments` (binding `R2`)
 - Queue `saasmail-sequence-emails` (binding `EMAIL_QUEUE`)
@@ -314,6 +325,6 @@ Show the user exactly what was set up, substituting their real values:
 - **`wrangler queues create` fails with a plan error** — Workers Paid plan isn't actually active. Recheck at https://dash.cloudflare.com/?to=/:account/workers/plans.
 - **Worker missing from Email Routing "Send to a Worker" dropdown** — Step 7 didn't succeed, or the dashboard is cached. Run `wrangler deployments list` to confirm, then refresh the dashboard.
 - **Inbound test email never arrives** — MX records haven't propagated, or the catch-all isn't saved. Email Routing **Overview** should say status **Active**; `dig MX <inbound domain>` should return `*.mx.cloudflare.net` hosts.
-- **Outbound email looks sent but never arrives** — the send-from domain isn't verified. Check Email Service (Option A), Resend → Domains (Option B), or the Bavimail dashboard (Option C); status must read **Verified**.
+- **Outbound email looks sent but never arrives** — the send-from domain isn't verified. Check Email Service (Option A), Resend → Domains (Option B), the Bavimail dashboard (Option C), or the Postmark dashboard (Option D); status must read **Verified**.
 - **Locked out after sign-up** — passkey enrollment wasn't completed. Sign in again and finish the prompt; the server requires a passkey for `/api/*` in production.
 - **`BASE_URL` serves a blank Cloudflare page instead of saasmail** — the `routes` block in `wrangler.jsonc` wasn't uncommented, or `custom_domain: true` is missing. Fix and redeploy.

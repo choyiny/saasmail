@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New outbound email provider: **Postmark**. Set `POSTMARK_API_KEY` (your Postmark server API token) as a secret to send through Postmark. Runtime precedence is Bavimail > Postmark > Resend > Cloudflare Email Sending.
+
 ## [0.9.0] - 2026-06-21
 
 ### Added
