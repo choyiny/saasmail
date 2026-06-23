@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-23
+
+### Added
+
+- Spam score column: inbound emails now capture the upstream `X-Spam-Score` header and store it as a nullable `spam_score` (real) column on the `emails` table. Migration `0028`.
+- Failed-send status indicator: sends rejected by the provider are now surfaced in both chat-bubble and thread views with a "Failed to send" badge and red tint. The `status` field is exposed on conversation and single-email API endpoints.
+
+### Dependencies
+
+- Bumped `actions/checkout` from 6 to 7.
+- Bumped the radix-ui group with 7 updates (`@radix-ui/react-avatar`, `@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-label`, `@radix-ui/react-scroll-area`, `@radix-ui/react-separator`, `@radix-ui/react-slot`).
+- Bumped the tiptap group with 5 updates.
+- Bumped the cloudflare dev-dependency group with 4 updates.
+- Bumped the better-auth group with 2 updates.
+
 ## [0.9.0] - 2026-06-21
 
 ### Added
@@ -396,7 +411,8 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/choyiny/saasmail/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/choyiny/saasmail/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/choyiny/saasmail/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
