@@ -437,8 +437,10 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
   await db.insert(sequenceEnrollments).values(enrollment);
 
   // Create outbox emails with computed schedule
-  // First email sends immediately; subsequent emails use snapToNextHour as base
+  // First email sends immediately; subsequent emails accumulate delays from
+  // snapToNextHour(now) so each step fires delayHours after the previous one.
   const baseTime = snapToNextHour(now);
+  let cumulativeHours = 0;
   const scheduledEmails = activeSteps.map((step, index) => {
     const delayHours =
       step.order.toString() in delayOverrides
@@ -446,12 +448,13 @@ sequencesRouter.openapi(enrollRoute, async (c) => {
         : step.delayHours;
 
     const isFirstEmail = index === 0;
+    if (!isFirstEmail) cumulativeHours += delayHours;
     return {
       id: nanoid(),
       enrollmentId,
       stepOrder: step.order,
       templateSlug: step.templateSlug,
-      scheduledAt: isFirstEmail ? now : baseTime + delayHours * 3600,
+      scheduledAt: isFirstEmail ? now : baseTime + cumulativeHours * 3600,
       // In demo mode there is no queue/cron to advance "queued" emails, so
       // leave everything as "pending" — the records exist for the UI to show
       // but nothing is dispatched.
@@ -672,7 +675,12 @@ sequencesRouter.openapi(listEnrollmentsRoute, async (c) => {
       personEmail: personRow[0]?.email ?? "unknown",
       personName: personRow[0]?.name ?? null,
       totalSteps: emailRows.length,
-      sentSteps: emailRows.filter((e) => e.status === "sent").length,
+      // 'suppressed' is a completed-but-not-delivered terminal state —
+      // count it toward sentSteps so completed-via-suppression enrollments
+      // show full progress in the UI.
+      sentSteps: emailRows.filter(
+        (e) => e.status === "sent" || e.status === "suppressed",
+      ).length,
     });
   }
 

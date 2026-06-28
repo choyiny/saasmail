@@ -68,8 +68,12 @@ export interface Email {
   isRead: number | null;
   cc: CcEntry[];
   timestamp: number;
+  /** Delivery status for sent messages: "sent" | "failed". Null for received. */
+  status?: string | null;
   attachmentCount?: number;
   attachments?: Attachment[];
+  /** Inbound Reply-To address, surfaced by the single-email endpoint. */
+  replyTo?: string | null;
 }
 
 export type InboxDisplayMode = "thread" | "chat";
@@ -263,6 +267,40 @@ export async function deleteEmail(
   id: string,
 ): Promise<{ success: boolean; attachmentsDeleted: number }> {
   return apiFetch(`/api/emails/${id}`, { method: "DELETE" });
+}
+
+export interface ReassignPersonResult {
+  success: boolean;
+  type: "received" | "sent";
+  email: {
+    id: string;
+    personId: string | null;
+    toAddress: string | null;
+    fromAddress: string | null;
+  };
+  person: {
+    id: string;
+    email: string;
+    name: string | null;
+    created: boolean;
+  } | null;
+}
+
+/**
+ * Re-target a message to a different/new person. For received messages, `email`
+ * re-attributes the sender's person. For sent messages, `email` also rewrites
+ * the recipient (`toAddress`) so replies route there, and `fromAddress` can
+ * switch the sending identity.
+ */
+export async function reassignEmailPerson(
+  emailId: string,
+  body: { email?: string; name?: string | null; fromAddress?: string },
+): Promise<ReassignPersonResult> {
+  return apiFetch(`/api/emails/${emailId}/person`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function deletePerson(id: string): Promise<{ success: boolean }> {
@@ -462,6 +500,12 @@ export async function deleteUser(id: string): Promise<{ success: boolean }> {
   });
 }
 
+export async function revokeInvite(id: string): Promise<{ success: true }> {
+  return apiFetch<{ success: true }>(`/api/admin/invites/${id}`, {
+    method: "DELETE",
+  });
+}
+
 // --- Public Invite API ---
 
 export async function validateInvite(token: string): Promise<InviteInfo> {
@@ -508,6 +552,36 @@ export async function generateApiKey(): Promise<{
 
 export async function revokeApiKey(): Promise<{ success: boolean }> {
   return apiFetch("/api/api-keys", { method: "DELETE" });
+}
+
+// --- Webhook (admin, global instance config) ---
+
+export interface WebhookConfigInfo {
+  url: string;
+  hasSecret: boolean;
+}
+
+export async function fetchWebhookConfig(): Promise<WebhookConfigInfo> {
+  return apiFetch<WebhookConfigInfo>("/api/webhook");
+}
+
+export async function saveWebhookConfig(body: {
+  url: string;
+  secret?: string | null;
+}): Promise<WebhookConfigInfo> {
+  return apiFetch("/api/webhook", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function testWebhook(): Promise<{
+  ok: boolean;
+  status?: number;
+  error?: string;
+}> {
+  return apiFetch("/api/webhook/test", { method: "POST" });
 }
 
 // --- Sequences ---
@@ -714,4 +788,41 @@ export interface AdminUser {
 
 export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
+}
+
+// --- Suppressions ---
+
+export interface Suppression {
+  id: string;
+  email: string;
+  reason: "unsubscribe" | "manual";
+  source: string | null;
+  note: string | null;
+  createdAt: number;
+}
+
+export interface SuppressionsPage {
+  items: Suppression[];
+  nextCursor: string | null;
+}
+
+export async function fetchSuppressions(
+  cursor?: string | null,
+): Promise<SuppressionsPage> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch(`/api/suppressions${qs}`);
+}
+
+export async function createSuppression(email: string): Promise<Suppression> {
+  return apiFetch("/api/suppressions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function deleteSuppression(
+  id: string,
+): Promise<{ deleted: true }> {
+  return apiFetch(`/api/suppressions/${id}`, { method: "DELETE" });
 }

@@ -1,9 +1,11 @@
 import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
 import {
   Inbox,
+  Link2,
   Maximize2,
   Paperclip,
   Trash2,
+  UserPen,
   ArrowDown,
   Check,
   CheckCheck,
@@ -15,6 +17,7 @@ import CcChips, { RosterDiffNotice } from "@/components/CcChips";
 import { rosterOf, diffRosters } from "@/lib/roster";
 import type { ComposePrefill } from "@/pages/ComposeModal";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
+import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import {
   HIDE_SIGNATURES_EVENT,
   readHideSignatures,
@@ -38,6 +41,7 @@ interface ChatInboxSectionProps {
   onOpenHtml: (email: Email) => void;
   onMarkRead: (email: Email) => void;
   onDelete: (emailId: string) => void;
+  onReassign?: (email: Email) => void;
   onSent: () => void;
   /**
    * Optional handoff to the global compose drawer. When provided, the
@@ -105,6 +109,7 @@ interface BubbleProps {
   onOpenHtml: (email: Email) => void;
   onMarkRead: (email: Email) => void;
   onDelete: (emailId: string) => void;
+  onReassign?: (email: Email) => void;
 }
 
 function Bubble({
@@ -114,6 +119,7 @@ function Bubble({
   onOpenHtml,
   onMarkRead,
   onDelete,
+  onReassign,
 }: BubbleProps) {
   // Resolve the sender label for received bubbles. In a group conversation,
   // each received bubble is from a different person; senderResolver lets
@@ -191,8 +197,10 @@ function Bubble({
 
   return (
     <div
+      id={messageDomId(email.id)}
       data-testid="chat-bubble"
-      className={`group flex flex-col px-4 py-1 sm:px-6 ${
+      data-email-id={email.id}
+      className={`group flex flex-col px-4 py-1 sm:px-6 scroll-mt-20 ${
         isSent ? "items-end" : "items-start"
       }`}
       onClick={handleClick}
@@ -315,6 +323,32 @@ function Bubble({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
+            void copyMessageLink(email.id);
+          }}
+          data-testid="message-copy-link"
+          className="flex items-center gap-1 opacity-0 transition-opacity hover:text-text-secondary group-hover:opacity-100"
+          title="Copy link to this message"
+        >
+          <Link2 size={10} />
+        </button>
+        {onReassign && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onReassign(email);
+            }}
+            data-testid="message-reassign"
+            className="flex items-center gap-1 opacity-0 transition-opacity hover:text-text-secondary group-hover:opacity-100"
+            title="Reassign to another person"
+          >
+            <UserPen size={10} />
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
             onDelete(email.id);
           }}
           className="flex items-center gap-1 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
@@ -356,6 +390,7 @@ export default function ChatInboxSection({
   onOpenHtml,
   onMarkRead,
   onDelete,
+  onReassign,
   onSent,
   onOpenCompose,
 }: ChatInboxSectionProps) {
@@ -540,6 +575,7 @@ export default function ChatInboxSection({
                 onOpenHtml={onOpenHtml}
                 onMarkRead={onMarkRead}
                 onDelete={onDelete}
+                onReassign={onReassign}
               />
             ),
           )}

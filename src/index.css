@@ -74,6 +74,10 @@
 
 html {
   font-size: 16px;
+  /* Stop iOS Safari from inflating text on rotate / when zoomed.
+     We control text size explicitly. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -83,6 +87,35 @@ body {
   font-feature-settings: "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Kill the gray flash on tap on iOS / Android — we rely on
+     hover/focus rings for affordance. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Mobile form controls ────────────────────────────────────────
+   iOS Safari (and some Android browsers) zoom the viewport in when
+   the focused input's computed font-size is below 16px. Many of our
+   inputs use `text-sm` (14px) for visual density on desktop — fine
+   on a trackpad, but it kicks off an annoying zoom on phones.
+
+   Force 16px on the actual form controls (input / textarea / select)
+   and the rich-text editor's contenteditable surface when the viewport
+   is in the mobile range. Above 640px the original utility classes
+   win again so the desktop look is unchanged. */
+@media (max-width: 639.98px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+      [type="color"]
+    ),
+  textarea,
+  select,
+  [contenteditable="true"],
+  .notion-editor {
+    /* !important is required because Tailwind utility classes
+       (text-xs / text-sm) carry higher specificity than a bare
+       element selector. The point of this rule is to override
+       those at the mobile breakpoint only. */
+    font-size: 16px !important;
+  }
 }
 
 /* ── Brand utilities ─────────────────────────────────────────── */
@@ -512,4 +545,22 @@ body {
 .notion-editor .notion-image-wrapper:hover .notion-image-resize-handle,
 .notion-editor .notion-image-resize-handle[data-visible="true"] {
   opacity: 1;
+}
+
+/* Deep-link landing flash — applied to a message bubble (id="m-<emailId>")
+   after PersonDetail scrolls to a `?#m=<id>` target so the user can see
+   which message the link pointed at. */
+@keyframes message-link-flash {
+  0% {
+    box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.55);
+    background-color: rgba(124, 92, 252, 0.12);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 92, 252, 0);
+    background-color: transparent;
+  }
+}
+.message-link-flash {
+  animation: message-link-flash 2200ms ease-out 1;
+  border-radius: 6px;
 }

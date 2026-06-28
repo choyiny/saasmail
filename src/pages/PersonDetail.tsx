@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { CheckCheck } from "lucide-react";
 import {
   fetchPersonEmails,
@@ -11,8 +12,11 @@ import {
   type Email,
   type PersonEnrollmentInfo,
   type InboxDisplayMode,
+  type ReassignPersonResult,
 } from "@/lib/api";
+import { messageDomId, readMessageHash } from "@/lib/message-link";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
+import ReassignPersonModal from "@/components/ReassignPersonModal";
 import SequenceStatus from "@/components/SequenceStatus";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import ReplyComposer from "@/components/ReplyComposer";
@@ -110,6 +114,7 @@ export default function PersonDetail({
   const [enrollmentInfo, setEnrollmentInfo] =
     useState<PersonEnrollmentInfo | null>(null);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
+  const [reassignEmail, setReassignEmail] = useState<Email | null>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
   const [expandedOlder, setExpandedOlder] = useState<Record<string, boolean>>(
     {},
@@ -204,6 +209,27 @@ export default function PersonDetail({
     onEmailDelete(person.id, wasUnread);
   }
 
+  function handleReassignDone(result: ReassignPersonResult) {
+    const moved = reassignEmail;
+    if (moved) {
+      const wasUnread = moved.type === "received" && moved.isRead === 0;
+      // The message now belongs to another person — drop it from this thread
+      // and let the parent decrement this person's counts (same as a delete
+      // from this view's perspective).
+      setEmails((prev) => prev.filter((e) => e.id !== moved.id));
+      onEmailDelete(person.id, wasUnread);
+    }
+    const target = result.person?.email ?? result.email.toAddress;
+    showToast({
+      kind: "success",
+      message: target ? `Moved to ${target}` : "Message re-targeted",
+      description: result.person?.created
+        ? "Created a new person and moved this message to them."
+        : "Replies to this message now go to them.",
+      durationMs: 5000,
+    });
+  }
+
   const inboxGroups = useMemo(() => groupEmailsByInbox(emails), [emails]);
   const distinctInboxes = useMemo(
     () => inboxGroups.map((g) => g.inbox).filter((i) => i !== "(unknown)"),
@@ -231,6 +257,54 @@ export default function PersonDetail({
       setActiveInbox(inboxGroups[0].inbox);
     }
   }, [inboxGroups, activeInbox]);
+
+  // Deep-link landing: if the URL has `#m=<emailId>` and that message
+  // belongs to this person, switch to its inbox tab, auto-expand the
+  // older-messages drawer when needed (thread mode), and scroll/flash
+  // the bubble. Fires once per (person, hash) pair so paging or
+  // re-renders don't keep yanking the scroll position.
+  const location = useLocation();
+  const lastHashHandled = useRef<string | null>(null);
+  useEffect(() => {
+    if (emails.length === 0) return;
+    const targetEmailId = readMessageHash(location.hash);
+    if (!targetEmailId) return;
+    const key = `${person.id}:${targetEmailId}`;
+    if (lastHashHandled.current === key) return;
+    const target = emails.find((e) => e.id === targetEmailId);
+    if (!target) return;
+    lastHashHandled.current = key;
+
+    const targetInbox = inboxOf(target);
+    setActiveInbox(targetInbox);
+
+    // Thread mode collapses older messages behind a toggle. If the
+    // target isn't the latest in its group, force the drawer open so
+    // the bubble is actually in the DOM when we try to scroll to it.
+    const group = inboxGroups.find((g) => g.inbox === targetInbox);
+    if (group && group.emails[0]?.id !== target.id) {
+      setExpandedOlder((prev) =>
+        prev[targetInbox] ? prev : { ...prev, [targetInbox]: true },
+      );
+    }
+
+    // Two rAFs: first lets React commit the tab switch / expand; second
+    // lets the new bubble mount before we measure for scrollIntoView.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = document.getElementById(messageDomId(target.id));
+        if (!el) return;
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.remove("message-link-flash");
+        // Reflow so re-adding the class restarts the animation.
+        void el.offsetWidth;
+        el.classList.add("message-link-flash");
+        window.setTimeout(() => {
+          el.classList.remove("message-link-flash");
+        }, 2400);
+      });
+    });
+  }, [emails, location.hash, inboxGroups, person.id]);
 
   // Listen for the global "email sent" event so we can:
   //   1) Refetch emails immediately — already happens via the existing
@@ -414,6 +488,7 @@ export default function PersonDetail({
                   onOpenHtml={setHtmlPreviewEmail}
                   onMarkRead={handleMarkRead}
                   onDelete={handleDelete}
+                  onReassign={setReassignEmail}
                   onSent={refetchEmails}
                   onOpenCompose={onOpenCompose}
                 />
@@ -436,6 +511,7 @@ export default function PersonDetail({
                   onMarkRead={handleMarkRead}
                   onReply={setReplyToEmailId}
                   onDelete={handleDelete}
+                  onReassign={setReassignEmail}
                 />
               </ThreadPaneScroller>
             );
@@ -468,6 +544,15 @@ export default function PersonDetail({
         email={htmlPreviewEmail}
         open={htmlPreviewEmail !== null}
         onClose={() => setHtmlPreviewEmail(null)}
+        onUpdated={refetchEmails}
+      />
+
+      <ReassignPersonModal
+        email={reassignEmail}
+        currentSender={person.name || person.email}
+        open={reassignEmail !== null}
+        onClose={() => setReassignEmail(null)}
+        onDone={handleReassignDone}
       />
 
       <EnrollSequenceModal

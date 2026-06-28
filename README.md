@@ -15,13 +15,14 @@
 
 Every interaction with a customer matters, and context compounds. saasmail pulls the promo blast, the billing receipt, and the support thread into the same conversation, so anyone on your team can respond with the full history already in hand.
 
-Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending** or **Resend**.
+Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending**, **Resend**, or **Bavimail**.
 
-<img alt="saasmail" src="docs/screenshots/saasmail.jpeg" />
+<img width="5088" height="3106" alt="saasmail-new" src="https://github.com/user-attachments/assets/407a8b4e-3ba0-4ed9-ae8a-f39dee861e56" />
 
 ## Sponsors
 
-<a href="https://givefeedback.dev/saas"><img width="200" height="44" alt="givefeedback.dev" src="https://github.com/user-attachments/assets/7da9ef06-cc47-4aa5-94b1-2108a302439c" /></a>GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks and prevent scope creep.
+<a href="https://givefeedback.dev/saas"><img width="200" height="44" alt="givefeedback.dev" src="https://github.com/user-attachments/assets/7da9ef06-cc47-4aa5-94b1-2108a302439c" /></a>
+GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks and prevent scope creep.
 
 ## Demo Video
 
@@ -29,17 +30,18 @@ https://github.com/user-attachments/assets/fe3a3811-1902-4b0b-8b94-f8c72f1afab4
 
 ## Provider Matrix
 
-|               | Cloudflare | Resend |
-| ------------- | ---------- | ------ |
-| **Sending**   | ✅         | ✅     |
-| **Receiving** | ✅         | ❌     |
+|               | Cloudflare | Resend | Bavimail |
+| ------------- | ---------- | ------ | -------- |
+| **Sending**   | ✅         | ✅     | ✅       |
+| **Receiving** | ✅         | ❌     | ❌       |
 
 Pick one outbound provider at deploy time:
 
 - **Cloudflare Email Sending** — add a `send_email` binding (`EMAIL`) in `wrangler.jsonc` and onboard your domain at [Email Service](https://dash.cloudflare.com/?to=/:account/email-service).
 - **Resend** — set `RESEND_API_KEY` as a secret.
+- **Bavimail** — set `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` as secrets. The alias ID identifies the sending alias configured in your Bavimail dashboard.
 
-If `RESEND_API_KEY` is set it takes precedence; otherwise the `EMAIL` binding is used. If neither is configured, send attempts return a "No email provider configured" error.
+Selection precedence at runtime: **Bavimail** (when both env vars are set) > **Resend** (when `RESEND_API_KEY` is set) > **Cloudflare Email Sending** (when the `EMAIL` binding exists). If none are configured, send attempts return a "No email provider configured" error.
 
 ## How much does it cost?
 
@@ -74,6 +76,19 @@ Create reusable HTML email templates with `{{variable}}` interpolation. Edit tem
 
 Build multi-step drip campaigns. Enroll a contact into a sequence and saasmail sends templated emails on a schedule. Supports step skipping, delay overrides, custom variables, and automatic cancellation when the contact replies. Enrollment is enforced against the member's allowed inboxes.
 
+### Suppressions and Unsubscribe
+
+saasmail tracks unsubscribed and manually-suppressed recipients in a `suppressions` table. Suppression checks run on every outbound dispatch path: `POST /api/send`, scheduled sequence steps, and admin template test-sends. Admins manage the list at `/admin/suppressions` (CRUD also exposed at `/api/suppressions`).
+
+- **List-Unsubscribe headers**: marketing sends automatically include `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) headers so Gmail/Yahoo bulk-sender rules and major mail clients render native unsubscribe affordances.
+- **Unsubscribe footer**: templates can use `{{unsubscribe_url}}` in HTML or plaintext bodies. If the rendered output doesn't include the URL, saasmail auto-appends a minimal unsubscribe footer.
+- **Unsubscribe page**: recipients land on `/unsubscribe?token=…`. The page POSTs to `/api/unsubscribe` on JavaScript mount (so URL-preview crawlers don't trigger it) and offers a "Re-subscribe" button. One-click unsubscribe (RFC 8058) also works via `POST /api/unsubscribe?token=…` directly — no session, no UI; the token signs the recipient's email.
+- **Transactional sends**: account-critical mail (password resets, OTPs, system notifications) should pass `transactional: true` in the `POST /api/send` body. This bypasses the suppression check, skips the unsubscribe headers, and skips the footer auto-append. Anyone you genuinely _need_ to email will still get the message.
+
+> **Behavior shift for API integrators**: `POST /api/send` now adds `List-Unsubscribe` headers and (if the body lacks the URL) appends an unsubscribe footer to every send UNLESS the caller passes `transactional: true`. If your integration sends password resets, OTPs, or other account-critical mail through `/api/send`, set the flag explicitly on those calls to preserve the previous behavior.
+
+The Worker signs unsubscribe tokens with `UNSUBSCRIBE_SECRET` (see [Configuration](#devvars)) and builds absolute URLs from the existing `BASE_URL` setting.
+
 ### User Management
 
 Admin-controlled onboarding via one-time invite links. New members sign up with email + password, and can register a passkey for passwordless login on subsequent sessions. Roles: `admin` (full access + user management) and `member` (scoped by inbox assignment).
@@ -82,12 +97,54 @@ Admin-controlled onboarding via one-time invite links. New members sign up with 
 
 Issue scoped API keys for programmatic access to send email, manage templates, enroll contacts in sequences, and query inbox data. Keys are hashed at rest and follow the `sk_…` format.
 
+### Webhooks
+
+POST to an external URL whenever a **new inbound message** is received — useful for help-desk automation (post to a team chat, trigger triage, draft a reply via n8n / Make / etc.).
+
+- **Config:** Admins set a destination URL (and optional signing secret) on the **API keys** page. Global, single best-effort attempt, **disabled by default** (no URL = nothing fires). Any URL scheme is accepted, including `http://` for local automation.
+- **Event:** one `message.received` per received message (deduped by `Message-ID`).
+- **Security:** when a secret is set, each request includes `X-SaaSMail-Signature: sha256=<hmac>`, an HMAC-SHA256 of the raw request body. Verify it before trusting the payload.
+
+Payload:
+
+```json
+{
+  "event": "message.received",
+  "id": "abc123",
+  "receivedAt": 1717459200,
+  "inbox": "support@yourdomain.com",
+  "from": { "address": "customer@example.com", "name": "Jane Customer" },
+  "subject": "Help with my order",
+  "textPreview": "Hi, I can't log in…",
+  "conversationId": "…",
+  "attachments": [
+    { "filename": "screenshot.png", "contentType": "image/png", "size": 20481 }
+  ],
+  "auth": { "spf": "pass", "dkim": "pass", "dmarc": "pass" },
+  "url": "https://mail.yourdomain.com/m/abc123"
+}
+```
+
+Verify the signature (Node example):
+
+```js
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verify(rawBody, header, secret) {
+  const expected =
+    "sha256=" + createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(header ?? "");
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
 ## Architecture
 
 | Layer               | Technology                                                                |
 | ------------------- | ------------------------------------------------------------------------- |
 | **Receive email**   | Cloudflare Email Workers                                                  |
-| **Send email**      | Cloudflare Email Sending or Resend                                        |
+| **Send email**      | Cloudflare Email Sending, Resend, or Bavimail                             |
 | **Runtime**         | Cloudflare Workers + Hono                                                 |
 | **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.1)                                   |
 | **Database**        | Cloudflare D1 (SQLite)                                                    |
@@ -154,6 +211,7 @@ Don't have Claude Code? The manual steps below cover the same ground.
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm install -g wrangler`)
 - A [Cloudflare](https://dash.cloudflare.com/) account with Email Routing available for your domain
 - _Optional:_ a [Resend](https://resend.com/) account and API key (only if you prefer Resend over Cloudflare Email Sending)
+- _Optional:_ a [Bavimail](https://bavimail.com/) account, API key, and alias ID (only if you prefer Bavimail)
 
 ### 1. Clone and install
 
@@ -208,14 +266,19 @@ cp .dev.vars.example .dev.vars
 
 Edit `.dev.vars`:
 
-- `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending)
+- `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` — your Bavimail bearer token and alias UUID (only if using Bavimail; both must be set)
+- `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending or Bavimail)
 - `BETTER_AUTH_SECRET` — generate a random string (`openssl rand -hex 32`)
+- `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
 
 For production, set these as Cloudflare secrets:
 
 ```bash
 wrangler secret put BETTER_AUTH_SECRET
-wrangler secret put RESEND_API_KEY   # only if using Resend
+wrangler secret put UNSUBSCRIBE_SECRET
+wrangler secret put RESEND_API_KEY      # only if using Resend
+wrangler secret put BAVIMAIL_API_KEY    # only if using Bavimail
+wrangler secret put BAVIMAIL_ALIAS_ID   # only if using Bavimail
 ```
 
 ### 6. Run migrations
@@ -334,8 +397,11 @@ To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used a
 
 Local development secrets. Created from `.dev.vars.example`. This file is gitignored.
 
+- `BAVIMAIL_API_KEY` — Bavimail API bearer token (required for Bavimail, must be paired with `BAVIMAIL_ALIAS_ID`)
+- `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
 - `RESEND_API_KEY` — Resend API key (if using Resend)
 - `BETTER_AUTH_SECRET` — Secret for session signing
+- `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the suppressions/unsubscribe feature.
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. **Never set this in production.**
 
 ## Roadmap

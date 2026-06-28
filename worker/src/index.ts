@@ -26,6 +26,9 @@ import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { notificationsRouter } from "./routers/notifications-router";
+import { suppressionsRouter } from "./routers/suppressions-router";
+import { webhooksRouter } from "./routers/webhooks-router";
+import { unsubscribeRouter } from "./routers/unsubscribe-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
@@ -53,6 +56,7 @@ function isUnauthenticatedPath(path: string): boolean {
     path.startsWith("/api/auth") ||
     path.startsWith("/api/setup") ||
     path.startsWith("/api/invites") ||
+    path.startsWith("/api/unsubscribe") ||
     path === "/api/health" ||
     path === "/api/config"
   );
@@ -205,6 +209,27 @@ app.route("/api/notifications", notificationsRouter);
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
+
+// Suppressions CRUD — admin-only (not under /api/admin/ for UX but enforced
+// here with the same role guard).
+app.use("/api/suppressions/*", requireAdmin);
+app.use("/api/suppressions", requireAdmin);
+app.route("/api/suppressions", suppressionsRouter);
+
+// Webhook config — admin-only global instance config.
+app.use("/api/webhook", requireAdmin);
+app.use("/api/webhook/*", requireAdmin);
+app.route("/api/webhook", webhooksRouter);
+
+// Public unsubscribe endpoints — token-authenticated, no session/API key.
+// Allowlisted in `isUnauthenticatedPath` above.
+app.route("/api/unsubscribe", unsubscribeRouter);
+
+// Also mount at `/unsubscribe` so the same URL we put in the `List-Unsubscribe`
+// email header (which doubles as the body link → SPA at GET /unsubscribe) handles
+// RFC 8058 one-click POSTs from mail clients like Fastmail / Gmail / Apple Mail.
+// GET requests don't match the router and fall through to the SPA assets handler.
+app.route("/unsubscribe", unsubscribeRouter);
 
 // Health check (no auth)
 app.get("/api/health", (c) => c.json({ status: "ok" }));

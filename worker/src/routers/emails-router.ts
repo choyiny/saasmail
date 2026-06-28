@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, desc, like, and, sql, inArray } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
@@ -47,8 +48,51 @@ export const EmailSchema = z.object({
   isRead: z.number().nullable(),
   cc: z.array(CcEntrySchema),
   timestamp: z.number(),
+  status: z
+    .string()
+    .nullable()
+    .optional()
+    .openapi({
+      description:
+        "Delivery status for sent messages: 'sent' or 'failed' (the provider " +
+        "rejected it). Null for received messages.",
+    }),
   attachmentCount: z.number().optional(),
+  replyTo: z
+    .string()
+    .nullable()
+    .optional()
+    .openapi({
+      description:
+        "Address from the inbound Reply-To header, when present (e.g. a " +
+        "contact form's actual submitter behind a noreply@ sender). Parsed " +
+        "from stored raw headers and returned by the single-email endpoint; " +
+        "null when there is no Reply-To.",
+    }),
 });
+
+/**
+ * Pull the Reply-To address out of an email's stored raw headers.
+ * `raw_headers` is a JSON object of all inbound headers (see email-handler),
+ * so no schema change is needed to surface this. Returns the bare address
+ * (lower-cased), unwrapping a "Name <addr>" form. Null when absent/malformed.
+ */
+function extractReplyTo(rawHeaders: string | null): string | null {
+  if (!rawHeaders) return null;
+  try {
+    const headers = JSON.parse(rawHeaders) as Record<string, unknown>;
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() === "reply-to" && typeof value === "string") {
+        const angle = value.match(/<([^>]+)>/);
+        const addr = (angle ? angle[1] : value).trim().toLowerCase();
+        return addr || null;
+      }
+    }
+  } catch {
+    // Malformed raw_headers — treat as no Reply-To rather than failing the read.
+  }
+  return null;
+}
 
 const InboxMetaSchema = z.object({
   email: z.string(),
@@ -143,6 +187,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       timestamp: sentEmails.sentAt,
       fromAddress: sentEmails.fromAddress,
       toAddress: sentEmails.toAddress,
+      status: sentEmails.status,
     })
     .from(sentEmails)
     .where(and(...sentConditions))
@@ -163,6 +208,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       isRead: e.isRead,
       cc: parseCc(e.cc),
       timestamp: e.timestamp,
+      status: null,
     })),
     ...sent.map((e) => ({
       id: e.id,
@@ -177,6 +223,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       isRead: null,
       cc: parseCc(e.cc),
       timestamp: e.timestamp,
+      status: e.status,
     })),
   ].sort((a, b) => b.timestamp - a.timestamp);
 
@@ -337,6 +384,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
         timestamp: row[0].receivedAt,
         fromAddress: null,
         toAddress: null,
+        replyTo: extractReplyTo(row[0].rawHeaders),
         cc: parseCc(row[0].cc),
         attachments: atts,
       },
@@ -382,8 +430,10 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
       bodyHtml: sent.bodyHtml,
       bodyText: sent.bodyText,
       isRead: null,
+      replyTo: null,
       cc: parseCc(sent.cc),
       timestamp: sent.sentAt,
+      status: sent.status,
       attachments: sentAtts,
     },
     200,
@@ -561,4 +611,267 @@ emailsRouter.openapi(deleteEmailRoute, async (c) => {
   }
 
   return c.json(result, 200);
+});
+
+// --- Re-target a message to a different/new person (received or sent) ---
+const ReassignPersonResponseSchema = z.object({
+  success: z.boolean(),
+  type: z.enum(["received", "sent"]),
+  email: z.object({
+    id: z.string(),
+    personId: z.string().nullable(),
+    toAddress: z.string().nullable(),
+    fromAddress: z.string().nullable(),
+  }),
+  person: z
+    .object({
+      id: z.string(),
+      email: z.string(),
+      name: z.string().nullable(),
+      created: z.boolean(),
+    })
+    .nullable(),
+});
+
+const reassignPersonRoute = createRoute({
+  method: "patch",
+  path: "/{id}/person",
+  tags: ["Emails"],
+  description:
+    "Re-target a single message to a different or new person (find-or-create " +
+    "by email). For a received message this re-attributes the sender's person. " +
+    "For a sent message — e.g. a contact-form notification mailed from a " +
+    "generic address with the real submitter in the body — it re-attributes " +
+    "the person AND rewrites the stored `toAddress` so a reply reaches them; " +
+    "an optional `fromAddress` switches the sending identity (must be one of " +
+    "your inboxes). Conversation threading is left intact and per-person " +
+    "counts are recomputed.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            email: z
+              .string()
+              .email()
+              .optional()
+              .openapi({
+                description:
+                  "Correspondent email to attribute this message to. Required " +
+                  "for received messages; for sent messages it also becomes the " +
+                  "new recipient (`toAddress`).",
+                example: "submitter@example.com",
+              }),
+            name: z
+              .string()
+              .max(200)
+              .nullable()
+              .optional()
+              .openapi({
+                description:
+                  "Display name for the person. Applied only when creating a new " +
+                  "person, or filling in a blank name on an existing one — never " +
+                  "overwrites an existing name.",
+              }),
+            fromAddress: z
+              .string()
+              .email()
+              .optional()
+              .openapi({
+                description:
+                  "Sent messages only: change the sending identity. Must be one " +
+                  "of your inboxes.",
+              }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    ...json200Response(ReassignPersonResponseSchema, "Re-targeted"),
+  },
+});
+
+emailsRouter.openapi(reassignPersonRoute, async (c) => {
+  const db = c.get("db");
+  const { id } = c.req.valid("param");
+  const { email: rawEmail, name, fromAddress: rawFrom } = c.req.valid("json");
+  const allowed = c.get("allowedInboxes")!;
+  const now = Math.floor(Date.now() / 1000);
+
+  const destEmail = rawEmail?.trim().toLowerCase();
+  const newFrom = rawFrom?.trim().toLowerCase();
+  if (!destEmail && !newFrom) {
+    return c.json({ error: "Provide an email and/or fromAddress." }, 400);
+  }
+
+  // Find-or-create the destination person by the unique `people.email`.
+  async function resolvePerson() {
+    const existing = await db
+      .select({ id: people.id, name: people.name })
+      .from(people)
+      .where(eq(people.email, destEmail!))
+      .limit(1);
+    if (existing.length > 0) {
+      let pname = existing[0].name;
+      // Fill a blank name only — never clobber an existing one.
+      if (name && !existing[0].name) {
+        await db
+          .update(people)
+          .set({ name, updatedAt: now })
+          .where(eq(people.id, existing[0].id));
+        pname = name;
+      }
+      return {
+        id: existing[0].id,
+        email: destEmail!,
+        name: pname,
+        created: false,
+      };
+    }
+    const pid = nanoid();
+    const pname = name ?? null;
+    await db.insert(people).values({
+      id: pid,
+      email: destEmail!,
+      name: pname,
+      lastEmailAt: now,
+      unreadCount: 0,
+      totalCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { id: pid, email: destEmail!, name: pname, created: true };
+  }
+
+  // Recompute denormalized counts from source-of-truth. totalCount/unreadCount
+  // track received emails only (sent never increments them), so counting
+  // `emails` rows is canonical; a sent-message move leaves them unchanged.
+  const recompute = async (pid: string) => {
+    const [counts] = await db.all<{
+      total: number;
+      unread: number;
+      last: number | null;
+    }>(sql`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread,
+             MAX(received_at) AS last
+      FROM ${emails}
+      WHERE person_id = ${pid}
+    `);
+    await db
+      .update(people)
+      .set({
+        totalCount: counts?.total ?? 0,
+        unreadCount: counts?.unread ?? 0,
+        ...(counts?.last != null ? { lastEmailAt: counts.last } : {}),
+        updatedAt: now,
+      })
+      .where(eq(people.id, pid));
+  };
+
+  // ---- Received message: re-attribute the sender's person ----
+  const recv = await db
+    .select({
+      id: emails.id,
+      personId: emails.personId,
+      recipient: emails.recipient,
+    })
+    .from(emails)
+    .where(eq(emails.id, id))
+    .limit(1);
+  if (recv.length > 0) {
+    const target = recv[0];
+    if (!allowed.isAdmin && !allowed.inboxes.includes(target.recipient)) {
+      return c.json({ error: "Email not found" }, 404);
+    }
+    if (!destEmail) {
+      return c.json(
+        { error: "A received message can only be re-attributed by email." },
+        400,
+      );
+    }
+    const person = await resolvePerson();
+    if (person.id !== target.personId) {
+      // conversation_id is orthogonal and intentionally left unchanged.
+      await db
+        .update(emails)
+        .set({ personId: person.id })
+        .where(eq(emails.id, target.id));
+      await recompute(target.personId);
+      await recompute(person.id);
+    }
+    return c.json(
+      {
+        success: true,
+        type: "received" as const,
+        email: {
+          id: target.id,
+          personId: person.id,
+          toAddress: null,
+          fromAddress: null,
+        },
+        person,
+      },
+      200,
+    );
+  }
+
+  // ---- Sent message: re-attribute + rewrite the recipient so replies land ----
+  const sentRow = await db
+    .select({
+      id: sentEmails.id,
+      personId: sentEmails.personId,
+      fromAddress: sentEmails.fromAddress,
+      toAddress: sentEmails.toAddress,
+    })
+    .from(sentEmails)
+    .where(eq(sentEmails.id, id))
+    .limit(1);
+  if (sentRow.length === 0) {
+    return c.json({ error: "Email not found" }, 404);
+  }
+  const sent = sentRow[0];
+  // Authz: caller must own the inbox this message was sent from.
+  if (!allowed.isAdmin && !allowed.inboxes.includes(sent.fromAddress)) {
+    return c.json({ error: "Email not found" }, 404);
+  }
+  // A new sending identity must be one the caller owns.
+  if (newFrom && !allowed.isAdmin && !allowed.inboxes.includes(newFrom)) {
+    return c.json({ error: "fromAddress must be one of your inboxes." }, 400);
+  }
+
+  let person: Awaited<ReturnType<typeof resolvePerson>> | null = null;
+  const updates: Partial<typeof sentEmails.$inferInsert> = {};
+  if (destEmail) {
+    person = await resolvePerson();
+    updates.personId = person.id;
+    updates.toAddress = destEmail; // replies to a sent message route to its toAddress
+  }
+  if (newFrom) {
+    updates.fromAddress = newFrom;
+  }
+  if (Object.keys(updates).length > 0) {
+    await db.update(sentEmails).set(updates).where(eq(sentEmails.id, sent.id));
+  }
+  if (person && sent.personId && sent.personId !== person.id) {
+    await recompute(sent.personId);
+    await recompute(person.id);
+  }
+
+  return c.json(
+    {
+      success: true,
+      type: "sent" as const,
+      email: {
+        id: sent.id,
+        personId: person?.id ?? sent.personId,
+        toAddress: destEmail ?? sent.toAddress,
+        fromAddress: newFrom ?? sent.fromAddress,
+      },
+      person,
+    },
+    200,
+  );
 });

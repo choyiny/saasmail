@@ -1,4 +1,10 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  index,
+} from "drizzle-orm/sqlite-core";
 
 export const emails = sqliteTable(
   "emails",
@@ -14,6 +20,7 @@ export const emails = sqliteTable(
     spf: text("spf"),
     dkim: text("dkim"),
     dmarc: text("dmarc"),
+    spamScore: real("spam_score"),
     isRead: integer("is_read").notNull().default(0),
     /**
      * JSON-encoded array of {"email","name"} objects for additional
@@ -38,5 +45,6 @@ export const emails = sqliteTable(
       table.recipient,
       table.receivedAt,
     ),
+    index("emails_conversation_idx").on(table.conversationId),
   ],
 );

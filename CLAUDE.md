@@ -14,3 +14,4 @@ Self-hosted email server on Cloudflare Workers. See README.md for full documenta
 ## Skills
 
 - `/saasmail-onboarding` — Interactive setup wizard for deploying a new saasmail instance
+- `/use-saasmail` — How to call a deployed saasmail instance's HTTP API to send emails (raw or via templates) and enroll recipients in sequences

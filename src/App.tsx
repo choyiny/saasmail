@@ -19,6 +19,7 @@ import TemplateEditorPage from "@/pages/TemplateEditorPage";
 import SetupPasskeyPage from "@/pages/SetupPasskeyPage";
 import InviteAcceptPage from "@/pages/InviteAcceptPage";
 import AdminUsersPage from "@/pages/AdminUsersPage";
+import SuppressionsPage from "@/pages/SuppressionsPage";
 import ApiKeysPage from "@/pages/ApiKeysPage";
 import DashboardLayout from "@/components/DashboardLayout";
 import PublicLayout from "@/components/PublicLayout";
@@ -29,6 +30,8 @@ import SequenceDetailPage from "@/pages/SequenceDetailPage";
 import SequenceEditorPage from "@/pages/SequenceEditorPage";
 import InboxesPage from "./pages/InboxesPage";
 import SettingsPage from "@/pages/SettingsPage";
+import MessageLinkPage from "@/pages/MessageLinkPage";
+import UnsubscribePage from "@/pages/UnsubscribePage";
 
 const queryClient = new QueryClient();
 
@@ -126,10 +129,20 @@ function App() {
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/privacy" element={<PrivacyPage />} />
 
+            {/* Public unsubscribe landing — token-authenticated, no session.
+                Lives outside AuthGuard so recipients (who are never logged in)
+                can land here from email links. See worker/src/routers/
+                unsubscribe-router.ts for the API. */}
+            <Route path="/unsubscribe" element={<UnsubscribePage />} />
+
             {/* Authenticated routes with shared layout */}
             <Route element={<AuthGuard />}>
               <Route element={<DashboardLayout />}>
                 <Route path="/admin/users" element={<AdminUsersPage />} />
+                <Route
+                  path="/admin/suppressions"
+                  element={<SuppressionsPage />}
+                />
                 <Route path="/templates" element={<TemplatesPage />} />
                 <Route path="/templates/new" element={<TemplateEditorPage />} />
                 <Route
@@ -149,6 +162,10 @@ function App() {
                 {/* Deep link from Web Push notifications — see
                     worker/src/do/notifications.ts where data.url is set. */}
                 <Route path="/inbox/:inbox/:personId" element={<InboxPage />} />
+                {/* Shareable link to a specific message — resolves the
+                    email's person/inbox and forwards to the route above
+                    with a `#m=<id>` hash for scroll/flash. */}
+                <Route path="/m/:emailId" element={<MessageLinkPage />} />
                 <Route path="/*" element={<InboxPage />} />
               </Route>
             </Route>

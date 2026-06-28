@@ -7,6 +7,116 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-06-23
+
+### Added
+
+- Spam score column: inbound emails now capture the upstream `X-Spam-Score` header and store it as a nullable `spam_score` (real) column on the `emails` table. Migration `0028`.
+- Failed-send status indicator: sends rejected by the provider are now surfaced in both chat-bubble and thread views with a "Failed to send" badge and red tint. The `status` field is exposed on conversation and single-email API endpoints.
+
+### Dependencies
+
+- Bumped `actions/checkout` from 6 to 7.
+- Bumped the radix-ui group with 7 updates (`@radix-ui/react-avatar`, `@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-label`, `@radix-ui/react-scroll-area`, `@radix-ui/react-separator`, `@radix-ui/react-slot`).
+- Bumped the tiptap group with 5 updates.
+- Bumped the cloudflare dev-dependency group with 4 updates.
+- Bumped the better-auth group with 2 updates.
+
+## [0.9.0] - 2026-06-21
+
+### Added
+
+- Outbound webhook on inbound messages: configure a target URL via the admin API-keys page and saasmail will POST a `message.received` payload (signed with HMAC-SHA256) whenever a new email arrives. Downstream services can react in real time without polling.
+  - `GET /api/admin/webhooks` / `PUT /api/admin/webhooks` / `POST /api/admin/webhooks/test` admin endpoints backed by `app_settings`.
+  - HMAC-SHA256 `X-Saasmail-Signature` header on every delivery; delivery is best-effort (fire-and-forget, non-blocking).
+  - Frontend webhook config UI on the API-keys admin page.
+  - In-app signature-verification guidance: a copyable AI prompt generates verifier code for your stack.
+
+### Dependencies
+
+- Bumped `hono` from 4.12.23 to 4.12.25.
+- Bumped `dompurify` from 3.4.9 to 3.4.11.
+
+## [0.8.0] - 2026-06-20
+
+### Added
+
+- Inbox refresh: mobile pull-to-refresh (rubber-band indicator while fetching) and a desktop refresh button in the inbox toolbar. Both share a single `refreshPeople` path that re-fetches in place without flashing the full-pane loading state.
+- Re-target a message to a different or new person. New `PATCH /api/emails/:id/person` accepts `{ email?, name?, fromAddress? }` and handles both received and sent messages: for a received message it re-attributes the sender's person; for a sent message — e.g. a contact-form notification mailed from a generic address with the real submitter in the body — it re-attributes the person AND rewrites the stored `toAddress` so a reply reaches them, with an optional `fromAddress` to switch the sending identity. Conversation threading is left intact and per-person counts recomputed. In the UI: a per-message "Reassign" control on both received and sent messages (pre-filled from the inbound `Reply-To` when present), plus inline-editable From/To rows in the message viewer for sent messages.
+
+### Performance
+
+- Added database indexes for hot query paths to avoid full table scans: `emails.conversation_id` and `sent_emails.conversation_id` (group thread lookups), `sent_emails.(from_address, sent_at)` (inbox-scoped sent listings), `users.role` (inbound-email admin fan-out), and `invitations.created_at` / `suppressions.created_at` (list ordering). Migration `0027` uses `CREATE INDEX IF NOT EXISTS`, so re-applying is safe.
+
+### Dependencies
+
+- Bumped the radix-ui group with 7 updates (`@radix-ui/react-avatar`, `@radix-ui/react-dialog`, `@radix-ui/react-dropdown-menu`, `@radix-ui/react-label`, `@radix-ui/react-scroll-area`, `@radix-ui/react-separator`, `@radix-ui/react-slot`).
+- Bumped the tiptap group (`@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, `@tiptap/starter-kit`) from 3.24.0 to 3.26.1.
+- Bumped the cloudflare dev-dependency group (`@cloudflare/vite-plugin` 1.39.0 → 1.40.2, `@cloudflare/vitest-pool-workers` 0.16.10 → 0.16.15, `@cloudflare/workers-types` 4.20260601.1 → 4.20260615.1, `wrangler` → 4.100.0).
+- Bumped the better-auth group (`@better-auth/passkey`, `better-auth`) from 1.6.11 to 1.6.18.
+- Bumped the testing dev-dependency group (`@playwright/test` 1.60.0 → 1.61.0, `@vitest/runner`, `@vitest/snapshot`, `vitest` 4.1.7 → 4.1.9).
+- Bumped `hono` from 4.12.18 to 4.12.23.
+- Bumped `@codemirror/view` from 6.43.0 to 6.43.1.
+- Bumped `vite` from 7.3.2 to 7.3.5.
+- Bumped `dompurify` from 3.4.0 to 3.4.9.
+
+## [0.7.0] - 2026-06-04
+
+### Added
+
+- Suppression list with admin UI at `/admin/suppressions` and CRUD API at `/api/suppressions` (admin-only).
+- Public unsubscribe page at `/unsubscribe?token=…` with one-click POST handling and a re-subscribe button.
+- `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) headers on marketing sends.
+- Template variable `{{unsubscribe_url}}` available in marketing email templates. If the rendered body doesn't include the URL, an unsubscribe footer is auto-appended (HTML and plaintext).
+- `transactional: boolean` flag on `POST /api/send` (default `false`) to bypass suppression checks and unsubscribe injection for account-critical mail (password resets, OTPs, system notifications).
+- `suppressed: string[]` field on the `POST /api/send` response, listing recipients that were dropped because they're on the suppression list.
+- Sequence dispatcher and template preview/test send now respect the suppression list — unsubscribed recipients no longer receive scheduled or test sends.
+
+### Changed
+
+- **Behavior shift for API integrators:** sends through `POST /api/send` now have `List-Unsubscribe` headers added and (if the body lacks the URL) an unsubscribe footer auto-appended UNLESS the caller passes `transactional: true`. To preserve previous behavior for transactional mail (password resets, OTPs, etc.), set the flag explicitly on every transactional send.
+- `POST /api/send` response: `id` is now nullable. When every recipient is suppressed, the response is `{ id: null, status: "suppressed", delivered: [], suppressed: [...] }` with no message dispatched.
+- The `sequence_emails.status` enum now includes `suppressed` for steps dropped due to suppression.
+
+### Configuration
+
+- New required env var: `UNSUBSCRIBE_SECRET` — Worker secret used to sign one-click unsubscribe tokens (HMAC). Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Generate with `openssl rand -hex 32`.
+- The existing `BASE_URL` var is reused to build absolute unsubscribe URLs — no new `APP_URL` introduced.
+
+## [0.6.0] - 2026-06-02
+
+### Added
+
+- Support optional `Reply-To` header on `POST /api/send` and the reply route.
+- Inbound `Reply-To` is now surfaced on the single-email endpoint (`GET /api/emails/:id`).
+- Inbox can be deep-linked to a filtered view via `?q=` query parameter; individual messages now have shareable per-message links.
+- Admins can revoke invitations from the admin users page.
+- Added `/use-saasmail` skill documenting how to call a deployed saasmail instance from Claude.
+
+### Fixed
+
+- Prevented iOS auto-zoom on focused inputs across forms.
+- Sequence step delays now accumulate correctly so emails space out as configured instead of all sending at once.
+- Wrapped `Reply-To` values in a mimetext `Mailbox` on the Cloudflare sender path so sends with a `replyTo` no longer silently fail.
+
+### Dependencies
+
+- Bumped the tiptap group with 5 updates.
+- Bumped the cloudflare dev-dependency group with 4 updates.
+- Bumped `resend` from 6.11.0 to 6.12.4.
+
+## [0.5.2] - 2026-05-26
+
+### Dependencies
+
+- Bumped `@tiptap/extension-image`, `@tiptap/extension-placeholder`, `@tiptap/pm`, `@tiptap/react`, and `@tiptap/starter-kit` from 3.23.4 to 3.23.6.
+- Bumped `@cloudflare/vite-plugin` from 1.37.1 to 1.38.0.
+- Bumped `@cloudflare/vitest-pool-workers` from 0.16.6 to 0.16.9.
+- Bumped `@cloudflare/workers-types` from 4.20260518.1 to 4.20260525.1.
+- Bumped `wrangler` from 4.92.0 to the latest in the cloudflare group.
+- Bumped `tsx` from 4.21.0 to 4.22.3.
+- Bumped `@vitest/runner`, `@vitest/snapshot`, and `vitest` from 4.1.6 to 4.1.7.
+
 ## [0.5.1] - 2026-05-23
 
 ### Added
@@ -301,7 +411,13 @@ and admin tooling all changed; the data model is unchanged.
 - Demo deploy mode (`deploy:demo`) for DB-only demo instances.
 - Project scaffolding: Vite build, Vitest tests, Prettier, Husky + lint-staged, TypeScript strict mode.
 
-[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/choyiny/saasmail/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/choyiny/saasmail/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/choyiny/saasmail/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/choyiny/saasmail/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/choyiny/saasmail/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/choyiny/saasmail/compare/v0.5.2...v0.6.0
+[0.5.2]: https://github.com/choyiny/saasmail/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/choyiny/saasmail/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/choyiny/saasmail/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/choyiny/saasmail/compare/v0.4.2...v0.4.3

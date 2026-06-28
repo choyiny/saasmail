@@ -18,6 +18,8 @@ declare namespace Cloudflare {
 		VAPID_SUBJECT: "mailto:admin@<your-domain>";
 		/** Secret: set via `wrangler secret put VAPID_PRIVATE_KEY`. Not emitted by `wrangler types`; added manually. */
 		VAPID_PRIVATE_KEY?: string;
+		/** Secret: set via `wrangler secret put UNSUBSCRIBE_SECRET`. Used to sign one-click unsubscribe tokens. Not emitted by `wrangler types`; added manually. */
+		UNSUBSCRIBE_SECRET: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
 	}
 }

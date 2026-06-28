@@ -139,6 +139,43 @@ adminRouter.openapi(listInvitesRoute, async (c) => {
   return c.json(result, 200);
 });
 
+const revokeInviteRoute = createRoute({
+  method: "delete",
+  path: "/invites/{id}",
+  tags: ["Admin"],
+  description: "Revoke an invitation by id.",
+  request: {
+    params: z.object({ id: z.string() }),
+  },
+  responses: {
+    ...json200Response(
+      z.object({ success: z.literal(true) }),
+      "Invite revoked",
+    ),
+    404: {
+      description: "Invite not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+adminRouter.openapi(revokeInviteRoute, async (c) => {
+  const db = c.get("db");
+  const { id } = c.req.valid("param");
+
+  const target = await db
+    .select()
+    .from(invitations)
+    .where(eq(invitations.id, id))
+    .get();
+  if (!target) {
+    return c.json({ error: "Invite not found" }, 404);
+  }
+
+  await db.delete(invitations).where(eq(invitations.id, id));
+  return c.json({ success: true as const }, 200);
+});
+
 // --- User Management Endpoints ---
 
 const listUsersRoute = createRoute({

@@ -1,3 +1,8 @@
+# Outbound provider — Bavimail takes precedence over Resend and Cloudflare
+# Email Sending when BOTH BAVIMAIL_API_KEY and BAVIMAIL_ALIAS_ID are set.
+BAVIMAIL_API_KEY=
+BAVIMAIL_ALIAS_ID=
+
 RESEND_API_KEY=re_xxxx
 BETTER_AUTH_SECRET=generate-a-random-secret
 
@@ -10,3 +15,8 @@ DISABLE_PASSKEY_GATE=true
 # synthetic demo_... id). Required by `yarn test:e2e`; safe to leave
 # off for normal `yarn dev`. Never set in production.
 DEMO_MODE=1
+
+# Secret used to sign one-click unsubscribe tokens (HMAC). Generate
+# with: openssl rand -hex 32. Set in prod via:
+#   wrangler secret put UNSUBSCRIBE_SECRET
+UNSUBSCRIBE_SECRET=replace-with-output-of-openssl-rand-hex-32

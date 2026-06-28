@@ -27,8 +27,9 @@
     }
   ],
   // Optional: enable Cloudflare Email Sending as the outbound provider.
-  // If RESEND_API_KEY is set, Resend is used instead. Requires onboarding
-  // your domain at Email Service → https://dash.cloudflare.com/?to=/:account/email-service
+  // If Bavimail (BAVIMAIL_API_KEY + BAVIMAIL_ALIAS_ID) or RESEND_API_KEY is
+  // set, those win instead. Requires onboarding your domain at Email Service
+  // → https://dash.cloudflare.com/?to=/:account/email-service
   // "send_email": [
   //   { "name": "EMAIL" }
   // ],
@@ -77,9 +78,11 @@
     "crons": ["0 * * * *"]
   },
   // Outbound email provider selection (runtime, no explicit toggle):
+  //   - Set BOTH BAVIMAIL_API_KEY and BAVIMAIL_ALIAS_ID (via `wrangler secret put`)
+  //     to use Bavimail. Takes precedence over Resend and the EMAIL binding.
   //   - Set RESEND_API_KEY (via `wrangler secret put RESEND_API_KEY`) to use Resend.
   //   - Or uncomment the `send_email` binding above to use Cloudflare Email Sending.
-  //   - If neither is configured, send attempts return a "No email provider configured" error.
+  //   - If none are configured, send attempts return a "No email provider configured" error.
   "vars": {
     "BASE_URL": "<your-deployed-url>",
     "TRUSTED_ORIGINS": "http://localhost:8080,http://localhost:8788,<your-deployed-url>",
