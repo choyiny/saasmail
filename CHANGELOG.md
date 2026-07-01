@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-01
+
+### Changed
+
+- Refactored `email-sender.ts` into a `email-sender/` folder with a dedicated `providers/` sub-directory, splitting each provider (Bavimail, Cloudflare, Resend, demo, noop) into its own module alongside shared types and utilities.
+
 ## [0.10.0] - 2026-06-23
 
 ### Added
