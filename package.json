@@ -76,9 +76,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "^1.42.1",
-    "@cloudflare/vitest-pool-workers": "^0.16.18",
-    "@cloudflare/workers-types": "^4.20260621.1",
+    "@cloudflare/vite-plugin": "^1.43.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.0",
+    "@cloudflare/workers-types": "^5.20260707.1",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^19.2.14",
