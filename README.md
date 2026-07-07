@@ -19,6 +19,35 @@ Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Se
 
 <img width="5088" height="3106" alt="saasmail-new" src="https://github.com/user-attachments/assets/407a8b4e-3ba0-4ed9-ae8a-f39dee861e56" />
 
+## Who this is for
+
+SaaS teams that want a self-hosted email stack on Cloudflare Workers — one shared, per-customer inbox for marketing, transactional, and support mail — without renting a VM or operating a traditional mail server. If you have a domain, a Cloudflare account, and want to own your customer email data for [~$5/month](#how-much-does-it-cost), this is for you.
+
+## Quickstart
+
+**Prerequisites:** a domain on Cloudflare with Email Routing available, the Workers Paid plan, and [Node.js](https://nodejs.org/) v18+.
+
+The fastest path is the Claude Code onboarding skill — it provisions every Cloudflare resource, fills out your config, runs migrations, and deploys for you:
+
+```bash
+git clone https://github.com/choyiny/saasmail.git
+cd saasmail
+claude   # then run /saasmail-onboarding
+```
+
+**First successful result:** your worker is live at your domain, and visiting it prompts you to create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+
+Prefer to wire it up by hand? See [Full setup](#full-setup) below (~8 steps).
+
+## Architecture at a glance
+
+```
+Inbound    customer ─▶ Cloudflare Email Routing ─▶ saasmail Worker ─▶ D1 · R2 · Queue
+Outbound   saasmail Worker ─▶ Email Sending / Resend / Bavimail / Postmark ─▶ customer
+```
+
+Everything runs inside a single Cloudflare Worker — no separate mail server to operate. See [Architecture](#architecture) for the full diagram and the component-by-component breakdown.
+
 ## Sponsors
 
 <a href="https://givefeedback.dev/saas"><img width="200" height="44" alt="givefeedback.dev" src="https://github.com/user-attachments/assets/7da9ef06-cc47-4aa5-94b1-2108a302439c" /></a>
@@ -184,7 +213,7 @@ flowchart LR
 
 The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). On inbound mail the worker fans out to each recipient's hub, which pushes WebSocket frames to live tabs and sends encrypted Web Push to registered devices. The queue carries scheduled sequence emails — the cron trigger enqueues due steps and a queue consumer in the same worker sends them.
 
-## Quick Start
+## Full setup
 
 ### Recommended: install with Claude Code
 
