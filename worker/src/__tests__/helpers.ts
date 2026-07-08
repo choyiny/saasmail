@@ -74,6 +74,8 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
     `CREATE TABLE IF NOT EXISTS suppressions (id TEXT PRIMARY KEY, email TEXT NOT NULL, reason TEXT NOT NULL, source TEXT, note TEXT, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS suppressions_email_unique ON suppressions(email)`,
+    `CREATE TABLE IF NOT EXISTS blocklist (id TEXT PRIMARY KEY, type TEXT NOT NULL, value TEXT NOT NULL, note TEXT, created_by TEXT, created_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS blocklist_type_value_unique ON blocklist(type, value)`,
   ];
 
   for (const sql of statements) {
@@ -261,6 +263,7 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM blocklist;
     DELETE FROM suppressions;
     DELETE FROM push_subscriptions;
     DELETE FROM inbox_permissions;
