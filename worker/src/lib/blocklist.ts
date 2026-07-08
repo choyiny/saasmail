@@ -5,7 +5,12 @@ import { blocklist } from "../db/blocklist.schema";
 
 export type Database = DrizzleD1Database<typeof schema>;
 
-/** Lowercased domain part of an email address (everything after the last "@"). */
+/**
+ * Lowercased domain part of an email address (everything after the last "@").
+ * Well-formed stored addresses have exactly one "@", so this agrees with the
+ * first-"@" `substr(..., instr(..., '@')+1)` expression used in the SQL paths
+ * (people-router hiding, purge selection).
+ */
 export function domainOf(email: string): string {
   const at = email.lastIndexOf("@");
   return at === -1 ? "" : email.slice(at + 1).toLowerCase();

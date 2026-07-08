@@ -133,7 +133,7 @@ export default function BlocklistPage() {
         `Deleted ${res.emailsDeleted} email(s) from ${res.peopleDeleted} blocked sender(s).`,
       );
     } catch {
-      setPurgeResult("Failed to delete blocked mail.");
+      setError("Failed to delete blocked mail.");
     } finally {
       setPurgeSubmitting(false);
       setPurgeOpen(false);
