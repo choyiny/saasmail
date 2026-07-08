@@ -197,6 +197,15 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
         ))`,
     );
   }
+  // Hide senders that are on the global blocklist (exact email or domain).
+  // The blocklist is the source of truth; unblocking makes rows reappear.
+  personConditions.push(
+    sql`NOT EXISTS (
+      SELECT 1 FROM blocklist b
+      WHERE (b.type = 'email'  AND b.value = s.email)
+         OR (b.type = 'domain' AND b.value = lower(substr(s.email, instr(s.email, '@') + 1)))
+    )`,
+  );
   const scopeClause = peopleScopeClause(allowed);
   const personExtraConditions =
     personConditions.length > 0
