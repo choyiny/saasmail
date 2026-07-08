@@ -16,6 +16,7 @@ import InboxToolbar, {
 import PeopleTable from "@/components/PeopleTable";
 import SelectionBar from "@/components/SelectionBar";
 import {
+  addBlock,
   defaultDirectionFor,
   fetchPerson,
   fetchStats,
@@ -300,6 +301,19 @@ export default function InboxPage() {
     applyMarkRead(Array.from(selectedIds), Array.from(selectedConversationIds));
     clearSelection();
   }
+
+  const handleBlockSelected = useCallback(async () => {
+    const emails = items
+      .filter((it) => it.type === "person" && selectedIds.has(it.id))
+      .map((it) => (it as GroupedPerson).email.toLowerCase());
+    if (emails.length === 0) return;
+    await Promise.all(
+      emails.map((value) => addBlock({ type: "email", value }).catch(() => {})),
+    );
+    clearSelection();
+    await refreshPeople();
+  }, [items, selectedIds, clearSelection, refreshPeople]);
+
   const [refreshKey, setRefreshKey] = useState(0);
   const [showBanner, setShowBanner] = useState(false);
   const { data: session } = useSession();
@@ -464,6 +478,7 @@ export default function InboxPage() {
                 count={selectedIds.size + selectedConversationIds.size}
                 busy={bulkBusy}
                 onMarkRead={handleBulkMarkRead}
+                onBlock={handleBlockSelected}
                 onClear={clearSelection}
               />
             </div>
@@ -475,6 +490,7 @@ export default function InboxPage() {
                 count={selectedIds.size + selectedConversationIds.size}
                 busy={bulkBusy}
                 onMarkRead={handleBulkMarkRead}
+                onBlock={handleBlockSelected}
                 onClear={clearSelection}
               />
             </div>
