@@ -859,6 +859,7 @@ export async function addBlock(input: {
 }): Promise<BlockRule> {
   return apiFetch("/api/blocklist", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
 }
