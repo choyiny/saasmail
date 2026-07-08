@@ -10,6 +10,7 @@ import {
   Shield,
   Users,
   Ban,
+  ShieldBan,
   Menu,
   User,
   LogOut,
@@ -173,6 +174,13 @@ export default function TopNav() {
                     </DropdownMenuItem>
                   </>
                 )}
+                <DropdownMenuItem
+                  onClick={() => navigate("/blocklist")}
+                  className="cursor-pointer"
+                >
+                  <ShieldBan className="h-4 w-4" />
+                  Blocklist
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => navigate("/settings")}
@@ -282,6 +290,13 @@ export default function TopNav() {
                   </button>
                 </>
               )}
+              <button
+                onClick={() => navigate("/blocklist")}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+              >
+                <ShieldBan className="h-4 w-4" />
+                Blocklist
+              </button>
               <button
                 onClick={() => navigate("/settings")}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"

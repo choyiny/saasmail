@@ -32,6 +32,7 @@ import InboxesPage from "./pages/InboxesPage";
 import SettingsPage from "@/pages/SettingsPage";
 import MessageLinkPage from "@/pages/MessageLinkPage";
 import UnsubscribePage from "@/pages/UnsubscribePage";
+import BlocklistPage from "@/pages/BlocklistPage";
 
 const queryClient = new QueryClient();
 
@@ -159,6 +160,7 @@ function App() {
                 <Route path="/api-keys" element={<ApiKeysPage />} />
                 <Route path="/inboxes" element={<InboxesPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/blocklist" element={<BlocklistPage />} />
                 {/* Deep link from Web Push notifications — see
                     worker/src/do/notifications.ts where data.url is set. */}
                 <Route path="/inbox/:inbox/:personId" element={<InboxPage />} />
