@@ -5,6 +5,7 @@ import { blocklist } from "../db/blocklist.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { domainOf } from "../lib/blocklist";
 import { json200Response, json201Response } from "../lib/helpers";
+import { purgeBlockedMail } from "../lib/purge-blocked";
 import type { Variables } from "../variables";
 
 export const blocklistRouter = new OpenAPIHono<{
@@ -184,6 +185,27 @@ blocklistRouter.openapi(createRouteDef, async (c) => {
   )[0];
 
   return c.json(toDTO(row), row.id === id ? 201 : 200);
+});
+
+// --- DELETE /api/blocklist/mail (purge hidden mail) ---
+const PurgeResponseSchema = z.object({
+  emailsDeleted: z.number(),
+  peopleDeleted: z.number(),
+});
+
+const purgeRouteDef = createRoute({
+  method: "delete",
+  path: "/mail",
+  tags: ["Blocklist"],
+  description:
+    "Permanently delete all currently-hidden emails from blocked senders/domains.",
+  responses: { ...json200Response(PurgeResponseSchema, "Purge result") },
+});
+
+blocklistRouter.openapi(purgeRouteDef, async (c) => {
+  const db = c.get("db");
+  const result = await purgeBlockedMail(db, c.env.R2);
+  return c.json(result, 200);
 });
 
 // --- DELETE /api/blocklist/:id ---
