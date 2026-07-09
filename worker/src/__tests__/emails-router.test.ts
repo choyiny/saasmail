@@ -70,8 +70,6 @@ describe("emails router", () => {
       // Most recent first — sent email has higher timestamp
       expect(data[0].type).toBe("sent");
       expect(data[1].type).toBe("received");
-      // Received email's From resolves to the sender person (regression:
-      // used to be null, rendering "—" in the view-original modal).
       expect(data[1].fromAddress).toBe("a@test.com");
     });
 
@@ -247,8 +245,6 @@ describe("emails router", () => {
     });
 
     it("resolves fromAddress to the sender person for received email", async () => {
-      // Regression: the view-original modal showed "—" for From because
-      // received emails have no sender column — it's the linked person.
       await createTestPerson({ id: "s1", email: "sender@example.com" });
       await createTestEmail({ id: "e1", personId: "s1" });
 

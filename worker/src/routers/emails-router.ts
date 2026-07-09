@@ -193,9 +193,6 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
     .where(and(...sentConditions))
     .orderBy(desc(sentEmails.sentAt));
 
-  // Received emails don't store a sender column — the sender is this person
-  // (personId → people.email). Resolve it once so "From" renders in the
-  // view-original modal instead of an em-dash placeholder.
   const personRow = await db
     .select({ email: people.email })
     .from(people)
@@ -387,8 +384,6 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
       .select()
       .from(attachments)
       .where(eq(attachments.emailId, id));
-    // The sender of a received email is the linked person (personId →
-    // people.email); the `emails` table has no sender column of its own.
     const senderRow = await db
       .select({ email: people.email })
       .from(people)
@@ -827,8 +822,6 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
           id: target.id,
           personId: person.id,
           toAddress: null,
-          // Received sender is the (now reassigned) person — mirror the read
-          // endpoints so consumers get a real From, not an em-dash placeholder.
           fromAddress: person.email,
         },
         person,

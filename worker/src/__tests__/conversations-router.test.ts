@@ -90,9 +90,6 @@ describe("conversations router", () => {
     });
 
     it("resolves fromAddress to the sender person for received emails", async () => {
-      // Regression: the view-original modal showed "—" for From on received
-      // emails because the timeline returned fromAddress: null. Received mail
-      // has no sender column — it's the linked person (personId → people.email).
       const db = getDb();
       const now = Math.floor(Date.now() / 1000);
       await createTestPerson({ id: "p1", email: "external@example.com" });
