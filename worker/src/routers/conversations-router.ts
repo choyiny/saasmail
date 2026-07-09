@@ -186,6 +186,11 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     }
   }
 
+  // Received emails don't store a sender column — the sender is the person
+  // (personId → people.email). Resolve it from the participants we already
+  // loaded so "From" renders correctly in the timeline / view-original modal.
+  const personEmailById = new Map(participants.map((p) => [p.id, p.email]));
+
   // Merge into the same email shape as listPersonEmailsRoute, oldest first.
   const merged = [
     ...received.map((e) => ({
@@ -193,7 +198,9 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
       type: "received" as const,
       personId: e.personId ?? null,
       recipient: e.recipient,
-      fromAddress: null,
+      fromAddress: e.personId
+        ? (personEmailById.get(e.personId) ?? null)
+        : null,
       toAddress: null,
       subject: e.subject,
       bodyHtml: e.bodyHtml,

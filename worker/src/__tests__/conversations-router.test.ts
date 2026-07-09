@@ -5,11 +5,13 @@ import {
   applyMigrations,
   cleanDb,
   createTestUser,
+  createTestPerson,
   authFetch,
   getDb,
   buildSendForm,
 } from "./helpers";
 import { sentEmails } from "../db/sent-emails.schema";
+import { emails } from "../db/emails.schema";
 
 describe("conversations router", () => {
   let apiKey: string;
@@ -85,6 +87,41 @@ describe("conversations router", () => {
       expect(sentRow!.attachments).toHaveLength(1);
       expect(sentRow!.attachments[0].filename).toBe("doc.txt");
       expect(sentRow!.attachmentCount).toBe(1);
+    });
+
+    it("resolves fromAddress to the sender person for received emails", async () => {
+      // Regression: the view-original modal showed "—" for From on received
+      // emails because the timeline returned fromAddress: null. Received mail
+      // has no sender column — it's the linked person (personId → people.email).
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      await createTestPerson({ id: "p1", email: "external@example.com" });
+      await db.insert(emails).values({
+        id: "recv-1",
+        personId: "p1",
+        recipient: "me@saasmail.test",
+        subject: "Inbound",
+        bodyHtml: "<p>hi</p>",
+        bodyText: "hi",
+        rawHeaders: "{}",
+        messageId: "inbound-1@example.com",
+        isRead: 0,
+        conversationId: "conv-xyz",
+        receivedAt: now,
+        createdAt: now,
+      });
+
+      const res = await authFetch("/api/conversations/conv-xyz/emails", {
+        apiKey,
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        emails: Array<{ id: string; type: string; fromAddress: string | null }>;
+      };
+      const received = body.emails.find((e) => e.id === "recv-1");
+      expect(received).toBeDefined();
+      expect(received!.type).toBe("received");
+      expect(received!.fromAddress).toBe("external@example.com");
     });
   });
 });

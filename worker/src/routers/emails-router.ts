@@ -193,6 +193,16 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
     .where(and(...sentConditions))
     .orderBy(desc(sentEmails.sentAt));
 
+  // Received emails don't store a sender column — the sender is this person
+  // (personId → people.email). Resolve it once so "From" renders in the
+  // view-original modal instead of an em-dash placeholder.
+  const personRow = await db
+    .select({ email: people.email })
+    .from(people)
+    .where(eq(people.id, personId))
+    .limit(1);
+  const personEmail = personRow[0]?.email ?? null;
+
   // Merge and sort
   const merged = [
     ...received.map((e) => ({
@@ -200,7 +210,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       type: "received" as const,
       personId,
       recipient: e.recipient,
-      fromAddress: null,
+      fromAddress: personEmail,
       toAddress: null,
       subject: e.subject,
       bodyHtml: e.bodyHtml,
@@ -377,12 +387,19 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
       .select()
       .from(attachments)
       .where(eq(attachments.emailId, id));
+    // The sender of a received email is the linked person (personId →
+    // people.email); the `emails` table has no sender column of its own.
+    const senderRow = await db
+      .select({ email: people.email })
+      .from(people)
+      .where(eq(people.id, row[0].personId))
+      .limit(1);
     return c.json(
       {
         ...row[0],
         type: "received",
         timestamp: row[0].receivedAt,
-        fromAddress: null,
+        fromAddress: senderRow[0]?.email ?? null,
         toAddress: null,
         replyTo: extractReplyTo(row[0].rawHeaders),
         cc: parseCc(row[0].cc),
@@ -810,7 +827,9 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
           id: target.id,
           personId: person.id,
           toAddress: null,
-          fromAddress: null,
+          // Received sender is the (now reassigned) person — mirror the read
+          // endpoints so consumers get a real From, not an em-dash placeholder.
+          fromAddress: person.email,
         },
         person,
       },
