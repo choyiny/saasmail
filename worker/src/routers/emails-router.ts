@@ -193,6 +193,13 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
     .where(and(...sentConditions))
     .orderBy(desc(sentEmails.sentAt));
 
+  const personRow = await db
+    .select({ email: people.email })
+    .from(people)
+    .where(eq(people.id, personId))
+    .limit(1);
+  const personEmail = personRow[0]?.email ?? null;
+
   // Merge and sort
   const merged = [
     ...received.map((e) => ({
@@ -200,7 +207,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
       type: "received" as const,
       personId,
       recipient: e.recipient,
-      fromAddress: null,
+      fromAddress: personEmail,
       toAddress: null,
       subject: e.subject,
       bodyHtml: e.bodyHtml,
@@ -377,12 +384,17 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
       .select()
       .from(attachments)
       .where(eq(attachments.emailId, id));
+    const senderRow = await db
+      .select({ email: people.email })
+      .from(people)
+      .where(eq(people.id, row[0].personId))
+      .limit(1);
     return c.json(
       {
         ...row[0],
         type: "received",
         timestamp: row[0].receivedAt,
-        fromAddress: null,
+        fromAddress: senderRow[0]?.email ?? null,
         toAddress: null,
         replyTo: extractReplyTo(row[0].rawHeaders),
         cc: parseCc(row[0].cc),
@@ -810,7 +822,7 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
           id: target.id,
           personId: person.id,
           toAddress: null,
-          fromAddress: null,
+          fromAddress: person.email,
         },
         person,
       },
