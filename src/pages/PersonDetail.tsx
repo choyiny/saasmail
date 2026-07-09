@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useLocation } from "react-router-dom";
-import { CheckCheck } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { CheckCheck, ShieldBan } from "lucide-react";
 import {
   fetchPersonEmails,
   markEmailRead,
@@ -8,12 +8,19 @@ import {
   deleteEmail,
   fetchPersonEnrollment,
   fetchStats,
+  addBlock,
   type GroupedPerson,
   type Email,
   type PersonEnrollmentInfo,
   type InboxDisplayMode,
   type ReassignPersonResult,
 } from "@/lib/api";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { messageDomId, readMessageHash } from "@/lib/message-link";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
 import ReassignPersonModal from "@/components/ReassignPersonModal";
@@ -108,6 +115,7 @@ export default function PersonDetail({
   refreshKey,
   onOpenCompose,
 }: PersonDetailProps) {
+  const navigate = useNavigate();
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
@@ -126,6 +134,19 @@ export default function PersonDetail({
     Array<{ email: string; displayName: string | null }>
   >([]);
   const [activeInbox, setActiveInbox] = useState<string | null>(null);
+
+  async function handleBlock(type: "email" | "domain") {
+    const email = person.email.toLowerCase();
+    const value =
+      type === "email" ? email : email.slice(email.lastIndexOf("@") + 1);
+    if (!value) return;
+    try {
+      await addBlock({ type, value });
+      navigate("/"); // thread is now hidden; return to the inbox
+    } catch {
+      // Most likely a self-block guard rejection; leave the user on the thread.
+    }
+  }
 
   function refetchEmails() {
     fetchPersonEmails(person.id).then((res) => {
@@ -379,7 +400,7 @@ export default function PersonDetail({
             </span>
           </div>
 
-          <div className="shrink-0">
+          <div className="flex shrink-0 items-center gap-2">
             {enrollmentInfo?.enrollment ? (
               <SequenceStatus
                 personId={person.id}
@@ -393,6 +414,31 @@ export default function PersonDetail({
                 Add to sequence
               </button>
             )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label="Block sender"
+                  className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-card px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-rose-50 hover:text-rose-600"
+                >
+                  <ShieldBan size={13} />
+                  Block
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  onClick={() => handleBlock("email")}
+                >
+                  Block {person.email}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="cursor-pointer"
+                  onClick={() => handleBlock("domain")}
+                >
+                  Block entire domain
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </div>

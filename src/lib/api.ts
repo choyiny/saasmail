@@ -826,3 +826,51 @@ export async function deleteSuppression(
 ): Promise<{ deleted: true }> {
   return apiFetch(`/api/suppressions/${id}`, { method: "DELETE" });
 }
+
+// --- Blocklist ---
+
+export type BlockRuleType = "email" | "domain";
+
+export interface BlockRule {
+  id: string;
+  type: BlockRuleType;
+  value: string;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: number;
+}
+
+export interface BlocklistPageResult {
+  items: BlockRule[];
+  nextCursor: string | null;
+}
+
+export async function fetchBlocklist(
+  cursor?: string,
+): Promise<BlocklistPageResult> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch(`/api/blocklist${qs}`);
+}
+
+export async function addBlock(input: {
+  type: BlockRuleType;
+  value: string;
+  note?: string;
+}): Promise<BlockRule> {
+  return apiFetch("/api/blocklist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function removeBlock(id: string): Promise<{ deleted: true }> {
+  return apiFetch(`/api/blocklist/${id}`, { method: "DELETE" });
+}
+
+export async function purgeBlockedMail(): Promise<{
+  emailsDeleted: number;
+  peopleDeleted: number;
+}> {
+  return apiFetch("/api/blocklist/mail", { method: "DELETE" });
+}

@@ -6,7 +6,9 @@ import {
   createTestPerson,
   createTestEmail,
   authFetch,
+  getDb,
 } from "./helpers";
+import { blocklist } from "../db/blocklist.schema";
 
 describe("people router", () => {
   let apiKey: string;
@@ -245,6 +247,59 @@ describe("people router", () => {
       const body = await res.json();
       expect(body.data[0].recipients?.[0]).toBe("support@saasmail.test");
       expect(body.data[1].recipients?.[0]).toBe("alpha@saasmail.test");
+    });
+
+    it("excludes blocked senders (email + domain) from grouped results and aggregates", async () => {
+      await createTestPerson({
+        id: "p-block-email",
+        email: "spam@evil.com",
+        unreadCount: 1,
+      });
+      await createTestEmail({
+        id: "e-be",
+        personId: "p-block-email",
+        messageId: "m-be@evil.com",
+      });
+
+      await createTestPerson({
+        id: "p-block-domain",
+        email: "x@bad.com",
+        unreadCount: 1,
+      });
+      await createTestEmail({
+        id: "e-bd",
+        personId: "p-block-domain",
+        messageId: "m-bd@bad.com",
+      });
+
+      await createTestPerson({
+        id: "p-keep",
+        email: "ok@nice.com",
+        unreadCount: 1,
+      });
+      await createTestEmail({
+        id: "e-keep",
+        personId: "p-keep",
+        messageId: "m-keep@nice.com",
+      });
+
+      await getDb()
+        .insert(blocklist)
+        .values([
+          { id: "b1", type: "email", value: "spam@evil.com", createdAt: 1 },
+          { id: "b2", type: "domain", value: "bad.com", createdAt: 2 },
+        ]);
+
+      const r = await authFetch("/api/people/grouped", { apiKey });
+      const body = (await r.json()) as {
+        data: Array<{ id: string; email: string }>;
+        aggregates: { unreadRowCount: number };
+      };
+      const ids = body.data.map((d) => d.id);
+      expect(ids).toContain("p-keep");
+      expect(ids).not.toContain("p-block-email");
+      expect(ids).not.toContain("p-block-domain");
+      expect(body.aggregates.unreadRowCount).toBe(1); // only p-keep counts
     });
 
     it("flips recency to ascending (oldest first) when direction=asc", async () => {

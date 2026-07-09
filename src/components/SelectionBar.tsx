@@ -1,10 +1,11 @@
-import { CheckCheck, X, Loader2 } from "lucide-react";
+import { CheckCheck, X, Loader2, ShieldBan } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface SelectionBarProps {
   count: number;
   busy?: boolean;
   onMarkRead: () => void;
+  onBlock?: () => void;
   onClear: () => void;
   className?: string;
 }
@@ -18,6 +19,7 @@ export default function SelectionBar({
   count,
   busy,
   onMarkRead,
+  onBlock,
   onClear,
   className,
 }: SelectionBarProps) {
@@ -50,6 +52,18 @@ export default function SelectionBar({
         )}
         Mark as read
       </button>
+
+      {onBlock && (
+        <button
+          type="button"
+          onClick={onBlock}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 rounded-[6px] bg-white/[0.08] px-3 py-1.5 text-xs font-medium transition-colors hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ShieldBan size={12} />
+          Block
+        </button>
+      )}
 
       <button
         type="button"
