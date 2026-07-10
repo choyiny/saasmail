@@ -54,6 +54,11 @@ export default function ThreadMessage({
                   : "bg-violet/10 text-violet",
           )}
           data-testid={retrying ? "message-retrying-badge" : undefined}
+          title={
+            retrying
+              ? "The email provider rejected this send; it will be retried automatically. See the Outbox for details."
+              : undefined
+          }
           style={!isSent ? { color: "#7c5cfc" } : undefined}
         >
           {failedToSend ? (
