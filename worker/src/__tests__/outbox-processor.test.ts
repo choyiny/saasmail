@@ -202,6 +202,27 @@ describe("attemptOutboxRow", () => {
     expect(sent[0].status).toBe("failed");
   });
 
+  it("flips a failed sent email back to retrying on a transient re-attempt", async () => {
+    await seedOutboxRow();
+    const db = getDb();
+    await db
+      .update(sentEmails)
+      .set({ status: "failed" })
+      .where(eq(sentEmails.id, "se-1"));
+    const outcome = await attemptOutboxRow(
+      db,
+      env as unknown as CloudflareBindings,
+      fakeSender(TRANSIENT),
+      "ob-1",
+    );
+    expect(outcome).toBe("retrying");
+    const sent = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, "se-1"));
+    expect(sent[0].status).toBe("retrying");
+  });
+
   it("resolves the sequence step and completes the enrollment", async () => {
     const db = getDb();
     const now = Math.floor(Date.now() / 1000);

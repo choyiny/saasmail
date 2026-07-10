@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, desc, eq, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, lt, lte, or, sql } from "drizzle-orm";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "../lib/email-sender";
@@ -95,22 +95,39 @@ outboxRouter.openapi(listRoute, async (c) => {
   const clauses = [];
   const scope = inboxFilter(allowed, outboxEmails.fromAddress);
   if (scope) clauses.push(scope);
-  if (cursor)
-    clauses.push(lt(outboxEmails.createdAt, Number.parseInt(cursor, 10)));
+  if (cursor) {
+    const sep = cursor.indexOf("_");
+    if (sep === -1) {
+      // Backward compat: bare createdAt cursor (old format).
+      clauses.push(lt(outboxEmails.createdAt, Number.parseInt(cursor, 10)));
+    } else {
+      const c_createdAt = Number.parseInt(cursor.slice(0, sep), 10);
+      const cid = cursor.slice(sep + 1);
+      // Compound keyset: rows with a smaller createdAt, OR rows with the same
+      // createdAt but a smaller id (nanoid lexicographic descending).
+      clauses.push(
+        or(
+          lt(outboxEmails.createdAt, c_createdAt),
+          and(
+            eq(outboxEmails.createdAt, c_createdAt),
+            lt(outboxEmails.id, cid),
+          ),
+        ),
+      );
+    }
+  }
 
   const rows = await db
     .select()
     .from(outboxEmails)
     .where(clauses.length > 0 ? and(...clauses) : undefined)
-    .orderBy(desc(outboxEmails.createdAt))
+    .orderBy(desc(outboxEmails.createdAt), desc(outboxEmails.id))
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;
   const items = hasMore ? rows.slice(0, limit) : rows;
-  const nextCursor =
-    hasMore && items.length > 0
-      ? String(items[items.length - 1].createdAt)
-      : null;
+  const last = items.length > 0 ? items[items.length - 1] : null;
+  const nextCursor = hasMore && last ? `${last.createdAt}_${last.id}` : null;
 
   return c.json(
     {

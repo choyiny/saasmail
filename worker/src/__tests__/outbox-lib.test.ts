@@ -151,6 +151,21 @@ describe("sendViaOutbox", () => {
     expect(rows).toHaveLength(0);
   });
 
+  it("keeps the write-ahead row unclaimable while the inline attempt is in flight", async () => {
+    let observedNextRetryAt: number | null | undefined;
+    const observingSender: EmailSender = {
+      provider: "none",
+      async send() {
+        const rows = await getDb().select().from(outboxEmails);
+        observedNextRetryAt = rows[0]?.nextRetryAt;
+        return { id: "prov-1", error: null };
+      },
+      maxAttachmentBytes: () => 25 * 1024 * 1024,
+    };
+    await sendViaOutbox(baseParams(observingSender));
+    expect(observedNextRetryAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+  });
+
   it("deletes the row when every recipient is suppressed", async () => {
     const db = getDb();
     const now = Math.floor(Date.now() / 1000);

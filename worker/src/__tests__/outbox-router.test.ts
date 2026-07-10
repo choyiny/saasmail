@@ -13,10 +13,16 @@ import { inboxPermissions } from "../db/inbox-permissions.schema";
 
 async function seedRow(
   id: string,
-  opts: { fromAddress?: string; status?: string } = {},
+  opts: {
+    fromAddress?: string;
+    status?: string;
+    /** Offset in seconds from now (negative = older). */
+    createdAtOffset?: number;
+  } = {},
 ) {
   const db = getDb();
   const now = Math.floor(Date.now() / 1000);
+  const createdAt = now + (opts.createdAtOffset ?? 0);
   await db.insert(sentEmails).values({
     id: `sent-${id}`,
     personId: null,
@@ -24,8 +30,8 @@ async function seedRow(
     toAddress: "to@example.com",
     subject: "Hi",
     status: "retrying",
-    sentAt: now,
-    createdAt: now,
+    sentAt: createdAt,
+    createdAt,
   });
   await db.insert(outboxEmails).values({
     id,
@@ -38,9 +44,9 @@ async function seedRow(
     status: opts.status ?? "pending",
     attempts: 1,
     lastError: "quota exceeded",
-    nextRetryAt: now - 10,
-    createdAt: now,
-    updatedAt: now,
+    nextRetryAt: createdAt - 10,
+    createdAt,
+    updatedAt: createdAt,
   });
 }
 
@@ -57,8 +63,9 @@ describe("outbox router", () => {
   });
 
   it("lists outbox rows newest first", async () => {
-    await seedRow("ob-1");
-    await seedRow("ob-2", { status: "failed" });
+    // Use distinct createdAt values so ordering is deterministic.
+    await seedRow("ob-1", { createdAtOffset: -10 }); // older
+    await seedRow("ob-2", { status: "failed", createdAtOffset: 0 }); // newer
     const res = await authFetch("/api/outbox", { apiKey });
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -66,6 +73,9 @@ describe("outbox router", () => {
       nextCursor: string | null;
     };
     expect(body.items).toHaveLength(2);
+    // Newest first: ob-2 (offset 0) before ob-1 (offset -10).
+    expect(body.items[0].id).toBe("ob-2");
+    expect(body.items[1].id).toBe("ob-1");
     expect(body.items[0].lastError).toBe("quota exceeded");
   });
 
@@ -148,6 +158,60 @@ describe("outbox router", () => {
     expect(await res.json()).toEqual({ outcome: "pending" });
     const rows = await db.select().from(outboxEmails);
     expect(rows[0].attempts).toBe(1); // untouched — no new attempt was made
+  });
+
+  it("paginates tie-break rows (same createdAt) without duplicates or losses", async () => {
+    // All three rows share the same createdAt second → tie-break on id.
+    await seedRow("aa-1", { createdAtOffset: 0 });
+    await seedRow("bb-2", { createdAtOffset: 0 });
+    await seedRow("cc-3", { createdAtOffset: 0 });
+
+    // Page 1: limit=2
+    const res1 = await authFetch("/api/outbox?limit=2", { apiKey });
+    expect(res1.status).toBe(200);
+    const page1 = (await res1.json()) as {
+      items: Array<{ id: string }>;
+      nextCursor: string | null;
+    };
+    expect(page1.items).toHaveLength(2);
+    expect(page1.nextCursor).not.toBeNull();
+
+    // Page 2: follow the cursor
+    const res2 = await authFetch(
+      `/api/outbox?limit=2&cursor=${encodeURIComponent(page1.nextCursor!)}`,
+      { apiKey },
+    );
+    expect(res2.status).toBe(200);
+    const page2 = (await res2.json()) as {
+      items: Array<{ id: string }>;
+      nextCursor: string | null;
+    };
+    expect(page2.items).toHaveLength(1);
+    expect(page2.nextCursor).toBeNull();
+
+    // All 3 distinct ids, no duplicates.
+    const allIds = [
+      ...page1.items.map((i) => i.id),
+      ...page2.items.map((i) => i.id),
+    ];
+    expect(new Set(allIds).size).toBe(3);
+    expect(allIds.sort()).toEqual(["aa-1", "bb-2", "cc-3"]);
+  });
+
+  it("returns 404 for retry on a nonexistent id", async () => {
+    const res = await authFetch("/api/outbox/does-not-exist/retry", {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for cancel on a nonexistent id", async () => {
+    const res = await authFetch("/api/outbox/does-not-exist", {
+      apiKey,
+      method: "DELETE",
+    });
+    expect(res.status).toBe(404);
   });
 
   it("manually retries a failed row with a fresh attempt budget", async () => {

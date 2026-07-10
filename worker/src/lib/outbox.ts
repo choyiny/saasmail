@@ -98,7 +98,11 @@ export async function sendViaOutbox(
     transactional: transactional === true ? 1 : 0,
     status: "pending",
     attempts: 0,
-    nextRetryAt: now,
+    // The row must not be claimable while the inline attempt is in flight.
+    // On a transient failure the resolution below resets it to "due now", and a
+    // hard crash mid-attempt self-heals at the next hourly run (same cool-down
+    // semantics as the processor's claim).
+    nextRetryAt: now + 3600,
     createdAt: now,
     updatedAt: now,
   });
@@ -306,6 +310,19 @@ export async function attemptOutboxRow(
         updatedAt: after,
       })
       .where(eq(outboxEmails.id, row.id));
+    // No-op on the normal cron path (already retrying); matters when a manual
+    // retry revives a terminally failed row — flip the UI status back to
+    // "retrying" so the thread and outbox stay in sync.
+    await db
+      .update(sentEmails)
+      .set({ status: "retrying" })
+      .where(eq(sentEmails.id, row.sentEmailId));
+    if (row.sequenceEmailId) {
+      await db
+        .update(sequenceEmails)
+        .set({ status: "retrying" })
+        .where(eq(sequenceEmails.id, row.sequenceEmailId));
+    }
     return "retrying";
   }
 

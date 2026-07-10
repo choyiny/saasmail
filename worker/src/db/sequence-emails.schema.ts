@@ -8,7 +8,7 @@ export const sequenceEmails = sqliteTable(
     stepOrder: integer("step_order").notNull(),
     templateSlug: text("template_slug").notNull(),
     scheduledAt: integer("scheduled_at").notNull(),
-    status: text("status").notNull().default("pending"), // pending, queued, sent, cancelled, failed
+    status: text("status").notNull().default("pending"), // pending, queued, sent, cancelled, failed, suppressed, retrying
     sentAt: integer("sent_at"),
     sentEmailId: text("sent_email_id"),
   },
