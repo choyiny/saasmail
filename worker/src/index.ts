@@ -31,6 +31,7 @@ import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
+import { outboxRouter } from "./routers/outbox-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
@@ -207,6 +208,7 @@ app.route("/api/invites", invitesRouter);
 app.route("/api/sequences", sequencesRouter);
 app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
+app.route("/api/outbox", outboxRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
