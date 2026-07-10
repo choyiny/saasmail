@@ -15,6 +15,7 @@ import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { suppressions } from "../db/suppressions.schema";
+import { outboxEmails } from "../db/outbox-emails.schema";
 
 describe("send router", () => {
   let apiKey: string;
@@ -315,6 +316,67 @@ describe("send router", () => {
       expect(body.data).toHaveLength(1);
       expect(body.data[0].email).toBe("newperson@example.com");
       expect(body.data[0].totalCount).toBe(1);
+    });
+  });
+
+  describe("outbox integration", () => {
+    it("marks the send failed and keeps a failed outbox row when no provider is configured", async () => {
+      // Leave demo mode OFF and remove the provider key → NoopSender, whose
+      // error is permanent (transient: false).
+      (env as any).DEMO_MODE = "0";
+      const savedKey = (env as any).RESEND_API_KEY;
+      const savedEmail = (env as any).EMAIL;
+      (env as any).RESEND_API_KEY = undefined;
+      (env as any).EMAIL = undefined;
+      try {
+        const res = await authFetch("/api/send", {
+          apiKey,
+          method: "POST",
+          body: buildSendForm({
+            to: "nobody@example.com",
+            fromAddress: "me@saasmail.test",
+            subject: "Will fail",
+            bodyHtml: "<p>Hi</p>",
+          }),
+        });
+        expect(res.status).toBe(201);
+        const body = (await res.json()) as { id: string; status: string };
+        expect(body.status).toBe("failed");
+
+        const db = getDb();
+        const sent = await db
+          .select()
+          .from(sentEmails)
+          .where(eq(sentEmails.id, body.id));
+        expect(sent[0].status).toBe("failed");
+
+        const outbox = await db.select().from(outboxEmails);
+        expect(outbox).toHaveLength(1);
+        expect(outbox[0].status).toBe("failed");
+        expect(outbox[0].sentEmailId).toBe(body.id);
+        expect(outbox[0].lastError).toBe("No email provider configured");
+      } finally {
+        (env as any).RESEND_API_KEY = savedKey;
+        (env as any).EMAIL = savedEmail;
+      }
+    });
+
+    it("deletes the outbox row on a successful send", async () => {
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          to: "ok@example.com",
+          fromAddress: "me@saasmail.test",
+          subject: "OK",
+          bodyHtml: "<p>Hi</p>",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { status: string };
+      expect(body.status).toBe("sent");
+      const outbox = await getDb().select().from(outboxEmails);
+      expect(outbox).toHaveLength(0);
     });
   });
 

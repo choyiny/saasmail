@@ -17,7 +17,7 @@ import { generateMessageId } from "../lib/message-id";
 import { computeConversationId, externalsOnly } from "../lib/conversation-id";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { attachments } from "../db/attachments.schema";
-import { sendWithSuppressionCheck } from "../lib/send";
+import { sendViaOutbox } from "../lib/outbox";
 
 /**
  * Fetch the set of "internal" domains (domains owned by our
@@ -213,10 +213,13 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
         }))
       : undefined;
 
-  const sendResult = await sendWithSuppressionCheck({
+  const id = nanoid();
+  const { outcome, send: sendResult } = await sendViaOutbox({
     db,
     env: c.env,
     sender,
+    sentEmailId: id,
+    fromAddress,
     from: formattedFrom,
     to,
     cc,
@@ -262,7 +265,6 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   }
 
   // The transport was called; reflect its result in sent_emails.
-  const result = sendResult.result!;
   // When the primary `to` was suppressed, the helper promoted a surviving cc
   // to be the actual primary recipient. Use that for audit + person lookup so
   // the row reflects who actually got the email.
@@ -308,7 +310,6 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   );
   const conversationId = await computeConversationId(fromAddress, externals);
 
-  const id = nanoid();
   await db.insert(sentEmails).values({
     id,
     personId,
@@ -318,25 +319,25 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     bodyHtml: sendResult.renderedHtml ?? bodyHtml,
     bodyText: sendResult.renderedText ?? bodyText ?? null,
     messageId,
-    resendId: result.id,
-    status: result.error ? "failed" : "sent",
+    resendId: sendResult.result?.id ?? null,
+    status: outcome === "sent" ? "sent" : outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
     conversationId,
     sentAt: now,
     createdAt: now,
   });
 
-  const attachmentIds = !result.error
-    ? await persistSentAttachments(db, c.env, id, files, now)
-    : [];
+  // Persist attachments even on failure: a retrying/failed send must be able
+  // to reload its attachment bytes from R2 on a later attempt.
+  const attachmentIds = await persistSentAttachments(db, c.env, id, files, now);
 
   await cancelSequencesForPerson(db, personId);
 
   return c.json(
     {
       id,
-      resendId: result.id,
-      status: result.error ? "failed" : "sent",
+      resendId: sendResult.result?.id ?? null,
+      status: outcome === "sent" ? "sent" : outcome,
       attachmentIds,
       delivered: sendResult.delivered,
       suppressed: sendResult.suppressed,
@@ -513,14 +514,17 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
   // Replies are 1:1 conversational responses to an inbound — the recipient
-  // initiated by emailing first, so route through sendWithSuppressionCheck
+  // initiated by emailing first, so route through sendViaOutbox
   // with transactional: true. That bypasses the suppression list AND skips
   // the unsubscribe footer / List-Unsubscribe header (this is a reply, not
   // a bulk send).
-  const sendResult = await sendWithSuppressionCheck({
+  const id = nanoid();
+  const { outcome, send: sendResult } = await sendViaOutbox({
     db,
     env: c.env,
     sender,
+    sentEmailId: id,
+    fromAddress,
     from: formattedFrom,
     to: toAddress,
     cc,
@@ -545,8 +549,6 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       : {}),
     transactional: true,
   });
-  // transactional: true always yields delivered=[to], suppressed=[].
-  const result = sendResult.result!;
 
   // Compute conversation_id for this reply.
   const internalDomainsReply = await fetchInternalDomains(db);
@@ -560,7 +562,6 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   );
 
   // Store sent email
-  const id = nanoid();
   await db.insert(sentEmails).values({
     id,
     personId: origPersonId,
@@ -571,17 +572,17 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     bodyText: bodyText ?? null,
     inReplyTo: origInReplyToMessageId,
     messageId,
-    resendId: result.id,
-    status: result.error ? "failed" : "sent",
+    resendId: sendResult.result?.id ?? null,
+    status: outcome === "sent" ? "sent" : outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
     conversationId: conversationIdReply,
     sentAt: now,
     createdAt: now,
   });
 
-  const attachmentIds = !result.error
-    ? await persistSentAttachments(db, c.env, id, files, now)
-    : [];
+  // Persist attachments even on failure: a retrying/failed send must be able
+  // to reload its attachment bytes from R2 on a later attempt.
+  const attachmentIds = await persistSentAttachments(db, c.env, id, files, now);
 
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, origPersonId);
@@ -589,8 +590,8 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   return c.json(
     {
       id,
-      resendId: result.id,
-      status: result.error ? "failed" : "sent",
+      resendId: sendResult.result?.id ?? null,
+      status: outcome === "sent" ? "sent" : outcome,
       attachmentIds,
     },
     201,
