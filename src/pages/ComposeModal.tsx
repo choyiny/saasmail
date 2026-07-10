@@ -66,6 +66,11 @@ export default function ComposeModal({
   >([]);
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");
+  // Plain-text rendering of the editor, kept in lockstep with bodyHtml so the
+  // outgoing mail ships a `text/plain` part — same shape the reply composers
+  // send. Also what the chat feed keys off to render a normal bubble rather
+  // than the HTML preview card.
+  const [bodyText, setBodyText] = useState("");
   // Tracked separately from the body so swapping `From` mid-compose can swap
   // the signature without stomping on what the user has typed.
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
@@ -120,11 +125,13 @@ export default function ComposeModal({
       setCc(prefill?.cc ?? []);
       setSubject(prefill?.subject ?? "");
       setBodyHtml(prefill?.bodyHtml ?? "");
+      setBodyText("");
     } else {
       setTo("");
       setCc([]);
       setSubject("");
       setBodyHtml("");
+      setBodyText("");
       setSignatureHtml(null);
       setError("");
       setFullscreen(false);
@@ -166,6 +173,7 @@ export default function ComposeModal({
         ...(cc.length > 0 ? { cc } : {}),
         subject,
         bodyHtml: finalBody,
+        ...(bodyText.trim() ? { bodyText } : {}),
         ...(files.length > 0 ? { files: files.map((file) => ({ file })) } : {}),
       });
       dispatchEmailSent({ fromAddress, to, origin: "compose" });
@@ -296,7 +304,13 @@ export default function ComposeModal({
               buttonClassName="hidden"
               onFilesAdded={(added) => setFiles((prev) => [...prev, ...added])}
             >
-              <TiptapEditor content={bodyHtml} onUpdate={setBodyHtml} />
+              <TiptapEditor
+                content={bodyHtml}
+                onUpdate={(html, text) => {
+                  setBodyHtml(html);
+                  setBodyText(text);
+                }}
+              />
               <AttachmentChips
                 files={files}
                 capBytes={ATTACHMENT_CAP_BYTES}
