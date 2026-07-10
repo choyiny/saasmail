@@ -2,6 +2,7 @@ import { EmailMessage } from "cloudflare:email";
 import { createMimeMessage, Mailbox } from "mimetext";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { parseFrom, toBase64 } from "../shared";
+import { classifyErrorMessage } from "../classify";
 
 export class CloudflareSender implements EmailSender {
   readonly provider = "cloudflare" as const;
@@ -65,7 +66,10 @@ export class CloudflareSender implements EmailSender {
         message,
         e instanceof Error ? e.stack : "",
       );
-      return { id: null, error: { message } };
+      return {
+        id: null,
+        error: { message, transient: classifyErrorMessage(message) },
+      };
     }
   }
 

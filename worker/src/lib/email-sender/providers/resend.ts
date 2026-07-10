@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { toBase64 } from "../shared";
+import { classifyErrorMessage } from "../classify";
 
 export class ResendSender implements EmailSender {
   readonly provider = "resend" as const;
@@ -29,9 +30,15 @@ export class ResendSender implements EmailSender {
         : {}),
     });
     if (result.error) {
+      const message = result.error.message ?? "Resend send failed";
       return {
         id: null,
-        error: { message: result.error.message ?? "Resend send failed" },
+        error: {
+          message,
+          transient: classifyErrorMessage(
+            `${result.error.name ?? ""} ${message}`,
+          ),
+        },
       };
     }
     return { id: result.data?.id ?? null, error: null };

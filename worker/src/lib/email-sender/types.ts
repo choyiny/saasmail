@@ -17,9 +17,18 @@ export interface SendEmailParams {
   attachments?: SendEmailAttachment[];
 }
 
+export interface SendEmailError {
+  message: string;
+  /**
+   * true = worth retrying via the outbox (429/5xx/quota/network);
+   * false = terminal reject (bad recipient, auth failure).
+   */
+  transient: boolean;
+}
+
 export interface SendEmailResult {
   id: string | null;
-  error: { message: string } | null;
+  error: SendEmailError | null;
 }
 
 export interface EmailSender {

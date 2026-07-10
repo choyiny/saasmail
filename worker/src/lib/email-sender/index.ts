@@ -11,8 +11,10 @@ export type {
   SendEmailAttachment,
   SendEmailParams,
   SendEmailResult,
+  SendEmailError,
   EmailSender,
 } from "./types";
+export { transientFromStatus, classifyErrorMessage } from "./classify";
 export { ResendSender } from "./providers/resend";
 export { CloudflareSender } from "./providers/cloudflare";
 export { BavimailSender } from "./providers/bavimail";

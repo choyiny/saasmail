@@ -1,5 +1,6 @@
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { toBase64 } from "../shared";
+import { transientFromStatus, classifyErrorMessage } from "../classify";
 
 async function extractPostmarkError(res: Response): Promise<string> {
   try {
@@ -73,7 +74,10 @@ export class PostmarkSender implements EmailSender {
       if (!res.ok) {
         return {
           id: null,
-          error: { message: await extractPostmarkError(res) },
+          error: {
+            message: await extractPostmarkError(res),
+            transient: transientFromStatus(res.status),
+          },
         };
       }
 
@@ -84,11 +88,10 @@ export class PostmarkSender implements EmailSender {
       };
       // Postmark can return HTTP 200 with a non-zero ErrorCode on some failures.
       if (data.ErrorCode && data.ErrorCode !== 0) {
+        const message = data.Message ?? `Postmark error ${data.ErrorCode}`;
         return {
           id: null,
-          error: {
-            message: data.Message ?? `Postmark error ${data.ErrorCode}`,
-          },
+          error: { message, transient: classifyErrorMessage(message) },
         };
       }
       return { id: data.MessageID ?? null, error: null };
@@ -99,7 +102,7 @@ export class PostmarkSender implements EmailSender {
         message,
         e instanceof Error ? e.stack : "",
       );
-      return { id: null, error: { message } };
+      return { id: null, error: { message, transient: true } };
     }
   }
 
