@@ -347,7 +347,10 @@ export async function sendEmail(data: {
 }): Promise<{ id: string; attachmentIds: string[]; status: string }> {
   const { files = [], ...payload } = data;
   const fd = new FormData();
-  fd.append("payload", JSON.stringify(payload));
+  // Manually composed emails are 1:1 transactional messages: no unsubscribe
+  // footer or List-Unsubscribe headers, and they bypass the suppression list
+  // (mirrors replies, which are always transactional).
+  fd.append("payload", JSON.stringify({ ...payload, transactional: true }));
   for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch("/api/send", {
     method: "POST",
