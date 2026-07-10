@@ -6,7 +6,13 @@ import { useEffect, useRef, useState } from "react";
 
 interface TiptapEditorProps {
   content: string;
-  onUpdate: (html: string) => void;
+  /**
+   * Fires on every edit with both the serialized HTML and a plain-text
+   * rendering (blocks separated by newlines). The text feeds the outgoing
+   * `text/plain` MIME part so composed mail ships multipart — matching the
+   * reply composer's format.
+   */
+  onUpdate: (html: string, text: string) => void;
   placeholder?: string;
   className?: string;
   /** Override the default 2 MB per-image cap. */
@@ -103,7 +109,7 @@ export default function TiptapEditor({
       editorRef.current = editor as Editor;
     },
     onUpdate: ({ editor }) => {
-      onUpdate(editor.getHTML());
+      onUpdate(editor.getHTML(), editor.getText());
     },
     editorProps: {
       attributes: {
