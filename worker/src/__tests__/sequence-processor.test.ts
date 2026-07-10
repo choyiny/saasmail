@@ -13,6 +13,7 @@ import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { suppressions } from "../db/suppressions.schema";
+import { outboxEmails } from "../db/outbox-emails.schema";
 import { eq } from "drizzle-orm";
 import {
   handleScheduled,
@@ -298,5 +299,91 @@ describe("sequence processor - processSequenceEmail suppression", () => {
     const sentRows = await db.select().from(sentEmails);
     expect(sentRows).toHaveLength(1);
     expect(sentRows[0].toAddress).toBe("ok@test.com");
+  });
+});
+
+describe("sequence processor - processSequenceEmail outbox", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createTestUser();
+  });
+
+  it("hands a transient provider failure to the outbox", async () => {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await createTestPerson({ id: "p1", email: "a@test.com" });
+    await createTestTemplate({ slug: "welcome" });
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Test",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-1",
+      sequenceId: "seq-1",
+      personId: "p1",
+      status: "active",
+      variables: "{}",
+      fromAddress: "me@saasmail.test",
+      enrolledAt: now,
+    });
+    await db.insert(sequenceEmails).values({
+      id: "se-1",
+      enrollmentId: "enr-1",
+      stepOrder: 1,
+      templateSlug: "welcome",
+      scheduledAt: now - 100,
+      status: "queued",
+    });
+
+    const transientSender: EmailSender = {
+      provider: "none",
+      async send(_p: SendEmailParams) {
+        return {
+          id: null,
+          error: { message: "quota exceeded", transient: true },
+        };
+      },
+      maxAttachmentBytes: () => 25 * 1024 * 1024,
+    };
+
+    // Must resolve without throwing — the queue consumer ACKs on return.
+    await processSequenceEmail(
+      db,
+      transientSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    const step = await db
+      .select()
+      .from(sequenceEmails)
+      .where(eq(sequenceEmails.id, "se-1"));
+    expect(step[0].status).toBe("retrying");
+
+    const sent = await db.select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].status).toBe("retrying");
+
+    const outbox = await db.select().from(outboxEmails);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0].status).toBe("pending");
+    expect(outbox[0].sequenceEmailId).toBe("se-1");
+    expect(outbox[0].sentEmailId).toBe(sent[0].id);
+
+    // Enrollment must NOT complete while a step is retrying.
+    const enr = await db
+      .select()
+      .from(sequenceEnrollments)
+      .where(eq(sequenceEnrollments.id, "enr-1"));
+    expect(enr[0].status).toBe("active");
   });
 });

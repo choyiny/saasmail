@@ -12,7 +12,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { interpolate } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
-import { sendWithSuppressionCheck } from "./send";
+import { sendViaOutbox } from "./outbox";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
 export interface SequenceEmailMessage {
@@ -179,10 +179,14 @@ export async function processSequenceEmail(
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const sendResult = await sendWithSuppressionCheck({
+  const sentId = nanoid();
+  const { outcome, send: sendResult } = await sendViaOutbox({
     db,
     env,
     sender,
+    sentEmailId: sentId,
+    sequenceEmailId,
+    fromAddress,
     from: formattedFrom,
     to: person.email,
     subject: renderedSubject,
@@ -190,9 +194,10 @@ export async function processSequenceEmail(
     headers: { "Message-ID": messageId },
   });
 
-  // Recipient is on the suppression list — skip transport, mark suppressed,
-  // do NOT retry. Suppression is a final state.
-  if (sendResult.delivered.length === 0) {
+  if (outcome === "suppressed") {
+    // Recipient is on the suppression list — skip transport, mark suppressed,
+    // do NOT retry. Suppression is a final state. sentAt's semantic is "time
+    // the transport was called" — no transport call happened, so it stays null.
     console.log(
       "[sequence] recipient suppressed",
       JSON.stringify({
@@ -201,24 +206,16 @@ export async function processSequenceEmail(
         suppressed: sendResult.suppressed,
       }),
     );
-    // sentAt's semantic is "time the transport was called" — no transport
-    // call happened on a suppressed step, so leave sentAt alone (it should
-    // stay null).
     await db
       .update(sequenceEmails)
       .set({ status: "suppressed" })
       .where(eq(sequenceEmails.id, sequenceEmailId));
-
-    // Treat as terminal for enrollment completion: fall through to the same
-    // remaining-step check below so an enrollment whose only outstanding step
-    // was suppressed still gets completed.
   } else {
     const result = sendResult.result!;
 
     // Store sent email record. The helper may have mutated the body to
     // interpolate {{unsubscribe_url}} or auto-append a footer — record
     // exactly what was on the wire, not the pre-helper template render.
-    const sentId = nanoid();
     await db.insert(sentEmails).values({
       id: sentId,
       personId: person.id,
@@ -229,13 +226,21 @@ export async function processSequenceEmail(
       bodyText: sendResult.renderedText ?? null,
       messageId,
       resendId: result.id,
-      status: result.error ? "failed" : "sent",
+      status: outcome === "sent" ? "sent" : outcome,
       sentAt: now,
       createdAt: now,
     });
 
-    // Update outbox row
-    if (result.error) {
+    if (outcome === "retrying") {
+      // The outbox owns the retry from here; the queue message is ACKed.
+      await db
+        .update(sequenceEmails)
+        .set({ status: "retrying" })
+        .where(eq(sequenceEmails.id, sequenceEmailId));
+      return;
+    }
+
+    if (outcome === "failed") {
       await db
         .update(sequenceEmails)
         .set({ status: "failed" })
@@ -249,6 +254,5 @@ export async function processSequenceEmail(
       .where(eq(sequenceEmails.id, sequenceEmailId));
   }
 
-  // Check if this was the last step — if so, mark enrollment completed
   await completeEnrollmentIfDone(db, enrollment.id);
 }
