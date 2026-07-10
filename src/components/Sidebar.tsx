@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Mail,
@@ -10,9 +11,11 @@ import {
   ListOrdered,
   ChevronsLeft,
   ChevronsRight,
+  Send,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { useSidebarCollapsed } from "@/lib/useSidebarCollapsed";
+import { fetchOutboxCount } from "@/lib/api";
 import { Wordmark } from "@/components/Wordmark";
 import {
   DropdownMenu,
@@ -30,6 +33,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { icon: Mail, label: "Inbox", path: "/" },
+  { icon: Send, label: "Outbox", path: "/outbox" },
   { icon: FileText, label: "Templates", path: "/templates" },
   { icon: ListOrdered, label: "Sequences", path: "/sequences" },
   { icon: Key, label: "API", path: "/api-keys" },
@@ -42,12 +46,14 @@ function NavButton({
   label,
   active,
   collapsed,
+  badge,
   onClick,
 }: {
   icon: React.ElementType;
   label: string;
   active: boolean;
   collapsed: boolean;
+  badge?: number;
   onClick: () => void;
 }) {
   if (collapsed) {
@@ -61,7 +67,12 @@ function NavButton({
             : "text-text-tertiary hover:bg-bg-muted hover:text-text-primary"
         }`}
       >
-        <Icon size={18} />
+        <span className="relative">
+          <Icon size={18} />
+          {badge ? (
+            <span className="absolute -right-1.5 -top-1.5 h-2 w-2 rounded-full bg-amber-500" />
+          ) : null}
+        </span>
       </button>
     );
   }
@@ -76,6 +87,11 @@ function NavButton({
     >
       <Icon size={16} />
       <span className="truncate">{label}</span>
+      {badge ? (
+        <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+          {badge}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -89,6 +105,18 @@ export default function Sidebar({ onCompose }: SidebarProps) {
   const navigate = useNavigate();
   const { data: session } = useSession();
   const [collapsed, toggleCollapsed] = useSidebarCollapsed();
+  const [outboxCount, setOutboxCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetchOutboxCount()
+      .then((res) => {
+        if (!cancelled) setOutboxCount(res.pending);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
 
   function isActive(path: string) {
     if (path === "/") {
@@ -133,6 +161,7 @@ export default function Sidebar({ onCompose }: SidebarProps) {
               label={item.label}
               active={isActive(item.path)}
               collapsed={collapsed}
+              badge={item.path === "/outbox" ? outboxCount : undefined}
               onClick={() => navigate(item.path)}
             />
           ))}
