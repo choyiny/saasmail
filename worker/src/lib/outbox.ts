@@ -1,13 +1,22 @@
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { drizzle } from "drizzle-orm/d1";
 import { outboxEmails } from "../db/outbox-emails.schema";
+import { sentEmails } from "../db/sent-emails.schema";
+import { sequenceEmails } from "../db/sequence-emails.schema";
+import { attachments } from "../db/attachments.schema";
+import { schema } from "../db/schema";
 import type { EmailSender, SendEmailAttachment } from "./email-sender";
+import { createEmailSender } from "./email-sender";
 import {
   sendWithSuppressionCheck,
   type CcRecipient,
   type SendOutput,
 } from "./send";
+import { formatFromAddress } from "./format-from-address";
+import { isDemoMode } from "./is-dev";
+import { completeEnrollmentIfDone } from "./enrollment-completion";
 
 /** Total provider attempts before a transient failure becomes terminal.
  *  With the hourly cron this is ~24h — enough to ride out Cloudflare's
@@ -160,4 +169,217 @@ export async function sendViaOutbox(
     })
     .where(eq(outboxEmails.id, outboxId));
   return { outcome: "failed", send };
+}
+
+/**
+ * Cron entry point: re-attempt every due pending outbox row. Called from
+ * the hourly `scheduled()` handler after sequence dispatch.
+ */
+export async function processOutbox(env: CloudflareBindings): Promise<void> {
+  if (isDemoMode(env)) return;
+  const db = drizzle(env.DB, { schema }) as unknown as Db;
+  const sender = createEmailSender(env);
+  const now = Math.floor(Date.now() / 1000);
+
+  const due = await db
+    .select({ id: outboxEmails.id })
+    .from(outboxEmails)
+    .where(
+      and(
+        eq(outboxEmails.status, "pending"),
+        lte(outboxEmails.nextRetryAt, now),
+      ),
+    );
+  if (due.length === 0) return;
+
+  for (const row of due) {
+    try {
+      await attemptOutboxRow(db, env, sender, row.id);
+    } catch (err) {
+      // A crashed attempt leaves the row pending with next_retry_at an hour
+      // out (set by the claim), so it self-heals on a later run.
+      console.error(`[outbox] retry attempt crashed for ${row.id}:`, err);
+    }
+  }
+  console.log(`[outbox] processed ${due.length} due rows`);
+}
+
+/**
+ * Claim and re-attempt a single outbox row. Returns the resolution, or
+ * null when the row couldn't be claimed (already resolved, status
+ * `failed`, or not due — e.g. a concurrent processor got there first).
+ *
+ * The claim is a conditional UPDATE that bumps `attempts` and pushes
+ * `next_retry_at` an hour out; a concurrent claimant fails the
+ * `next_retry_at <= now` condition, so a cron run racing a manual retry
+ * can't double-send.
+ */
+export async function attemptOutboxRow(
+  db: Db,
+  env: CloudflareBindings,
+  sender: EmailSender,
+  id: string,
+): Promise<OutboxOutcome | null> {
+  const now = Math.floor(Date.now() / 1000);
+  const claimed = await db
+    .update(outboxEmails)
+    .set({
+      attempts: sql`${outboxEmails.attempts} + 1`,
+      nextRetryAt: now + 3600,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(outboxEmails.id, id),
+        eq(outboxEmails.status, "pending"),
+        lte(outboxEmails.nextRetryAt, now),
+      ),
+    )
+    .returning();
+  if (claimed.length === 0) return null;
+  const row = claimed[0];
+
+  const from = await formatFromAddress(db, row.fromAddress);
+  const storedAttachments = await loadOutboxAttachments(
+    db,
+    env,
+    row.sentEmailId,
+  );
+
+  const send = await sendWithSuppressionCheck({
+    db,
+    env,
+    sender,
+    from,
+    to: row.toAddress,
+    cc: row.cc ? (JSON.parse(row.cc) as CcRecipient[]) : undefined,
+    subject: row.subject,
+    html: row.bodyHtml ?? undefined,
+    text: row.bodyText ?? undefined,
+    headers: row.headers
+      ? (JSON.parse(row.headers) as Record<string, string>)
+      : undefined,
+    attachments: storedAttachments.length > 0 ? storedAttachments : undefined,
+    transactional: row.transactional === 1,
+  });
+
+  const after = Math.floor(Date.now() / 1000);
+
+  if (send.delivered.length === 0) {
+    // Recipient was suppressed between attempts — terminal, don't retry.
+    await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
+    await db
+      .update(sentEmails)
+      .set({ status: "failed" })
+      .where(eq(sentEmails.id, row.sentEmailId));
+    if (row.sequenceEmailId) {
+      await resolveSequenceStep(db, row.sequenceEmailId, "suppressed", null);
+    }
+    return "suppressed";
+  }
+
+  const result = send.result!;
+  if (!result.error) {
+    await db
+      .update(sentEmails)
+      .set({ status: "sent", resendId: result.id, sentAt: after })
+      .where(eq(sentEmails.id, row.sentEmailId));
+    if (row.sequenceEmailId) {
+      await resolveSequenceStep(
+        db,
+        row.sequenceEmailId,
+        "sent",
+        row.sentEmailId,
+      );
+    }
+    await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
+    return "sent";
+  }
+
+  if (result.error.transient && row.attempts < MAX_OUTBOX_ATTEMPTS) {
+    // Due again immediately — i.e. at the next hourly run.
+    await db
+      .update(outboxEmails)
+      .set({
+        lastError: result.error.message,
+        nextRetryAt: after,
+        updatedAt: after,
+      })
+      .where(eq(outboxEmails.id, row.id));
+    return "retrying";
+  }
+
+  // Permanent reject, or the attempt budget is spent.
+  await db
+    .update(outboxEmails)
+    .set({
+      status: "failed",
+      lastError: result.error.message,
+      updatedAt: after,
+    })
+    .where(eq(outboxEmails.id, row.id));
+  await db
+    .update(sentEmails)
+    .set({ status: "failed" })
+    .where(eq(sentEmails.id, row.sentEmailId));
+  if (row.sequenceEmailId) {
+    await resolveSequenceStep(db, row.sequenceEmailId, "failed", null);
+  }
+  return "failed";
+}
+
+/** Flip a sequence step to its terminal status and re-check the enrollment. */
+export async function resolveSequenceStep(
+  db: Db,
+  sequenceEmailId: string,
+  status: "sent" | "failed" | "suppressed",
+  sentEmailId: string | null,
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  await db
+    .update(sequenceEmails)
+    .set({
+      status,
+      ...(status === "sent" ? { sentAt: now, sentEmailId } : {}),
+    })
+    .where(eq(sequenceEmails.id, sequenceEmailId));
+
+  const rows = await db
+    .select({ enrollmentId: sequenceEmails.enrollmentId })
+    .from(sequenceEmails)
+    .where(eq(sequenceEmails.id, sequenceEmailId))
+    .limit(1);
+  if (rows[0]) {
+    await completeEnrollmentIfDone(db, rows[0].enrollmentId);
+  }
+}
+
+/** Reload persisted attachments (R2 bytes) for a retry attempt. */
+async function loadOutboxAttachments(
+  db: Db,
+  env: CloudflareBindings,
+  sentEmailId: string,
+): Promise<SendEmailAttachment[]> {
+  const rows = await db
+    .select()
+    .from(attachments)
+    .where(
+      and(eq(attachments.emailId, sentEmailId), eq(attachments.kind, "sent")),
+    );
+  const out: SendEmailAttachment[] = [];
+  for (const a of rows) {
+    const obj = await env.R2.get(a.r2Key);
+    if (!obj) {
+      console.error(
+        `[outbox] missing R2 object ${a.r2Key} for sent email ${sentEmailId}`,
+      );
+      continue;
+    }
+    out.push({
+      filename: a.filename,
+      contentType: a.contentType,
+      content: await obj.arrayBuffer(),
+    });
+  }
+  return out;
 }

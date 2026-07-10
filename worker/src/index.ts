@@ -25,6 +25,7 @@ import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { processOutbox } from "./lib/outbox";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -274,7 +275,7 @@ export default {
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(handleScheduled(env));
+    ctx.waitUntil(handleScheduled(env).then(() => processOutbox(env)));
   },
   async queue(
     batch: MessageBatch<SequenceEmailMessage>,
