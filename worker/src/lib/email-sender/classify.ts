@@ -9,7 +9,7 @@ const TRANSIENT_RE =
   /quota|rate.?limit|too many|limit exceeded|timeout|timed out|network|temporar|try again/i;
 
 const PERMANENT_RE =
-  /invalid|malformed|validation|unauthorized|forbidden|authentication|not allowed|rejected|55\d/i;
+  /invalid|malformed|validation|unauthorized|forbidden|authentication|not allowed|rejected|55\d|inactive|not confirmed|unconfirmed|not found|does not exist/i;
 
 /** Classify by HTTP status when one is available. */
 export function transientFromStatus(status: number): boolean {

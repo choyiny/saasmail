@@ -386,4 +386,173 @@ describe("sequence processor - processSequenceEmail outbox", () => {
       .where(eq(sequenceEnrollments.id, "enr-1"));
     expect(enr[0].status).toBe("active");
   });
+
+  it("completes the enrollment when the inline send permanently fails", async () => {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await createTestPerson({ id: "p2", email: "perm@test.com" });
+    await createTestTemplate({ slug: "welcome" });
+    await db.insert(sequences).values({
+      id: "seq-perm",
+      name: "Test",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-perm",
+      sequenceId: "seq-perm",
+      personId: "p2",
+      status: "active",
+      variables: "{}",
+      fromAddress: "me@saasmail.test",
+      enrolledAt: now,
+    });
+    await db.insert(sequenceEmails).values({
+      id: "se-perm",
+      enrollmentId: "enr-perm",
+      stepOrder: 1,
+      templateSlug: "welcome",
+      scheduledAt: now - 100,
+      status: "queued",
+    });
+
+    const permanentSender: EmailSender = {
+      provider: "none",
+      async send(_p: SendEmailParams) {
+        return {
+          id: null,
+          error: { message: "invalid recipient", transient: false },
+        };
+      },
+      maxAttachmentBytes: () => 25 * 1024 * 1024,
+    };
+
+    await processSequenceEmail(
+      db,
+      permanentSender,
+      env as unknown as CloudflareBindings,
+      "se-perm",
+    );
+
+    const step = await db
+      .select()
+      .from(sequenceEmails)
+      .where(eq(sequenceEmails.id, "se-perm"));
+    expect(step[0].status).toBe("failed");
+
+    const sent = await db.select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].status).toBe("failed");
+
+    const enr = await db
+      .select()
+      .from(sequenceEnrollments)
+      .where(eq(sequenceEnrollments.id, "enr-perm"));
+    expect(enr[0].status).toBe("completed");
+  });
+});
+
+describe("sequence processor - crash-redelivery idempotency", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createTestUser();
+  });
+
+  it("repairs a crashed delivery by reusing the existing outbox row without calling the sender", async () => {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+
+    await createTestPerson({ id: "p1", email: "a@test.com" });
+    await createTestTemplate({ slug: "welcome" });
+
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Test",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-1",
+      sequenceId: "seq-1",
+      personId: "p1",
+      status: "active",
+      variables: "{}",
+      fromAddress: "me@saasmail.test",
+      enrolledAt: now,
+    });
+
+    await db.insert(sequenceEmails).values({
+      id: "se-1",
+      enrollmentId: "enr-1",
+      stepOrder: 1,
+      templateSlug: "welcome",
+      scheduledAt: now - 100,
+      status: "queued",
+    });
+
+    // Seed an existing outbox row as if the first delivery inserted it but
+    // crashed before completing the sentEmails insert and step update.
+    await db.insert(outboxEmails).values({
+      id: "ob-repair-1",
+      sentEmailId: "sent-repair-1",
+      sequenceEmailId: "se-1",
+      fromAddress: "me@saasmail.test",
+      toAddress: "a@test.com",
+      subject: "Hello",
+      bodyHtml: "<p>Hello</p>",
+      status: "pending",
+      attempts: 1,
+      nextRetryAt: now,
+      headers: JSON.stringify({ "Message-ID": "<mid-repair@saasmail.test>" }),
+      transactional: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const throwingSender: EmailSender = {
+      provider: "none",
+      async send(_p: SendEmailParams) {
+        throw new Error("should not be called");
+      },
+      maxAttachmentBytes: () => 25 * 1024 * 1024,
+    };
+
+    // Must not throw — the redelivery guard intercepts and repairs.
+    await processSequenceEmail(
+      db,
+      throwingSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    // Step should be flipped to retrying
+    const step = await db
+      .select()
+      .from(sequenceEmails)
+      .where(eq(sequenceEmails.id, "se-1"));
+    expect(step[0].status).toBe("retrying");
+
+    // sentEmails row should exist with the outbox row's sentEmailId
+    const sent = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, "sent-repair-1"));
+    expect(sent).toHaveLength(1);
+    expect(sent[0].status).toBe("retrying");
+
+    // Outbox row should still exist (owned by the outbox processor)
+    const outbox = await db.select().from(outboxEmails);
+    expect(outbox).toHaveLength(1);
+  });
 });

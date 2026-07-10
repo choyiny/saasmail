@@ -9,6 +9,7 @@ import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { outboxEmails } from "../db/outbox-emails.schema";
 import { interpolate } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
@@ -131,6 +132,45 @@ export async function processSequenceEmail(
     return;
   }
 
+  // Crash-redelivery guard: if the queue message is redelivered after a crash
+  // mid-bookkeeping (e.g. the sentEmails insert threw), an outbox row may already
+  // exist for this step even though the step status is still "queued". Sending again
+  // would insert a second outbox row and generate a duplicate email. Instead, repair:
+  // insert the missing sentEmails row (no-op if it already exists) and flip the step
+  // to "retrying" so the outbox owns the retry from here.
+  const existingOutboxRows = await db
+    .select()
+    .from(outboxEmails)
+    .where(eq(outboxEmails.sequenceEmailId, sequenceEmailId))
+    .limit(1);
+  if (existingOutboxRows.length > 0) {
+    const outboxRow = existingOutboxRows[0];
+    const repairNow = Math.floor(Date.now() / 1000);
+    await db
+      .insert(sentEmails)
+      .values({
+        id: outboxRow.sentEmailId,
+        personId: enrollment.personId,
+        fromAddress: outboxRow.fromAddress,
+        toAddress: outboxRow.toAddress,
+        subject: outboxRow.subject,
+        bodyHtml: outboxRow.bodyHtml ?? null,
+        bodyText: outboxRow.bodyText ?? null,
+        messageId: outboxRow.headers
+          ? (JSON.parse(outboxRow.headers)["Message-ID"] ?? null)
+          : null,
+        status: "retrying" as const,
+        sentAt: repairNow,
+        createdAt: repairNow,
+      })
+      .onConflictDoNothing();
+    await db
+      .update(sequenceEmails)
+      .set({ status: "retrying" })
+      .where(eq(sequenceEmails.id, sequenceEmailId));
+    return;
+  }
+
   // Fetch the template
   const templateRows = await db
     .select()
@@ -226,7 +266,7 @@ export async function processSequenceEmail(
       bodyText: sendResult.renderedText ?? null,
       messageId,
       resendId: result.id,
-      status: outcome === "sent" ? "sent" : outcome,
+      status: outcome,
       sentAt: now,
       createdAt: now,
     });
@@ -245,13 +285,12 @@ export async function processSequenceEmail(
         .update(sequenceEmails)
         .set({ status: "failed" })
         .where(eq(sequenceEmails.id, sequenceEmailId));
-      return;
+    } else {
+      await db
+        .update(sequenceEmails)
+        .set({ status: "sent", sentAt: now, sentEmailId: sentId })
+        .where(eq(sequenceEmails.id, sequenceEmailId));
     }
-
-    await db
-      .update(sequenceEmails)
-      .set({ status: "sent", sentAt: now, sentEmailId: sentId })
-      .where(eq(sequenceEmails.id, sequenceEmailId));
   }
 
   await completeEnrollmentIfDone(db, enrollment.id);

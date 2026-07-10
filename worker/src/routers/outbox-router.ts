@@ -239,6 +239,10 @@ const cancelRoute = createRoute({
       description: "Not found",
       content: { "application/json": { schema: ErrorSchema } },
     },
+    409: {
+      description: "Send in progress",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -256,7 +260,25 @@ outboxRouter.openapi(cancelRoute, async (c) => {
   const row = rows[0];
   assertInboxAllowed(allowed, row.fromAddress);
 
-  await db.delete(outboxEmails).where(eq(outboxEmails.id, id));
+  const now = Math.floor(Date.now() / 1000);
+  // Guard against cancelling while a send is in flight: the processor holds a
+  // claim by pushing next_retry_at an hour into the future. Deleting mid-claim
+  // would let the processor complete the send and flip sent_emails back to "sent"
+  // after the caller already saw { deleted: true }.
+  const deleted = await db
+    .delete(outboxEmails)
+    .where(
+      row.status === "failed"
+        ? eq(outboxEmails.id, id)
+        : and(eq(outboxEmails.id, id), lte(outboxEmails.nextRetryAt, now)),
+    )
+    .returning({ id: outboxEmails.id });
+  if (deleted.length === 0) {
+    return c.json(
+      { error: "A send attempt is in progress — try again in a moment" },
+      409,
+    );
+  }
   await db
     .update(sentEmails)
     .set({ status: "failed" })

@@ -118,8 +118,9 @@ describe("sendViaOutbox", () => {
     expect(rows[0].attempts).toBe(1);
     expect(rows[0].lastError).toBe("quota exceeded");
     expect(rows[0].sentEmailId).toBe("se-1");
+    expect(rows[0].nextRetryAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
     expect(rows[0].nextRetryAt).toBeLessThanOrEqual(
-      Math.floor(Date.now() / 1000),
+      Math.floor(Date.now() / 1000) + 60,
     );
     expect(JSON.parse(rows[0].headers!)["Message-ID"]).toBe(
       "<mid-1@saasmail.test>",

@@ -47,4 +47,19 @@ describe("classifyErrorMessage", () => {
     // "550" would be permanent, but the quota keyword wins.
     expect(classifyErrorMessage("550 over quota, retry later")).toBe(true);
   });
+
+  it("marks Postmark inactive-recipient errors permanent", () => {
+    expect(
+      classifyErrorMessage(
+        "You tried to send to a recipient that has been marked as inactive.",
+      ),
+    ).toBe(false);
+    expect(classifyErrorMessage("sender signature not confirmed")).toBe(false);
+  });
+
+  it("transient keywords win over inactive in a combined message", () => {
+    expect(
+      classifyErrorMessage("recipient inactive, rate limit hit, try again"),
+    ).toBe(true);
+  });
 });

@@ -307,7 +307,10 @@ const sendTemplateRoute = createRoute({
       z.object({
         id: z.string().nullable(),
         resendId: z.string().nullable(),
-        status: z.string(),
+        status: z.string().openapi({
+          description:
+            'Delivery status. "sent" = delivered; "retrying" = transient provider failure — saasmail queues this in the outbox and retries automatically; "failed" = provider permanently rejected; "suppressed" = every recipient was on the suppression list.',
+        }),
         delivered: z.array(z.string()),
         suppressed: z.array(z.string()),
       }),
@@ -431,7 +434,7 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
     bodyText: sendResult.renderedText ?? null,
     messageId,
     resendId: result.id,
-    status: outcome === "sent" ? "sent" : outcome,
+    status: outcome,
     sentAt: now,
     createdAt: now,
   });
@@ -440,7 +443,7 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
     {
       id,
       resendId: result.id,
-      status: outcome === "sent" ? "sent" : outcome,
+      status: outcome,
       delivered: sendResult.delivered,
       suppressed: sendResult.suppressed,
     },

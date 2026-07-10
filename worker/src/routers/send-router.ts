@@ -127,7 +127,10 @@ const SendEmailSchema = z
 const SentEmailResponseSchema = z.object({
   id: z.string().nullable(),
   resendId: z.string().nullable(),
-  status: z.string(),
+  status: z.string().openapi({
+    description:
+      'Delivery status. "sent" = delivered; "retrying" = transient provider failure — saasmail queues this in the outbox and retries automatically (check GET /api/outbox for resolution); "failed" = provider permanently rejected; "suppressed" = every recipient was on the suppression list.',
+  }),
   attachmentIds: z.array(z.string()),
   delivered: z.array(z.string()).default([]),
   suppressed: z.array(z.string()).default([]),
@@ -320,7 +323,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     bodyText: sendResult.renderedText ?? bodyText ?? null,
     messageId,
     resendId: sendResult.result?.id ?? null,
-    status: outcome === "sent" ? "sent" : outcome,
+    status: outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
     conversationId,
     sentAt: now,
@@ -337,7 +340,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     {
       id,
       resendId: sendResult.result?.id ?? null,
-      status: outcome === "sent" ? "sent" : outcome,
+      status: outcome,
       attachmentIds,
       delivered: sendResult.delivered,
       suppressed: sendResult.suppressed,
@@ -573,7 +576,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     inReplyTo: origInReplyToMessageId,
     messageId,
     resendId: sendResult.result?.id ?? null,
-    status: outcome === "sent" ? "sent" : outcome,
+    status: outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
     conversationId: conversationIdReply,
     sentAt: now,
@@ -591,7 +594,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     {
       id,
       resendId: sendResult.result?.id ?? null,
-      status: outcome === "sent" ? "sent" : outcome,
+      status: outcome,
       attachmentIds,
     },
     201,

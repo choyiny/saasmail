@@ -277,7 +277,11 @@ export default {
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(handleScheduled(env).then(() => processOutbox(env)));
+    ctx.waitUntil(
+      handleScheduled(env)
+        .catch((err) => console.error("[cron] sequence dispatch failed:", err))
+        .then(() => processOutbox(env)),
+    );
   },
   async queue(
     batch: MessageBatch<SequenceEmailMessage>,

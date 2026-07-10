@@ -23,6 +23,9 @@ import { completeEnrollmentIfDone } from "./enrollment-completion";
  *  daily send-quota reset. */
 export const MAX_OUTBOX_ATTEMPTS = 24;
 
+/** Caps one cron tick's work; anything beyond drains on subsequent ticks. */
+const OUTBOX_BATCH_LIMIT = 200;
+
 export type OutboxOutcome = "sent" | "suppressed" | "retrying" | "failed";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,13 +153,18 @@ export async function sendViaOutbox(
   }
 
   if (result.error.transient) {
-    // Stays pending; due immediately so the next hourly run picks it up.
+    // Stays pending; due at the next hourly run (after + 60: the 60-second cool-down
+    // covers the caller's post-return bookkeeping — specifically the sent_emails insert
+    // that happens after sendViaOutbox returns. Without this gap, a concurrent
+    // cron/manual claim that resolves successfully could update a nonexistent
+    // sent_emails row and delete the outbox row, leaving the caller's subsequent
+    // "retrying" sent_emails row permanently stuck).
     await db
       .update(outboxEmails)
       .set({
         attempts: 1,
         lastError: result.error.message,
-        nextRetryAt: after,
+        nextRetryAt: after + 60,
         updatedAt: after,
       })
       .where(eq(outboxEmails.id, outboxId));
@@ -193,19 +201,22 @@ export async function processOutbox(env: CloudflareBindings): Promise<void> {
         eq(outboxEmails.status, "pending"),
         lte(outboxEmails.nextRetryAt, now),
       ),
-    );
+    )
+    .limit(OUTBOX_BATCH_LIMIT);
   if (due.length === 0) return;
 
+  let claimed = 0;
   for (const row of due) {
     try {
-      await attemptOutboxRow(db, env, sender, row.id);
+      const result = await attemptOutboxRow(db, env, sender, row.id);
+      if (result !== null) claimed++;
     } catch (err) {
       // A crashed attempt leaves the row pending with next_retry_at an hour
       // out (set by the claim), so it self-heals on a later run.
       console.error(`[outbox] retry attempt crashed for ${row.id}:`, err);
     }
   }
-  console.log(`[outbox] processed ${due.length} due rows`);
+  console.log(`[outbox] processed ${claimed}/${due.length} due rows`);
 }
 
 /**
@@ -270,7 +281,12 @@ export async function attemptOutboxRow(
   const after = Math.floor(Date.now() / 1000);
 
   if (send.delivered.length === 0) {
-    // Recipient was suppressed between attempts — terminal, don't retry.
+    // Mid-retry suppression: the recipient was added to the suppression list between
+    // a previous attempt and this one. Terminal — delete the outbox row and don't retry.
+    // sent_emails is set to "failed" (not "suppressed") because a transport was already
+    // attempted on the initial inline call; "failed" is the only terminal sent-status
+    // that doesn't render the message as delivered. The step-level "suppressed" below
+    // preserves the precise reason for sequence reporting.
     await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
     await db
       .update(sentEmails)

@@ -214,6 +214,57 @@ describe("outbox router", () => {
     expect(res.status).toBe(404);
   });
 
+  it("refuses to cancel a row that is mid-claim (next_retry_at in the future)", async () => {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    // Seed with nextRetryAt in the future (mid-claim)
+    await db.insert(sentEmails).values({
+      id: "sent-midclaim",
+      personId: null,
+      fromAddress: "me@saasmail.test",
+      toAddress: "to@example.com",
+      subject: "Hi",
+      status: "retrying",
+      sentAt: now,
+      createdAt: now,
+    });
+    await db.insert(outboxEmails).values({
+      id: "ob-midclaim",
+      sentEmailId: "sent-midclaim",
+      fromAddress: "me@saasmail.test",
+      toAddress: "to@example.com",
+      subject: "Hi",
+      bodyHtml: "<p>Hi</p>",
+      transactional: 1,
+      status: "pending",
+      attempts: 1,
+      lastError: "quota exceeded",
+      nextRetryAt: now + 3600,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/outbox/ob-midclaim", {
+      apiKey,
+      method: "DELETE",
+    });
+    expect(res.status).toBe(409);
+
+    // Row still exists
+    const rows = await db
+      .select()
+      .from(outboxEmails)
+      .where(eq(outboxEmails.id, "ob-midclaim"));
+    expect(rows).toHaveLength(1);
+
+    // sentEmails status unchanged
+    const sent = await db
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, "sent-midclaim"));
+    expect(sent[0].status).toBe("retrying");
+  });
+
   it("manually retries a failed row with a fresh attempt budget", async () => {
     // No provider configured → NoopSender permanent error → outcome failed,
     // but the row must have been re-attempted (attempts reset to 0, then 1).
