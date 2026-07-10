@@ -13,6 +13,7 @@ import { interpolate } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
 import { sendWithSuppressionCheck } from "./send";
+import { completeEnrollmentIfDone } from "./enrollment-completion";
 
 export interface SequenceEmailMessage {
   sequenceEmailId: string;
@@ -249,32 +250,5 @@ export async function processSequenceEmail(
   }
 
   // Check if this was the last step — if so, mark enrollment completed
-  const remainingPending = await db
-    .select({ id: sequenceEmails.id })
-    .from(sequenceEmails)
-    .where(
-      and(
-        eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "pending"),
-      ),
-    )
-    .limit(1);
-
-  const remainingQueued = await db
-    .select({ id: sequenceEmails.id })
-    .from(sequenceEmails)
-    .where(
-      and(
-        eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "queued"),
-      ),
-    )
-    .limit(1);
-
-  if (remainingPending.length === 0 && remainingQueued.length === 0) {
-    await db
-      .update(sequenceEnrollments)
-      .set({ status: "completed" })
-      .where(eq(sequenceEnrollments.id, enrollment.id));
-  }
+  await completeEnrollmentIfDone(db, enrollment.id);
 }
