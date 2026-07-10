@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, lt, lte, sql } from "drizzle-orm";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "../lib/email-sender";
@@ -177,7 +177,11 @@ outboxRouter.openapi(retryRoute, async (c) => {
 
   const now = Math.floor(Date.now() / 1000);
   // Make the row claimable now; a failed row gets a fresh attempt budget.
-  await db
+  // A pending row whose next_retry_at is in the future was just claimed by
+  // the processor (send in flight) or is cooling down after a crashed attempt
+  // — resetting it here would defeat the claim's double-send protection.
+  // Failed rows are always safe to revive.
+  const reset = await db
     .update(outboxEmails)
     .set({
       status: "pending",
@@ -185,7 +189,18 @@ outboxRouter.openapi(retryRoute, async (c) => {
       ...(row.status === "failed" ? { attempts: 0 } : {}),
       updatedAt: now,
     })
-    .where(eq(outboxEmails.id, id));
+    .where(
+      and(
+        eq(outboxEmails.id, id),
+        row.status === "failed"
+          ? undefined
+          : lte(outboxEmails.nextRetryAt, now),
+      ),
+    )
+    .returning({ id: outboxEmails.id });
+  if (reset.length === 0) {
+    return c.json({ outcome: "pending" as const }, 200);
+  }
 
   const sender = createEmailSender(c.env);
   const outcome = await attemptOutboxRow(db, c.env, sender, id);

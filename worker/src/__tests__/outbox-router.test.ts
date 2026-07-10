@@ -133,6 +133,23 @@ describe("outbox router", () => {
     expect(retry.status).toBe(403);
   });
 
+  it("refuses to retry a pending row that is mid-claim (next_retry_at in the future)", async () => {
+    await seedRow("ob-1");
+    const db = getDb();
+    await db
+      .update(outboxEmails)
+      .set({ nextRetryAt: Math.floor(Date.now() / 1000) + 3600 })
+      .where(eq(outboxEmails.id, "ob-1"));
+    const res = await authFetch("/api/outbox/ob-1/retry", {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ outcome: "pending" });
+    const rows = await db.select().from(outboxEmails);
+    expect(rows[0].attempts).toBe(1); // untouched — no new attempt was made
+  });
+
   it("manually retries a failed row with a fresh attempt budget", async () => {
     // No provider configured → NoopSender permanent error → outcome failed,
     // but the row must have been re-attempted (attempts reset to 0, then 1).
