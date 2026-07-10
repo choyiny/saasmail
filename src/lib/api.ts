@@ -902,9 +902,7 @@ export async function fetchOutboxCount(): Promise<{ pending: number }> {
   return apiFetch("/api/outbox/count");
 }
 
-export async function retryOutboxItem(
-  id: string,
-): Promise<{
+export async function retryOutboxItem(id: string): Promise<{
   outcome: "sent" | "suppressed" | "retrying" | "failed" | "pending";
 }> {
   return apiFetch(`/api/outbox/${id}/retry`, { method: "POST" });
