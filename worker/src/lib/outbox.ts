@@ -94,20 +94,32 @@ export async function sendViaOutbox(
     updatedAt: now,
   });
 
-  const send = await sendWithSuppressionCheck({
-    db,
-    env,
-    sender,
-    from,
-    to,
-    cc,
-    subject,
-    html,
-    text,
-    headers,
-    attachments,
-    transactional,
-  });
+  // Wrap in try/catch so that an unexpected throw (e.g. a D1 error during the
+  // suppression lookup, or a sender implementation that throws) cleans up the
+  // write-ahead row. Without this, the caller's route fails with 500 and never
+  // writes its sent_emails row, yet the hourly retry processor would later
+  // resend the email — producing a send that is invisible in app history.
+  // Deleting the row and rethrowing preserves the pre-outbox failure semantics.
+  let send: SendOutput;
+  try {
+    send = await sendWithSuppressionCheck({
+      db,
+      env,
+      sender,
+      from,
+      to,
+      cc,
+      subject,
+      html,
+      text,
+      headers,
+      attachments,
+      transactional,
+    });
+  } catch (err) {
+    await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
+    throw err;
+  }
 
   const after = Math.floor(Date.now() / 1000);
 

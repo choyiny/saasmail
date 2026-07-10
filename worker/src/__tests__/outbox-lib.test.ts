@@ -136,6 +136,21 @@ describe("sendViaOutbox", () => {
     expect(rows[0].attempts).toBe(1);
   });
 
+  it("deletes the write-ahead row and rethrows when the send helper throws", async () => {
+    const throwingSender: EmailSender = {
+      provider: "none",
+      async send() {
+        throw new Error("unexpected transport crash");
+      },
+      maxAttachmentBytes: () => 25 * 1024 * 1024,
+    };
+    await expect(sendViaOutbox(baseParams(throwingSender))).rejects.toThrow(
+      "unexpected transport crash",
+    );
+    const rows = await getDb().select().from(outboxEmails);
+    expect(rows).toHaveLength(0);
+  });
+
   it("deletes the row when every recipient is suppressed", async () => {
     const db = getDb();
     const now = Math.floor(Date.now() / 1000);
