@@ -68,7 +68,7 @@ export interface Email {
   isRead: number | null;
   cc: CcEntry[];
   timestamp: number;
-  /** Delivery status for sent messages: "sent" | "failed". Null for received. */
+  /** Delivery status for sent messages: "sent" | "failed" | "retrying". Null for received. */
   status?: string | null;
   attachmentCount?: number;
   attachments?: Attachment[];
@@ -876,4 +876,43 @@ export async function purgeBlockedMail(): Promise<{
   peopleDeleted: number;
 }> {
   return apiFetch("/api/blocklist/mail", { method: "DELETE" });
+}
+
+// ---- Outbox ----
+
+export interface OutboxItem {
+  id: string;
+  sentEmailId: string;
+  fromAddress: string;
+  toAddress: string;
+  subject: string;
+  status: "pending" | "failed";
+  attempts: number;
+  lastError: string | null;
+  nextRetryAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchOutbox(
+  cursor?: string,
+): Promise<{ items: OutboxItem[]; nextCursor: string | null }> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch(`/api/outbox${qs}`);
+}
+
+export async function fetchOutboxCount(): Promise<{ pending: number }> {
+  return apiFetch("/api/outbox/count");
+}
+
+export async function retryOutboxItem(id: string): Promise<{
+  outcome: "sent" | "suppressed" | "retrying" | "failed" | "pending";
+}> {
+  return apiFetch(`/api/outbox/${id}/retry`, { method: "POST" });
+}
+
+export async function cancelOutboxItem(
+  id: string,
+): Promise<{ deleted: boolean }> {
+  return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
 }

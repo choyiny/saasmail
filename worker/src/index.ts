@@ -25,11 +25,13 @@ import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { processOutbox } from "./lib/outbox";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
+import { outboxRouter } from "./routers/outbox-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
@@ -206,6 +208,7 @@ app.route("/api/invites", invitesRouter);
 app.route("/api/sequences", sequencesRouter);
 app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
+app.route("/api/outbox", outboxRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
@@ -274,7 +277,11 @@ export default {
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(handleScheduled(env));
+    ctx.waitUntil(
+      handleScheduled(env)
+        .catch((err) => console.error("[cron] sequence dispatch failed:", err))
+        .then(() => processOutbox(env)),
+    );
   },
   async queue(
     batch: MessageBatch<SequenceEmailMessage>,

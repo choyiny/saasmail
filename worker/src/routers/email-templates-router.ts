@@ -8,7 +8,9 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import { interpolate, extractVariables } from "../lib/interpolate";
-import { sendWithSuppressionCheck } from "../lib/send";
+import { sendViaOutbox } from "../lib/outbox";
+import { generateMessageId } from "../lib/message-id";
+import { formatFromAddress } from "../lib/format-from-address";
 import type { Variables } from "../variables";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
@@ -305,7 +307,10 @@ const sendTemplateRoute = createRoute({
       z.object({
         id: z.string().nullable(),
         resendId: z.string().nullable(),
-        status: z.string(),
+        status: z.string().openapi({
+          description:
+            'Delivery status. "sent" = delivered; "retrying" = transient provider failure — saasmail queues this in the outbox and retries automatically; "failed" = provider permanently rejected; "suppressed" = every recipient was on the suppression list.',
+        }),
         delivered: z.array(z.string()),
         suppressed: z.array(z.string()),
       }),
@@ -368,19 +373,25 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   const renderedHtml = interpolate(template.bodyHtml, variables);
 
   const sender = createEmailSender(c.env);
-  const sendResult = await sendWithSuppressionCheck({
+  const id = nanoid();
+  const messageId = generateMessageId(fromAddress);
+  const formattedFrom = await formatFromAddress(db, fromAddress);
+  const { outcome, send: sendResult } = await sendViaOutbox({
     db,
     env: c.env,
     sender,
-    from: fromAddress,
+    sentEmailId: id,
+    fromAddress,
+    from: formattedFrom,
     to,
     subject: renderedSubject,
     html: renderedHtml,
+    headers: { "Message-ID": messageId },
   });
 
   // Recipient is on the suppression list — no transport call, no sent_emails
   // write. Tell the admin caller so the UI can surface "suppressed".
-  if (sendResult.delivered.length === 0) {
+  if (outcome === "suppressed") {
     console.log(
       "[template-send] recipient suppressed",
       JSON.stringify({ from: fromAddress, suppressed: sendResult.suppressed }),
@@ -409,7 +420,6 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   const personId = existingPerson[0]?.id ?? null;
 
   // Store sent email
-  const id = nanoid();
   const now = Math.floor(Date.now() / 1000);
   await db.insert(sentEmails).values({
     id,
@@ -422,8 +432,9 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
     // template render.
     bodyHtml: sendResult.renderedHtml ?? renderedHtml,
     bodyText: sendResult.renderedText ?? null,
+    messageId,
     resendId: result.id,
-    status: result.error ? "failed" : "sent",
+    status: outcome,
     sentAt: now,
     createdAt: now,
   });
@@ -432,7 +443,7 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
     {
       id,
       resendId: result.id,
-      status: result.error ? "failed" : "sent",
+      status: outcome,
       delivered: sendResult.delivered,
       suppressed: sendResult.suppressed,
     },

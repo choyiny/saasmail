@@ -5,6 +5,7 @@ import type {
   SendEmailResult,
 } from "../types";
 import { parseFrom } from "../shared";
+import { transientFromStatus } from "../classify";
 
 async function extractBavimailError(res: Response): Promise<string> {
   try {
@@ -80,14 +81,17 @@ export class BavimailSender implements EmailSender {
 
       if (!res.ok) {
         const message = await extractBavimailError(res);
-        return { id: null, error: { message } };
+        return {
+          id: null,
+          error: { message, transient: transientFromStatus(res.status) },
+        };
       }
 
       const data = (await res.json().catch(() => ({}))) as { id?: string };
       return { id: data.id ?? null, error: null };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      return { id: null, error: { message } };
+      return { id: null, error: { message, transient: true } };
     }
   }
 
@@ -95,7 +99,7 @@ export class BavimailSender implements EmailSender {
     attachments: SendEmailAttachment[],
   ): Promise<
     | { ids: string[]; error: null }
-    | { ids: never[]; error: { message: string } }
+    | { ids: never[]; error: { message: string; transient: boolean } }
   > {
     const form = new FormData();
     for (const a of attachments) {
@@ -118,7 +122,10 @@ export class BavimailSender implements EmailSender {
 
     if (!res.ok) {
       const message = await extractBavimailError(res);
-      return { ids: [], error: { message } };
+      return {
+        ids: [],
+        error: { message, transient: transientFromStatus(res.status) },
+      };
     }
 
     const data = (await res.json().catch(() => ({}))) as {
@@ -133,6 +140,7 @@ export class BavimailSender implements EmailSender {
         ids: [],
         error: {
           message: `Bavimail upload returned ${ids.length} ids for ${attachments.length} attachments`,
+          transient: true,
         },
       };
     }

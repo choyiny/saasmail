@@ -9,10 +9,12 @@ import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { outboxEmails } from "../db/outbox-emails.schema";
 import { interpolate } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
-import { sendWithSuppressionCheck } from "./send";
+import { sendViaOutbox } from "./outbox";
+import { completeEnrollmentIfDone } from "./enrollment-completion";
 
 export interface SequenceEmailMessage {
   sequenceEmailId: string;
@@ -130,6 +132,45 @@ export async function processSequenceEmail(
     return;
   }
 
+  // Crash-redelivery guard: if the queue message is redelivered after a crash
+  // mid-bookkeeping (e.g. the sentEmails insert threw), an outbox row may already
+  // exist for this step even though the step status is still "queued". Sending again
+  // would insert a second outbox row and generate a duplicate email. Instead, repair:
+  // insert the missing sentEmails row (no-op if it already exists) and flip the step
+  // to "retrying" so the outbox owns the retry from here.
+  const existingOutboxRows = await db
+    .select()
+    .from(outboxEmails)
+    .where(eq(outboxEmails.sequenceEmailId, sequenceEmailId))
+    .limit(1);
+  if (existingOutboxRows.length > 0) {
+    const outboxRow = existingOutboxRows[0];
+    const repairNow = Math.floor(Date.now() / 1000);
+    await db
+      .insert(sentEmails)
+      .values({
+        id: outboxRow.sentEmailId,
+        personId: enrollment.personId,
+        fromAddress: outboxRow.fromAddress,
+        toAddress: outboxRow.toAddress,
+        subject: outboxRow.subject,
+        bodyHtml: outboxRow.bodyHtml ?? null,
+        bodyText: outboxRow.bodyText ?? null,
+        messageId: outboxRow.headers
+          ? (JSON.parse(outboxRow.headers)["Message-ID"] ?? null)
+          : null,
+        status: "retrying" as const,
+        sentAt: repairNow,
+        createdAt: repairNow,
+      })
+      .onConflictDoNothing();
+    await db
+      .update(sequenceEmails)
+      .set({ status: "retrying" })
+      .where(eq(sequenceEmails.id, sequenceEmailId));
+    return;
+  }
+
   // Fetch the template
   const templateRows = await db
     .select()
@@ -178,10 +219,14 @@ export async function processSequenceEmail(
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  const sendResult = await sendWithSuppressionCheck({
+  const sentId = nanoid();
+  const { outcome, send: sendResult } = await sendViaOutbox({
     db,
     env,
     sender,
+    sentEmailId: sentId,
+    sequenceEmailId,
+    fromAddress,
     from: formattedFrom,
     to: person.email,
     subject: renderedSubject,
@@ -189,9 +234,10 @@ export async function processSequenceEmail(
     headers: { "Message-ID": messageId },
   });
 
-  // Recipient is on the suppression list — skip transport, mark suppressed,
-  // do NOT retry. Suppression is a final state.
-  if (sendResult.delivered.length === 0) {
+  if (outcome === "suppressed") {
+    // Recipient is on the suppression list — skip transport, mark suppressed,
+    // do NOT retry. Suppression is a final state. sentAt's semantic is "time
+    // the transport was called" — no transport call happened, so it stays null.
     console.log(
       "[sequence] recipient suppressed",
       JSON.stringify({
@@ -200,24 +246,16 @@ export async function processSequenceEmail(
         suppressed: sendResult.suppressed,
       }),
     );
-    // sentAt's semantic is "time the transport was called" — no transport
-    // call happened on a suppressed step, so leave sentAt alone (it should
-    // stay null).
     await db
       .update(sequenceEmails)
       .set({ status: "suppressed" })
       .where(eq(sequenceEmails.id, sequenceEmailId));
-
-    // Treat as terminal for enrollment completion: fall through to the same
-    // remaining-step check below so an enrollment whose only outstanding step
-    // was suppressed still gets completed.
   } else {
     const result = sendResult.result!;
 
     // Store sent email record. The helper may have mutated the body to
     // interpolate {{unsubscribe_url}} or auto-append a footer — record
     // exactly what was on the wire, not the pre-helper template render.
-    const sentId = nanoid();
     await db.insert(sentEmails).values({
       id: sentId,
       personId: person.id,
@@ -228,53 +266,32 @@ export async function processSequenceEmail(
       bodyText: sendResult.renderedText ?? null,
       messageId,
       resendId: result.id,
-      status: result.error ? "failed" : "sent",
+      status: outcome,
       sentAt: now,
       createdAt: now,
     });
 
-    // Update outbox row
-    if (result.error) {
+    if (outcome === "retrying") {
+      // The outbox owns the retry from here; the queue message is ACKed.
       await db
         .update(sequenceEmails)
-        .set({ status: "failed" })
+        .set({ status: "retrying" })
         .where(eq(sequenceEmails.id, sequenceEmailId));
       return;
     }
 
-    await db
-      .update(sequenceEmails)
-      .set({ status: "sent", sentAt: now, sentEmailId: sentId })
-      .where(eq(sequenceEmails.id, sequenceEmailId));
+    if (outcome === "failed") {
+      await db
+        .update(sequenceEmails)
+        .set({ status: "failed" })
+        .where(eq(sequenceEmails.id, sequenceEmailId));
+    } else {
+      await db
+        .update(sequenceEmails)
+        .set({ status: "sent", sentAt: now, sentEmailId: sentId })
+        .where(eq(sequenceEmails.id, sequenceEmailId));
+    }
   }
 
-  // Check if this was the last step — if so, mark enrollment completed
-  const remainingPending = await db
-    .select({ id: sequenceEmails.id })
-    .from(sequenceEmails)
-    .where(
-      and(
-        eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "pending"),
-      ),
-    )
-    .limit(1);
-
-  const remainingQueued = await db
-    .select({ id: sequenceEmails.id })
-    .from(sequenceEmails)
-    .where(
-      and(
-        eq(sequenceEmails.enrollmentId, enrollment.id),
-        eq(sequenceEmails.status, "queued"),
-      ),
-    )
-    .limit(1);
-
-  if (remainingPending.length === 0 && remainingQueued.length === 0) {
-    await db
-      .update(sequenceEnrollments)
-      .set({ status: "completed" })
-      .where(eq(sequenceEnrollments.id, enrollment.id));
-  }
+  await completeEnrollmentIfDone(db, enrollment.id);
 }

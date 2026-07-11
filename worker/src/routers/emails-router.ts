@@ -54,7 +54,8 @@ export const EmailSchema = z.object({
     .optional()
     .openapi({
       description:
-        "Delivery status for sent messages: 'sent' or 'failed' (the provider " +
+        "Delivery status for sent messages: 'sent', 'retrying' (transient " +
+        "provider failure, will be retried), or 'failed' (the provider " +
         "rejected it). Null for received messages.",
     }),
   attachmentCount: z.number().optional(),

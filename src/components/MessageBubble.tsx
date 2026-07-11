@@ -2,6 +2,7 @@ import { useState } from "react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import {
   AlertTriangle,
+  Clock,
   Link2,
   Maximize2,
   Paperclip,
@@ -58,6 +59,7 @@ export default function MessageBubble({
   const isSent = email.type === "sent";
   const isUnread = email.type === "received" && email.isRead === 0;
   const failedToSend = isSent && email.status === "failed";
+  const retrying = isSent && email.status === "retrying";
 
   const text =
     email.bodyText ||
@@ -113,9 +115,11 @@ export default function MessageBubble({
       className={`group ${compact ? "px-3 py-1.5" : "px-4 sm:px-6 py-2"} hover:bg-bg-muted/50 transition-colors scroll-mt-20 ${
         failedToSend
           ? "border-l-2 border-red-500/60 bg-red-500/5"
-          : isUnread
-            ? "bg-accent/5"
-            : ""
+          : retrying
+            ? "border-l-2 border-amber-500/60 bg-amber-500/5"
+            : isUnread
+              ? "bg-accent/5"
+              : ""
       }`}
       onClick={handleClick}
     >
@@ -139,6 +143,16 @@ export default function MessageBubble({
           >
             <AlertTriangle size={10} />
             Failed to send
+          </span>
+        )}
+        {retrying && (
+          <span
+            data-testid="message-retrying-badge"
+            title="The email provider rejected this send; it will be retried automatically. See the Outbox for details."
+            className="inline-flex items-center gap-1 rounded-[5px] bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-600 shrink-0"
+          >
+            <Clock size={10} />
+            Retrying
           </span>
         )}
         <span className="text-[10px] text-text-tertiary shrink-0 ml-auto">
