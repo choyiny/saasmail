@@ -13,3 +13,4 @@ jobs:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
           valid-labels: "major, minor, patch"
           invalid-labels: "hold"
+          disable-reviews: "true"
