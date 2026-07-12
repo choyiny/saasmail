@@ -7,6 +7,7 @@ import { json200Response, json201Response } from "../lib/helpers";
 import { hashKey } from "../lib/crypto";
 import { isDevEnvironment } from "../lib/is-dev";
 import type { Variables } from "../variables";
+import { bearerSecurity } from "../lib/openapi-auth";
 
 export const apiKeysRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -27,6 +28,7 @@ const getKeyRoute = createRoute({
   method: "get",
   path: "/",
   tags: ["API Keys"],
+  security: bearerSecurity,
   description:
     "Get the current user's API key info (prefix and creation date), or null if none exists.",
   responses: {
@@ -60,6 +62,7 @@ const createKeyRoute = createRoute({
   method: "post",
   path: "/",
   tags: ["API Keys"],
+  security: bearerSecurity,
   description: "Generate a new API key. If one already exists, it is replaced.",
   responses: {
     ...json201Response(
@@ -122,6 +125,7 @@ const deleteKeyRoute = createRoute({
   method: "delete",
   path: "/",
   tags: ["API Keys"],
+  security: bearerSecurity,
   description: "Revoke the current user's API key.",
   responses: {
     ...json200Response(z.object({ success: z.boolean() }), "Key revoked"),
