@@ -13,6 +13,10 @@ import { generateMessageId } from "../lib/message-id";
 import { formatFromAddress } from "../lib/format-from-address";
 import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
+import {
+  ErrorSchema,
+  inboxForbiddenResponse,
+} from "../lib/openapi-send-errors";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -329,6 +333,11 @@ const sendTemplateRoute = createRoute({
           }),
         },
       },
+    },
+    ...inboxForbiddenResponse,
+    404: {
+      description: "Template slug not found",
+      content: { "application/json": { schema: ErrorSchema } },
     },
   },
 });
