@@ -22,9 +22,10 @@ describe("OpenAPI /doc", () => {
 
     expect(doc.info.description).toContain("Authorization: Bearer sk_");
     expect(doc.info.description).toContain("PASSKEY_REQUIRED");
-    expect(doc.components.securitySchemes?.[BEARER_AUTH_SCHEME]).toMatchObject(
-      { type: "http", scheme: "bearer" },
-    );
+    expect(doc.components.securitySchemes?.[BEARER_AUTH_SCHEME]).toMatchObject({
+      type: "http",
+      scheme: "bearer",
+    });
     expect(doc.paths["/api/send"]?.post?.security).toEqual([
       { [BEARER_AUTH_SCHEME]: [] },
     ]);
