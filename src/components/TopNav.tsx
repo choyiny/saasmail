@@ -11,11 +11,13 @@ import {
   Users,
   Ban,
   ShieldBan,
+  Send,
   Menu,
   User,
   LogOut,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
+import { fetchOutboxCount } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +49,7 @@ export default function TopNav() {
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [outboxPending, setOutboxPending] = useState(0);
 
   useEffect(() => {
     function onScroll() {
@@ -54,6 +57,12 @@ export default function TopNav() {
     }
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    fetchOutboxCount()
+      .then((res) => setOutboxPending(res.pending))
+      .catch(() => setOutboxPending(0));
   }, []);
 
   useEffect(() => {
@@ -181,6 +190,18 @@ export default function TopNav() {
                   <ShieldBan className="h-4 w-4" />
                   Blocklist
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => navigate("/outbox")}
+                  className="cursor-pointer"
+                >
+                  <Send className="h-4 w-4" />
+                  Outbox
+                  {outboxPending > 0 && (
+                    <span className="ml-auto rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                      {outboxPending}
+                    </span>
+                  )}
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => navigate("/settings")}
@@ -296,6 +317,18 @@ export default function TopNav() {
               >
                 <ShieldBan className="h-4 w-4" />
                 Blocklist
+              </button>
+              <button
+                onClick={() => navigate("/outbox")}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+              >
+                <Send className="h-4 w-4" />
+                Outbox
+                {outboxPending > 0 && (
+                  <span className="ml-auto rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                    {outboxPending}
+                  </span>
+                )}
               </button>
               <button
                 onClick={() => navigate("/settings")}
