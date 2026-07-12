@@ -52,7 +52,7 @@ export const sendRouter = new OpenAPIHono<{
   Variables: Variables;
 }>();
 
-const CcEntrySchema = z
+export const CcEntrySchema = z
   .object({
     email: z.string().email().openapi({ example: "cc@example.com" }),
     // Constrain the rendered "Name <addr>" header — long display names
@@ -76,7 +76,7 @@ function formatCc(c: CcEntry): string {
   return c.name ? `${c.name} <${c.email}>` : c.email;
 }
 
-const SendEmailSchema = z
+export const SendEmailSchema = z
   .object({
     to: z.string().email().openapi({
       description: "Recipient email address.",
@@ -158,6 +158,7 @@ const sendEmailRoute = createRoute({
                   subject: "Welcome to our service",
                   bodyHtml: "<p>Hello!</p>",
                   bodyText: "Hello!",
+                  transactional: false,
                 },
                 null,
                 2,
@@ -349,15 +350,40 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
   );
 });
 
-const ReplyEmailSchema = z.object({
-  bodyHtml: z.string().optional(),
-  bodyText: z.string().optional(),
-  fromAddress: z.string().email(),
-  cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
-  templateSlug: z.string().optional(),
-  variables: z.record(z.string(), z.string()).optional(),
-  replyTo: z.string().email().optional(),
-});
+export const ReplyEmailSchema = z
+  .object({
+    fromAddress: z.string().email().openapi({
+      description:
+        "Sending identity for the reply. Must be one of your configured inboxes.",
+      example: "support@yourdomain.com",
+    }),
+    bodyHtml: z.string().optional().openapi({
+      description:
+        "HTML reply body. Provide bodyHtml and/or bodyText unless templateSlug is set.",
+    }),
+    bodyText: z.string().optional().openapi({
+      description: "Plain-text reply body.",
+    }),
+    cc: z
+      .array(CcEntrySchema)
+      .max(MAX_CC_ENTRIES)
+      .optional()
+      .openapi({
+        description: `CC recipients. Maximum ${MAX_CC_ENTRIES} entries.`,
+      }),
+    templateSlug: z.string().optional().openapi({
+      description:
+        "Optional template slug to render as the reply body instead of bodyHtml/bodyText.",
+    }),
+    variables: z.record(z.string(), z.string()).optional().openapi({
+      description: "Template variables when templateSlug is set.",
+    }),
+    replyTo: z.string().email().optional().openapi({
+      description: "Override Reply-To header for this reply.",
+      example: "submitter@example.com",
+    }),
+  })
+  .openapi("ReplyEmailSchema");
 
 // Reply to an existing email
 const replyEmailRoute = createRoute({
@@ -372,7 +398,19 @@ const replyEmailRoute = createRoute({
       content: {
         "multipart/form-data": {
           schema: z.object({
-            payload: z.string().describe("JSON-encoded reply body"),
+            payload: z.string().openapi({
+              description:
+                "JSON-encoded ReplyEmailSchema. Required: `fromAddress`. Provide bodyHtml/bodyText or templateSlug. See the ReplyEmailSchema component for the full field reference.",
+              example: JSON.stringify(
+                {
+                  fromAddress: "support@yourdomain.com",
+                  bodyHtml: "<p>Thanks for reaching out — we're on it.</p>",
+                  bodyText: "Thanks for reaching out — we're on it.",
+                },
+                null,
+                2,
+              ),
+            }),
             files: z.union([z.array(z.any()), z.any()]).optional(),
           }),
         },
