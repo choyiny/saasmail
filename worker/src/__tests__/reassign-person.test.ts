@@ -310,6 +310,35 @@ describe("reassign email to person", () => {
     const res = await reassign("nope", apiKey, { email: "real@example.com" });
     expect(res.status).toBe(404);
   });
+
+  it("clears a stale inbound Reply-To when re-attributing to a different person", async () => {
+    await createTestPerson({ id: "p-old", email: "forms@site.test" });
+    await createTestEmail({
+      id: "e1",
+      personId: "p-old",
+      rawHeaders: JSON.stringify({
+        "reply-to": "Submitter <submitter@example.com>",
+      }),
+    });
+
+    const res = await reassign("e1", apiKey, { email: "charlie@example.com" });
+    expect(res.status).toBe(200);
+
+    const db = getDb();
+    const email = await db
+      .select()
+      .from(emails)
+      .where(eq(emails.id, "e1"))
+      .get();
+    const headers = JSON.parse(email?.rawHeaders ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(headers["reply-to"]).toBeUndefined();
+    expect(
+      Object.keys(headers).some((k) => k.toLowerCase() === "reply-to"),
+    ).toBe(false);
+  });
 });
 
 async function createSent(opts: {

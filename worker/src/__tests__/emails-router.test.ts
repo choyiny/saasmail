@@ -281,6 +281,22 @@ describe("emails router", () => {
       expect(data.replyTo).toBeNull();
     });
 
+    it("returns replyTo null when Reply-To matches the attributed sender", async () => {
+      await createTestPerson({ id: "s1", email: "alice@example.com" });
+      await createTestEmail({
+        id: "e-same-rt",
+        personId: "s1",
+        rawHeaders: JSON.stringify({
+          "reply-to": "Alice <alice@example.com>",
+        }),
+      });
+
+      const res = await authFetch("/api/emails/e-same-rt", { apiKey });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.replyTo).toBeNull();
+    });
+
     it("returns 404 for missing email", async () => {
       const res = await authFetch("/api/emails/nonexistent", { apiKey });
       expect(res.status).toBe(404);
