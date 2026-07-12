@@ -37,13 +37,13 @@ import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
+import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
 import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
-import { appSettings } from "./db/app-settings.schema";
 import { isDevEnvironment } from "./lib/is-dev";
 import {
   BEARER_AUTH_SCHEME,
@@ -256,26 +256,8 @@ app.route("/api/unsubscribe", unsubscribeRouter);
 // GET requests don't match the router and fall through to the SPA assets handler.
 app.route("/unsubscribe", unsubscribeRouter);
 
-// Health check (no auth)
-app.get("/api/health", (c) => c.json({ status: "ok" }));
-
-// Public runtime config (no auth) — consumed by the SPA
-app.get("/api/config", async (c) => {
-  const db = c.get("db");
-  const row = await db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, "brand_name"))
-    .limit(1);
-  const brandName =
-    row.length > 0 && row[0].value && row[0].value.length > 0
-      ? row[0].value
-      : "saasmail";
-  return c.json({
-    passkeyRequired: !isDevEnvironment(c.env),
-    brandName,
-  });
-});
+// Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
+app.route("/api", bootstrapRouter);
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
