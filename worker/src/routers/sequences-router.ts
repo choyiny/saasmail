@@ -11,6 +11,7 @@ import { json200Response, json201Response } from "../lib/helpers";
 import type { SequenceEmailMessage } from "../lib/sequence-processor";
 import type { Variables } from "../variables";
 import { isDemoMode } from "../lib/is-dev";
+import { bearerSecurity } from "../lib/openapi-auth";
 
 export const sequencesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -316,6 +317,7 @@ const enrollRoute = createRoute({
   method: "post",
   path: "/{id}/enroll",
   tags: ["Sequences"],
+  security: bearerSecurity,
   description:
     "Enroll a person into a sequence. Computes all scheduled send times upfront.",
   request: {

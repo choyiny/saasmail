@@ -29,9 +29,10 @@ export default function ReassignPersonModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // On open, prefill the address from the message's inbound Reply-To when
-  // present. The thread list doesn't carry replyTo, so fetch the single
-  // email (which surfaces it) unless the object already has it.
+  // On open, prefill the correspondent address. Prefer inbound Reply-To
+  // (contact-form pattern) when it differs from the attributed sender;
+  // otherwise fall back to fromAddress. The thread list doesn't carry
+  // replyTo, so fetch the single email when needed.
   useEffect(() => {
     if (!open || !email) return;
     setName("");
@@ -44,15 +45,23 @@ export default function ReassignPersonModal({
       setPrefilledFromReplyTo(true);
       return;
     }
+    if (email.fromAddress) {
+      setToEmail(email.fromAddress);
+      return;
+    }
     let cancelled = false;
     fetchEmail(email.id)
       .then((full) => {
-        if (cancelled || !full.replyTo) return;
-        setToEmail(full.replyTo);
-        setPrefilledFromReplyTo(true);
+        if (cancelled) return;
+        if (full.replyTo) {
+          setToEmail(full.replyTo);
+          setPrefilledFromReplyTo(true);
+          return;
+        }
+        if (full.fromAddress) setToEmail(full.fromAddress);
       })
       .catch(() => {
-        /* no Reply-To to prefill — leave blank */
+        /* no address to prefill — leave blank */
       });
     return () => {
       cancelled = true;

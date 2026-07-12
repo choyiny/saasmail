@@ -21,6 +21,25 @@ export const CcEntrySchema = z.object({
   name: z.string().nullable().optional(),
 });
 
+/** Attachment row returned on email list/detail/conversation endpoints. */
+export const AttachmentSchema = z.object({
+  id: z.string(),
+  emailId: z.string(),
+  kind: z.string().openapi({
+    description:
+      '"inbound" for received email attachments, "sent" for outbound.',
+  }),
+  filename: z.string(),
+  contentType: z.string(),
+  size: z.number().openapi({ description: "Size in bytes." }),
+  r2Key: z.string().openapi({
+    description:
+      "Internal R2 object key. Download via GET /api/attachments/{id}.",
+  }),
+  contentId: z.string().nullable(),
+  createdAt: z.number(),
+});
+
 /** Parse a stored cc TEXT column (JSON) into a typed array, falling back to
  *  [] for NULL or any malformed/corrupt JSON so a bad row never breaks reads. */
 export function parseCc(
@@ -58,7 +77,14 @@ export const EmailSchema = z.object({
         "provider failure, will be retried), or 'failed' (the provider " +
         "rejected it). Null for received messages.",
     }),
-  attachmentCount: z.number().optional(),
+  attachmentCount: z.number().optional().openapi({
+    description:
+      "Number of attachments on this message. Set on list endpoints; may be omitted on GET /api/emails/{id}.",
+  }),
+  attachments: z.array(AttachmentSchema).optional().openapi({
+    description:
+      "Attachment metadata. Included on GET /api/emails/by-person/{personId}, GET /api/emails/{id}, and GET /api/conversations/{id}/emails. Download bytes via GET /api/attachments/{id}.",
+  }),
   replyTo: z
     .string()
     .nullable()
@@ -66,9 +92,9 @@ export const EmailSchema = z.object({
     .openapi({
       description:
         "Address from the inbound Reply-To header, when present (e.g. a " +
-        "contact form's actual submitter behind a noreply@ sender). Parsed " +
-        "from stored raw headers and returned by the single-email endpoint; " +
-        "null when there is no Reply-To.",
+        "contact form's actual submitter behind a noreply@ sender). Populated " +
+        "only on GET /api/emails/{id} for received messages; omitted or null " +
+        "on list/conversation endpoints and on sent messages.",
     }),
 });
 
@@ -95,6 +121,43 @@ function extractReplyTo(rawHeaders: string | null): string | null {
   return null;
 }
 
+/**
+ * Strip Reply-To from stored raw headers after re-attribution. Once a message
+ * is attributed to a person, `people.email` is the canonical reply target —
+ * leaving the original inbound Reply-To in place would mislead the reassign
+ * UI and any code that surfaces `replyTo` alongside the new person.
+ */
+function clearReplyToInRawHeaders(rawHeaders: string | null): string | null {
+  if (!rawHeaders) return rawHeaders;
+  try {
+    const headers = JSON.parse(rawHeaders) as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    let changed = false;
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() === "reply-to") {
+        changed = true;
+        continue;
+      }
+      next[key] = value;
+    }
+    return changed ? JSON.stringify(next) : rawHeaders;
+  } catch {
+    return rawHeaders;
+  }
+}
+
+/** Reply-To is only meaningful when it differs from the attributed sender. */
+function surfaceReplyTo(
+  rawHeaders: string | null,
+  personEmail: string | null,
+): string | null {
+  const replyTo = extractReplyTo(rawHeaders);
+  if (!replyTo) return null;
+  const person = personEmail?.trim().toLowerCase();
+  if (person && replyTo === person) return null;
+  return replyTo;
+}
+
 const InboxMetaSchema = z.object({
   email: z.string(),
   displayName: z.string().nullable(),
@@ -112,7 +175,7 @@ const listPersonEmailsRoute = createRoute({
   path: "/by-person/{personId}",
   tags: ["Emails"],
   description:
-    "List all emails for a person (received and sent, interleaved chronologically).",
+    "List all emails for a person (received and sent, interleaved chronologically). Each email includes attachment metadata when present.",
   request: {
     params: z.object({ personId: z.string() }),
     query: z.object({
@@ -360,7 +423,8 @@ const getEmailRoute = createRoute({
   method: "get",
   path: "/{id}",
   tags: ["Emails"],
-  description: "Get a single email with full details.",
+  description:
+    "Get a single email with full details, including attachments. replyTo is set for received messages when a Reply-To header was present.",
   request: {
     params: z.object({ id: z.string() }),
   },
@@ -397,7 +461,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
         timestamp: row[0].receivedAt,
         fromAddress: senderRow[0]?.email ?? null,
         toAddress: null,
-        replyTo: extractReplyTo(row[0].rawHeaders),
+        replyTo: surfaceReplyTo(row[0].rawHeaders, senderRow[0]?.email ?? null),
         cc: parseCc(row[0].cc),
         attachments: atts,
       },
@@ -790,6 +854,7 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
       id: emails.id,
       personId: emails.personId,
       recipient: emails.recipient,
+      rawHeaders: emails.rawHeaders,
     })
     .from(emails)
     .where(eq(emails.id, id))
@@ -808,9 +873,13 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
     const person = await resolvePerson();
     if (person.id !== target.personId) {
       // conversation_id is orthogonal and intentionally left unchanged.
+      const rawHeaders = clearReplyToInRawHeaders(target.rawHeaders);
       await db
         .update(emails)
-        .set({ personId: person.id })
+        .set({
+          personId: person.id,
+          ...(rawHeaders !== target.rawHeaders ? { rawHeaders } : {}),
+        })
         .where(eq(emails.id, target.id));
       await recompute(target.personId);
       await recompute(person.id);
