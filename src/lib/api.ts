@@ -901,10 +901,6 @@ export async function fetchOutbox(
   return apiFetch(`/api/outbox${qs}`);
 }
 
-export async function fetchOutboxCount(): Promise<{ pending: number }> {
-  return apiFetch("/api/outbox/count");
-}
-
 export async function retryOutboxItem(id: string): Promise<{
   outcome: "sent" | "suppressed" | "retrying" | "failed" | "pending";
 }> {

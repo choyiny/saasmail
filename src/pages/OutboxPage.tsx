@@ -117,7 +117,7 @@ export default function OutboxPage() {
         subtitle="Sends the provider rejected. Retrying items are re-attempted every hour; failed items gave up and need a manual retry."
       />
 
-      <div className="max-w-4xl space-y-6">
+      <div className="space-y-6">
         <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
