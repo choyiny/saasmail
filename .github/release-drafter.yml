@@ -1,0 +1,63 @@
+autolabeler:
+  - label: "patch"
+    body:
+      - '/\[x] Patch/gm'
+  - label: "minor"
+    body:
+      - '/\[x] Minor/gm'
+  - label: "major"
+    body:
+      - '/\[x] Major/gm'
+  - label: "feature"
+    body:
+      - '/\[x] Feature/gm'
+  - label: "bug"
+    body:
+      - '/\[x] Bug Fix/gm'
+  - label: "refactor"
+    body:
+      - '/\[x] Refactor/gm'
+  - label: "documentation"
+    body:
+      - '/\[x] Documentation/gm'
+  - label: "chore"
+    body:
+      - '/\[x] Chore/gm'
+
+version-resolver:
+  major:
+    labels:
+      - "major"
+  minor:
+    labels:
+      - "minor"
+  patch:
+    labels:
+      - "patch"
+  default: patch
+
+name-template: "v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+categories:
+  - title: "Features"
+    labels:
+      - "feature"
+      - "enhancement"
+  - title: "Bug Fixes"
+    labels:
+      - "fix"
+      - "bug"
+      - "bugfix"
+  - title: "Maintenance"
+    labels:
+      - "chore"
+      - "refactor"
+      - "documentation"
+change-template: "- $TITLE @$AUTHOR (#$NUMBER)"
+change-title-escapes: '\<*_&' # You can add # and @ to disable mentions, and add ` to disable code blocks.
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  Full Changelog: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
