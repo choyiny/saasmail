@@ -12,6 +12,7 @@ import { sendViaOutbox } from "../lib/outbox";
 import { generateMessageId } from "../lib/message-id";
 import { formatFromAddress } from "../lib/format-from-address";
 import type { Variables } from "../variables";
+import { bearerSecurity } from "../lib/openapi-auth";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -287,6 +288,7 @@ const sendTemplateRoute = createRoute({
   method: "post",
   path: "/{slug}/send",
   tags: ["Email Templates"],
+  security: bearerSecurity,
   description: "Send an email using a template.",
   request: {
     params: z.object({ slug: z.string() }),
