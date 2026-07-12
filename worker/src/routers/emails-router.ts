@@ -21,6 +21,25 @@ export const CcEntrySchema = z.object({
   name: z.string().nullable().optional(),
 });
 
+/** Attachment row returned on email list/detail/conversation endpoints. */
+export const AttachmentSchema = z.object({
+  id: z.string(),
+  emailId: z.string(),
+  kind: z.string().openapi({
+    description:
+      '"inbound" for received email attachments, "sent" for outbound.',
+  }),
+  filename: z.string(),
+  contentType: z.string(),
+  size: z.number().openapi({ description: "Size in bytes." }),
+  r2Key: z.string().openapi({
+    description:
+      "Internal R2 object key. Download via GET /api/attachments/{id}.",
+  }),
+  contentId: z.string().nullable(),
+  createdAt: z.number(),
+});
+
 /** Parse a stored cc TEXT column (JSON) into a typed array, falling back to
  *  [] for NULL or any malformed/corrupt JSON so a bad row never breaks reads. */
 export function parseCc(
@@ -58,7 +77,14 @@ export const EmailSchema = z.object({
         "provider failure, will be retried), or 'failed' (the provider " +
         "rejected it). Null for received messages.",
     }),
-  attachmentCount: z.number().optional(),
+  attachmentCount: z.number().optional().openapi({
+    description:
+      "Number of attachments on this message. Set on list endpoints; may be omitted on GET /api/emails/{id}.",
+  }),
+  attachments: z.array(AttachmentSchema).optional().openapi({
+    description:
+      "Attachment metadata. Included on GET /api/emails/by-person/{personId}, GET /api/emails/{id}, and GET /api/conversations/{id}/emails. Download bytes via GET /api/attachments/{id}.",
+  }),
   replyTo: z
     .string()
     .nullable()
@@ -66,9 +92,9 @@ export const EmailSchema = z.object({
     .openapi({
       description:
         "Address from the inbound Reply-To header, when present (e.g. a " +
-        "contact form's actual submitter behind a noreply@ sender). Parsed " +
-        "from stored raw headers and returned by the single-email endpoint; " +
-        "null when there is no Reply-To.",
+        "contact form's actual submitter behind a noreply@ sender). Populated " +
+        "only on GET /api/emails/{id} for received messages; omitted or null " +
+        "on list/conversation endpoints and on sent messages.",
     }),
 });
 
@@ -112,7 +138,7 @@ const listPersonEmailsRoute = createRoute({
   path: "/by-person/{personId}",
   tags: ["Emails"],
   description:
-    "List all emails for a person (received and sent, interleaved chronologically).",
+    "List all emails for a person (received and sent, interleaved chronologically). Each email includes attachment metadata when present.",
   request: {
     params: z.object({ personId: z.string() }),
     query: z.object({
@@ -360,7 +386,8 @@ const getEmailRoute = createRoute({
   method: "get",
   path: "/{id}",
   tags: ["Emails"],
-  description: "Get a single email with full details.",
+  description:
+    "Get a single email with full details, including attachments. replyTo is set for received messages when a Reply-To header was present.",
   request: {
     params: z.object({ id: z.string() }),
   },

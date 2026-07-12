@@ -34,7 +34,7 @@ const listConversationEmailsRoute = createRoute({
   path: "/{id}/emails",
   tags: ["Conversations"],
   description:
-    "List all emails in a group conversation, oldest first, with participants metadata.",
+    "List all emails in a group conversation, oldest first, with participants metadata. Each email includes attachment metadata when present.",
   request: {
     params: z.object({ id: z.string() }),
   },
