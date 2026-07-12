@@ -12,7 +12,12 @@ import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
 import { emailsRouter } from "./routers/emails-router";
 import { conversationsRouter } from "./routers/conversations-router";
-import { sendRouter } from "./routers/send-router";
+import {
+  sendRouter,
+  CcEntrySchema,
+  ReplyEmailSchema,
+  SendEmailSchema,
+} from "./routers/send-router";
 import { attachmentsRouter } from "./routers/attachments-router";
 import { statsRouter } from "./routers/stats-router";
 import { setupRouter } from "./routers/setup-router";
@@ -50,6 +55,10 @@ const app = new OpenAPIHono<{
   Bindings: CloudflareBindings;
   Variables: Variables;
 }>();
+
+app.openAPIRegistry.register("CcEntry", CcEntrySchema);
+app.openAPIRegistry.register("SendEmailSchema", SendEmailSchema);
+app.openAPIRegistry.register("ReplyEmailSchema", ReplyEmailSchema);
 
 app.openAPIRegistry.registerComponent(
   "securitySchemes",
