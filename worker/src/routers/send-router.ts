@@ -18,6 +18,7 @@ import { computeConversationId, externalsOnly } from "../lib/conversation-id";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { attachments } from "../db/attachments.schema";
 import { sendViaOutbox } from "../lib/outbox";
+import { bearerSecurity } from "../lib/openapi-auth";
 
 /**
  * Fetch the set of "internal" domains (domains owned by our
@@ -141,6 +142,7 @@ const sendEmailRoute = createRoute({
   method: "post",
   path: "/",
   tags: ["Send"],
+  security: bearerSecurity,
   description:
     "Compose and send a new email. The request body is multipart/form-data with a JSON `payload` field containing a SendEmailSchema object, and zero or more `files` fields for attachments.",
   request: {
@@ -364,6 +366,7 @@ const replyEmailRoute = createRoute({
   method: "post",
   path: "/reply/{emailId}",
   tags: ["Send"],
+  security: bearerSecurity,
   description:
     "Reply to a received email. multipart/form-data body with 'payload' JSON and optional 'files'.",
   request: {
