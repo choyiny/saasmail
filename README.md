@@ -176,7 +176,7 @@ function verify(rawBody, header, secret) {
 | **Receive email**   | Cloudflare Email Workers                                                  |
 | **Send email**      | Cloudflare Email Sending, Resend, Bavimail, or Postmark                   |
 | **Runtime**         | Cloudflare Workers + Hono                                                 |
-| **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.1)                                   |
+| **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.0)                                   |
 | **Database**        | Cloudflare D1 (SQLite)                                                    |
 | **File storage**    | Cloudflare R2 (attachments)                                               |
 | **Queue**           | Cloudflare Queues (sequence processing)                                   |
@@ -381,7 +381,7 @@ yarn db:studio:dev
 
 Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script populates `seeds/demo.sql` so you can exercise the inbox UI without real inbound email.
 
-The API is generated from Zod schemas in `worker/src/routers/` and exposes an OpenAPI 3.1 spec at `/api/doc` in the running worker.
+The API is generated from Zod schemas in `worker/src/routers/`. Each running worker exposes an OpenAPI 3.0 spec at `/doc` (JSON) and an interactive explorer at `/swagger-ui`. Both are public — no auth required to read the spec.
 
 ### End-to-end tests
 
