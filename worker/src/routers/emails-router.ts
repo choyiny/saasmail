@@ -95,6 +95,43 @@ function extractReplyTo(rawHeaders: string | null): string | null {
   return null;
 }
 
+/**
+ * Strip Reply-To from stored raw headers after re-attribution. Once a message
+ * is attributed to a person, `people.email` is the canonical reply target —
+ * leaving the original inbound Reply-To in place would mislead the reassign
+ * UI and any code that surfaces `replyTo` alongside the new person.
+ */
+function clearReplyToInRawHeaders(rawHeaders: string | null): string | null {
+  if (!rawHeaders) return rawHeaders;
+  try {
+    const headers = JSON.parse(rawHeaders) as Record<string, unknown>;
+    const next: Record<string, unknown> = {};
+    let changed = false;
+    for (const [key, value] of Object.entries(headers)) {
+      if (key.toLowerCase() === "reply-to") {
+        changed = true;
+        continue;
+      }
+      next[key] = value;
+    }
+    return changed ? JSON.stringify(next) : rawHeaders;
+  } catch {
+    return rawHeaders;
+  }
+}
+
+/** Reply-To is only meaningful when it differs from the attributed sender. */
+function surfaceReplyTo(
+  rawHeaders: string | null,
+  personEmail: string | null,
+): string | null {
+  const replyTo = extractReplyTo(rawHeaders);
+  if (!replyTo) return null;
+  const person = personEmail?.trim().toLowerCase();
+  if (person && replyTo === person) return null;
+  return replyTo;
+}
+
 const InboxMetaSchema = z.object({
   email: z.string(),
   displayName: z.string().nullable(),
@@ -397,7 +434,7 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
         timestamp: row[0].receivedAt,
         fromAddress: senderRow[0]?.email ?? null,
         toAddress: null,
-        replyTo: extractReplyTo(row[0].rawHeaders),
+        replyTo: surfaceReplyTo(row[0].rawHeaders, senderRow[0]?.email ?? null),
         cc: parseCc(row[0].cc),
         attachments: atts,
       },
@@ -790,6 +827,7 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
       id: emails.id,
       personId: emails.personId,
       recipient: emails.recipient,
+      rawHeaders: emails.rawHeaders,
     })
     .from(emails)
     .where(eq(emails.id, id))
@@ -808,9 +846,13 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
     const person = await resolvePerson();
     if (person.id !== target.personId) {
       // conversation_id is orthogonal and intentionally left unchanged.
+      const rawHeaders = clearReplyToInRawHeaders(target.rawHeaders);
       await db
         .update(emails)
-        .set({ personId: person.id })
+        .set({
+          personId: person.id,
+          ...(rawHeaders !== target.rawHeaders ? { rawHeaders } : {}),
+        })
         .where(eq(emails.id, target.id));
       await recompute(target.personId);
       await recompute(person.id);

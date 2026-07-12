@@ -45,6 +45,11 @@ import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { appSettings } from "./db/app-settings.schema";
 import { isDevEnvironment } from "./lib/is-dev";
+import {
+  BEARER_AUTH_SCHEME,
+  bearerAuthSecurityScheme,
+  openapiInfoDescription,
+} from "./lib/openapi-auth";
 
 const app = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -54,6 +59,12 @@ const app = new OpenAPIHono<{
 app.openAPIRegistry.register("CcEntry", CcEntrySchema);
 app.openAPIRegistry.register("SendEmailSchema", SendEmailSchema);
 app.openAPIRegistry.register("ReplyEmailSchema", ReplyEmailSchema);
+
+app.openAPIRegistry.registerComponent(
+  "securitySchemes",
+  BEARER_AUTH_SCHEME,
+  bearerAuthSecurityScheme,
+);
 
 // Middleware
 app.use("*", injectDb);
@@ -270,7 +281,11 @@ app.get("/api/config", async (c) => {
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
 app.doc("/doc", {
   openapi: "3.0.0",
-  info: { title: "saasmail API", version: "1.0.0" },
+  info: {
+    title: "saasmail API",
+    version: "1.0.0",
+    description: openapiInfoDescription,
+  },
 });
 
 // SPA fallback
