@@ -19,6 +19,12 @@ import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { attachments } from "../db/attachments.schema";
 import { sendViaOutbox } from "../lib/outbox";
 import { bearerSecurity } from "../lib/openapi-auth";
+import {
+  inboxForbiddenResponse,
+  multipartParseErrorResponses,
+  replyNotFoundResponse,
+  replyValidationErrorResponse,
+} from "../lib/openapi-send-errors";
 
 /**
  * Fetch the set of "internal" domains (domains owned by our
@@ -177,6 +183,8 @@ const sendEmailRoute = createRoute({
   },
   responses: {
     ...json201Response(SentEmailResponseSchema, "Email sent"),
+    ...multipartParseErrorResponses,
+    ...inboxForbiddenResponse,
   },
 });
 
@@ -422,6 +430,10 @@ const replyEmailRoute = createRoute({
   },
   responses: {
     ...json201Response(SentEmailResponseSchema, "Reply sent"),
+    ...replyValidationErrorResponse,
+    413: multipartParseErrorResponses[413],
+    ...inboxForbiddenResponse,
+    ...replyNotFoundResponse,
   },
 });
 
