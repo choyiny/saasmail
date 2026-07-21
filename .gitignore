@@ -16,6 +16,7 @@ playwright-report/
 
 # Local superpowers docs (specs, plans)
 docs/superpowers/
+.superpowers/sdd
 
 # Per-developer Claude Code preview launch config
 .claude/launch.json

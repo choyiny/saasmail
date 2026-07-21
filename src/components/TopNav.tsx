@@ -10,11 +10,14 @@ import {
   Shield,
   Users,
   Ban,
+  ShieldBan,
+  Send,
   Menu,
   User,
   LogOut,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
+import { fetchOutboxCount, fetchStats } from "@/lib/api";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,6 +49,8 @@ export default function TopNav() {
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [outboxPending, setOutboxPending] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     function onScroll() {
@@ -54,6 +59,20 @@ export default function TopNav() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  useEffect(() => {
+    fetchOutboxCount()
+      .then((res) => setOutboxPending(res.pending))
+      .catch(() => setOutboxPending(0));
+  }, []);
+
+  // Refetch the unread badge on every navigation so marking mail read on the
+  // inbox is reflected in the nav.
+  useEffect(() => {
+    fetchStats()
+      .then((res) => setUnreadCount(res.unreadCount))
+      .catch(() => setUnreadCount(0));
+  }, [location.pathname]);
 
   useEffect(() => {
     setMobileOpen(false);
@@ -103,6 +122,14 @@ export default function TopNav() {
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {item.label}
+                  {item.path === "/" && unreadCount > 0 && (
+                    <span
+                      className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none text-white"
+                      style={{ backgroundColor: "#7c5cfc" }}
+                    >
+                      {unreadCount > 99 ? "99+" : unreadCount}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}
@@ -173,6 +200,25 @@ export default function TopNav() {
                     </DropdownMenuItem>
                   </>
                 )}
+                <DropdownMenuItem
+                  onClick={() => navigate("/blocklist")}
+                  className="cursor-pointer"
+                >
+                  <ShieldBan className="h-4 w-4" />
+                  Blocklist
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => navigate("/outbox")}
+                  className="cursor-pointer"
+                >
+                  <Send className="h-4 w-4" />
+                  Outbox
+                  {outboxPending > 0 && (
+                    <span className="ml-auto rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                      {outboxPending}
+                    </span>
+                  )}
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => navigate("/settings")}
@@ -246,6 +292,14 @@ export default function TopNav() {
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}
+                    {item.path === "/" && unreadCount > 0 && (
+                      <span
+                        className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none text-white"
+                        style={{ backgroundColor: "#7c5cfc" }}
+                      >
+                        {unreadCount > 99 ? "99+" : unreadCount}
+                      </span>
+                    )}
                   </NavLink>
                 );
               })}
@@ -282,6 +336,25 @@ export default function TopNav() {
                   </button>
                 </>
               )}
+              <button
+                onClick={() => navigate("/blocklist")}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+              >
+                <ShieldBan className="h-4 w-4" />
+                Blocklist
+              </button>
+              <button
+                onClick={() => navigate("/outbox")}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+              >
+                <Send className="h-4 w-4" />
+                Outbox
+                {outboxPending > 0 && (
+                  <span className="ml-auto rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                    {outboxPending}
+                  </span>
+                )}
+              </button>
               <button
                 onClick={() => navigate("/settings")}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"

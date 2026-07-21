@@ -79,6 +79,9 @@ export default function ReplyComposer({
   const [fromAddress, setFromAddress] = useState(recipients[0] ?? "");
   const [cc, setCc] = useState<CcEntry[]>([]);
   const [bodyHtml, setBodyHtml] = useState("");
+  // Plain-text mirror of the editor, kept in lockstep with bodyHtml so the
+  // reply ships a `text/plain` part and renders as a normal chat bubble.
+  const [bodyText, setBodyText] = useState("");
   // Stored separately from the body so swapping `From` mid-reply replaces
   // the trailing signature without touching what the user has typed.
   const [signatureHtml, setSignatureHtml] = useState<string | null>(null);
@@ -217,6 +220,7 @@ export default function ReplyComposer({
           : bodyHtml;
         await replyToEmail(emailId, {
           bodyHtml: finalBody,
+          ...(bodyText.trim() ? { bodyText } : {}),
           fromAddress,
           ...(ccPayload ? { cc: ccPayload } : {}),
           ...(files.length > 0
@@ -376,7 +380,10 @@ export default function ReplyComposer({
                   >
                     <TiptapEditor
                       content={bodyHtml}
-                      onUpdate={setBodyHtml}
+                      onUpdate={(html, text) => {
+                        setBodyHtml(html);
+                        setBodyText(text);
+                      }}
                       placeholder="Write your reply…"
                     />
                     <AttachmentChips

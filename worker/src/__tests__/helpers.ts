@@ -74,6 +74,11 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
     `CREATE TABLE IF NOT EXISTS suppressions (id TEXT PRIMARY KEY, email TEXT NOT NULL, reason TEXT NOT NULL, source TEXT, note TEXT, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS suppressions_email_unique ON suppressions(email)`,
+    `CREATE TABLE IF NOT EXISTS blocklist (id TEXT PRIMARY KEY, type TEXT NOT NULL, value TEXT NOT NULL, note TEXT, created_by TEXT, created_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS blocklist_type_value_unique ON blocklist(type, value)`,
+    `CREATE TABLE IF NOT EXISTS outbox_emails (id TEXT PRIMARY KEY, sent_email_id TEXT NOT NULL, sequence_email_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, cc TEXT, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, headers TEXT, transactional INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, next_retry_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS outbox_status_retry_idx ON outbox_emails(status, next_retry_at)`,
+    `CREATE INDEX IF NOT EXISTS outbox_from_idx ON outbox_emails(from_address)`,
   ];
 
   for (const sql of statements) {
@@ -261,6 +266,8 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM outbox_emails;
+    DELETE FROM blocklist;
     DELETE FROM suppressions;
     DELETE FROM push_subscriptions;
     DELETE FROM inbox_permissions;

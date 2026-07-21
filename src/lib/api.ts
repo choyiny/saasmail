@@ -68,7 +68,7 @@ export interface Email {
   isRead: number | null;
   cc: CcEntry[];
   timestamp: number;
-  /** Delivery status for sent messages: "sent" | "failed". Null for received. */
+  /** Delivery status for sent messages: "sent" | "failed" | "retrying". Null for received. */
   status?: string | null;
   attachmentCount?: number;
   attachments?: Attachment[];
@@ -347,7 +347,10 @@ export async function sendEmail(data: {
 }): Promise<{ id: string; attachmentIds: string[]; status: string }> {
   const { files = [], ...payload } = data;
   const fd = new FormData();
-  fd.append("payload", JSON.stringify(payload));
+  // Manually composed emails are 1:1 transactional messages: no unsubscribe
+  // footer or List-Unsubscribe headers, and they bypass the suppression list
+  // (mirrors replies, which are always transactional).
+  fd.append("payload", JSON.stringify({ ...payload, transactional: true }));
   for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch("/api/send", {
     method: "POST",
@@ -825,4 +828,91 @@ export async function deleteSuppression(
   id: string,
 ): Promise<{ deleted: true }> {
   return apiFetch(`/api/suppressions/${id}`, { method: "DELETE" });
+}
+
+// --- Blocklist ---
+
+export type BlockRuleType = "email" | "domain";
+
+export interface BlockRule {
+  id: string;
+  type: BlockRuleType;
+  value: string;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: number;
+}
+
+export interface BlocklistPageResult {
+  items: BlockRule[];
+  nextCursor: string | null;
+}
+
+export async function fetchBlocklist(
+  cursor?: string,
+): Promise<BlocklistPageResult> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch(`/api/blocklist${qs}`);
+}
+
+export async function addBlock(input: {
+  type: BlockRuleType;
+  value: string;
+  note?: string;
+}): Promise<BlockRule> {
+  return apiFetch("/api/blocklist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function removeBlock(id: string): Promise<{ deleted: true }> {
+  return apiFetch(`/api/blocklist/${id}`, { method: "DELETE" });
+}
+
+export async function purgeBlockedMail(): Promise<{
+  emailsDeleted: number;
+  peopleDeleted: number;
+}> {
+  return apiFetch("/api/blocklist/mail", { method: "DELETE" });
+}
+
+// ---- Outbox ----
+
+export interface OutboxItem {
+  id: string;
+  sentEmailId: string;
+  fromAddress: string;
+  toAddress: string;
+  subject: string;
+  status: "pending" | "failed";
+  attempts: number;
+  lastError: string | null;
+  nextRetryAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchOutbox(
+  cursor?: string,
+): Promise<{ items: OutboxItem[]; nextCursor: string | null }> {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+  return apiFetch(`/api/outbox${qs}`);
+}
+
+export async function fetchOutboxCount(): Promise<{ pending: number }> {
+  return apiFetch("/api/outbox/count");
+}
+
+export async function retryOutboxItem(id: string): Promise<{
+  outcome: "sent" | "suppressed" | "retrying" | "failed" | "pending";
+}> {
+  return apiFetch(`/api/outbox/${id}/retry`, { method: "POST" });
+}
+
+export async function cancelOutboxItem(
+  id: string,
+): Promise<{ deleted: boolean }> {
+  return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
 }

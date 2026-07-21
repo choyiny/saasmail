@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).
+
+### Added
+
+- OpenAPI email responses: document `attachments` on `EmailSchema`, clarify `replyTo` is only populated on `GET /api/emails/{id}` for received messages.
+- OpenAPI `/doc`: register `SendEmailSchema`, `CcEntry`, and `ReplyEmailSchema` under `components.schemas` (including `transactional` and reply payload fields).
+- OpenAPI `/doc`: global auth documentation, `BearerAuth` security scheme, and `security` requirements on integrator-facing routes (`/api/send`, template send, sequence enroll, API keys).
+- OpenAPI sequences: `fromAddress` and typed `variables` on `EnrollmentSchema`; document enroll and delete error responses (400/404).
+- OpenAPI send paths: document multipart parse errors (400/413), inbox permission 403, and reply/template-not-found 404 on `/api/send`, `/api/send/reply/{emailId}`, and `/api/email-templates/{slug}/send`.
+- OpenAPI bootstrap: add unauthenticated `GET /api/health` and `GET /api/config` to the generated spec.
+- OpenAPI notifications: convert `notifications-router` to zod-openapi; document config, WebSocket stream, push subscribe/unsubscribe, and subscription management routes.
+- New outbound email provider: **Postmark**. Set `POSTMARK_API_KEY` (your Postmark server API token) as a secret to send through Postmark. Runtime precedence is Bavimail > Postmark > Resend > Cloudflare Email Sending.
+
 ## [0.10.0] - 2026-06-23
 
 ### Added

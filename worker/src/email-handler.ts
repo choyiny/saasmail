@@ -9,6 +9,7 @@ import { inboxPermissions } from "./db/inbox-permissions.schema";
 import { senderIdentities } from "./db/sender-identities.schema";
 import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
+import { isBlocked } from "./lib/blocklist";
 import { computeConversationId, externalsOnly } from "./lib/conversation-id";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 import {
@@ -37,6 +38,12 @@ export async function handleEmail(
   // need the stored column to match).
   const recipientCanonical = parsed.to.trim().toLowerCase();
   const fromAddressCanonical = parsed.from.address.trim().toLowerCase();
+
+  // Drop mail from blocked senders/domains before any storage or side effects.
+  if (await isBlocked(db, fromAddressCanonical)) {
+    console.log(`Dropped blocked email from ${fromAddressCanonical}`);
+    return;
+  }
 
   // Deduplicate by Message-ID
   if (parsed.messageId) {

@@ -12,7 +12,12 @@ import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
 import { emailsRouter } from "./routers/emails-router";
 import { conversationsRouter } from "./routers/conversations-router";
-import { sendRouter } from "./routers/send-router";
+import {
+  sendRouter,
+  CcEntrySchema,
+  ReplyEmailSchema,
+  SendEmailSchema,
+} from "./routers/send-router";
 import { attachmentsRouter } from "./routers/attachments-router";
 import { statsRouter } from "./routers/stats-router";
 import { setupRouter } from "./routers/setup-router";
@@ -25,23 +30,41 @@ import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { processOutbox } from "./lib/outbox";
 import { notificationsRouter } from "./routers/notifications-router";
+import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
+import { outboxRouter } from "./routers/outbox-router";
+import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
 import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
-import { appSettings } from "./db/app-settings.schema";
 import { isDevEnvironment } from "./lib/is-dev";
+import {
+  BEARER_AUTH_SCHEME,
+  bearerAuthSecurityScheme,
+  openapiInfoDescription,
+} from "./lib/openapi-auth";
 
 const app = new OpenAPIHono<{
   Bindings: CloudflareBindings;
   Variables: Variables;
 }>();
+
+app.openAPIRegistry.register("CcEntry", CcEntrySchema);
+app.openAPIRegistry.register("SendEmailSchema", SendEmailSchema);
+app.openAPIRegistry.register("ReplyEmailSchema", ReplyEmailSchema);
+
+app.openAPIRegistry.registerComponent(
+  "securitySchemes",
+  BEARER_AUTH_SCHEME,
+  bearerAuthSecurityScheme,
+);
 
 // Middleware
 app.use("*", injectDb);
@@ -204,6 +227,8 @@ app.route("/api/api-keys", apiKeysRouter);
 app.route("/api/invites", invitesRouter);
 app.route("/api/sequences", sequencesRouter);
 app.route("/api/notifications", notificationsRouter);
+app.route("/api/blocklist", blocklistRouter);
+app.route("/api/outbox", outboxRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
@@ -231,32 +256,18 @@ app.route("/api/unsubscribe", unsubscribeRouter);
 // GET requests don't match the router and fall through to the SPA assets handler.
 app.route("/unsubscribe", unsubscribeRouter);
 
-// Health check (no auth)
-app.get("/api/health", (c) => c.json({ status: "ok" }));
-
-// Public runtime config (no auth) — consumed by the SPA
-app.get("/api/config", async (c) => {
-  const db = c.get("db");
-  const row = await db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, "brand_name"))
-    .limit(1);
-  const brandName =
-    row.length > 0 && row[0].value && row[0].value.length > 0
-      ? row[0].value
-      : "saasmail";
-  return c.json({
-    passkeyRequired: !isDevEnvironment(c.env),
-    brandName,
-  });
-});
+// Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
+app.route("/api", bootstrapRouter);
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
 app.doc("/doc", {
   openapi: "3.0.0",
-  info: { title: "saasmail API", version: "1.0.0" },
+  info: {
+    title: "saasmail API",
+    version: "1.0.0",
+    description: openapiInfoDescription,
+  },
 });
 
 // SPA fallback
@@ -272,7 +283,11 @@ export default {
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(handleScheduled(env));
+    ctx.waitUntil(
+      handleScheduled(env)
+        .catch((err) => console.error("[cron] sequence dispatch failed:", err))
+        .then(() => processOutbox(env)),
+    );
   },
   async queue(
     batch: MessageBatch<SequenceEmailMessage>,

@@ -7,25 +7,6 @@ interface WordmarkProps {
 }
 
 /**
- * Inline wordmark — used in sidebar header, footer brand line, and as the
- * default text-logo replacement for the legacy /saasmail-logo.png image.
- * Inherits color from parent so it reads on both light and dark surfaces.
- */
-export function Wordmark({ className }: WordmarkProps) {
-  const { brandName } = useBranding();
-  return (
-    <span
-      className={cn(
-        "text-lg font-light tracking-wide whitespace-nowrap",
-        className,
-      )}
-    >
-      {brandName}
-    </span>
-  );
-}
-
-/**
  * Larger ✦ + uppercase wordmark for auth/onboarding hero. Mirrors
  * givefeedback.dev's auth treatment: bright lime sparkle, extrabold
  * uppercase brand line. Sits above the auth card on the dark backdrop.

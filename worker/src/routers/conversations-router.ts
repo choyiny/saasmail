@@ -34,7 +34,7 @@ const listConversationEmailsRoute = createRoute({
   path: "/{id}/emails",
   tags: ["Conversations"],
   description:
-    "List all emails in a group conversation, oldest first, with participants metadata.",
+    "List all emails in a group conversation, oldest first, with participants metadata. Each email includes attachment metadata when present.",
   request: {
     params: z.object({ id: z.string() }),
   },
@@ -186,6 +186,8 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     }
   }
 
+  const personEmailById = new Map(participants.map((p) => [p.id, p.email]));
+
   // Merge into the same email shape as listPersonEmailsRoute, oldest first.
   const merged = [
     ...received.map((e) => ({
@@ -193,7 +195,9 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
       type: "received" as const,
       personId: e.personId ?? null,
       recipient: e.recipient,
-      fromAddress: null,
+      fromAddress: e.personId
+        ? (personEmailById.get(e.personId) ?? null)
+        : null,
       toAddress: null,
       subject: e.subject,
       bodyHtml: e.bodyHtml,

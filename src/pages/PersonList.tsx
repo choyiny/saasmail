@@ -132,10 +132,7 @@ export default function PersonList({
     pullDistance,
     refreshing,
     threshold,
-    handlers: pullHandlers,
-  } = usePullToRefresh<HTMLDivElement>({
-    onRefresh: onRefresh ?? (() => {}),
-  });
+  } = usePullToRefresh<HTMLDivElement>({ onRefresh });
   const pullActive = pullDistance > 0 || refreshing;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
@@ -202,7 +199,6 @@ export default function PersonList({
       {/* Scrollable list — independent of the right pane */}
       <div
         ref={scrollRef}
-        {...(onRefresh ? pullHandlers : {})}
         className="smooth-scroll relative min-h-0 flex-1 overflow-y-auto"
         style={onRefresh ? { overscrollBehaviorY: "contain" } : undefined}
       >

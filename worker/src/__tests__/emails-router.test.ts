@@ -70,6 +70,7 @@ describe("emails router", () => {
       // Most recent first — sent email has higher timestamp
       expect(data[0].type).toBe("sent");
       expect(data[1].type).toBe("received");
+      expect(data[1].fromAddress).toBe("a@test.com");
     });
 
     it("surfaces delivery status: 'failed' on sent, null on received", async () => {
@@ -243,6 +244,16 @@ describe("emails router", () => {
       expect(data.attachments).toEqual([]);
     });
 
+    it("resolves fromAddress to the sender person for received email", async () => {
+      await createTestPerson({ id: "s1", email: "sender@example.com" });
+      await createTestEmail({ id: "e1", personId: "s1" });
+
+      const res = await authFetch("/api/emails/e1", { apiKey });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.fromAddress).toBe("sender@example.com");
+    });
+
     it("surfaces replyTo from the inbound Reply-To header", async () => {
       await createTestPerson({ id: "s1", email: "noreply@readerful.com" });
       await createTestEmail({
@@ -265,6 +276,22 @@ describe("emails router", () => {
       await createTestEmail({ id: "e-no-rt", personId: "s1" });
 
       const res = await authFetch("/api/emails/e-no-rt", { apiKey });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.replyTo).toBeNull();
+    });
+
+    it("returns replyTo null when Reply-To matches the attributed sender", async () => {
+      await createTestPerson({ id: "s1", email: "alice@example.com" });
+      await createTestEmail({
+        id: "e-same-rt",
+        personId: "s1",
+        rawHeaders: JSON.stringify({
+          "reply-to": "Alice <alice@example.com>",
+        }),
+      });
+
+      const res = await authFetch("/api/emails/e-same-rt", { apiKey });
       expect(res.status).toBe(200);
       const data = await res.json();
       expect(data.replyTo).toBeNull();

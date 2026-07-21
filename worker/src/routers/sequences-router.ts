@@ -11,6 +11,7 @@ import { json200Response, json201Response } from "../lib/helpers";
 import type { SequenceEmailMessage } from "../lib/sequence-processor";
 import type { Variables } from "../variables";
 import { isDemoMode } from "../lib/is-dev";
+import { bearerSecurity } from "../lib/openapi-auth";
 
 export const sequencesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -18,6 +19,8 @@ export const sequencesRouter = new OpenAPIHono<{
 }>();
 
 // --- Zod Schemas ---
+
+const ErrorSchema = z.object({ error: z.string() });
 
 const SequenceStepSchema = z.object({
   order: z.number().int().min(1),
@@ -58,8 +61,14 @@ const EnrollmentSchema = z.object({
   id: z.string(),
   sequenceId: z.string(),
   personId: z.string(),
+  fromAddress: z.string().email().openapi({
+    description: "Sender identity used for all steps in this enrollment.",
+  }),
   status: z.string(),
-  variables: z.any(),
+  variables: z.record(z.string(), z.string()).openapi({
+    description:
+      "Template variables for this enrollment. API responses return a parsed object (stored as JSON in the database).",
+  }),
   enrolledAt: z.number(),
   cancelledAt: z.number().nullable(),
 });
@@ -269,6 +278,10 @@ const deleteRoute = createRoute({
   },
   responses: {
     ...json200Response(z.object({ success: z.boolean() }), "Sequence deleted"),
+    400: {
+      description: "Sequence has active enrollments",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -304,6 +317,7 @@ const enrollRoute = createRoute({
   method: "post",
   path: "/{id}/enroll",
   tags: ["Sequences"],
+  security: bearerSecurity,
   description:
     "Enroll a person into a sequence. Computes all scheduled send times upfront.",
   request: {
@@ -322,6 +336,15 @@ const enrollRoute = createRoute({
       }),
       "Person enrolled",
     ),
+    400: {
+      description:
+        "Person already in an active sequence, or all steps were skipped",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    404: {
+      description: "Sequence or person not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { env } from "cloudflare:workers";
 import {
   applyMigrations,
   cleanDb,
@@ -9,6 +10,7 @@ import {
 } from "./helpers";
 import { suppressions } from "../db/suppressions.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { outboxEmails } from "../db/outbox-emails.schema";
 
 describe("email templates router", () => {
   let apiKey: string;
@@ -182,6 +184,41 @@ describe("email templates router", () => {
       // No sent_emails row should have been written for the suppressed send
       const sentRows = await db.select().from(sentEmails);
       expect(sentRows).toHaveLength(0);
+    });
+  });
+
+  describe("send-test outbox integration", () => {
+    it("keeps a failed outbox row when no provider is configured", async () => {
+      (env as any).DEMO_MODE = "0";
+      const savedKey = (env as any).RESEND_API_KEY;
+      const savedEmail = (env as any).EMAIL;
+      (env as any).RESEND_API_KEY = undefined;
+      (env as any).EMAIL = undefined;
+      try {
+        await createTestTemplate({
+          slug: "plain",
+          subject: "S",
+          bodyHtml: "<p>B</p>",
+        });
+        const res = await authFetch("/api/email-templates/plain/send", {
+          apiKey,
+          method: "POST",
+          body: JSON.stringify({
+            to: "nobody@example.com",
+            fromAddress: "me@saasmail.test",
+            variables: {},
+          }),
+        });
+        expect(res.status).toBe(201);
+        const body = (await res.json()) as { status: string };
+        expect(body.status).toBe("failed");
+        const outbox = await getDb().select().from(outboxEmails);
+        expect(outbox).toHaveLength(1);
+        expect(outbox[0].status).toBe("failed");
+      } finally {
+        (env as any).RESEND_API_KEY = savedKey;
+        (env as any).EMAIL = savedEmail;
+      }
     });
   });
 });

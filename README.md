@@ -15,9 +15,38 @@
 
 Every interaction with a customer matters, and context compounds. saasmail pulls the promo blast, the billing receipt, and the support thread into the same conversation, so anyone on your team can respond with the full history already in hand.
 
-Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending**, **Resend**, or **Bavimail**.
+Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending**, **Resend**, **Bavimail**, or **Postmark**.
 
 <img width="5088" height="3106" alt="saasmail-new" src="https://github.com/user-attachments/assets/407a8b4e-3ba0-4ed9-ae8a-f39dee861e56" />
+
+## Who this is for
+
+SaaS teams that want a self-hosted email stack on Cloudflare Workers — one shared, per-customer inbox for marketing, transactional, and support mail — without renting a VM or operating a traditional mail server. If you have a domain, a Cloudflare account, and want to own your customer email data for [~$5/month](#how-much-does-it-cost), this is for you.
+
+## Quickstart
+
+**Prerequisites:** a domain on Cloudflare with Email Routing available, the Workers Paid plan, and [Node.js](https://nodejs.org/) v18+.
+
+The fastest path is the Claude Code onboarding skill — it provisions every Cloudflare resource, fills out your config, runs migrations, and deploys for you:
+
+```bash
+git clone https://github.com/choyiny/saasmail.git
+cd saasmail
+claude   # then run /saasmail-onboarding
+```
+
+**First successful result:** your worker is live at your domain, and visiting it prompts you to create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+
+Prefer to wire it up by hand? See [Full setup](#full-setup) below (~8 steps).
+
+## Architecture at a glance
+
+```
+Inbound    customer ─▶ Cloudflare Email Routing ─▶ saasmail Worker ─▶ D1 · R2 · Queue
+Outbound   saasmail Worker ─▶ Email Sending / Resend / Bavimail / Postmark ─▶ customer
+```
+
+Everything runs inside a single Cloudflare Worker — no separate mail server to operate. See [Architecture](#architecture) for the full diagram and the component-by-component breakdown.
 
 ## Sponsors
 
@@ -30,18 +59,19 @@ https://github.com/user-attachments/assets/fe3a3811-1902-4b0b-8b94-f8c72f1afab4
 
 ## Provider Matrix
 
-|               | Cloudflare | Resend | Bavimail |
-| ------------- | ---------- | ------ | -------- |
-| **Sending**   | ✅         | ✅     | ✅       |
-| **Receiving** | ✅         | ❌     | ❌       |
+|               | Cloudflare | Resend | Bavimail | Postmark |
+| ------------- | ---------- | ------ | -------- | -------- |
+| **Sending**   | ✅         | ✅     | ✅       | ✅       |
+| **Receiving** | ✅         | ❌     | ❌       | ❌       |
 
 Pick one outbound provider at deploy time:
 
 - **Cloudflare Email Sending** — add a `send_email` binding (`EMAIL`) in `wrangler.jsonc` and onboard your domain at [Email Service](https://dash.cloudflare.com/?to=/:account/email-service).
 - **Resend** — set `RESEND_API_KEY` as a secret.
 - **Bavimail** — set `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` as secrets. The alias ID identifies the sending alias configured in your Bavimail dashboard.
+- **Postmark** — set `POSTMARK_API_KEY` as a secret (your Postmark server's API token). Verify each send-from domain in the Postmark dashboard.
 
-Selection precedence at runtime: **Bavimail** (when both env vars are set) > **Resend** (when `RESEND_API_KEY` is set) > **Cloudflare Email Sending** (when the `EMAIL` binding exists). If none are configured, send attempts return a "No email provider configured" error.
+Selection precedence at runtime: **Bavimail** (when both env vars are set) > **Postmark** (when `POSTMARK_API_KEY` is set) > **Resend** (when `RESEND_API_KEY` is set) > **Cloudflare Email Sending** (when the `EMAIL` binding exists). If none are configured, send attempts return a "No email provider configured" error.
 
 ## How much does it cost?
 
@@ -144,9 +174,9 @@ function verify(rawBody, header, secret) {
 | Layer               | Technology                                                                |
 | ------------------- | ------------------------------------------------------------------------- |
 | **Receive email**   | Cloudflare Email Workers                                                  |
-| **Send email**      | Cloudflare Email Sending, Resend, or Bavimail                             |
+| **Send email**      | Cloudflare Email Sending, Resend, Bavimail, or Postmark                   |
 | **Runtime**         | Cloudflare Workers + Hono                                                 |
-| **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.1)                                   |
+| **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.0)                                   |
 | **Database**        | Cloudflare D1 (SQLite)                                                    |
 | **File storage**    | Cloudflare R2 (attachments)                                               |
 | **Queue**           | Cloudflare Queues (sequence processing)                                   |
@@ -183,7 +213,7 @@ flowchart LR
 
 The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). On inbound mail the worker fans out to each recipient's hub, which pushes WebSocket frames to live tabs and sends encrypted Web Push to registered devices. The queue carries scheduled sequence emails — the cron trigger enqueues due steps and a queue consumer in the same worker sends them.
 
-## Quick Start
+## Full setup
 
 ### Recommended: install with Claude Code
 
@@ -212,6 +242,7 @@ Don't have Claude Code? The manual steps below cover the same ground.
 - A [Cloudflare](https://dash.cloudflare.com/) account with Email Routing available for your domain
 - _Optional:_ a [Resend](https://resend.com/) account and API key (only if you prefer Resend over Cloudflare Email Sending)
 - _Optional:_ a [Bavimail](https://bavimail.com/) account, API key, and alias ID (only if you prefer Bavimail)
+- _Optional:_ a [Postmark](https://postmarkapp.com/) account and server API token (only if you prefer Postmark)
 
 ### 1. Clone and install
 
@@ -267,7 +298,8 @@ cp .dev.vars.example .dev.vars
 Edit `.dev.vars`:
 
 - `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` — your Bavimail bearer token and alias UUID (only if using Bavimail; both must be set)
-- `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending or Bavimail)
+- `POSTMARK_API_KEY` — your Postmark server API token (only if using Postmark)
+- `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending, Bavimail, or Postmark)
 - `BETTER_AUTH_SECRET` — generate a random string (`openssl rand -hex 32`)
 - `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
 
@@ -279,6 +311,7 @@ wrangler secret put UNSUBSCRIBE_SECRET
 wrangler secret put RESEND_API_KEY      # only if using Resend
 wrangler secret put BAVIMAIL_API_KEY    # only if using Bavimail
 wrangler secret put BAVIMAIL_ALIAS_ID   # only if using Bavimail
+wrangler secret put POSTMARK_API_KEY    # only if using Postmark
 ```
 
 ### 6. Run migrations
@@ -348,7 +381,7 @@ yarn db:studio:dev
 
 Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script populates `seeds/demo.sql` so you can exercise the inbox UI without real inbound email.
 
-The API is generated from Zod schemas in `worker/src/routers/` and exposes an OpenAPI 3.1 spec at `/api/doc` in the running worker.
+The API is generated from Zod schemas in `worker/src/routers/`. Each running worker exposes an OpenAPI 3.0 spec at `/doc` (JSON) and an interactive explorer at `/swagger-ui`. Both are public — no auth required to read the spec.
 
 ### End-to-end tests
 
@@ -399,6 +432,7 @@ Local development secrets. Created from `.dev.vars.example`. This file is gitign
 
 - `BAVIMAIL_API_KEY` — Bavimail API bearer token (required for Bavimail, must be paired with `BAVIMAIL_ALIAS_ID`)
 - `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
+- `POSTMARK_API_KEY` — Postmark server API token (if using Postmark)
 - `RESEND_API_KEY` — Resend API key (if using Resend)
 - `BETTER_AUTH_SECRET` — Secret for session signing
 - `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the suppressions/unsubscribe feature.
