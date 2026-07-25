@@ -6,6 +6,7 @@ import type { AllowedInboxes } from "../lib/inbox-permissions";
 import { SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE, hasScope } from "../auth/scopes";
 import { sendTemplate } from "../lib/send-template";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
+import { sendEmail, replyToEmail } from "../lib/send-email";
 import { listPeople, getPersonScoped } from "../lib/queries/people";
 import {
   listPersonEmails,
@@ -357,6 +358,139 @@ export function buildMcpServer(ctx: McpContext): McpServer {
               `${result.message} Missing: ${result.missingVariables.join(", ")}. Required: ${result.requiredVariables.join(", ")}.`,
             )
           : fail(result.message);
+      }
+      return ok(result);
+    }),
+  );
+
+  const ccSchema = z
+    .array(z.object({ email: z.email(), name: z.string().max(200).optional() }))
+    .max(50)
+    .optional()
+    .describe("CC recipients.");
+
+  server.registerTool(
+    "send_email",
+    {
+      description:
+        "Compose and send a new message. fromAddress must be an inbox you may send from — call whoami to see which. Sending to a contact cancels any drip sequence they are enrolled in, since a direct message supersedes the automation.",
+      annotations: { readOnlyHint: false, title: "Send Email" },
+      inputSchema: {
+        to: z.email().describe("Recipient email address."),
+        fromAddress: z
+          .email()
+          .describe("Sender identity; must be one of your allowed inboxes."),
+        subject: z.string().describe("Subject line."),
+        bodyHtml: z.string().describe("HTML body."),
+        bodyText: z
+          .string()
+          .optional()
+          .describe(
+            "Plain-text alternative. Strongly recommended — messages without one are downranked by some providers.",
+          ),
+        cc: ccSchema,
+        replyTo: z
+          .email()
+          .optional()
+          .describe("Where replies should go, if not fromAddress."),
+      },
+    },
+    guard(ctx, SCOPE_SEND, async (input) => {
+      const result = await sendEmail({
+        db,
+        env: ctx.env,
+        // Attachments would mean base64 in the tool payload; omitted until
+        // there is a staged-upload path like the one taxspace uses.
+        files: [],
+        payload: {
+          to: input.to,
+          fromAddress: input.fromAddress,
+          subject: input.subject,
+          bodyHtml: input.bodyHtml,
+          bodyText: input.bodyText,
+          cc: input.cc,
+          replyTo: input.replyTo,
+        },
+        allowed,
+      });
+      return ok(result);
+    }),
+  );
+
+  server.registerTool(
+    "reply_email",
+    {
+      description:
+        "Reply to a message, threading correctly via its Message-ID. Works for received and sent messages. Provide either bodyHtml or a templateSlug with its variables.",
+      annotations: { readOnlyHint: false, title: "Reply To Email" },
+      inputSchema: {
+        emailId: z
+          .string()
+          .describe("Id of the message being replied to, from list_emails."),
+        fromAddress: z
+          .email()
+          .describe("Sender identity; must be one of your allowed inboxes."),
+        bodyHtml: z
+          .string()
+          .optional()
+          .describe("HTML body. Omit when using templateSlug."),
+        bodyText: z.string().optional().describe("Plain-text alternative."),
+        templateSlug: z
+          .string()
+          .optional()
+          .describe("Render this saved template instead of bodyHtml."),
+        variables: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Values for the template's placeholders."),
+        cc: ccSchema,
+        replyTo: z
+          .email()
+          .optional()
+          .describe("Override the reply-to address."),
+      },
+    },
+    guard(ctx, SCOPE_SEND, async (input) => {
+      // Check visibility through the same masked path read_email uses, before
+      // the send core asserts on the target's inbox. That assertion throws
+      // "Inbox not allowed", which would confirm the message exists somewhere
+      // the caller cannot see — a probe oracle the read tools deliberately
+      // close.
+      const target = await getEmailById(db, input.emailId, allowed);
+      if (!target) return fail(NOT_FOUND);
+
+      const result = await replyToEmail({
+        db,
+        env: ctx.env,
+        emailId: input.emailId,
+        files: [],
+        payload: {
+          fromAddress: input.fromAddress,
+          bodyHtml: input.bodyHtml,
+          bodyText: input.bodyText,
+          templateSlug: input.templateSlug,
+          variables: input.variables,
+          cc: input.cc,
+          replyTo: input.replyTo,
+        },
+        allowed,
+      });
+      if (!result.ok) {
+        // Denials on the referenced message are reported as not-found, matching
+        // read_email — the caller supplied an id, and confirming it exists in
+        // an inbox they cannot see would be a probe oracle.
+        if (
+          result.code === "EMAIL_NOT_FOUND" ||
+          result.code === "PERSON_NOT_FOUND" ||
+          result.code === "EMAIL_HAS_NO_PERSON"
+        ) {
+          return fail(NOT_FOUND);
+        }
+        return fail(
+          result.code === "MISSING_VARIABLES" && "missingVariables" in result
+            ? `${result.message} Missing: ${(result as { missingVariables: string[] }).missingVariables.join(", ")}.`
+            : result.message,
+        );
       }
       return ok(result);
     }),

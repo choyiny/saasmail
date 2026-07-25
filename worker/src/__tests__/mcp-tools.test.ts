@@ -133,7 +133,9 @@ describe("MCP tools", () => {
           "list_people",
           "mark_read",
           "read_email",
+          "reply_email",
           "search_emails",
+          "send_email",
           "send_template",
           "whoami",
         ].sort(),
@@ -521,6 +523,71 @@ describe("MCP tools", () => {
         fromAddress: MINE,
       });
       expect(out.isError).toBe(true);
+    });
+  });
+
+  describe("send_email / reply_email", () => {
+    beforeEach(() => {
+      (env as any).DEMO_MODE = "1";
+    });
+    afterEach(() => {
+      (env as any).DEMO_MODE = "0";
+    });
+
+    it("sends from an allowed inbox", async () => {
+      const out = await callTool(memberToken, "send_email", {
+        to: "alice@example.com",
+        fromAddress: MINE,
+        subject: "Hello there",
+        bodyHtml: "<p>Hi</p>",
+        bodyText: "Hi",
+      });
+      expect(out.isError, out.text).toBe(false);
+      expect(out.data.status).toBe("sent");
+    });
+
+    it("refuses to send from an inbox the member does not own", async () => {
+      const before = await getDb().select().from(sentEmails);
+      const out = await callTool(memberToken, "send_email", {
+        to: "alice@example.com",
+        fromAddress: OTHER,
+        subject: "Nope",
+        bodyHtml: "<p>Nope</p>",
+      });
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("Inbox not allowed");
+      const after = await getDb().select().from(sentEmails);
+      expect(after).toHaveLength(before.length);
+    });
+
+    it("rejects a recipient that is not an address", async () => {
+      const out = await callTool(memberToken, "send_email", {
+        to: "Bob Smith",
+        fromAddress: MINE,
+        subject: "Hi",
+        bodyHtml: "<p>Hi</p>",
+      });
+      expect(out.isError).toBe(true);
+    });
+
+    it("replies to a message in an allowed inbox", async () => {
+      const out = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+      });
+      expect(out.isError, out.text).toBe(false);
+    });
+
+    it("reports a reply target in another inbox as not found", async () => {
+      const out = await callTool(memberToken, "reply_email", {
+        emailId: "e-other",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+      });
+      expect(out.isError).toBe(true);
+      // Must not confirm the message exists in an inbox the caller can't see.
+      expect(out.text).toContain("Not found");
     });
   });
 
