@@ -45,6 +45,7 @@ import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
 import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
+import { registerMcpRoutes } from "./mcp/http";
 import {
   BEARER_AUTH_SCHEME,
   bearerAuthSecurityScheme,
@@ -69,7 +70,18 @@ app.openAPIRegistry.registerComponent(
 // Middleware
 app.use("*", injectDb);
 app.use("*", logger());
-app.use("*", cors({ origin: "*" }));
+// `exposeHeaders` is required so browser-based MCP clients (e.g. Claude.ai
+// connectors) can read the `WWW-Authenticate` challenge on a 401 to discover
+// the OAuth protected-resource metadata URL, plus the `Mcp-Session-Id` header
+// used by the streamable-HTTP transport. Without these a cross-origin MCP
+// client sees an opaque 401 and reports "Couldn't reach the MCP server".
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    exposeHeaders: ["WWW-Authenticate", "Mcp-Session-Id"],
+  }),
+);
 
 // Paths that don't participate in our session/passkey/inbox pipeline.
 // (BetterAuth handles its own auth at /api/auth/*; setup/invites/health/config
@@ -258,6 +270,12 @@ app.route("/unsubscribe", unsubscribeRouter);
 
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);
+
+// MCP endpoint + OAuth discovery. Registered before the SPA catch-all so
+// `/.well-known/*` isn't served index.html. `/mcp` authenticates with OAuth
+// bearer tokens via mcpHandler rather than the session/API-key pipeline, and
+// it sits outside `/api/*` so that middleware never applies to it.
+registerMcpRoutes(app);
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));

@@ -6,6 +6,7 @@ import { passkey } from "@better-auth/passkey";
 import { drizzle } from "drizzle-orm/d1";
 import { schema } from "../db/schema";
 import { MCP_SCOPES } from "./scopes";
+import { mcpAudience, oauthIssuer } from "../mcp/resource";
 
 /**
  * Scopes advertised to OAuth clients: the OpenID set plus saasmail's own
@@ -53,6 +54,11 @@ export function createAuth(env?: CloudflareBindings) {
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
         scopes: OAUTH_SCOPES,
+        // A `resource` outside this list is rejected as invalid_request, and
+        // an access token is only issued as a *JWT* when a resource was
+        // requested — an opaque token can't be verified locally against JWKS.
+        // The MCP audience therefore has to be declared here.
+        validAudiences: [oauthIssuer(baseURL), mcpAudience(baseURL)],
       }),
     ],
     advanced: {
