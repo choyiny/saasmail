@@ -10,8 +10,9 @@ import { eq } from "drizzle-orm";
 import { createAuth } from "../auth";
 import { OAUTH_SCOPES } from "../auth";
 import { parseScopes } from "../auth/scopes";
-import { users } from "../db/auth.schema";
+import { users, passkeys, oauthClients } from "../db/auth.schema";
 import { resolveAllowedInboxes } from "../lib/inbox-permissions";
+import { isDevEnvironment } from "../lib/is-dev";
 import { buildMcpServer } from "./server";
 import {
   MCP_PATH,
@@ -106,6 +107,21 @@ export function registerMcpRoutes(app: App) {
     const userId = jwt.sub;
     if (!userId) return unauthorized(baseURL, "invalid token subject");
 
+    // Tokens verify offline against JWKS, so without this a revoked client
+    // would keep working until its token expired and could refresh past that.
+    // Checking `azp` (the authorized party, i.e. the client) on every call is
+    // what makes "revoke access at any time" true rather than aspirational.
+    const clientId = typeof jwt.azp === "string" ? jwt.azp : undefined;
+    if (!clientId) return unauthorized(baseURL, "invalid token client");
+    const client = await db
+      .select({ disabled: oauthClients.disabled })
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, clientId))
+      .limit(1);
+    if (client.length === 0 || client[0].disabled) {
+      return unauthorized(baseURL, "client revoked");
+    }
+
     const rows = await db
       .select({
         id: users.id,
@@ -128,6 +144,21 @@ export function registerMcpRoutes(app: App) {
     // expired, and keep refreshing it after that.
     if (user.banned && (!user.banExpires || user.banExpires > new Date())) {
       return unauthorized(baseURL, "account suspended");
+    }
+
+    // Same rule requirePasskey enforces on /api/*. /mcp sits outside that
+    // middleware, and MCP grants strictly more than the web API does (send and
+    // delete), so exempting it would make "passkey registration is required to
+    // access data" false for the most powerful surface.
+    if (!isDevEnvironment(c.env)) {
+      const pk = await db
+        .select({ id: passkeys.id })
+        .from(passkeys)
+        .where(eq(passkeys.userId, user.id))
+        .limit(1);
+      if (pk.length === 0) {
+        return unauthorized(baseURL, "passkey registration required");
+      }
     }
 
     const allowed = await resolveAllowedInboxes(db, user);

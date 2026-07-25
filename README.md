@@ -248,14 +248,24 @@ Three scopes gate what a connected client may do:
 
 **Access is scoped to the connecting user.** A client acting for a member with
 access to one inbox sees only that inbox — the same permission model as the web
-UI and the HTTP API, enforced by the same code. Admins see everything.
+UI and the HTTP API, enforced by the same code. Admins see everything. A passkey
+is required, the same as for the web API.
 
-Revoke a connection at any time; tokens stop working immediately. Note that
-`delete_email` is permanent (there is no trash), so clients are told to confirm
-before calling it.
+**Prefer `email:read` alone.** An assistant connected to a mailbox reads
+attacker-authored content by definition — anyone can email you. Granting
+`email:send` or `email:manage` alongside it means a message in your inbox can
+try to instruct the assistant to mail your data somewhere or delete it. The
+consent screen flags those two scopes for this reason, and `delete_email` is
+permanent (there is no trash). Grant them only to clients you actually trust.
 
-> Freeform composition (`send_email`, `reply_email`) and full-text `search_emails`
-> are not exposed yet. A client can still send through a saved template.
+**Revoking access.** Admins can list connected OAuth clients and cut them off at
+**Settings → OAuth apps** (`GET /api/oauth-apps`, `DELETE /api/oauth-apps/{clientId}`).
+Revocation takes effect on the client's next call: the MCP endpoint checks the
+client on every request, so a revoked connection cannot keep working until its
+token expires. Banning a user has the same immediate effect.
+
+Any client can register itself (that is how MCP connectors work), so the list is
+also where you spot one you don't recognise.
 
 ### Webhooks
 

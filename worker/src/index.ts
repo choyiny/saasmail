@@ -24,6 +24,7 @@ import { setupRouter } from "./routers/setup-router";
 import { emailTemplatesRouter } from "./routers/email-templates-router";
 import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
+import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
@@ -246,6 +247,13 @@ app.route("/api/outbox", outboxRouter);
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
+
+// Registered OAuth clients. Admin-only: registration is open to any caller so
+// MCP clients can self-register, which makes an operator-visible list and a
+// revocation path the control that actually bounds it.
+app.use("/api/oauth-apps", requireAdmin);
+app.use("/api/oauth-apps/*", requireAdmin);
+app.route("/api/oauth-apps", oauthAppsRouter);
 
 // Suppressions CRUD — admin-only (not under /api/admin/ for UX but enforced
 // here with the same role guard).

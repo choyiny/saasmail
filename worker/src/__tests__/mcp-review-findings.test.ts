@@ -7,7 +7,7 @@ import {
   createTestPerson,
   getDb,
 } from "./helpers";
-import { users } from "../db/auth.schema";
+import { users, oauthClients } from "../db/auth.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { blocklist } from "../db/blocklist.schema";
@@ -18,6 +18,7 @@ import {
   createUserWithPassword,
   getAccessToken,
   grantInbox,
+  mcpRpc,
 } from "./mcp-helpers";
 
 const MINE = "mine@x.com";
@@ -169,6 +170,50 @@ describe("review findings", () => {
         before: 0,
       });
       expect(out.data.hits).toEqual([]);
+    });
+  });
+
+  describe("token revocation", () => {
+    it("stops working once the client is revoked", async () => {
+      // Confirm the token works before revoking, so the assertion below is
+      // about revocation and not some unrelated failure.
+      expect((await callTool(memberToken, "whoami")).isError).toBe(false);
+
+      await getDb().delete(oauthClients);
+
+      // Revocation is an auth failure, so it surfaces as a transport-level 401
+      // with a discovery challenge — not an in-band tool error.
+      const res = await mcpRpc(memberToken, "tools/call", {
+        name: "whoami",
+        arguments: {},
+      });
+      expect(res.status).toBe(401);
+      expect(res.headers.get("WWW-Authenticate")).toContain("Bearer");
+    });
+
+    it("stops working once the user is banned", async () => {
+      expect((await callTool(memberToken, "whoami")).isError).toBe(false);
+
+      await getDb()
+        .update(users)
+        .set({ banned: true })
+        .where(eq(users.email, MEMBER.email));
+
+      const res = await mcpRpc(memberToken, "tools/call", {
+        name: "whoami",
+        arguments: {},
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("keeps working when a ban has already expired", async () => {
+      await getDb()
+        .update(users)
+        .set({ banned: true, banExpires: new Date(Date.now() - 60_000) })
+        .where(eq(users.email, MEMBER.email));
+
+      const out = await callTool(memberToken, "whoami");
+      expect(out.isError, out.text).toBe(false);
     });
   });
 
