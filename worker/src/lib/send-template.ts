@@ -7,7 +7,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
-import { extractVariables, interpolate } from "./interpolate";
+import { renderTemplate } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
 
@@ -71,26 +71,19 @@ export async function sendTemplate(
     };
   }
 
-  const template = rows[0];
-
-  // Validate all required variables are provided
-  const subjectVars = extractVariables(template.subject);
-  const bodyVars = extractVariables(template.bodyHtml);
-  const requiredVars = Array.from(new Set([...subjectVars, ...bodyVars]));
-  const missingVars = requiredVars.filter((v) => !(v in variables));
-
-  if (missingVars.length > 0) {
+  const rendered = renderTemplate(rows[0], variables);
+  if (!rendered.ok) {
     return {
       ok: false,
       code: "MISSING_VARIABLES",
       message: "Missing required template variables",
-      missingVariables: missingVars,
-      requiredVariables: requiredVars,
+      missingVariables: rendered.missingVariables,
+      requiredVariables: rendered.requiredVariables,
     };
   }
 
-  const renderedSubject = interpolate(template.subject, variables);
-  const renderedHtml = interpolate(template.bodyHtml, variables);
+  const renderedSubject = rendered.subject;
+  const renderedHtml = rendered.bodyHtml;
 
   const sender = createEmailSender(env);
   const id = nanoid();
