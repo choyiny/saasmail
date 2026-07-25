@@ -133,6 +133,7 @@ describe("MCP tools", () => {
           "list_people",
           "mark_read",
           "read_email",
+          "search_emails",
           "send_template",
           "whoami",
         ].sort(),
@@ -334,6 +335,122 @@ describe("MCP tools", () => {
         emailId: "s-other",
       });
       expect(out.isError).toBe(false);
+    });
+  });
+
+  describe("search_emails", () => {
+    it("finds a received message by a word in its subject", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "mine",
+      });
+      expect(out.isError, out.text).toBe(false);
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toContain("e-mine");
+    });
+
+    it("finds a received message by a word in its body", async () => {
+      await createTestEmail({
+        id: "e-body",
+        personId: "p-mine",
+        recipient: MINE,
+        subject: "No keyword here",
+        bodyText: "the quarterly invoice is attached",
+        messageId: "body-1@example.com",
+      });
+      const out = await callTool(memberToken, "search_emails", {
+        q: "invoice",
+      });
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toContain("e-body");
+    });
+
+    it("finds sent messages too", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "Outgoing",
+      });
+      const hit = out.data.hits.find((h: any) => h.id === "s-mine");
+      expect(hit).toBeTruthy();
+      expect(hit.type).toBe("sent");
+    });
+
+    it("never returns messages from another inbox", async () => {
+      // "Hello" matches both the MINE and OTHER seeded subjects.
+      const out = await callTool(memberToken, "search_emails", { q: "Hello" });
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toContain("e-mine");
+      expect(ids).not.toContain("e-other");
+    });
+
+    it("returns both inboxes for an admin", async () => {
+      const out = await callTool(adminToken, "search_emails", { q: "Hello" });
+      const ids = out.data.hits.map((h: any) => h.id).sort();
+      expect(ids).toEqual(["e-mine", "e-other"]);
+    });
+
+    it("restricts to a single inbox when asked", async () => {
+      const out = await callTool(adminToken, "search_emails", {
+        q: "Hello",
+        inbox: OTHER,
+      });
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toEqual(["e-other"]);
+    });
+
+    it("returns an empty result rather than erroring on no match", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "zzzznotpresent",
+      });
+      expect(out.isError).toBe(false);
+      expect(out.data.hits).toEqual([]);
+      expect(out.data.hasMore).toBe(false);
+    });
+
+    it("treats LIKE wildcards as literal text", async () => {
+      // A bare "%" must not behave as match-everything on the sent-mail side.
+      const out = await callTool(memberToken, "search_emails", { q: "%" });
+      expect(out.isError).toBe(false);
+      expect(out.data.hits).toEqual([]);
+    });
+
+    it("paginates and reports hasMore", async () => {
+      for (let i = 0; i < 3; i++) {
+        await createTestEmail({
+          id: `e-page-${i}`,
+          personId: "p-mine",
+          recipient: MINE,
+          subject: `Paginate ${i}`,
+          messageId: `page-${i}@example.com`,
+        });
+      }
+      const first = await callTool(memberToken, "search_emails", {
+        q: "Paginate",
+        limit: 2,
+      });
+      expect(first.data.hits).toHaveLength(2);
+      expect(first.data.hasMore).toBe(true);
+
+      const second = await callTool(memberToken, "search_emails", {
+        q: "Paginate",
+        limit: 2,
+        page: 2,
+      });
+      expect(second.data.hits).toHaveLength(1);
+      expect(second.data.hasMore).toBe(false);
+
+      // Pages must not overlap.
+      const firstIds = first.data.hits.map((h: any) => h.id);
+      const secondIds = second.data.hits.map((h: any) => h.id);
+      expect(firstIds.filter((id: string) => secondIds.includes(id))).toEqual(
+        [],
+      );
+    });
+
+    it("filters by time range", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "Hello",
+        after: Math.floor(Date.now() / 1000) + 3600,
+      });
+      expect(out.data.hits).toEqual([]);
     });
   });
 

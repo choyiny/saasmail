@@ -13,6 +13,7 @@ import {
   setEmailRead,
 } from "../lib/queries/emails";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
+import { searchEmails } from "../lib/queries/search";
 
 export interface McpUser {
   id: string;
@@ -210,6 +211,55 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     guard(ctx, SCOPE_READ, async ({ emailId }) => {
       const email = await getEmailById(db, emailId, allowed);
       return email ? ok(email) : fail(NOT_FOUND);
+    }),
+  );
+
+  server.registerTool(
+    "search_emails",
+    {
+      description:
+        "Full-text search across received and sent mail, newest first. Use this to find messages when you don't already know the contact — otherwise list_emails is cheaper. Returns a body excerpt per hit; call read_email for the full message.",
+      annotations: { readOnlyHint: true, title: "Search Emails" },
+      inputSchema: {
+        q: z
+          .string()
+          .min(1)
+          .describe("Words to search for in subject and body."),
+        inbox: z.string().optional().describe("Restrict to one inbox address."),
+        personId: z.string().optional().describe("Restrict to one contact."),
+        after: z
+          .number()
+          .int()
+          .optional()
+          .describe("Only messages at or after this Unix timestamp (seconds)."),
+        before: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Only messages at or before this Unix timestamp (seconds).",
+          ),
+        ...pagination,
+      },
+    },
+    guard(ctx, SCOPE_READ, async (input) => {
+      const limit = input.limit ?? 50;
+      const page = input.page ?? 1;
+      return ok(
+        await searchEmails(
+          db,
+          {
+            q: input.q,
+            inbox: input.inbox,
+            personId: input.personId,
+            after: input.after,
+            before: input.before,
+            limit,
+            offset: (page - 1) * limit,
+          },
+          allowed,
+        ),
+      );
     }),
   );
 
