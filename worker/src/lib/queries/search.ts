@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { AllowedInboxes } from "../inbox-permissions";
+import { inboxScopeSql, type AllowedInboxes } from "../inbox-permissions";
 import { escapeFts, escapeLike } from "../helpers";
 
 export type SearchEmailsOptions = {
@@ -36,7 +36,22 @@ export type SearchEmailsResult = {
   hits: SearchHit[];
   /** True when more rows exist past `limit`. */
   hasMore: boolean;
+  /**
+   * True when the result set was clipped at MAX_SCAN. The caller should narrow
+   * the query rather than page further — later pages are not reachable.
+   */
+  truncated: boolean;
 };
+
+/**
+ * Hard ceiling on rows pulled from either table for one search.
+ *
+ * Both queries fetch whole bodies, and the merge happens in the isolate, so an
+ * unbounded `offset + limit` would let a caller ask for page 5000 and drag the
+ * entire matching corpus through D1 into memory to return nothing. Refining a
+ * query is the right move for a text search; deep paging is not.
+ */
+const MAX_SCAN = 500;
 
 /** Collapse whitespace and clip, so a hit is scannable in a tool result. */
 function excerpt(body: string | null, max = 200): string | null {
@@ -64,32 +79,54 @@ export async function searchEmails(
 ): Promise<SearchEmailsResult> {
   const { q, inbox, personId, after, before, limit, offset } = opts;
 
-  // Nothing is visible to a member with no inbox grants.
+  // Nothing is visible to a member with no inbox grants. This branch is
+  // load-bearing, not defensive: `IN ()` is a SQLite syntax error, so the
+  // scope fragments below cannot express "match nothing" for an empty list.
   if (!allowed.isAdmin && allowed.inboxes.length === 0) {
-    return { hits: [], hasMore: false };
+    return { hits: [], hasMore: false, truncated: false };
+  }
+
+  // Beyond the scan ceiling there is nothing left to page through.
+  if (offset >= MAX_SCAN) {
+    return { hits: [], hasMore: false, truncated: true };
   }
 
   // Over-fetch by one so `hasMore` is known without a COUNT.
-  const window = offset + limit + 1;
+  const window = Math.min(offset + limit + 1, MAX_SCAN);
 
   const ftsQuery = escapeFts(q);
   const likePattern = `%${escapeLike(q)}%`;
 
-  const receivedScope = allowed.isAdmin
-    ? sql``
-    : sql`AND e.recipient IN ${allowed.inboxes}`;
-  const sentScope = allowed.isAdmin
-    ? sql``
-    : sql`AND se.from_address IN ${allowed.inboxes}`;
+  const receivedScope = inboxScopeSql(allowed, sql`e.recipient`);
+  const sentScope = inboxScopeSql(allowed, sql`se.from_address`);
 
-  const receivedInbox = inbox ? sql`AND e.recipient = ${inbox}` : sql``;
-  const sentInbox = inbox ? sql`AND se.from_address = ${inbox}` : sql``;
-  const receivedPerson = personId ? sql`AND e.person_id = ${personId}` : sql``;
-  const sentPerson = personId ? sql`AND se.person_id = ${personId}` : sql``;
-  const receivedAfter = after ? sql`AND e.received_at >= ${after}` : sql``;
-  const receivedBefore = before ? sql`AND e.received_at <= ${before}` : sql``;
-  const sentAfter = after ? sql`AND se.sent_at >= ${after}` : sql``;
-  const sentBefore = before ? sql`AND se.sent_at <= ${before}` : sql``;
+  // `!== undefined` rather than truthiness: 0 is a legitimate Unix timestamp
+  // bound, and `""` should not silently widen an inbox filter to everything.
+  const receivedInbox =
+    inbox !== undefined ? sql`AND e.recipient = ${inbox}` : sql``;
+  const sentInbox =
+    inbox !== undefined ? sql`AND se.from_address = ${inbox}` : sql``;
+  const receivedPerson =
+    personId !== undefined ? sql`AND e.person_id = ${personId}` : sql``;
+  const sentPerson =
+    personId !== undefined ? sql`AND se.person_id = ${personId}` : sql``;
+  const receivedAfter =
+    after !== undefined ? sql`AND e.received_at >= ${after}` : sql``;
+  const receivedBefore =
+    before !== undefined ? sql`AND e.received_at <= ${before}` : sql``;
+  const sentAfter =
+    after !== undefined ? sql`AND se.sent_at >= ${after}` : sql``;
+  const sentBefore =
+    before !== undefined ? sql`AND se.sent_at <= ${before}` : sql``;
+
+  // Blocking a sender is expected to hide their existing mail, not merely stop
+  // new mail — the web UI filters these out, so search must too or an
+  // assistant resurfaces exactly the correspondence a user blocked.
+  const notBlocked = sql`AND NOT EXISTS (
+    SELECT 1 FROM blocklist b
+    WHERE (b.type = 'email'  AND b.value = p.email)
+       OR (b.type = 'domain' AND b.value = lower(substr(p.email, instr(p.email, '@') + 1)))
+  )`;
 
   const receivedRows = await db.all<{
     id: string;
@@ -110,8 +147,8 @@ export async function searchEmails(
     LEFT JOIN people p ON p.id = e.person_id
     WHERE emails_fts MATCH ${ftsQuery}
       ${receivedScope} ${receivedInbox} ${receivedPerson}
-      ${receivedAfter} ${receivedBefore}
-    ORDER BY e.received_at DESC
+      ${receivedAfter} ${receivedBefore} ${notBlocked}
+    ORDER BY e.received_at DESC, e.id DESC
     LIMIT ${window}
   `);
 
@@ -133,12 +170,14 @@ export async function searchEmails(
     WHERE (se.subject LIKE ${likePattern} ESCAPE '\\'
            OR se.body_text LIKE ${likePattern} ESCAPE '\\')
       ${sentScope} ${sentInbox} ${sentPerson}
-      ${sentAfter} ${sentBefore}
-    ORDER BY se.sent_at DESC
+      ${sentAfter} ${sentBefore} ${notBlocked}
+    ORDER BY se.sent_at DESC, se.id DESC
     LIMIT ${window}
   `);
 
-  const merged: SearchHit[] = [
+  type Row = Omit<SearchHit, "snippet"> & { body: string | null };
+
+  const merged: Row[] = [
     ...receivedRows.map((r) => ({
       id: r.id,
       type: "received" as const,
@@ -147,7 +186,7 @@ export async function searchEmails(
       personName: r.person_name,
       inbox: r.inbox,
       subject: r.subject,
-      snippet: excerpt(r.body_text),
+      body: r.body_text,
       timestamp: r.timestamp,
       isRead: r.is_read,
     })),
@@ -159,12 +198,25 @@ export async function searchEmails(
       personName: r.person_name,
       inbox: r.inbox,
       subject: r.subject,
-      snippet: excerpt(r.body_text),
+      body: r.body_text,
       timestamp: r.timestamp,
       isRead: null,
     })),
-  ].sort((a, b) => b.timestamp - a.timestamp);
+    // Tie-break on id so equal timestamps order identically on every call —
+    // bulk imports and sequence blasts produce many rows sharing a second, and
+    // an unstable order makes a message appear on two pages while another is
+    // never returned at all. Matches the SQL ORDER BY above.
+  ].sort((a, b) => b.timestamp - a.timestamp || (a.id < b.id ? 1 : -1));
 
-  const page = merged.slice(offset, offset + limit);
-  return { hits: page, hasMore: merged.length > offset + limit };
+  // Build excerpts only for the rows actually returned; doing it during the
+  // map above ran the whitespace regex over every fetched body.
+  const hits: SearchHit[] = merged
+    .slice(offset, offset + limit)
+    .map(({ body, ...rest }) => ({ ...rest, snippet: excerpt(body) }));
+
+  return {
+    hits,
+    hasMore: merged.length > offset + limit,
+    truncated: merged.length >= MAX_SCAN,
+  };
 }

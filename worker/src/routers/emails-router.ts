@@ -7,6 +7,7 @@ import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
 import { json200Response } from "../lib/helpers";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
+import { isInboxAllowed } from "../lib/inbox-permissions";
 import {
   getEmailById,
   listPersonEmails,
@@ -273,8 +274,7 @@ emailsRouter.openapi(bulkPatchRoute, async (c) => {
       .limit(1);
 
     if (email.length === 0) continue;
-    if (!allowed.isAdmin && !allowed.inboxes.includes(email[0].recipient))
-      continue;
+    if (!isInboxAllowed(allowed, email[0].recipient)) continue;
 
     const wasRead = email[0].isRead === 1;
     if (wasRead !== isRead) {
@@ -499,7 +499,7 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
     .limit(1);
   if (recv.length > 0) {
     const target = recv[0];
-    if (!allowed.isAdmin && !allowed.inboxes.includes(target.recipient)) {
+    if (!isInboxAllowed(allowed, target.recipient)) {
       return c.json({ error: "Email not found" }, 404);
     }
     if (!destEmail) {
@@ -554,11 +554,11 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
   }
   const sent = sentRow[0];
   // Authz: caller must own the inbox this message was sent from.
-  if (!allowed.isAdmin && !allowed.inboxes.includes(sent.fromAddress)) {
+  if (!isInboxAllowed(allowed, sent.fromAddress)) {
     return c.json({ error: "Email not found" }, 404);
   }
   // A new sending identity must be one the caller owns.
-  if (newFrom && !allowed.isAdmin && !allowed.inboxes.includes(newFrom)) {
+  if (newFrom && !isInboxAllowed(allowed, newFrom)) {
     return c.json({ error: "fromAddress must be one of your inboxes." }, 400);
   }
 

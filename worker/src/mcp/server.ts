@@ -56,11 +56,12 @@ export function fail(message: string) {
  */
 function guard<Args extends unknown[]>(
   ctx: McpContext,
-  requiredScope: string,
+  /** null for tools every token may call regardless of granted scopes. */
+  requiredScope: string | null,
   run: (...args: Args) => Promise<ReturnType<typeof ok>>,
 ) {
   return async (...args: Args) => {
-    if (!hasScope(ctx.scopes, requiredScope)) {
+    if (requiredScope !== null && !hasScope(ctx.scopes, requiredScope)) {
       return fail(
         `This tool requires the "${requiredScope}" scope, which this token was not granted.`,
       );
@@ -68,8 +69,14 @@ function guard<Args extends unknown[]>(
     try {
       return await run(...args);
     } catch (e) {
+      // HTTPException is deliberate and safe to echo — it is our own
+      // permission message. Anything else is a bug, and its message may carry
+      // SQL fragments, column names, or stored row content. The MCP client is
+      // third-party software the operator never vetted, so log the detail and
+      // return an opaque failure.
       if (e instanceof HTTPException) return fail(e.message);
-      return fail(e instanceof Error ? e.message : String(e));
+      console.error("[mcp] tool failed:", e);
+      return fail("The request could not be completed.");
     }
   };
 }
@@ -103,7 +110,11 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       annotations: { readOnlyHint: true, title: "Who Am I" },
       inputSchema: {},
     },
-    guard(ctx, SCOPE_READ, async () =>
+    // Deliberately ungated: this is the only way to discover a valid
+    // fromAddress, and both send tools tell the model to call it. Gating it on
+    // email:read would leave a least-privilege send-only token unable to send
+    // at all. It discloses nothing beyond the token's own identity and grants.
+    guard(ctx, null, async () =>
       ok({
         userId: ctx.user.id,
         name: ctx.user.name,
@@ -316,7 +327,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       annotations: { readOnlyHint: false, title: "Send Template" },
       inputSchema: {
         slug: z.string().describe("Template slug."),
-        to: z.string().describe("Recipient email address."),
+        to: z.email().describe("Recipient email address."),
         fromAddress: z
           .string()
           .describe("Sender identity; must be one of your allowed inboxes."),
@@ -360,7 +371,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       inputSchema: {
         sequenceId: z.string().describe("Sequence id."),
         personEmail: z
-          .string()
+          .email()
           .optional()
           .describe("Recipient address; the contact is created if new."),
         personId: z
@@ -387,6 +398,13 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       },
     },
     guard(ctx, SCOPE_SEND, async (input) => {
+      // The HTTP route expresses this as a Zod .refine() on the whole object;
+      // an MCP inputSchema is a bare shape with no cross-field validation, so
+      // without this the lib would query `people.email = undefined` and then
+      // insert a row violating a NOT NULL constraint.
+      if (!input.personId && !input.personEmail) {
+        return fail("Provide either personEmail or personId.");
+      }
       const result = await enrollPersonInSequence({
         db,
         env: ctx.env,

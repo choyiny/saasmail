@@ -52,7 +52,14 @@ export type SendTemplateResult = SendTemplateSuccess | SendTemplateFailure;
 export async function sendTemplate(
   params: SendTemplateParams,
 ): Promise<SendTemplateResult> {
-  const { db, env, slug, to, fromAddress, variables, allowed } = params;
+  const { db, env, slug, variables, allowed } = params;
+
+  // Canonicalize before authorizing AND before storing, as the send routes do.
+  // assertInboxAllowed folds case, so `Support@x.com` passes — but persisting
+  // it verbatim produced a sent_emails row its own sender could not read back,
+  // since the read paths match against the lowercased grant list.
+  const fromAddress = params.fromAddress.trim().toLowerCase();
+  const to = params.to.trim().toLowerCase();
 
   assertInboxAllowed(allowed, fromAddress);
 

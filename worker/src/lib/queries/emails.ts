@@ -6,7 +6,11 @@ import { senderIdentities } from "../../db/sender-identities.schema";
 import { attachments } from "../../db/attachments.schema";
 import { people } from "../../db/people.schema";
 import { escapeLike } from "../helpers";
-import { inboxFilter, type AllowedInboxes } from "../inbox-permissions";
+import {
+  inboxFilter,
+  type AllowedInboxes,
+  isInboxAllowed,
+} from "../inbox-permissions";
 
 export type CcEntry = { email: string; name?: string | null };
 
@@ -367,7 +371,7 @@ export async function getEmailById(
   const row = await db.select().from(emails).where(eq(emails.id, id)).limit(1);
 
   if (row.length > 0) {
-    if (!allowed.isAdmin && !allowed.inboxes.includes(row[0].recipient)) {
+    if (!isInboxAllowed(allowed, row[0].recipient)) {
       return null;
     }
     const atts = await db
@@ -408,7 +412,7 @@ export async function getEmailById(
 
   // Authorization mirrors the reply route's defense-in-depth — only
   // surface a sent row to a caller who still owns the inbox that sent it.
-  if (!allowed.isAdmin && !allowed.inboxes.includes(sentRow[0].fromAddress)) {
+  if (!isInboxAllowed(allowed, sentRow[0].fromAddress)) {
     return null;
   }
 
@@ -462,7 +466,7 @@ export async function setEmailRead(
     return null;
   }
 
-  if (!allowed.isAdmin && !allowed.inboxes.includes(email[0].recipient)) {
+  if (!isInboxAllowed(allowed, email[0].recipient)) {
     return null;
   }
 

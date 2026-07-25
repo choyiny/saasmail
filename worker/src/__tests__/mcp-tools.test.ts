@@ -239,6 +239,7 @@ describe("MCP tools", () => {
         emailId: "e-other",
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
     });
 
     it("refuses a sent message from another inbox", async () => {
@@ -246,6 +247,7 @@ describe("MCP tools", () => {
         emailId: "s-other",
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
     });
   });
 
@@ -281,6 +283,7 @@ describe("MCP tools", () => {
         isRead: true,
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
 
       const row = await getDb()
         .select({ isRead: emails.isRead })
@@ -308,6 +311,7 @@ describe("MCP tools", () => {
         emailId: "e-other",
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
       const rows = await getDb()
         .select()
         .from(emails)
@@ -322,6 +326,7 @@ describe("MCP tools", () => {
       const out = await callTool(memberToken, "delete_email", {
         emailId: "s-other",
       });
+      expect(out.text).toContain("Not found");
       expect(out.isError).toBe(true);
       const rows = await getDb()
         .select()
@@ -488,6 +493,7 @@ describe("MCP tools", () => {
         variables: { name: "Alice" },
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Inbox not allowed");
 
       const rows = await getDb()
         .select()
@@ -561,6 +567,7 @@ describe("MCP tools", () => {
         fromAddress: OTHER,
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Inbox not allowed");
 
       const rows = await getDb().select().from(sequenceEnrollments);
       expect(rows).toHaveLength(0);

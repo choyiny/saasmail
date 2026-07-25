@@ -112,6 +112,8 @@ export function registerMcpRoutes(app: App) {
         name: users.name,
         email: users.email,
         role: users.role,
+        banned: users.banned,
+        banExpires: users.banExpires,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -119,6 +121,14 @@ export function registerMcpRoutes(app: App) {
     // The user may have been deleted since the token was minted.
     if (rows.length === 0) return unauthorized(baseURL, "unknown user");
     const user = rows[0];
+
+    // Tokens are verified offline, so this row is the only thing that can
+    // revoke a live one. better-auth honours a ban on the session path; without
+    // this the MCP path would keep serving a banned user until the token
+    // expired, and keep refreshing it after that.
+    if (user.banned && (!user.banExpires || user.banExpires > new Date())) {
+      return unauthorized(baseURL, "account suspended");
+    }
 
     const allowed = await resolveAllowedInboxes(db, user);
     const scopes = parseScopes(jwt.scope ?? (jwt as { scp?: unknown }).scp);
@@ -152,10 +162,14 @@ async function verifyAccessTokenLocally(
   token: string,
   baseURL: string,
 ): Promise<JWTPayload> {
-  const auth = createAuth(env);
   return verifyJwsAccessToken(token, {
+    // Constructed inside the closure, not before the call: the JWKS is cached
+    // per isolate against JWKS_CACHE_KEY, so this runs about once every five
+    // minutes. Building a full betterAuth instance (Drizzle adapter + five
+    // plugins + endpoint table) eagerly would pay that cost on every request
+    // and discard it.
     jwksFetch: async () =>
-      (await auth.api.getJwks()) as unknown as JSONWebKeySet,
+      (await createAuth(env).api.getJwks()) as unknown as JSONWebKeySet,
     jwksCacheKey: JWKS_CACHE_KEY,
     verifyOptions: {
       issuer: oauthIssuer(baseURL),
@@ -170,15 +184,14 @@ async function verifyAccessTokenLocally(
  * well-known prefix plus the audience URL's pathname.
  */
 function unauthorized(baseURL: string, message: string): Response {
-  const audience = new URL(mcpAudience(baseURL));
-  const path = audience.pathname.endsWith("/")
-    ? audience.pathname.slice(0, -1)
-    : audience.pathname;
+  // Built from the same constant the route is registered on, so the challenge
+  // cannot drift from the path that actually serves the document.
+  const origin = new URL(baseURL).origin;
   return new Response(JSON.stringify({ error: message }), {
     status: 401,
     headers: {
       "Content-Type": "application/json",
-      "WWW-Authenticate": `Bearer resource_metadata="${audience.origin}/.well-known/oauth-protected-resource${path}"`,
+      "WWW-Authenticate": `Bearer resource_metadata="${origin}${PROTECTED_RESOURCE_METADATA_PATH}"`,
     },
   });
 }

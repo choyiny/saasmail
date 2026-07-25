@@ -6,6 +6,7 @@ import {
   MCP_AUDIENCE,
   REDIRECT_URI,
   type Credentials,
+  callTool,
   createUserWithPassword,
   exchangeToken,
   getAccessToken,
@@ -206,15 +207,24 @@ describe("MCP OAuth", () => {
 
   describe("scope enforcement", () => {
     it("refuses a tool whose scope the token lacks", async () => {
-      // whoami requires email:read; this token only carries openid.
+      // list_people requires email:read; this token only carries openid.
       const token = await getAccessToken(ADMIN, "openid");
       const res = await mcpRpc(token, "tools/call", {
-        name: "whoami",
+        name: "list_people",
         arguments: {},
       });
       const body = await readRpc(res);
       expect(body.result.isError).toBe(true);
       expect(body.result.content[0].text).toContain("email:read");
+    });
+
+    it("still allows whoami without a capability scope", async () => {
+      // whoami is the documented way to discover a valid fromAddress, so a
+      // least-privilege send-only token must be able to call it.
+      const token = await getAccessToken(ADMIN, "openid");
+      const out = await callTool(token, "whoami");
+      expect(out.isError, out.text).toBe(false);
+      expect(out.data.email).toBe(ADMIN.email);
     });
   });
 });
