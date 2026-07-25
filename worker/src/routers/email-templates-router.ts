@@ -1,16 +1,11 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { eq, inArray, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { createEmailSender } from "../lib/email-sender";
 import { assertInboxAllowed } from "../lib/inbox-permissions";
 import { emailTemplates } from "../db/email-templates.schema";
-import { sentEmails } from "../db/sent-emails.schema";
-import { people } from "../db/people.schema";
 import { json200Response, json201Response } from "../lib/helpers";
-import { interpolate, extractVariables } from "../lib/interpolate";
-import { sendViaOutbox } from "../lib/outbox";
-import { generateMessageId } from "../lib/message-id";
-import { formatFromAddress } from "../lib/format-from-address";
+import { extractVariables } from "../lib/interpolate";
+import { sendTemplate } from "../lib/send-template";
 import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
@@ -347,116 +342,37 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   const { slug } = c.req.valid("param");
   const { to, fromAddress, variables } = c.req.valid("json");
 
-  const allowed = c.get("allowedInboxes")!;
-  assertInboxAllowed(allowed, fromAddress);
+  const result = await sendTemplate({
+    db,
+    env: c.env,
+    slug,
+    to,
+    fromAddress,
+    variables,
+    allowed: c.get("allowedInboxes")!,
+  });
 
-  // Look up template
-  const rows = await db
-    .select()
-    .from(emailTemplates)
-    .where(eq(emailTemplates.slug, slug))
-    .limit(1);
-
-  if (rows.length === 0) {
-    return c.json({ error: "Template not found" }, 404);
-  }
-
-  const template = rows[0];
-
-  // Validate all required variables are provided
-  const subjectVars = extractVariables(template.subject);
-  const bodyVars = extractVariables(template.bodyHtml);
-  const requiredVars = Array.from(new Set([...subjectVars, ...bodyVars]));
-  const missingVars = requiredVars.filter((v) => !(v in variables));
-
-  if (missingVars.length > 0) {
+  if (!result.ok) {
+    if (result.code === "TEMPLATE_NOT_FOUND") {
+      return c.json({ error: result.message }, 404);
+    }
     return c.json(
       {
-        error: "Missing required template variables",
-        missingVariables: missingVars,
-        requiredVariables: requiredVars,
+        error: result.message,
+        missingVariables: result.missingVariables,
+        requiredVariables: result.requiredVariables,
       },
       400,
     );
   }
 
-  const renderedSubject = interpolate(template.subject, variables);
-  const renderedHtml = interpolate(template.bodyHtml, variables);
-
-  const sender = createEmailSender(c.env);
-  const id = nanoid();
-  const messageId = generateMessageId(fromAddress);
-  const formattedFrom = await formatFromAddress(db, fromAddress);
-  const { outcome, send: sendResult } = await sendViaOutbox({
-    db,
-    env: c.env,
-    sender,
-    sentEmailId: id,
-    fromAddress,
-    from: formattedFrom,
-    to,
-    subject: renderedSubject,
-    html: renderedHtml,
-    headers: { "Message-ID": messageId },
-  });
-
-  // Recipient is on the suppression list — no transport call, no sent_emails
-  // write. Tell the admin caller so the UI can surface "suppressed".
-  if (outcome === "suppressed") {
-    console.log(
-      "[template-send] recipient suppressed",
-      JSON.stringify({ from: fromAddress, suppressed: sendResult.suppressed }),
-    );
-    return c.json(
-      {
-        id: null,
-        resendId: null,
-        status: "suppressed",
-        delivered: [],
-        suppressed: sendResult.suppressed,
-      },
-      201,
-    );
-  }
-
-  const result = sendResult.result!;
-
-  // Find person if they exist
-  const existingPerson = await db
-    .select({ id: people.id })
-    .from(people)
-    .where(eq(people.email, to))
-    .limit(1);
-
-  const personId = existingPerson[0]?.id ?? null;
-
-  // Store sent email
-  const now = Math.floor(Date.now() / 1000);
-  await db.insert(sentEmails).values({
-    id,
-    personId,
-    fromAddress,
-    toAddress: to,
-    subject: renderedSubject,
-    // Record what was on the wire (helper may have interpolated
-    // {{unsubscribe_url}} or auto-appended a footer), not the pre-helper
-    // template render.
-    bodyHtml: sendResult.renderedHtml ?? renderedHtml,
-    bodyText: sendResult.renderedText ?? null,
-    messageId,
-    resendId: result.id,
-    status: outcome,
-    sentAt: now,
-    createdAt: now,
-  });
-
   return c.json(
     {
-      id,
-      resendId: result.id,
-      status: outcome,
-      delivered: sendResult.delivered,
-      suppressed: sendResult.suppressed,
+      id: result.id,
+      resendId: result.resendId,
+      status: result.status,
+      delivered: result.delivered,
+      suppressed: result.suppressed,
     },
     201,
   );

@@ -3,7 +3,9 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
-import { SCOPE_READ, SCOPE_MANAGE, hasScope } from "../auth/scopes";
+import { SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE, hasScope } from "../auth/scopes";
+import { sendTemplate } from "../lib/send-template";
+import { enrollPersonInSequence } from "../lib/enroll-sequence";
 import { listPeople, getPersonScoped } from "../lib/queries/people";
 import {
   listPersonEmails,
@@ -253,6 +255,103 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         allowed,
       );
       return result ? ok(result) : fail(NOT_FOUND);
+    }),
+  );
+
+  server.registerTool(
+    "send_template",
+    {
+      description:
+        "Send a saved template to one recipient, interpolating its {{variables}}. fromAddress must be an inbox you may send from — call whoami to see which. Attachments and cc are not supported here.",
+      annotations: { readOnlyHint: false, title: "Send Template" },
+      inputSchema: {
+        slug: z.string().describe("Template slug."),
+        to: z.string().describe("Recipient email address."),
+        fromAddress: z
+          .string()
+          .describe("Sender identity; must be one of your allowed inboxes."),
+        variables: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe(
+            "Values for the template's {{placeholders}}. Missing ones are reported back with the full required list.",
+          ),
+      },
+    },
+    guard(ctx, SCOPE_SEND, async (input) => {
+      const result = await sendTemplate({
+        db,
+        env: ctx.env,
+        slug: input.slug,
+        to: input.to,
+        fromAddress: input.fromAddress,
+        variables: input.variables ?? {},
+        allowed,
+      });
+      if (!result.ok) {
+        // Hand the model the required-variable list so it can retry correctly
+        // rather than guessing at what was missing.
+        return result.code === "MISSING_VARIABLES"
+          ? fail(
+              `${result.message} Missing: ${result.missingVariables.join(", ")}. Required: ${result.requiredVariables.join(", ")}.`,
+            )
+          : fail(result.message);
+      }
+      return ok(result);
+    }),
+  );
+
+  server.registerTool(
+    "enroll_sequence",
+    {
+      description:
+        "Enrol a contact into a drip sequence. The first step sends immediately and later steps are scheduled from it. A contact can only be in one active sequence at a time, and sending them direct mail cancels it.",
+      annotations: { readOnlyHint: false, title: "Enroll In Sequence" },
+      inputSchema: {
+        sequenceId: z.string().describe("Sequence id."),
+        personEmail: z
+          .string()
+          .optional()
+          .describe("Recipient address; the contact is created if new."),
+        personId: z
+          .string()
+          .optional()
+          .describe("Existing contact id. Use instead of personEmail."),
+        fromAddress: z
+          .string()
+          .describe("Sender identity; must be one of your allowed inboxes."),
+        variables: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Values for placeholders used by the sequence templates."),
+        skipSteps: z
+          .array(z.number().int())
+          .optional()
+          .describe("Step `order` numbers to skip entirely."),
+        delayOverrides: z
+          .record(z.string(), z.number())
+          .optional()
+          .describe(
+            "Map of step order (as a string) to hours, overriding that step's delay. The first step always sends immediately.",
+          ),
+      },
+    },
+    guard(ctx, SCOPE_SEND, async (input) => {
+      const result = await enrollPersonInSequence({
+        db,
+        env: ctx.env,
+        sequenceId: input.sequenceId,
+        input: {
+          personId: input.personId,
+          personEmail: input.personEmail,
+          fromAddress: input.fromAddress,
+          variables: input.variables ?? {},
+          skipSteps: input.skipSteps ?? [],
+          delayOverrides: input.delayOverrides ?? {},
+        },
+        allowed,
+      });
+      return result.ok ? ok(result) : fail(result.message);
     }),
   );
 

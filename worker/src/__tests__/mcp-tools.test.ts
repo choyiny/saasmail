@@ -1,12 +1,16 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import {
   applyMigrations,
   cleanDb,
   createTestEmail,
   createTestPerson,
+  createTestTemplate,
   getDb,
 } from "./helpers";
+import { sequences } from "../db/sequences.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { users } from "../db/auth.schema";
 import { emails } from "../db/emails.schema";
 import { people } from "../db/people.schema";
@@ -123,11 +127,13 @@ describe("MCP tools", () => {
       expect(names).toEqual(
         [
           "delete_email",
+          "enroll_sequence",
           "get_person",
           "list_emails",
           "list_people",
           "mark_read",
           "read_email",
+          "send_template",
           "whoami",
         ].sort(),
       );
@@ -328,6 +334,157 @@ describe("MCP tools", () => {
         emailId: "s-other",
       });
       expect(out.isError).toBe(false);
+    });
+  });
+
+  describe("send_template", () => {
+    beforeEach(async () => {
+      await createTestTemplate({
+        slug: "welcome",
+        subject: "Hi {{name}}",
+        bodyHtml: "<p>Hi {{name}}, welcome!</p>",
+      });
+      // DemoSender, so sends complete without reaching a real provider.
+      (env as any).DEMO_MODE = "1";
+    });
+
+    afterEach(() => {
+      (env as any).DEMO_MODE = "0";
+    });
+
+    it("sends from an allowed inbox", async () => {
+      const out = await callTool(memberToken, "send_template", {
+        slug: "welcome",
+        to: "alice@example.com",
+        fromAddress: MINE,
+        variables: { name: "Alice" },
+      });
+      expect(out.isError, out.text).toBe(false);
+      expect(out.data.status).toBe("sent");
+    });
+
+    it("refuses to send from an inbox the member does not own", async () => {
+      const out = await callTool(memberToken, "send_template", {
+        slug: "welcome",
+        to: "alice@example.com",
+        fromAddress: OTHER,
+        variables: { name: "Alice" },
+      });
+      expect(out.isError).toBe(true);
+
+      const rows = await getDb()
+        .select()
+        .from(sentEmails)
+        .where(eq(sentEmails.fromAddress, OTHER));
+      // Only the seeded message; nothing new was sent.
+      expect(rows).toHaveLength(1);
+    });
+
+    it("names the missing variables so the caller can retry", async () => {
+      const out = await callTool(memberToken, "send_template", {
+        slug: "welcome",
+        to: "alice@example.com",
+        fromAddress: MINE,
+        variables: {},
+      });
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("name");
+    });
+
+    it("reports an unknown template", async () => {
+      const out = await callTool(memberToken, "send_template", {
+        slug: "does-not-exist",
+        to: "alice@example.com",
+        fromAddress: MINE,
+      });
+      expect(out.isError).toBe(true);
+    });
+  });
+
+  describe("enroll_sequence", () => {
+    beforeEach(async () => {
+      await createTestTemplate({ slug: "step-1", subject: "One" });
+      await createTestTemplate({ slug: "step-2", subject: "Two" });
+      const now = Math.floor(Date.now() / 1000);
+      await getDb()
+        .insert(sequences)
+        .values({
+          id: "seq-1",
+          name: "Onboarding",
+          steps: JSON.stringify([
+            { order: 1, templateSlug: "step-1", delayHours: 0 },
+            { order: 2, templateSlug: "step-2", delayHours: 24 },
+          ]),
+          createdAt: now,
+          updatedAt: now,
+        });
+      (env as any).DEMO_MODE = "1";
+    });
+
+    afterEach(() => {
+      (env as any).DEMO_MODE = "0";
+    });
+
+    it("enrols a contact and schedules every step", async () => {
+      const out = await callTool(memberToken, "enroll_sequence", {
+        sequenceId: "seq-1",
+        personEmail: "alice@example.com",
+        fromAddress: MINE,
+        variables: { name: "Alice" },
+      });
+      expect(out.isError, out.text).toBe(false);
+      expect(out.data.scheduledEmails).toHaveLength(2);
+      expect(out.data.enrollment.status).toBe("active");
+    });
+
+    it("refuses to enrol from an inbox the member does not own", async () => {
+      const out = await callTool(memberToken, "enroll_sequence", {
+        sequenceId: "seq-1",
+        personEmail: "alice@example.com",
+        fromAddress: OTHER,
+      });
+      expect(out.isError).toBe(true);
+
+      const rows = await getDb().select().from(sequenceEnrollments);
+      expect(rows).toHaveLength(0);
+    });
+
+    it("refuses a second active enrolment for the same contact", async () => {
+      const first = await callTool(memberToken, "enroll_sequence", {
+        sequenceId: "seq-1",
+        personEmail: "alice@example.com",
+        fromAddress: MINE,
+      });
+      expect(first.isError, first.text).toBe(false);
+
+      const second = await callTool(memberToken, "enroll_sequence", {
+        sequenceId: "seq-1",
+        personEmail: "alice@example.com",
+        fromAddress: MINE,
+      });
+      expect(second.isError).toBe(true);
+      expect(second.text.toLowerCase()).toContain("active sequence");
+    });
+
+    it("skips the steps it is told to skip", async () => {
+      const out = await callTool(memberToken, "enroll_sequence", {
+        sequenceId: "seq-1",
+        personEmail: "alice@example.com",
+        fromAddress: MINE,
+        skipSteps: [2],
+      });
+      expect(out.isError, out.text).toBe(false);
+      expect(out.data.scheduledEmails).toHaveLength(1);
+      expect(out.data.scheduledEmails[0].stepOrder).toBe(1);
+    });
+
+    it("reports an unknown sequence", async () => {
+      const out = await callTool(memberToken, "enroll_sequence", {
+        sequenceId: "nope",
+        personEmail: "alice@example.com",
+        fromAddress: MINE,
+      });
+      expect(out.isError).toBe(true);
     });
   });
 

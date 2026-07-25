@@ -89,7 +89,10 @@ export async function createUserWithPassword(
       email: creds.email,
       password: creds.password,
       name: creds.name,
-      role,
+      // better-auth's admin plugin types this as "admin" | "user", but
+      // saasmail's non-admin role is "member" (see requireAdmin and the
+      // invitation flow). The column stores whatever it is given.
+      role: role as "admin" | "user",
     },
   });
 }

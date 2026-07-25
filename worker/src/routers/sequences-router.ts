@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, and, inArray } from "drizzle-orm";
-import { assertInboxAllowed, inboxFilter } from "../lib/inbox-permissions";
+import { inboxFilter } from "../lib/inbox-permissions";
 import { nanoid } from "nanoid";
 import { sequences } from "../db/sequences.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
@@ -8,9 +8,8 @@ import { sequenceEmails } from "../db/sequence-emails.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { people } from "../db/people.schema";
 import { json200Response, json201Response } from "../lib/helpers";
-import type { SequenceEmailMessage } from "../lib/sequence-processor";
+import { enrollPersonInSequence } from "../lib/enroll-sequence";
 import type { Variables } from "../variables";
-import { isDemoMode } from "../lib/is-dev";
 import { bearerSecurity } from "../lib/openapi-auth";
 
 export const sequencesRouter = new OpenAPIHono<{
@@ -83,15 +82,6 @@ const SequenceEmailSchema = z.object({
   sentAt: z.number().nullable(),
   sentEmailId: z.string().nullable(),
 });
-
-// --- Helper: snap to next hour ---
-function snapToNextHour(timestampSeconds: number): number {
-  const ms = timestampSeconds * 1000;
-  const date = new Date(ms);
-  date.setMinutes(0, 0, 0);
-  date.setHours(date.getHours() + 1);
-  return Math.floor(date.getTime() / 1000);
-}
 
 // --- LIST sequences ---
 const listRoute = createRoute({
@@ -351,160 +341,28 @@ const enrollRoute = createRoute({
 sequencesRouter.openapi(enrollRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
-  const {
-    personId: inputPersonId,
-    personEmail,
-    fromAddress,
-    variables,
-    skipSteps,
-    delayOverrides,
-  } = c.req.valid("json");
-  const now = Math.floor(Date.now() / 1000);
+  const input = c.req.valid("json");
 
-  // Check inbox permission before any other work
-  const allowed = c.get("allowedInboxes")!;
-  assertInboxAllowed(allowed, fromAddress);
-
-  // Validate sequence exists
-  const seqRows = await db
-    .select()
-    .from(sequences)
-    .where(eq(sequences.id, id))
-    .limit(1);
-
-  if (seqRows.length === 0) {
-    return c.json({ error: "Sequence not found" }, 404);
-  }
-
-  // Resolve person: by ID, or by email (create if needed)
-  let personId: string;
-  if (inputPersonId) {
-    const personRows = await db
-      .select({ id: people.id })
-      .from(people)
-      .where(eq(people.id, inputPersonId))
-      .limit(1);
-    if (personRows.length === 0) {
-      return c.json({ error: "Person not found" }, 404);
-    }
-    personId = inputPersonId;
-  } else {
-    // personEmail is guaranteed by the schema refinement
-    const existing = await db
-      .select({ id: people.id })
-      .from(people)
-      .where(eq(people.email, personEmail!))
-      .limit(1);
-
-    if (existing.length > 0) {
-      personId = existing[0].id;
-    } else {
-      personId = nanoid();
-      await db.insert(people).values({
-        id: personId,
-        email: personEmail!,
-        name: null,
-        lastEmailAt: now,
-        unreadCount: 0,
-        totalCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-  }
-
-  // Check person is not already in an active sequence
-  const existingEnrollment = await db
-    .select({ id: sequenceEnrollments.id })
-    .from(sequenceEnrollments)
-    .where(
-      and(
-        eq(sequenceEnrollments.personId, personId),
-        eq(sequenceEnrollments.status, "active"),
-      ),
-    )
-    .limit(1);
-
-  if (existingEnrollment.length > 0) {
-    return c.json({ error: "Person is already in an active sequence" }, 400);
-  }
-
-  const steps: Array<{
-    order: number;
-    templateSlug: string;
-    delayHours: number;
-  }> = JSON.parse(seqRows[0].steps);
-
-  // Filter out skipped steps
-  const activeSteps = steps.filter((s) => !skipSteps.includes(s.order));
-
-  if (activeSteps.length === 0) {
-    return c.json(
-      { error: "At least one step must remain after skipping" },
-      400,
-    );
-  }
-
-  // Create enrollment
-  const enrollmentId = nanoid();
-  const enrollment = {
-    id: enrollmentId,
+  const result = await enrollPersonInSequence({
+    db,
+    env: c.env,
     sequenceId: id,
-    personId,
-    fromAddress,
-    status: "active",
-    variables: JSON.stringify(variables),
-    enrolledAt: now,
-    cancelledAt: null,
-  };
-  await db.insert(sequenceEnrollments).values(enrollment);
-
-  // Create outbox emails with computed schedule
-  // First email sends immediately; subsequent emails accumulate delays from
-  // snapToNextHour(now) so each step fires delayHours after the previous one.
-  const baseTime = snapToNextHour(now);
-  let cumulativeHours = 0;
-  const scheduledEmails = activeSteps.map((step, index) => {
-    const delayHours =
-      step.order.toString() in delayOverrides
-        ? delayOverrides[step.order.toString()]
-        : step.delayHours;
-
-    const isFirstEmail = index === 0;
-    if (!isFirstEmail) cumulativeHours += delayHours;
-    return {
-      id: nanoid(),
-      enrollmentId,
-      stepOrder: step.order,
-      templateSlug: step.templateSlug,
-      scheduledAt: isFirstEmail ? now : baseTime + cumulativeHours * 3600,
-      // In demo mode there is no queue/cron to advance "queued" emails, so
-      // leave everything as "pending" — the records exist for the UI to show
-      // but nothing is dispatched.
-      status: isDemoMode(c.env)
-        ? "pending"
-        : isFirstEmail
-          ? "queued"
-          : "pending",
-      sentAt: null,
-      sentEmailId: null,
-    };
+    input,
+    allowed: c.get("allowedInboxes")!,
   });
 
-  await db.insert(sequenceEmails).values(scheduledEmails);
-
-  // Immediately queue the first email so it sends without waiting for cron.
-  // Skipped in demo mode where no EMAIL_QUEUE binding exists.
-  if (!isDemoMode(c.env)) {
-    const firstEmail = scheduledEmails[0];
-    const message: SequenceEmailMessage = { sequenceEmailId: firstEmail.id };
-    await c.env.EMAIL_QUEUE.send(message);
+  if (!result.ok) {
+    const status =
+      result.code === "SEQUENCE_NOT_FOUND" || result.code === "PERSON_NOT_FOUND"
+        ? 404
+        : 400;
+    return c.json({ error: result.message }, status);
   }
 
   return c.json(
     {
-      enrollment: { ...enrollment, variables },
-      scheduledEmails,
+      enrollment: result.enrollment,
+      scheduledEmails: result.scheduledEmails,
     },
     201,
   );
