@@ -12,6 +12,7 @@ import { useSession } from "@/lib/auth-client";
 import { fetchPasskeyStatus } from "@/lib/api";
 import { useEffect, useState } from "react";
 import LoginPage from "@/pages/LoginPage";
+import ConsentPage from "@/pages/ConsentPage";
 import OnboardingPage from "@/pages/OnboardingPage";
 import InboxPage from "@/pages/InboxPage";
 import TemplatesPage from "@/pages/TemplatesPage";
@@ -122,6 +123,9 @@ function App() {
             {/* Public routes — shared dark backdrop + footer shell */}
             <Route element={<PublicLayout />}>
               <Route path="/login" element={<LoginPage />} />
+              {/* OAuth consent. Not behind AuthGuard: the provider redirects
+                  to /login first when there is no session, then back here. */}
+              <Route path="/consent" element={<ConsentPage />} />
               <Route path="/onboarding" element={<OnboardingPage />} />
               <Route path="/invite/:token" element={<InviteAcceptPage />} />
               <Route path="/setup-passkey" element={<SetupPasskeyPage />} />

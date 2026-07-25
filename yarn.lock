@@ -3121,6 +3121,11 @@ hasown@^2.0.2:
   dependencies:
     function-bind "^1.1.2"
 
+hono-rate-limiter@^0.5.3:
+  version "0.5.3"
+  resolved "https://registry.yarnpkg.com/hono-rate-limiter/-/hono-rate-limiter-0.5.3.tgz#29ee906b904edd38651f623630342b249d884b34"
+  integrity sha512-M0DxbVMpPELEzLi0AJg1XyBHLGJXz7GySjsPoK+gc5YeeBsdGDGe+2RvVuCAv8ydINiwlbxqYMNxUEyYfRji/A==
+
 hono@^4.11.4, hono@^4.12.32:
   version "4.12.32"
   resolved "https://registry.yarnpkg.com/hono/-/hono-4.12.32.tgz#9489eb5507c2b90554ee7817a3f97d9b754ee1ff"
