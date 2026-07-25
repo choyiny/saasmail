@@ -168,6 +168,36 @@ Admin-controlled onboarding via one-time invite links. New members sign up with 
 
 Issue scoped API keys for programmatic access to send email, manage templates, enroll contacts in sequences, and query inbox data. Keys are hashed at rest and follow the `sk_…` format.
 
+### MCP Server (AI assistant access)
+
+Connect Claude, or any other MCP client, directly to your inbox. saasmail
+exposes a [Model Context Protocol](https://modelcontextprotocol.io) endpoint at
+`/mcp`, secured with OAuth 2.1.
+
+Point your client at `https://your-domain.com/mcp`. There is nothing to
+pre-configure: the client discovers the authorization server, registers itself,
+and sends you through a normal browser login plus a consent screen listing
+exactly what it is asking for. Approve it and the client gets a scoped token.
+
+Three scopes gate what a connected client may do:
+
+| Scope          | Grants                                                             |
+| -------------- | ------------------------------------------------------------------ |
+| `email:read`   | `whoami`, `list_people`, `get_person`, `list_emails`, `read_email` |
+| `email:send`   | `send_template`, `enroll_sequence`                                 |
+| `email:manage` | `mark_read`, `delete_email`                                        |
+
+**Access is scoped to the connecting user.** A client acting for a member with
+access to one inbox sees only that inbox — the same permission model as the web
+UI and the HTTP API, enforced by the same code. Admins see everything.
+
+Revoke a connection at any time; tokens stop working immediately. Note that
+`delete_email` is permanent (there is no trash), so clients are told to confirm
+before calling it.
+
+> Freeform composition (`send_email`, `reply_email`) and full-text `search_emails`
+> are not exposed yet. A client can still send through a saved template.
+
 ### Webhooks
 
 POST to an external URL whenever a **new inbound message** is received — useful for help-desk automation (post to a team chat, trigger triage, draft a reply via n8n / Make / etc.).
@@ -341,7 +371,7 @@ Edit `.dev.vars`:
 - `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` — your Bavimail bearer token and alias UUID (only if using Bavimail; both must be set)
 - `POSTMARK_API_KEY` — your Postmark server API token (only if using Postmark)
 - `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending, Bavimail, or Postmark)
-- `BETTER_AUTH_SECRET` — generate a random string (`openssl rand -hex 32`)
+- `BETTER_AUTH_SECRET` — **required**; generate a random string (`openssl rand -hex 32`). Signs sessions and protects the OAuth signing keys used by the MCP endpoint. Set this before deploying: without it the auth library silently falls back to a publicly known default value.
 - `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
 
 For production, set these as Cloudflare secrets:
