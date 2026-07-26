@@ -3,7 +3,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { people } from "../../db/people.schema";
 import { emails } from "../../db/emails.schema";
 import { escapeLike } from "../helpers";
-import type { AllowedInboxes } from "../inbox-permissions";
+import { inboxScopeSql, type AllowedInboxes } from "../inbox-permissions";
 
 export type PersonRow = typeof people.$inferSelect;
 
@@ -82,11 +82,17 @@ export async function listPeople(
   }
 
   const scopeClause = peopleScopeClause(allowed);
+  // `peopleScopeClause` decides WHICH PEOPLE are visible; it does not constrain
+  // which of their (person, inbox) pairs are. Without this second clause a
+  // contact who wrote to both an allowed inbox and a private one produced a row
+  // for the private inbox too — leaking its address, message counts, and
+  // latestSubject to a member who cannot read any of its mail.
+  const recipientScope = inboxScopeSql(allowed, sql`e.recipient`);
   const extraConditions =
     conditions.length > 0
       ? sql`AND ${sql.join(conditions, sql` AND `)}`
       : sql``;
-  const whereClause = sql`WHERE 1=1 ${extraConditions} ${scopeClause}`;
+  const whereClause = sql`WHERE 1=1 ${extraConditions} ${scopeClause} ${recipientScope}`;
 
   // Group by (person, recipient) to get per-thread stats
   const rows = await db.all<PersonListRow>(sql`

@@ -7,7 +7,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
-import { extractVariables, interpolate } from "./interpolate";
+import { renderTemplate } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
 
@@ -52,7 +52,14 @@ export type SendTemplateResult = SendTemplateSuccess | SendTemplateFailure;
 export async function sendTemplate(
   params: SendTemplateParams,
 ): Promise<SendTemplateResult> {
-  const { db, env, slug, to, fromAddress, variables, allowed } = params;
+  const { db, env, slug, variables, allowed } = params;
+
+  // Canonicalize before authorizing AND before storing, as the send routes do.
+  // assertInboxAllowed folds case, so `Support@x.com` passes — but persisting
+  // it verbatim produced a sent_emails row its own sender could not read back,
+  // since the read paths match against the lowercased grant list.
+  const fromAddress = params.fromAddress.trim().toLowerCase();
+  const to = params.to.trim().toLowerCase();
 
   assertInboxAllowed(allowed, fromAddress);
 
@@ -71,26 +78,19 @@ export async function sendTemplate(
     };
   }
 
-  const template = rows[0];
-
-  // Validate all required variables are provided
-  const subjectVars = extractVariables(template.subject);
-  const bodyVars = extractVariables(template.bodyHtml);
-  const requiredVars = Array.from(new Set([...subjectVars, ...bodyVars]));
-  const missingVars = requiredVars.filter((v) => !(v in variables));
-
-  if (missingVars.length > 0) {
+  const rendered = renderTemplate(rows[0], variables);
+  if (!rendered.ok) {
     return {
       ok: false,
       code: "MISSING_VARIABLES",
       message: "Missing required template variables",
-      missingVariables: missingVars,
-      requiredVariables: requiredVars,
+      missingVariables: rendered.missingVariables,
+      requiredVariables: rendered.requiredVariables,
     };
   }
 
-  const renderedSubject = interpolate(template.subject, variables);
-  const renderedHtml = interpolate(template.bodyHtml, variables);
+  const renderedSubject = rendered.subject;
+  const renderedHtml = rendered.bodyHtml;
 
   const sender = createEmailSender(env);
   const id = nanoid();

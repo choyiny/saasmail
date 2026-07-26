@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Check, ShieldCheck } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
 
@@ -18,6 +18,14 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
   "email:send": "Send mail and enroll contacts in sequences",
   "email:manage": "Mark mail as read and delete mail",
 };
+
+/**
+ * Scopes that let a client act, not just look. An assistant connected to a
+ * mailbox reads attacker-authored content by definition, so granting these
+ * alongside read access is what turns a prompt injection into an outbound
+ * message or a deletion. They are called out rather than listed flatly.
+ */
+const ELEVATED_SCOPES = new Set(["email:send", "email:manage"]);
 
 const CARD =
   "rounded-2xl bg-white/10 p-8 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl";
@@ -147,24 +155,54 @@ export default function ConsentPage() {
         <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-white/50">
           It will be able to
         </p>
-        <ul className="mb-8 space-y-2">
-          {scopes.map((s) => (
-            <li
-              key={s}
-              className="flex items-start gap-2 rounded-md bg-white/5 px-3 py-2 ring-1 ring-white/10"
-            >
-              <Check
-                className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                strokeWidth={2.5}
-                style={{ color: "#BFFF00" }}
-                aria-hidden
-              />
-              <span className="text-xs text-white/80">
-                {SCOPE_DESCRIPTIONS[s] ?? s}
-              </span>
-            </li>
-          ))}
+        <ul className="mb-4 space-y-2">
+          {scopes.map((s) => {
+            const elevated = ELEVATED_SCOPES.has(s);
+            return (
+              <li
+                key={s}
+                className={
+                  elevated
+                    ? "flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 ring-1 ring-amber-400/30"
+                    : "flex items-start gap-2 rounded-md bg-white/5 px-3 py-2 ring-1 ring-white/10"
+                }
+              >
+                {elevated ? (
+                  <AlertTriangle
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300"
+                    strokeWidth={2.5}
+                    aria-hidden
+                  />
+                ) : (
+                  <Check
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                    strokeWidth={2.5}
+                    style={{ color: "#BFFF00" }}
+                    aria-hidden
+                  />
+                )}
+                <span
+                  className={
+                    elevated
+                      ? "text-xs text-amber-100"
+                      : "text-xs text-white/80"
+                  }
+                >
+                  {SCOPE_DESCRIPTIONS[s] ?? s}
+                </span>
+              </li>
+            );
+          })}
         </ul>
+
+        {scopes.some((s) => ELEVATED_SCOPES.has(s)) && (
+          <p className="mb-8 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-100 ring-1 ring-amber-400/30">
+            This app can act on your mailbox, not just read it. Anything it
+            reads — including mail sent to you by strangers — can influence what
+            it does next. Only continue if you trust it with sending and
+            deleting.
+          </p>
+        )}
 
         <div className="space-y-3">
           <button

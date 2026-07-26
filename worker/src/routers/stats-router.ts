@@ -4,7 +4,7 @@ import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { json200Response } from "../lib/helpers";
-import { inboxFilter } from "../lib/inbox-permissions";
+import { inboxFilter, isInboxAllowed } from "../lib/inbox-permissions";
 import type { Variables } from "../variables";
 
 export const statsRouter = new OpenAPIHono<{
@@ -81,7 +81,7 @@ statsRouter.openapi(statsRoute, async (c) => {
   const allIdentities = await db.select().from(senderIdentities);
   const identityRows = allowed.isAdmin
     ? allIdentities
-    : allIdentities.filter((r) => allowed.inboxes.includes(r.email));
+    : allIdentities.filter((r) => isInboxAllowed(allowed, r.email));
 
   return c.json(
     {

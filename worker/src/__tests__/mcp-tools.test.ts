@@ -133,6 +133,9 @@ describe("MCP tools", () => {
           "list_people",
           "mark_read",
           "read_email",
+          "reply_email",
+          "search_emails",
+          "send_email",
           "send_template",
           "whoami",
         ].sort(),
@@ -238,6 +241,7 @@ describe("MCP tools", () => {
         emailId: "e-other",
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
     });
 
     it("refuses a sent message from another inbox", async () => {
@@ -245,6 +249,7 @@ describe("MCP tools", () => {
         emailId: "s-other",
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
     });
   });
 
@@ -280,6 +285,7 @@ describe("MCP tools", () => {
         isRead: true,
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
 
       const row = await getDb()
         .select({ isRead: emails.isRead })
@@ -307,6 +313,7 @@ describe("MCP tools", () => {
         emailId: "e-other",
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
       const rows = await getDb()
         .select()
         .from(emails)
@@ -321,6 +328,7 @@ describe("MCP tools", () => {
       const out = await callTool(memberToken, "delete_email", {
         emailId: "s-other",
       });
+      expect(out.text).toContain("Not found");
       expect(out.isError).toBe(true);
       const rows = await getDb()
         .select()
@@ -334,6 +342,122 @@ describe("MCP tools", () => {
         emailId: "s-other",
       });
       expect(out.isError).toBe(false);
+    });
+  });
+
+  describe("search_emails", () => {
+    it("finds a received message by a word in its subject", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "mine",
+      });
+      expect(out.isError, out.text).toBe(false);
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toContain("e-mine");
+    });
+
+    it("finds a received message by a word in its body", async () => {
+      await createTestEmail({
+        id: "e-body",
+        personId: "p-mine",
+        recipient: MINE,
+        subject: "No keyword here",
+        bodyText: "the quarterly invoice is attached",
+        messageId: "body-1@example.com",
+      });
+      const out = await callTool(memberToken, "search_emails", {
+        q: "invoice",
+      });
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toContain("e-body");
+    });
+
+    it("finds sent messages too", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "Outgoing",
+      });
+      const hit = out.data.hits.find((h: any) => h.id === "s-mine");
+      expect(hit).toBeTruthy();
+      expect(hit.type).toBe("sent");
+    });
+
+    it("never returns messages from another inbox", async () => {
+      // "Hello" matches both the MINE and OTHER seeded subjects.
+      const out = await callTool(memberToken, "search_emails", { q: "Hello" });
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toContain("e-mine");
+      expect(ids).not.toContain("e-other");
+    });
+
+    it("returns both inboxes for an admin", async () => {
+      const out = await callTool(adminToken, "search_emails", { q: "Hello" });
+      const ids = out.data.hits.map((h: any) => h.id).sort();
+      expect(ids).toEqual(["e-mine", "e-other"]);
+    });
+
+    it("restricts to a single inbox when asked", async () => {
+      const out = await callTool(adminToken, "search_emails", {
+        q: "Hello",
+        inbox: OTHER,
+      });
+      const ids = out.data.hits.map((h: any) => h.id);
+      expect(ids).toEqual(["e-other"]);
+    });
+
+    it("returns an empty result rather than erroring on no match", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "zzzznotpresent",
+      });
+      expect(out.isError).toBe(false);
+      expect(out.data.hits).toEqual([]);
+      expect(out.data.hasMore).toBe(false);
+    });
+
+    it("treats LIKE wildcards as literal text", async () => {
+      // A bare "%" must not behave as match-everything on the sent-mail side.
+      const out = await callTool(memberToken, "search_emails", { q: "%" });
+      expect(out.isError).toBe(false);
+      expect(out.data.hits).toEqual([]);
+    });
+
+    it("paginates and reports hasMore", async () => {
+      for (let i = 0; i < 3; i++) {
+        await createTestEmail({
+          id: `e-page-${i}`,
+          personId: "p-mine",
+          recipient: MINE,
+          subject: `Paginate ${i}`,
+          messageId: `page-${i}@example.com`,
+        });
+      }
+      const first = await callTool(memberToken, "search_emails", {
+        q: "Paginate",
+        limit: 2,
+      });
+      expect(first.data.hits).toHaveLength(2);
+      expect(first.data.hasMore).toBe(true);
+
+      const second = await callTool(memberToken, "search_emails", {
+        q: "Paginate",
+        limit: 2,
+        page: 2,
+      });
+      expect(second.data.hits).toHaveLength(1);
+      expect(second.data.hasMore).toBe(false);
+
+      // Pages must not overlap.
+      const firstIds = first.data.hits.map((h: any) => h.id);
+      const secondIds = second.data.hits.map((h: any) => h.id);
+      expect(firstIds.filter((id: string) => secondIds.includes(id))).toEqual(
+        [],
+      );
+    });
+
+    it("filters by time range", async () => {
+      const out = await callTool(memberToken, "search_emails", {
+        q: "Hello",
+        after: Math.floor(Date.now() / 1000) + 3600,
+      });
+      expect(out.data.hits).toEqual([]);
     });
   });
 
@@ -371,6 +495,7 @@ describe("MCP tools", () => {
         variables: { name: "Alice" },
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Inbox not allowed");
 
       const rows = await getDb()
         .select()
@@ -398,6 +523,71 @@ describe("MCP tools", () => {
         fromAddress: MINE,
       });
       expect(out.isError).toBe(true);
+    });
+  });
+
+  describe("send_email / reply_email", () => {
+    beforeEach(() => {
+      (env as any).DEMO_MODE = "1";
+    });
+    afterEach(() => {
+      (env as any).DEMO_MODE = "0";
+    });
+
+    it("sends from an allowed inbox", async () => {
+      const out = await callTool(memberToken, "send_email", {
+        to: "alice@example.com",
+        fromAddress: MINE,
+        subject: "Hello there",
+        bodyHtml: "<p>Hi</p>",
+        bodyText: "Hi",
+      });
+      expect(out.isError, out.text).toBe(false);
+      expect(out.data.status).toBe("sent");
+    });
+
+    it("refuses to send from an inbox the member does not own", async () => {
+      const before = await getDb().select().from(sentEmails);
+      const out = await callTool(memberToken, "send_email", {
+        to: "alice@example.com",
+        fromAddress: OTHER,
+        subject: "Nope",
+        bodyHtml: "<p>Nope</p>",
+      });
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("Inbox not allowed");
+      const after = await getDb().select().from(sentEmails);
+      expect(after).toHaveLength(before.length);
+    });
+
+    it("rejects a recipient that is not an address", async () => {
+      const out = await callTool(memberToken, "send_email", {
+        to: "Bob Smith",
+        fromAddress: MINE,
+        subject: "Hi",
+        bodyHtml: "<p>Hi</p>",
+      });
+      expect(out.isError).toBe(true);
+    });
+
+    it("replies to a message in an allowed inbox", async () => {
+      const out = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+      });
+      expect(out.isError, out.text).toBe(false);
+    });
+
+    it("reports a reply target in another inbox as not found", async () => {
+      const out = await callTool(memberToken, "reply_email", {
+        emailId: "e-other",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+      });
+      expect(out.isError).toBe(true);
+      // Must not confirm the message exists in an inbox the caller can't see.
+      expect(out.text).toContain("Not found");
     });
   });
 
@@ -444,6 +634,7 @@ describe("MCP tools", () => {
         fromAddress: OTHER,
       });
       expect(out.isError).toBe(true);
+      expect(out.text).toContain("Inbox not allowed");
 
       const rows = await getDb().select().from(sequenceEnrollments);
       expect(rows).toHaveLength(0);

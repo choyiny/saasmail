@@ -24,6 +24,19 @@ export function createAuth(env?: CloudflareBindings) {
   const db = env ? drizzle(env.DB, { schema, logger: true }) : ({} as any);
   const baseURL = env?.BASE_URL || "http://localhost:8080";
 
+  // Fail closed rather than silently signing with better-auth's published
+  // default. The library only *warns* when the secret is missing, and its
+  // NODE_ENV check does not fire on Workers — so an operator who upgrades
+  // without setting the secret would come up issuing OAuth tokens anyone can
+  // forge. `env` is undefined only under the schema-generation CLI, which
+  // never signs anything.
+  if (env && !env.BETTER_AUTH_SECRET) {
+    throw new Error(
+      "BETTER_AUTH_SECRET is not set. Run `wrangler secret put BETTER_AUTH_SECRET` " +
+        "(or add it to .dev.vars) — it signs sessions and protects the OAuth signing keys.",
+    );
+  }
+
   return betterAuth({
     baseURL,
     // Passed explicitly: better-auth resolves this from `process.env`, which

@@ -6,6 +6,7 @@ import type { AllowedInboxes } from "../lib/inbox-permissions";
 import { SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE, hasScope } from "../auth/scopes";
 import { sendTemplate } from "../lib/send-template";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
+import { sendEmail, replyToEmail } from "../lib/send-email";
 import { listPeople, getPersonScoped } from "../lib/queries/people";
 import {
   listPersonEmails,
@@ -13,6 +14,7 @@ import {
   setEmailRead,
 } from "../lib/queries/emails";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
+import { searchEmails } from "../lib/queries/search";
 
 export interface McpUser {
   id: string;
@@ -55,11 +57,12 @@ export function fail(message: string) {
  */
 function guard<Args extends unknown[]>(
   ctx: McpContext,
-  requiredScope: string,
+  /** null for tools every token may call regardless of granted scopes. */
+  requiredScope: string | null,
   run: (...args: Args) => Promise<ReturnType<typeof ok>>,
 ) {
   return async (...args: Args) => {
-    if (!hasScope(ctx.scopes, requiredScope)) {
+    if (requiredScope !== null && !hasScope(ctx.scopes, requiredScope)) {
       return fail(
         `This tool requires the "${requiredScope}" scope, which this token was not granted.`,
       );
@@ -67,8 +70,14 @@ function guard<Args extends unknown[]>(
     try {
       return await run(...args);
     } catch (e) {
+      // HTTPException is deliberate and safe to echo — it is our own
+      // permission message. Anything else is a bug, and its message may carry
+      // SQL fragments, column names, or stored row content. The MCP client is
+      // third-party software the operator never vetted, so log the detail and
+      // return an opaque failure.
       if (e instanceof HTTPException) return fail(e.message);
-      return fail(e instanceof Error ? e.message : String(e));
+      console.error("[mcp] tool failed:", e);
+      return fail("The request could not be completed.");
     }
   };
 }
@@ -102,7 +111,11 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       annotations: { readOnlyHint: true, title: "Who Am I" },
       inputSchema: {},
     },
-    guard(ctx, SCOPE_READ, async () =>
+    // Deliberately ungated: this is the only way to discover a valid
+    // fromAddress, and both send tools tell the model to call it. Gating it on
+    // email:read would leave a least-privilege send-only token unable to send
+    // at all. It discloses nothing beyond the token's own identity and grants.
+    guard(ctx, null, async () =>
       ok({
         userId: ctx.user.id,
         name: ctx.user.name,
@@ -214,6 +227,55 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   );
 
   server.registerTool(
+    "search_emails",
+    {
+      description:
+        "Full-text search across received and sent mail, newest first. Use this to find messages when you don't already know the contact — otherwise list_emails is cheaper. Returns a body excerpt per hit; call read_email for the full message.",
+      annotations: { readOnlyHint: true, title: "Search Emails" },
+      inputSchema: {
+        q: z
+          .string()
+          .min(1)
+          .describe("Words to search for in subject and body."),
+        inbox: z.string().optional().describe("Restrict to one inbox address."),
+        personId: z.string().optional().describe("Restrict to one contact."),
+        after: z
+          .number()
+          .int()
+          .optional()
+          .describe("Only messages at or after this Unix timestamp (seconds)."),
+        before: z
+          .number()
+          .int()
+          .optional()
+          .describe(
+            "Only messages at or before this Unix timestamp (seconds).",
+          ),
+        ...pagination,
+      },
+    },
+    guard(ctx, SCOPE_READ, async (input) => {
+      const limit = input.limit ?? 50;
+      const page = input.page ?? 1;
+      return ok(
+        await searchEmails(
+          db,
+          {
+            q: input.q,
+            inbox: input.inbox,
+            personId: input.personId,
+            after: input.after,
+            before: input.before,
+            limit,
+            offset: (page - 1) * limit,
+          },
+          allowed,
+        ),
+      );
+    }),
+  );
+
+  server.registerTool(
     "mark_read",
     {
       description:
@@ -266,7 +328,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       annotations: { readOnlyHint: false, title: "Send Template" },
       inputSchema: {
         slug: z.string().describe("Template slug."),
-        to: z.string().describe("Recipient email address."),
+        to: z.email().describe("Recipient email address."),
         fromAddress: z
           .string()
           .describe("Sender identity; must be one of your allowed inboxes."),
@@ -301,6 +363,139 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     }),
   );
 
+  const ccSchema = z
+    .array(z.object({ email: z.email(), name: z.string().max(200).optional() }))
+    .max(50)
+    .optional()
+    .describe("CC recipients.");
+
+  server.registerTool(
+    "send_email",
+    {
+      description:
+        "Compose and send a new message. fromAddress must be an inbox you may send from — call whoami to see which. Sending to a contact cancels any drip sequence they are enrolled in, since a direct message supersedes the automation.",
+      annotations: { readOnlyHint: false, title: "Send Email" },
+      inputSchema: {
+        to: z.email().describe("Recipient email address."),
+        fromAddress: z
+          .email()
+          .describe("Sender identity; must be one of your allowed inboxes."),
+        subject: z.string().describe("Subject line."),
+        bodyHtml: z.string().describe("HTML body."),
+        bodyText: z
+          .string()
+          .optional()
+          .describe(
+            "Plain-text alternative. Strongly recommended — messages without one are downranked by some providers.",
+          ),
+        cc: ccSchema,
+        replyTo: z
+          .email()
+          .optional()
+          .describe("Where replies should go, if not fromAddress."),
+      },
+    },
+    guard(ctx, SCOPE_SEND, async (input) => {
+      const result = await sendEmail({
+        db,
+        env: ctx.env,
+        // Attachments would mean base64 in the tool payload; omitted until
+        // there is a staged-upload path like the one taxspace uses.
+        files: [],
+        payload: {
+          to: input.to,
+          fromAddress: input.fromAddress,
+          subject: input.subject,
+          bodyHtml: input.bodyHtml,
+          bodyText: input.bodyText,
+          cc: input.cc,
+          replyTo: input.replyTo,
+        },
+        allowed,
+      });
+      return ok(result);
+    }),
+  );
+
+  server.registerTool(
+    "reply_email",
+    {
+      description:
+        "Reply to a message, threading correctly via its Message-ID. Works for received and sent messages. Provide either bodyHtml or a templateSlug with its variables.",
+      annotations: { readOnlyHint: false, title: "Reply To Email" },
+      inputSchema: {
+        emailId: z
+          .string()
+          .describe("Id of the message being replied to, from list_emails."),
+        fromAddress: z
+          .email()
+          .describe("Sender identity; must be one of your allowed inboxes."),
+        bodyHtml: z
+          .string()
+          .optional()
+          .describe("HTML body. Omit when using templateSlug."),
+        bodyText: z.string().optional().describe("Plain-text alternative."),
+        templateSlug: z
+          .string()
+          .optional()
+          .describe("Render this saved template instead of bodyHtml."),
+        variables: z
+          .record(z.string(), z.string())
+          .optional()
+          .describe("Values for the template's placeholders."),
+        cc: ccSchema,
+        replyTo: z
+          .email()
+          .optional()
+          .describe("Override the reply-to address."),
+      },
+    },
+    guard(ctx, SCOPE_SEND, async (input) => {
+      // Check visibility through the same masked path read_email uses, before
+      // the send core asserts on the target's inbox. That assertion throws
+      // "Inbox not allowed", which would confirm the message exists somewhere
+      // the caller cannot see — a probe oracle the read tools deliberately
+      // close.
+      const target = await getEmailById(db, input.emailId, allowed);
+      if (!target) return fail(NOT_FOUND);
+
+      const result = await replyToEmail({
+        db,
+        env: ctx.env,
+        emailId: input.emailId,
+        files: [],
+        payload: {
+          fromAddress: input.fromAddress,
+          bodyHtml: input.bodyHtml,
+          bodyText: input.bodyText,
+          templateSlug: input.templateSlug,
+          variables: input.variables,
+          cc: input.cc,
+          replyTo: input.replyTo,
+        },
+        allowed,
+      });
+      if (!result.ok) {
+        // Denials on the referenced message are reported as not-found, matching
+        // read_email — the caller supplied an id, and confirming it exists in
+        // an inbox they cannot see would be a probe oracle.
+        if (
+          result.code === "EMAIL_NOT_FOUND" ||
+          result.code === "PERSON_NOT_FOUND" ||
+          result.code === "EMAIL_HAS_NO_PERSON"
+        ) {
+          return fail(NOT_FOUND);
+        }
+        return fail(
+          result.code === "MISSING_VARIABLES" && "missingVariables" in result
+            ? `${result.message} Missing: ${(result as { missingVariables: string[] }).missingVariables.join(", ")}.`
+            : result.message,
+        );
+      }
+      return ok(result);
+    }),
+  );
+
   server.registerTool(
     "enroll_sequence",
     {
@@ -310,7 +505,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       inputSchema: {
         sequenceId: z.string().describe("Sequence id."),
         personEmail: z
-          .string()
+          .email()
           .optional()
           .describe("Recipient address; the contact is created if new."),
         personId: z
@@ -337,6 +532,13 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       },
     },
     guard(ctx, SCOPE_SEND, async (input) => {
+      // The HTTP route expresses this as a Zod .refine() on the whole object;
+      // an MCP inputSchema is a bare shape with no cross-field validation, so
+      // without this the lib would query `people.email = undefined` and then
+      // insert a row violating a NOT NULL constraint.
+      if (!input.personId && !input.personEmail) {
+        return fail("Provide either personEmail or personId.");
+      }
       const result = await enrollPersonInSequence({
         db,
         env: ctx.env,

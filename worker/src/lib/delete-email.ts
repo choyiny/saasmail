@@ -4,14 +4,10 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { AllowedInboxes } from "./inbox-permissions";
+import { isInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 
 /** Grants deletion of any email. For system callers (e.g. blocklist purge). */
 export const SYSTEM_INBOX_ACCESS: AllowedInboxes = { isAdmin: true };
-
-function isInboxAllowed(allowed: AllowedInboxes, inbox: string): boolean {
-  return allowed.isAdmin || allowed.inboxes.includes(inbox.toLowerCase());
-}
 
 /**
  * Hard delete an email (received or sent) and all associated R2 attachments.
@@ -86,9 +82,23 @@ export async function deleteEmailWithAttachments(
 
   if (sent.length > 0) {
     if (!isInboxAllowed(allowed, sent[0].fromAddress)) return null;
-    // Sent emails don't have attachments in the current schema
+
+    // Outbound messages DO carry attachments — the send path writes rows with
+    // kind "sent" keyed on the sent_emails id. Skipping them here orphaned the
+    // rows and leaked their R2 objects forever, while reporting success on a
+    // "permanent" delete.
+    const atts = await db
+      .select({ r2Key: attachments.r2Key })
+      .from(attachments)
+      .where(eq(attachments.emailId, emailId));
+
+    for (const att of atts) {
+      await r2.delete(att.r2Key);
+    }
+    await db.delete(attachments).where(eq(attachments.emailId, emailId));
     await db.delete(sentEmails).where(eq(sentEmails.id, emailId));
-    return { success: true, attachmentsDeleted: 0 };
+
+    return { success: true, attachmentsDeleted: atts.length };
   }
 
   return null;

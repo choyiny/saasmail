@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, inArray, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { assertInboxAllowed } from "../lib/inbox-permissions";
+import { assertInboxAllowed, isInboxAllowed } from "../lib/inbox-permissions";
 import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import { extractVariables } from "../lib/interpolate";
@@ -144,7 +144,7 @@ emailTemplatesRouter.openapi(getTemplateRoute, async (c) => {
   }
   const allowed = c.get("allowedInboxes")!;
   if (!allowed.isAdmin && rows[0].fromAddress !== null) {
-    if (!allowed.inboxes.includes(rows[0].fromAddress)) {
+    if (!isInboxAllowed(allowed, rows[0].fromAddress)) {
       return c.json({ error: "Template not found" }, 404);
     }
   }

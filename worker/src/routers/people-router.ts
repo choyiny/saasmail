@@ -11,6 +11,7 @@ import {
   peopleScopeClause,
 } from "../lib/queries/people";
 import type { Variables } from "../variables";
+import { isInboxAllowed } from "../lib/inbox-permissions";
 
 export const peopleRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -738,7 +739,7 @@ peopleRouter.openapi(bulkMarkReadRoute, async (c) => {
   // inboxes; explicit `recipient` narrows further).
   const recipientScope = (() => {
     if (recipient) {
-      if (!allowed.isAdmin && !allowed.inboxes.includes(recipient)) {
+      if (!isInboxAllowed(allowed, recipient)) {
         return null; // not permitted
       }
       return [recipient];
