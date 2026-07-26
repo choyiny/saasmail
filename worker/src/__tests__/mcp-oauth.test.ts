@@ -6,7 +6,6 @@ import {
   MCP_AUDIENCE,
   REDIRECT_URI,
   type Credentials,
-  callTool,
   createUserWithPassword,
   exchangeToken,
   getAccessToken,
