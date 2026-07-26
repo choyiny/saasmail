@@ -20,6 +20,8 @@ declare namespace Cloudflare {
 		VAPID_PRIVATE_KEY?: string;
 		/** Secret: set via `wrangler secret put UNSUBSCRIBE_SECRET`. Used to sign one-click unsubscribe tokens. Not emitted by `wrangler types`; added manually. */
 		UNSUBSCRIBE_SECRET: string;
+		/** Secret: set via `wrangler secret put BETTER_AUTH_SECRET`. Signs sessions and protects the OAuth signing keys in `jwkss`. Not emitted by `wrangler types`; added manually. */
+		BETTER_AUTH_SECRET: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
 	}
 }

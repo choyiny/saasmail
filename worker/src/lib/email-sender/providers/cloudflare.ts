@@ -1,5 +1,10 @@
 import { EmailMessage } from "cloudflare:email";
-import { createMimeMessage, Mailbox } from "mimetext";
+// The `browser` entrypoint, not the default `node` one: the node build pulls in
+// `mime-types`, a CJS package that fails to load in the Workers runtime
+// ("require is not defined"). Workers has no Node builtins, so the browser
+// build is the correct target. The only behavioral difference is that
+// attachment Content-Type validation becomes permissive.
+import { createMimeMessage, Mailbox } from "mimetext/browser";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { parseFrom, toBase64 } from "../shared";
 import { classifyErrorMessage } from "../classify";

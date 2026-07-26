@@ -30,6 +30,9 @@ export default defineConfig({
           VAPID_PUBLIC_KEY: "test-vapid-public",
           VAPID_SUBJECT: "mailto:test@example.com",
           UNSUBSCRIBE_SECRET: "test-secret-do-not-use-in-prod",
+          // `createAuth` now passes `secret` explicitly rather than relying on
+          // better-auth reading process.env, so tests must supply one.
+          BETTER_AUTH_SECRET: "test-better-auth-secret-do-not-use-in-prod",
         },
       },
     }),

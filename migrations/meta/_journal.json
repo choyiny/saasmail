@@ -225,6 +225,13 @@
       "when": 1785060832032,
       "tag": "0031_aspiring_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1785062744076,
+      "tag": "0032_famous_enchantress",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,8 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
 import { json200Response } from "../lib/helpers";
-import { EmailSchema, parseCc } from "./emails-router";
+import { parseCc } from "../lib/queries/emails";
+import { EmailSchema } from "./emails-router";
 import type { Variables } from "../variables";
 
 export const conversationsRouter = new OpenAPIHono<{
