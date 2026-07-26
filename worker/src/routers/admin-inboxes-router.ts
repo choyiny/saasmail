@@ -20,6 +20,7 @@ const InboxRowSchema = z.object({
   displayName: z.string().nullable(),
   displayMode: z.enum(["thread", "chat"]),
   signatureHtml: z.string().nullable(),
+  forwardTo: z.string().nullable(),
   assignedUserIds: z.array(z.string()),
 });
 
@@ -41,6 +42,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     displayName: string | null;
     displayMode: "thread" | "chat" | null;
     signatureHtml: string | null;
+    forwardTo: string | null;
     assignedUserIds: string | null;
   };
   const rows = await db.all<Row>(sql`
@@ -54,6 +56,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       s.display_name AS displayName,
       s.display_mode AS displayMode,
       s.signature_html AS signatureHtml,
+      s.forward_to AS forwardTo,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -73,6 +76,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       displayName: r.displayName,
       displayMode: r.displayMode ?? "chat",
       signatureHtml: r.signatureHtml,
+      forwardTo: r.forwardTo,
       assignedUserIds: r.assignedUserIds ? JSON.parse(r.assignedUserIds) : [],
     })),
     200,
@@ -105,6 +109,7 @@ const createInboxRoute = createRoute({
         displayName: z.string().nullable(),
         displayMode: z.enum(["thread", "chat"]),
         signatureHtml: z.string().nullable(),
+        forwardTo: z.string().nullable(),
         assignedUserIds: z.array(z.string()),
       }),
       "Created inbox",
@@ -151,6 +156,7 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
       displayName,
       displayMode,
       signatureHtml: null,
+      forwardTo: null,
       assignedUserIds: [],
     },
     201,
@@ -169,12 +175,18 @@ const PatchInboxBodySchema = z
       .max(MAX_SIGNATURE_HTML_LENGTH)
       .nullable()
       .optional(),
+    // Destination for per-inbox forwarding. "" clears it (the UI sends an empty
+    // input as ""), so the union accepts a valid address, "", or null.
+    forwardTo: z
+      .union([z.string().email(), z.literal(""), z.null()])
+      .optional(),
   })
   .refine(
     (b) =>
       b.displayName !== undefined ||
       b.displayMode !== undefined ||
-      b.signatureHtml !== undefined,
+      b.signatureHtml !== undefined ||
+      b.forwardTo !== undefined,
     "must update at least one field",
   );
 
@@ -183,7 +195,7 @@ const patchInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Update display name, display mode, and/or signature HTML for an inbox. Row is deleted only when all three fields are at defaults (null + 'chat' + null).",
+    "Update display name, display mode, signature HTML, and/or forward destination for an inbox. Row is deleted only when all four fields are at defaults (null + 'chat' + null + null).",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -201,9 +213,18 @@ const patchInboxRoute = createRoute({
         displayName: z.string().nullable(),
         displayMode: z.enum(["thread", "chat"]),
         signatureHtml: z.string().nullable(),
+        forwardTo: z.string().nullable(),
       }),
       "Updated",
     ),
+    400: {
+      description: "Invalid forward destination",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
   },
 });
 
@@ -242,12 +263,30 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         ? null
         : await sanitizeSignatureHtml(body.signatureHtml)
       : (currentRow?.signatureHtml ?? null);
+  const nextForwardTo =
+    body.forwardTo !== undefined
+      ? body.forwardTo === "" || body.forwardTo === null
+        ? null
+        : body.forwardTo.trim().toLowerCase()
+      : (currentRow?.forwardTo ?? null);
+
+  // Reject the tight self-forward loop at config time so the admin gets an
+  // error instead of a silently-skipped forward. `buildForwardMessage` guards
+  // this again at send time (and also catches forwards aimed at *other* inboxes
+  // on this instance, which may not exist yet when the rule is saved).
+  if (nextForwardTo !== null && nextForwardTo === email.trim().toLowerCase()) {
+    return c.json(
+      { error: "Forward destination cannot be the inbox itself" },
+      400,
+    );
+  }
 
   // All fields at defaults → delete the row to keep the table sparse.
   if (
     nextDisplayName === null &&
     nextDisplayMode === "chat" &&
-    nextSignatureHtml === null
+    nextSignatureHtml === null &&
+    nextForwardTo === null
   ) {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
     return c.json(
@@ -256,6 +295,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         displayName: null,
         displayMode: "chat",
         signatureHtml: null,
+        forwardTo: null,
       },
       200,
     );
@@ -268,6 +308,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       displayName: nextDisplayName,
       displayMode: nextDisplayMode,
       signatureHtml: nextSignatureHtml,
+      forwardTo: nextForwardTo,
       createdAt: now,
       updatedAt: now,
     })
@@ -277,6 +318,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         displayName: nextDisplayName,
         displayMode: nextDisplayMode,
         signatureHtml: nextSignatureHtml,
+        forwardTo: nextForwardTo,
         updatedAt: now,
       },
     });
@@ -287,6 +329,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       displayName: nextDisplayName,
       displayMode: nextDisplayMode,
       signatureHtml: nextSignatureHtml,
+      forwardTo: nextForwardTo,
     },
     200,
   );

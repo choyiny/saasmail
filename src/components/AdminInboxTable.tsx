@@ -41,6 +41,10 @@ export default function AdminInboxTable() {
   const [signatureEditingFor, setSignatureEditingFor] = useState<string | null>(
     null,
   );
+  // Per-inbox validation/save errors for the forward destination, keyed by inbox.
+  const [forwardErrors, setForwardErrors] = useState<Record<string, string>>(
+    {},
+  );
 
   useEffect(() => {
     Promise.all([fetchAdminInboxes(), fetchAdminUsers()])
@@ -123,10 +127,54 @@ export default function AdminInboxTable() {
               displayName: res.displayName,
               displayMode: res.displayMode,
               signatureHtml: res.signatureHtml,
+              forwardTo: res.forwardTo,
             }
           : r,
       ),
     );
+  }
+
+  async function commitForwardTo(inbox: AdminInbox, value: string) {
+    const trimmed = value.trim().toLowerCase();
+    const next = trimmed === "" ? null : trimmed;
+    if (next === inbox.forwardTo) return;
+
+    // Validate client-side so the admin gets a specific message — apiFetch
+    // collapses error responses to "API error: 400".
+    if (next !== null) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
+        setForwardErrors((p) => ({
+          ...p,
+          [inbox.email]: "Enter a valid email address.",
+        }));
+        return;
+      }
+      if (next === inbox.email.toLowerCase()) {
+        setForwardErrors((p) => ({
+          ...p,
+          [inbox.email]: "Can't forward an inbox to itself.",
+        }));
+        return;
+      }
+    }
+
+    setForwardErrors((p) => {
+      const { [inbox.email]: _drop, ...rest } = p;
+      return rest;
+    });
+    try {
+      const res = await updateInboxSettings(inbox.email, { forwardTo: next });
+      setInboxes((prev) =>
+        prev.map((r) =>
+          r.email === inbox.email ? { ...r, forwardTo: res.forwardTo } : r,
+        ),
+      );
+    } catch {
+      setForwardErrors((p) => ({
+        ...p,
+        [inbox.email]: "Couldn't save. Check the address and try again.",
+      }));
+    }
   }
 
   async function commitSignature(inbox: AdminInbox, html: string) {
@@ -367,6 +415,7 @@ export default function AdminInboxTable() {
                   <th className="px-3 py-2.5 font-semibold">Display name</th>
                   <th className="px-3 py-2.5 font-semibold">Signature</th>
                   <th className="px-3 py-2.5 font-semibold">Mode</th>
+                  <th className="px-3 py-2.5 font-semibold">Forward to</th>
                   <th className="px-3 py-2.5 font-semibold">Members</th>
                   <th className="w-16 px-3 py-2.5 text-right font-semibold">
                     {/* actions */}
@@ -476,6 +525,15 @@ export default function AdminInboxTable() {
                         </div>
                       </td>
 
+                      {/* Forward to (inline editable, blur to save) */}
+                      <td className="px-3 py-2.5">
+                        <ForwardToInput
+                          inbox={inbox}
+                          error={forwardErrors[inbox.email]}
+                          onCommit={(v) => commitForwardTo(inbox, v)}
+                        />
+                      </td>
+
                       {/* Members — inline chip toggles */}
                       <td className="px-3 py-2.5">
                         {members.length === 0 ? (
@@ -538,6 +596,20 @@ export default function AdminInboxTable() {
           </div>
         </div>
       )}
+
+      {inboxes.length > 0 && (
+        <p className="px-1 text-xs font-light leading-relaxed text-text-tertiary">
+          <span className="font-medium text-text-secondary">Forward to</span>{" "}
+          sends a copy of every message this inbox receives on to another
+          address, using your configured sending provider. Prefer it over a
+          Cloudflare Email Routing forwarding rule: Email Routing relays from
+          shared IPs that Outlook and Hotmail blocklist, so those forwards
+          bounce with <span className="font-mono">550 5.7.1 … (S3150)</span>.
+          Copies are sent from this inbox's address with the original sender in{" "}
+          <span className="font-mono">Reply-To</span>, so they authenticate on
+          your own domain.
+        </p>
+      )}
     </div>
   );
 }
@@ -573,6 +645,62 @@ function DisplayNameInput({ inbox, onCommit }: DisplayNameInputProps) {
       data-testid="inbox-display-name-input"
       className="h-8 w-full rounded-[6px] border border-transparent bg-transparent px-2 text-sm text-text-primary placeholder:font-light placeholder:italic placeholder:text-text-tertiary hover:border-border focus:border-border focus:bg-card focus:outline-none focus:ring-2 focus:ring-text-primary/15"
     />
+  );
+}
+
+interface ForwardToInputProps {
+  inbox: AdminInbox;
+  error?: string;
+  onCommit: (value: string) => Promise<void>;
+}
+
+/**
+ * Destination address for per-inbox forwarding. Blur-to-save, mirroring
+ * DisplayNameInput. Empty clears the rule.
+ */
+function ForwardToInput({ inbox, error, onCommit }: ForwardToInputProps) {
+  const [value, setValue] = useState(inbox.forwardTo ?? "");
+
+  useEffect(() => {
+    setValue(inbox.forwardTo ?? "");
+  }, [inbox.forwardTo]);
+
+  return (
+    <div className="min-w-[180px]">
+      <input
+        type="email"
+        value={value}
+        onChange={(e) => setValue(e.currentTarget.value)}
+        onBlur={() => onCommit(value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            (e.currentTarget as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            setValue(inbox.forwardTo ?? "");
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+        }}
+        placeholder="No forwarding"
+        aria-label={`Forward destination for ${inbox.email}`}
+        aria-invalid={error ? true : undefined}
+        data-testid="inbox-forward-to-input"
+        className={cn(
+          "h-8 w-full rounded-[6px] border bg-transparent px-2 font-mono text-xs text-text-primary placeholder:font-sans placeholder:text-sm placeholder:font-light placeholder:italic placeholder:text-text-tertiary focus:bg-card focus:outline-none focus:ring-2",
+          error
+            ? "border-destructive focus:ring-destructive/20"
+            : "border-transparent hover:border-border focus:border-border focus:ring-text-primary/15",
+        )}
+      />
+      {error && (
+        <div
+          data-testid="inbox-forward-to-error"
+          className="mt-1 text-[10px] font-light text-destructive"
+        >
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

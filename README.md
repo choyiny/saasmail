@@ -98,6 +98,47 @@ Different inboxes call for different UX. Set each inbox to render as **Thread** 
 
 One deployment, one person timeline, but the interaction model matches the channel.
 
+### Per-Inbox Forwarding
+
+Give any inbox a **Forward to** address and every message it receives is re-sent to
+that address. Configured per inbox on the **Inboxes** page, right next to display
+name, signature, mode, and member permissions. Off by default.
+
+**Why not just use a Cloudflare Email Routing forwarding rule?** Because Email
+Routing relays forwarded mail from a shared IP pool that Outlook, Hotmail, and Live
+blocklist. Forwards to a Microsoft-hosted mailbox come back as:
+
+```
+permanent error (550): 5.7.1 Unfortunately, messages from [104.30.10.66] weren't
+sent. Please contact your Internet service provider since part of their network is
+on our block list (S3150).
+```
+
+That IP belongs to Cloudflare, not to you, so there is no delisting path. saasmail
+sidesteps it by sending the copy itself through your configured outbound provider —
+different IPs, and DKIM-signed for your own domain, so it authenticates cleanly.
+
+How the forwarded copy looks:
+
+- **From** the inbox address, with the original sender named in the display name
+  (`"Jane Customer (via Acme Support)" <support@acme.com>`). It cannot keep the
+  original `From:` — sending as `jane@example.com` from your infrastructure would
+  fail SPF and DMARC and get filtered harder than the block being avoided.
+- **Reply-To** the original sender, so replying reaches the customer.
+- Original `From` / `Date` / `Subject` / `Cc` and the SPF/DKIM/DMARC verdicts are
+  restated in a header block at the top of the body.
+- Attachments are included, up to your provider's size ceiling; anything too large
+  is named in the body rather than silently dropped. Inline images arrive as regular
+  attachments.
+- The original `Cc` recipients are **not** re-sent to — only the destination is.
+
+Forwarding is best-effort and never blocks inbound mail: it runs after the message
+is safely stored, and after the blocklist and duplicate checks, so blocked senders
+and duplicate deliveries are never forwarded. There is no retry — failures are
+logged. Loops are prevented three ways: an inbox can't forward to itself, can't
+forward to another inbox on the same instance, and any message already carrying the
+`X-SaaSMail-Forwarded-For` header is never forwarded again.
+
 ### Email Templates
 
 Create reusable HTML email templates with `{{variable}}` interpolation. Edit templates with a live HTML editor, preview rendered output, and send them via the API or the UI. Variables are automatically extracted and validated before sending. Templates are scoped to allowed inboxes.

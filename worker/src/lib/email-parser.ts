@@ -17,8 +17,18 @@ export interface ParsedEmail {
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
   cc: ParsedEmailAddress[];
   subject: string;
+  /** Quote-trimmed HTML body, with `cid:` refs left intact. For display/storage. */
   bodyHtml: string | null;
+  /** Quote-trimmed plain-text body. For display/storage. */
   bodyText: string | null;
+  /**
+   * Untrimmed HTML body, exactly as received. Used when relaying the message
+   * onward (per-inbox forwarding), where dropping the quoted reply history
+   * would lose context the recipient needs.
+   */
+  fullBodyHtml: string | null;
+  /** Untrimmed plain-text body, exactly as received. See `fullBodyHtml`. */
+  fullBodyText: string | null;
   messageId: string | null;
   headers: Record<string, string>;
   attachments: ParsedAttachment[];
@@ -180,6 +190,8 @@ export async function parseEmail(
     subject: parsed.subject || "",
     bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
     bodyText: bodyText ? trimQuotedText(bodyText) : null,
+    fullBodyHtml: bodyHtml,
+    fullBodyText: bodyText,
     messageId: parsed.messageId || null,
     headers,
     attachments: (parsed.attachments || []).map((att) => ({
