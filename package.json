@@ -32,6 +32,10 @@
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,css,md,html}": "prettier --write"
   },
+  "resolutions": {
+    "vite/postcss": "^8.5.23",
+    "sharp": "^0.35.0"
+  },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "8.5.0",
     "@better-auth/passkey": "^1.6.23",
