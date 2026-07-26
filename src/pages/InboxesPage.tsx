@@ -12,7 +12,7 @@ export default function InboxesPage() {
     <PageContainer>
       <PageHeader
         title="Inboxes"
-        subtitle="Set display names, choose chat or thread mode, and assign which members can access each inbox."
+        subtitle="Set display names, choose chat or thread mode, forward mail onward, and assign member access."
       />
       <AdminInboxTable />
     </PageContainer>
