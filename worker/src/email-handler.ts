@@ -18,6 +18,7 @@ import {
 } from "./lib/notification-fanout";
 import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
+import { forwardInbound } from "./lib/inbound-forward";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -160,21 +161,28 @@ export async function handleEmail(
   // External participants = the sender + everyone on the Cc line, minus
   // any addresses that match one of our sender_identities (those are
   // "internal" team members and don't change the group identity).
-  const ourDomains = await (async () => {
-    const rows = await db
-      .select({ email: senderIdentities.email })
-      .from(senderIdentities);
-    return Array.from(
-      new Set(
-        rows
-          .map((r) => {
-            const at = r.email.lastIndexOf("@");
-            return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-          })
-          .filter(Boolean),
-      ),
-    );
-  })();
+  //
+  // One scan of sender_identities serves three consumers: the "our domains"
+  // set below, the forward destination for this inbox, and the known-inbox
+  // loop guard in `forwardInbound`.
+  const identityRows = await db
+    .select({
+      email: senderIdentities.email,
+      displayName: senderIdentities.displayName,
+      forwardTo: senderIdentities.forwardTo,
+    })
+    .from(senderIdentities);
+
+  const ourDomains = Array.from(
+    new Set(
+      identityRows
+        .map((r) => {
+          const at = r.email.lastIndexOf("@");
+          return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
+        })
+        .filter(Boolean),
+    ),
+  );
   const allParticipants = [
     fromAddressCanonical,
     ...parsed.cc.map((c) => c.email),
@@ -295,6 +303,33 @@ export async function handleEmail(
       baseUrl: env.BASE_URL,
     }),
   );
+
+  // Per-inbox forwarding ("redirect rule"). Re-sends this message to the
+  // inbox's configured destination through the outbound provider, because
+  // Cloudflare Email Routing's own forwarding rules relay from IPs that Outlook
+  // blocklists (550 5.7.1 S3150). See lib/inbound-forward.ts for the full
+  // rationale. Best-effort and non-blocking, like the webhook above — and it
+  // sits after the blocklist and dedupe gates, so blocked senders and duplicate
+  // deliveries are never forwarded.
+  const inboxIdentity = identityRows.find(
+    (r) => r.email.trim().toLowerCase() === recipientCanonical,
+  );
+  forwardInbound(env, ctx, {
+    inbox: recipientCanonical,
+    forwardTo: inboxIdentity?.forwardTo ?? null,
+    inboxDisplayName: inboxIdentity?.displayName ?? null,
+    from: parsed.from,
+    subject: parsed.subject,
+    fullBodyHtml: parsed.fullBodyHtml,
+    fullBodyText: parsed.fullBodyText,
+    messageId: parsed.messageId,
+    receivedAt: now,
+    cc: parsed.cc,
+    auth: parsed.auth,
+    attachments: cappedAttachments,
+    headers: parsed.headers,
+    knownInboxes: identityRows.map((r) => r.email),
+  });
 
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, actualPersonId);

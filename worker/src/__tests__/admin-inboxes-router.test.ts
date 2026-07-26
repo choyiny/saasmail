@@ -378,4 +378,171 @@ describe("admin inboxes router", () => {
     const userIds = rows.map((r) => r.userId).sort();
     expect(userIds).toEqual(["u-m1", "u-m2"]);
   });
+
+  it("PATCH persists forwardTo and surfaces it in GET", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await createTestPerson();
+    await createTestEmail({ recipient: "a@x.com" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ forwardTo: "boss@outlook.com" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { forwardTo: string | null };
+    expect(body.forwardTo).toBe("boss@outlook.com");
+
+    const list = await authFetch("/api/admin/inboxes", { apiKey });
+    const rows = (await list.json()) as Array<{
+      email: string;
+      forwardTo: string | null;
+    }>;
+    expect(rows.find((r) => r.email === "a@x.com")?.forwardTo).toBe(
+      "boss@outlook.com",
+    );
+  });
+
+  it("PATCH lowercases the forward destination", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ forwardTo: "Boss@Outlook.COM" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { forwardTo: string | null };
+    expect(body.forwardTo).toBe("boss@outlook.com");
+  });
+
+  it("PATCH rejects a malformed forward destination", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ forwardTo: "not-an-email" }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH rejects forwarding an inbox to itself", async () => {
+    // Tight loop: would re-enter handleEmail forever.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ forwardTo: "a@x.com" }),
+      },
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/itself/i);
+  });
+
+  it("PATCH with forwardTo='' clears the stored destination", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "a@x.com",
+      displayName: "Alpha",
+      displayMode: "thread",
+      forwardTo: "boss@outlook.com",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ forwardTo: "" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { forwardTo: string | null };
+    expect(body.forwardTo).toBeNull();
+  });
+
+  it("PATCH of another field preserves a configured forwardTo", async () => {
+    // Regression guard: a partial update must not silently drop the forward.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "a@x.com",
+      displayName: "Alpha",
+      displayMode: "thread",
+      forwardTo: "boss@outlook.com",
+      createdAt: now,
+      updatedAt: now,
+    });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ displayName: "Renamed" }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { forwardTo: string | null };
+    expect(body.forwardTo).toBe("boss@outlook.com");
+  });
+
+  it("does not sparse-delete the row when only forwardTo is set", async () => {
+    // Clearing the display fields must not discard the forwarding rule.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "a@x.com",
+      displayName: null,
+      displayMode: "chat",
+      forwardTo: "boss@outlook.com",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await authFetch(`/api/admin/inboxes/${encodeURIComponent("a@x.com")}`, {
+      apiKey,
+      method: "PATCH",
+      body: JSON.stringify({ displayName: null, displayMode: "chat" }),
+    });
+    const rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].forwardTo).toBe("boss@outlook.com");
+  });
+
+  it("sparse-deletes the row once forwardTo is cleared too", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "a@x.com",
+      displayName: null,
+      displayMode: "chat",
+      forwardTo: "boss@outlook.com",
+      createdAt: now,
+      updatedAt: now,
+    });
+    await authFetch(`/api/admin/inboxes/${encodeURIComponent("a@x.com")}`, {
+      apiKey,
+      method: "PATCH",
+      body: JSON.stringify({ forwardTo: "" }),
+    });
+    const rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(0);
+  });
 });

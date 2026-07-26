@@ -218,6 +218,13 @@
       "when": 1783987200000,
       "tag": "0030_outbox_emails",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1785060832032,
+      "tag": "0031_aspiring_caretaker",
+      "breakpoints": true
     }
   ]
 }
