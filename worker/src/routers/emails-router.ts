@@ -671,18 +671,9 @@ emailsRouter.openapi(deleteEmailRoute, async (c) => {
   const { id } = c.req.valid("param");
 
   const allowed = c.get("allowedInboxes")!;
-  if (!allowed.isAdmin) {
-    const row = await db
-      .select({ recipient: emails.recipient })
-      .from(emails)
-      .where(eq(emails.id, id))
-      .limit(1);
-    if (row.length > 0 && !allowed.inboxes.includes(row[0].recipient)) {
-      return c.json({ error: "Email not found" }, 404);
-    }
-  }
-
-  const result = await deleteEmailWithAttachments(db, r2, id);
+  // Scoping is enforced inside deleteEmailWithAttachments so that received and
+  // sent emails are both covered; a denied delete comes back as null → 404.
+  const result = await deleteEmailWithAttachments(db, r2, id, allowed);
   if (!result) {
     return c.json({ error: "Email not found" }, 404);
   }

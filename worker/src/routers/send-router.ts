@@ -480,6 +480,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
 
   if (receivedRow.length > 0) {
     const orig = receivedRow[0];
+    // Mirror of the sent-row check below: only allow replies to messages
+    // delivered to an inbox the caller still owns. Without this a scoped user
+    // could thread a reply into a conversation they cannot read.
+    assertInboxAllowed(allowed, orig.recipient);
     const person = await db
       .select({ email: people.email })
       .from(people)
