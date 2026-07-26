@@ -78,7 +78,7 @@
     "postal-mime": "^2.4.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-router-dom": "^6.30.1",
+    "react-router-dom": "^7.0.0",
     "resend": "^6.12.4",
     "tailwind-merge": "^3.0.2",
     "zod": "^4.3.6"
