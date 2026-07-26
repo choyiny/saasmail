@@ -172,12 +172,71 @@ Issue scoped API keys for programmatic access to send email, manage templates, e
 
 Connect Claude, or any other MCP client, directly to your inbox. saasmail
 exposes a [Model Context Protocol](https://modelcontextprotocol.io) endpoint at
-`/mcp`, secured with OAuth 2.1.
+`/mcp` over streamable HTTP, secured with OAuth 2.1.
 
-Point your client at `https://your-domain.com/mcp`. There is nothing to
-pre-configure: the client discovers the authorization server, registers itself,
-and sends you through a normal browser login plus a consent screen listing
-exactly what it is asking for. Approve it and the client gets a scoped token.
+There is nothing to pre-register. The client discovers the authorization
+server, registers itself (RFC 7591), and sends you through a normal browser
+login plus a consent screen listing exactly what it is asking for. Approve it
+and the client gets a scoped token.
+
+#### Connecting a client
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http saasmail https://your-domain.com/mcp
+```
+
+Then run `/mcp` inside Claude Code and choose `saasmail` to finish the browser
+login. Add `--scope user` to the command to make the connection available in
+every project rather than only the current one.
+
+**claude.ai** — Settings → Connectors → add a custom connector pointing at
+`https://your-domain.com/mcp`. On Team and Enterprise plans, only admins can
+add connectors.
+
+**Any other MCP client** — point it at `https://your-domain.com/mcp` and choose
+streamable HTTP as the transport. Clients configured by file usually want:
+
+```json
+{
+  "mcpServers": {
+    "saasmail": {
+      "type": "http",
+      "url": "https://your-domain.com/mcp"
+    }
+  }
+}
+```
+
+`"streamable-http"` is accepted as a synonym for `"http"`.
+
+#### Prerequisites
+
+Two settings (see [Configuration](#devvars)) must be right, or the handshake
+fails in ways that are hard to read:
+
+- **`BASE_URL` must exactly match the URL you hand the client** — same scheme
+  and host, no trailing slash. Every OAuth identifier derives from it, and a
+  token's audience is fixed at the moment it is issued. Connect to
+  `https://www.example.com/mcp` while `BASE_URL` says `https://example.com` and
+  tokens get minted for one identity and verified against another, so every
+  call returns 401.
+- **`BETTER_AUTH_SECRET` must be set.** It protects the OAuth signing keys.
+
+To check the endpoint is reachable and discovery is wired up before involving a
+client at all:
+
+```bash
+curl https://your-domain.com/.well-known/oauth-protected-resource/mcp
+```
+
+That returns the resource metadata (audience, authorization server, supported
+scopes). An unauthenticated `POST /mcp` should return `401` with a
+`WWW-Authenticate` header pointing back at that same document — that is the
+handshake working, not an error.
+
+#### Scopes
 
 Three scopes gate what a connected client may do:
 
