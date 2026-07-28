@@ -87,7 +87,7 @@
     "@cloudflare/vite-plugin": "^1.47.0",
     "@cloudflare/vitest-pool-workers": "^0.18.8",
     "@cloudflare/workers-types": "^5.20260727.1",
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^18.3.6",
