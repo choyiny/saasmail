@@ -3,7 +3,10 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
-import { deleteEmailWithAttachments } from "./delete-email";
+import {
+  deleteEmailWithAttachments,
+  SYSTEM_INBOX_ACCESS,
+} from "./delete-email";
 
 /**
  * Hard-delete every email + person whose address matches any block rule, and
@@ -32,7 +35,14 @@ export async function purgeBlockedMail(
       .from(emails)
       .where(eq(emails.personId, personId));
     for (const e of received) {
-      const res = await deleteEmailWithAttachments(db, r2, e.id);
+      // Purging a blocked sender is a system action, not a user-scoped one:
+      // every matching email must go regardless of who triggered the purge.
+      const res = await deleteEmailWithAttachments(
+        db,
+        r2,
+        e.id,
+        SYSTEM_INBOX_ACCESS,
+      );
       if (res) emailsDeleted++;
     }
     // Any sent emails attributed to this person.

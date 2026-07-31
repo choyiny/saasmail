@@ -38,16 +38,44 @@ export function inboxFilter(
   return inArray(column, allowed.inboxes);
 }
 
+/**
+ * The single "may this caller act on this address?" predicate.
+ *
+ * Normalization lives here and nowhere else. `allowed.inboxes` is lowercased at
+ * resolution time, but stored `recipient` / `from_address` values may be mixed
+ * case from before insert-time canonicalization, so the address is folded too.
+ *
+ * Call this rather than reaching into `allowed.inboxes` directly: hand-rolled
+ * `allowed.inboxes.includes(x)` copies previously drifted apart, leaving a row
+ * a member could delete but not read.
+ */
+export function isInboxAllowed(
+  allowed: AllowedInboxes,
+  email: string,
+): boolean {
+  return allowed.isAdmin || allowed.inboxes.includes(email.toLowerCase());
+}
+
 export function assertInboxAllowed(
   allowed: AllowedInboxes,
   email: string,
 ): void {
-  if (allowed.isAdmin) return;
-  // Compare lowercased so a member who registered `Support@x.com` in
-  // permissions still passes when the route asserts `support@x.com`
-  // (callers now canonicalize inputs at the boundary, but be
-  // defensive in case future callers don't).
-  if (!allowed.inboxes.includes(email.toLowerCase())) {
+  if (!isInboxAllowed(allowed, email)) {
     throw new HTTPException(403, { message: "Inbox not allowed" });
   }
+}
+
+/**
+ * Scope fragment for raw-SQL queries, as a spliceable `AND ...` chunk.
+ *
+ * `inboxFilter` covers Drizzle query builders; this covers the hand-written
+ * `sql` templates. Both must agree, and in particular both must express the
+ * empty-grant case as a false predicate — an empty list renders `IN ()`, which
+ * SQLite rejects outright, so forgetting that branch fails loudly at best and
+ * scopes nothing at worst.
+ */
+export function inboxScopeSql(allowed: AllowedInboxes, column: SQL): SQL {
+  if (allowed.isAdmin) return sql``;
+  if (allowed.inboxes.length === 0) return sql`AND 0`;
+  return sql`AND ${column} IN ${allowed.inboxes}`;
 }

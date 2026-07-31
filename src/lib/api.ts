@@ -720,6 +720,8 @@ export interface AdminInbox {
   displayName: string | null;
   displayMode: InboxDisplayMode;
   signatureHtml: string | null;
+  /** Destination address for per-inbox forwarding; null = forwarding off. */
+  forwardTo: string | null;
   assignedUserIds: string[];
 }
 
@@ -745,12 +747,14 @@ export async function updateInboxSettings(
     displayName?: string | null;
     displayMode?: InboxDisplayMode;
     signatureHtml?: string | null;
+    forwardTo?: string | null;
   },
 ): Promise<{
   email: string;
   displayName: string | null;
   displayMode: InboxDisplayMode;
   signatureHtml: string | null;
+  forwardTo: string | null;
 }> {
   return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
     method: "PATCH",

@@ -24,6 +24,7 @@ import { setupRouter } from "./routers/setup-router";
 import { emailTemplatesRouter } from "./routers/email-templates-router";
 import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
+import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
@@ -45,6 +46,7 @@ import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
 import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
+import { registerMcpRoutes } from "./mcp/http";
 import {
   BEARER_AUTH_SCHEME,
   bearerAuthSecurityScheme,
@@ -69,7 +71,18 @@ app.openAPIRegistry.registerComponent(
 // Middleware
 app.use("*", injectDb);
 app.use("*", logger());
-app.use("*", cors({ origin: "*" }));
+// `exposeHeaders` is required so browser-based MCP clients (e.g. Claude.ai
+// connectors) can read the `WWW-Authenticate` challenge on a 401 to discover
+// the OAuth protected-resource metadata URL, plus the `Mcp-Session-Id` header
+// used by the streamable-HTTP transport. Without these a cross-origin MCP
+// client sees an opaque 401 and reports "Couldn't reach the MCP server".
+app.use(
+  "*",
+  cors({
+    origin: "*",
+    exposeHeaders: ["WWW-Authenticate", "Mcp-Session-Id"],
+  }),
+);
 
 // Paths that don't participate in our session/passkey/inbox pipeline.
 // (BetterAuth handles its own auth at /api/auth/*; setup/invites/health/config
@@ -235,6 +248,13 @@ app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
 
+// Registered OAuth clients. Admin-only: registration is open to any caller so
+// MCP clients can self-register, which makes an operator-visible list and a
+// revocation path the control that actually bounds it.
+app.use("/api/oauth-apps", requireAdmin);
+app.use("/api/oauth-apps/*", requireAdmin);
+app.route("/api/oauth-apps", oauthAppsRouter);
+
 // Suppressions CRUD — admin-only (not under /api/admin/ for UX but enforced
 // here with the same role guard).
 app.use("/api/suppressions/*", requireAdmin);
@@ -258,6 +278,12 @@ app.route("/unsubscribe", unsubscribeRouter);
 
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);
+
+// MCP endpoint + OAuth discovery. Registered before the SPA catch-all so
+// `/.well-known/*` isn't served index.html. `/mcp` authenticates with OAuth
+// bearer tokens via mcpHandler rather than the session/API-key pipeline, and
+// it sits outside `/api/*` so that middleware never applies to it.
+registerMcpRoutes(app);
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));

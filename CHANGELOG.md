@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-inbox forwarding.** Admins can set an optional destination address per inbox on the **Inboxes** page (alongside display name, signature, mode, and members). Every message the inbox receives is re-sent to that address through the configured outbound provider. This exists because Cloudflare Email Routing's own forwarding rules relay from shared IPs that Outlook/Hotmail blocklist (`550 5.7.1 … S3150`), so those forwards bounce; re-sending leaves from different IPs and is DKIM-signed for your own domain. Copies are sent from the inbox address with the original sender in `Reply-To`. Off by default. Migration `0031`.
 - OpenAPI email responses: document `attachments` on `EmailSchema`, clarify `replyTo` is only populated on `GET /api/emails/{id}` for received messages.
 - OpenAPI `/doc`: register `SendEmailSchema`, `CcEntry`, and `ReplyEmailSchema` under `components.schemas` (including `transactional` and reply payload fields).
 - OpenAPI `/doc`: global auth documentation, `BearerAuth` security scheme, and `security` requirements on integrator-facing routes (`/api/send`, template send, sequence enroll, API keys).

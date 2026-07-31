@@ -6,6 +6,17 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # `major`/`minor`/`patch` mean "product release impact" here: the
+    # pr-labels workflow requires exactly one of them, and release-drafter's
+    # version-resolver maps them to the next saasmail version. Dependabot's
+    # own semver labels reuse those names to mean "size of the dependency
+    # jump", so a routine action bump from v6 to v7 was resolving the next
+    # release as a major one. Pinning to `patch` satisfies the label gate
+    # while keeping dependency updates out of the product's version number.
+    # The size of the bump is still legible in the PR title.
+    labels:
+      - "dependencies"
+      - "patch"
     groups:
       radix-ui:
         patterns:
@@ -43,3 +54,7 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 3
+    # Same reasoning as npm above.
+    labels:
+      - "dependencies"
+      - "patch"

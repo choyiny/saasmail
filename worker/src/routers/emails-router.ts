@@ -1,14 +1,18 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq, desc, like, and, sql, inArray } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
-import { senderIdentities } from "../db/sender-identities.schema";
 import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
-import { json200Response, escapeLike } from "../lib/helpers";
+import { json200Response } from "../lib/helpers";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
-import { inboxFilter } from "../lib/inbox-permissions";
+import { isInboxAllowed } from "../lib/inbox-permissions";
+import {
+  getEmailById,
+  listPersonEmails,
+  setEmailRead,
+} from "../lib/queries/emails";
 import type { Variables } from "../variables";
 
 export const emailsRouter = new OpenAPIHono<{
@@ -39,20 +43,6 @@ export const AttachmentSchema = z.object({
   contentId: z.string().nullable(),
   createdAt: z.number(),
 });
-
-/** Parse a stored cc TEXT column (JSON) into a typed array, falling back to
- *  [] for NULL or any malformed/corrupt JSON so a bad row never breaks reads. */
-export function parseCc(
-  raw: string | null | undefined,
-): Array<{ email: string; name?: string | null }> {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
 
 export const EmailSchema = z.object({
   id: z.string(),
@@ -99,29 +89,6 @@ export const EmailSchema = z.object({
 });
 
 /**
- * Pull the Reply-To address out of an email's stored raw headers.
- * `raw_headers` is a JSON object of all inbound headers (see email-handler),
- * so no schema change is needed to surface this. Returns the bare address
- * (lower-cased), unwrapping a "Name <addr>" form. Null when absent/malformed.
- */
-function extractReplyTo(rawHeaders: string | null): string | null {
-  if (!rawHeaders) return null;
-  try {
-    const headers = JSON.parse(rawHeaders) as Record<string, unknown>;
-    for (const [key, value] of Object.entries(headers)) {
-      if (key.toLowerCase() === "reply-to" && typeof value === "string") {
-        const angle = value.match(/<([^>]+)>/);
-        const addr = (angle ? angle[1] : value).trim().toLowerCase();
-        return addr || null;
-      }
-    }
-  } catch {
-    // Malformed raw_headers — treat as no Reply-To rather than failing the read.
-  }
-  return null;
-}
-
-/**
  * Strip Reply-To from stored raw headers after re-attribution. Once a message
  * is attributed to a person, `people.email` is the canonical reply target —
  * leaving the original inbound Reply-To in place would mislead the reassign
@@ -144,18 +111,6 @@ function clearReplyToInRawHeaders(rawHeaders: string | null): string | null {
   } catch {
     return rawHeaders;
   }
-}
-
-/** Reply-To is only meaningful when it differs from the attributed sender. */
-function surfaceReplyTo(
-  rawHeaders: string | null,
-  personEmail: string | null,
-): string | null {
-  const replyTo = extractReplyTo(rawHeaders);
-  if (!replyTo) return null;
-  const person = personEmail?.trim().toLowerCase();
-  if (person && replyTo === person) return null;
-  return replyTo;
 }
 
 const InboxMetaSchema = z.object({
@@ -200,222 +155,16 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
   const db = c.get("db");
   const { personId } = c.req.valid("param");
   const { q, recipient, page, limit } = c.req.valid("query");
-  const offset = (page - 1) * limit;
-
   const allowed = c.get("allowedInboxes")!;
 
-  // Build conditions for received emails
-  const receivedConditions: any[] = [eq(emails.personId, personId)];
-  if (q) {
-    receivedConditions.push(like(emails.subject, `%${escapeLike(q)}%`));
-  }
-  if (recipient) {
-    receivedConditions.push(eq(emails.recipient, recipient));
-  }
-  const recvScope = inboxFilter(allowed, emails.recipient);
-  if (recvScope) receivedConditions.push(recvScope);
+  const result = await listPersonEmails(
+    db,
+    personId,
+    { q, recipient, page, limit },
+    allowed,
+  );
 
-  const received = await db
-    .select({
-      id: emails.id,
-      subject: emails.subject,
-      bodyHtml: emails.bodyHtml,
-      bodyText: emails.bodyText,
-      isRead: emails.isRead,
-      cc: emails.cc,
-      timestamp: emails.receivedAt,
-      recipient: emails.recipient,
-    })
-    .from(emails)
-    .where(and(...receivedConditions))
-    .orderBy(desc(emails.receivedAt));
-
-  // Build conditions for sent emails
-  const sentConditions: any[] = [eq(sentEmails.personId, personId)];
-  if (q) {
-    sentConditions.push(like(sentEmails.subject, `%${escapeLike(q)}%`));
-  }
-  if (recipient) {
-    sentConditions.push(eq(sentEmails.fromAddress, recipient));
-  }
-  const sentScope = inboxFilter(allowed, sentEmails.fromAddress);
-  if (sentScope) sentConditions.push(sentScope);
-
-  const sent = await db
-    .select({
-      id: sentEmails.id,
-      subject: sentEmails.subject,
-      bodyHtml: sentEmails.bodyHtml,
-      bodyText: sentEmails.bodyText,
-      cc: sentEmails.cc,
-      timestamp: sentEmails.sentAt,
-      fromAddress: sentEmails.fromAddress,
-      toAddress: sentEmails.toAddress,
-      status: sentEmails.status,
-    })
-    .from(sentEmails)
-    .where(and(...sentConditions))
-    .orderBy(desc(sentEmails.sentAt));
-
-  const personRow = await db
-    .select({ email: people.email })
-    .from(people)
-    .where(eq(people.id, personId))
-    .limit(1);
-  const personEmail = personRow[0]?.email ?? null;
-
-  // Merge and sort
-  const merged = [
-    ...received.map((e) => ({
-      id: e.id,
-      type: "received" as const,
-      personId,
-      recipient: e.recipient,
-      fromAddress: personEmail,
-      toAddress: null,
-      subject: e.subject,
-      bodyHtml: e.bodyHtml,
-      bodyText: e.bodyText,
-      isRead: e.isRead,
-      cc: parseCc(e.cc),
-      timestamp: e.timestamp,
-      status: null,
-    })),
-    ...sent.map((e) => ({
-      id: e.id,
-      type: "sent" as const,
-      personId,
-      recipient: null,
-      fromAddress: e.fromAddress,
-      toAddress: e.toAddress,
-      subject: e.subject,
-      bodyHtml: e.bodyHtml,
-      bodyText: e.bodyText,
-      isRead: null,
-      cc: parseCc(e.cc),
-      timestamp: e.timestamp,
-      status: e.status,
-    })),
-  ].sort((a, b) => b.timestamp - a.timestamp);
-
-  const paginated = merged.slice(offset, offset + limit);
-
-  // Get attachment counts for received emails
-  const receivedIds = paginated
-    .filter((e) => e.type === "received")
-    .map((e) => e.id);
-
-  let attachmentCounts: Record<string, number> = {};
-  if (receivedIds.length > 0) {
-    const counts = await db
-      .select({
-        emailId: attachments.emailId,
-        count: sql<number>`COUNT(*)`,
-      })
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          receivedIds.map((id) => sql`${id}`),
-          sql`,`,
-        )})`,
-      )
-      .groupBy(attachments.emailId);
-
-    for (const row of counts) {
-      attachmentCounts[row.emailId] = row.count;
-    }
-  }
-
-  // Fetch attachment details for received emails
-  let attachmentDetails: Record<string, any[]> = {};
-  if (receivedIds.length > 0) {
-    const attRows = await db
-      .select()
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          receivedIds.map((id) => sql`${id}`),
-          sql`,`,
-        )})`,
-      );
-
-    for (const att of attRows) {
-      if (!attachmentDetails[att.emailId]) {
-        attachmentDetails[att.emailId] = [];
-      }
-      attachmentDetails[att.emailId].push(att);
-    }
-  }
-
-  // Same lookup for sent emails so the chat/thread surface includes outgoing
-  // attachments. Mirrors conversations-router; sent rows only have
-  // kind='sent' attachment rows, so no kind filter is needed.
-  const sentIds = paginated.filter((e) => e.type === "sent").map((e) => e.id);
-  let sentAttachmentDetails: Record<string, any[]> = {};
-  if (sentIds.length > 0) {
-    const attRows = await db
-      .select()
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          sentIds.map((id) => sql`${id}`),
-          sql`,`,
-        )})`,
-      );
-
-    for (const att of attRows) {
-      if (!sentAttachmentDetails[att.emailId]) {
-        sentAttachmentDetails[att.emailId] = [];
-      }
-      sentAttachmentDetails[att.emailId].push(att);
-    }
-  }
-
-  const result = paginated.map((e) => {
-    const atts =
-      e.type === "sent"
-        ? (sentAttachmentDetails[e.id] ?? [])
-        : (attachmentDetails[e.id] ?? []);
-    const count =
-      e.type === "sent" ? atts.length : (attachmentCounts[e.id] ?? 0);
-    return {
-      ...e,
-      attachmentCount: count,
-      attachments: atts,
-    };
-  });
-
-  // Collect distinct inbox addresses referenced by the returned emails.
-  const inboxAddrs = new Set<string>();
-  for (const e of result) {
-    if (e.type === "received" && e.recipient) inboxAddrs.add(e.recipient);
-    if (e.type === "sent" && e.fromAddress) inboxAddrs.add(e.fromAddress);
-  }
-  const addrList = [...inboxAddrs];
-
-  const identities =
-    addrList.length > 0
-      ? await db
-          .select({
-            email: senderIdentities.email,
-            displayName: senderIdentities.displayName,
-            displayMode: senderIdentities.displayMode,
-          })
-          .from(senderIdentities)
-          .where(inArray(senderIdentities.email, addrList))
-      : [];
-  const identityMap = new Map(identities.map((r) => [r.email, r]));
-
-  const inboxesMeta = addrList.map((email) => {
-    const id = identityMap.get(email);
-    return {
-      email,
-      displayName: id?.displayName ?? null,
-      displayMode: (id?.displayMode ?? "chat") as "thread" | "chat",
-    };
-  });
-
-  return c.json({ emails: result, inboxes: inboxesMeta }, 200);
+  return c.json(result, 200);
 });
 
 // Get single email detail
@@ -438,83 +187,13 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
   const { id } = c.req.valid("param");
   const allowed = c.get("allowedInboxes")!;
 
-  // Look up the id in `emails` (received) first.
-  const row = await db.select().from(emails).where(eq(emails.id, id)).limit(1);
+  const email = await getEmailById(db, id, allowed);
 
-  if (row.length > 0) {
-    if (!allowed.isAdmin && !allowed.inboxes.includes(row[0].recipient)) {
-      return c.json({ error: "Email not found" }, 404);
-    }
-    const atts = await db
-      .select()
-      .from(attachments)
-      .where(eq(attachments.emailId, id));
-    const senderRow = await db
-      .select({ email: people.email })
-      .from(people)
-      .where(eq(people.id, row[0].personId))
-      .limit(1);
-    return c.json(
-      {
-        ...row[0],
-        type: "received",
-        timestamp: row[0].receivedAt,
-        fromAddress: senderRow[0]?.email ?? null,
-        toAddress: null,
-        replyTo: surfaceReplyTo(row[0].rawHeaders, senderRow[0]?.email ?? null),
-        cc: parseCc(row[0].cc),
-        attachments: atts,
-      },
-      200,
-    );
-  }
-
-  // Fall back to `sent_emails`. The reply route already accepts both
-  // tables as reply targets, but historically this lookup didn't —
-  // which meant ReplyComposer's "what you're replying to" panel never
-  // rendered when the user clicked Reply on one of our own outgoing
-  // messages, and the silent .catch in the client masked the 404.
-  const sentRow = await db
-    .select()
-    .from(sentEmails)
-    .where(eq(sentEmails.id, id))
-    .limit(1);
-
-  if (sentRow.length === 0) {
+  if (!email) {
     return c.json({ error: "Email not found" }, 404);
   }
 
-  // Authorization mirrors the reply route's defense-in-depth — only
-  // surface a sent row to a caller who still owns the inbox that sent it.
-  if (!allowed.isAdmin && !allowed.inboxes.includes(sentRow[0].fromAddress)) {
-    return c.json({ error: "Email not found" }, 404);
-  }
-
-  const sent = sentRow[0];
-  const sentAtts = await db
-    .select()
-    .from(attachments)
-    .where(eq(attachments.emailId, id));
-  return c.json(
-    {
-      id: sent.id,
-      type: "sent",
-      personId: sent.personId,
-      recipient: null,
-      fromAddress: sent.fromAddress,
-      toAddress: sent.toAddress,
-      subject: sent.subject,
-      bodyHtml: sent.bodyHtml,
-      bodyText: sent.bodyText,
-      isRead: null,
-      replyTo: null,
-      cc: parseCc(sent.cc),
-      timestamp: sent.sentAt,
-      status: sent.status,
-      attachments: sentAtts,
-    },
-    200,
-  );
+  return c.json(email, 200);
 });
 
 // Mark email read/unread
@@ -544,43 +223,12 @@ emailsRouter.openapi(patchEmailRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
   const { isRead } = c.req.valid("json");
-
-  const email = await db
-    .select({
-      personId: emails.personId,
-      isRead: emails.isRead,
-      recipient: emails.recipient,
-    })
-    .from(emails)
-    .where(eq(emails.id, id))
-    .limit(1);
-
-  if (email.length === 0) {
-    return c.json({ error: "Email not found" }, 404);
-  }
-
   const allowed = c.get("allowedInboxes")!;
-  if (!allowed.isAdmin && !allowed.inboxes.includes(email[0].recipient)) {
+
+  const result = await setEmailRead(db, id, isRead, allowed);
+
+  if (!result) {
     return c.json({ error: "Email not found" }, 404);
-  }
-
-  const wasRead = email[0].isRead === 1;
-  const nowRead = isRead;
-
-  if (wasRead !== nowRead) {
-    await db
-      .update(emails)
-      .set({ isRead: nowRead ? 1 : 0 })
-      .where(eq(emails.id, id));
-
-    // Update person unread count
-    const delta = nowRead ? -1 : 1;
-    await db
-      .update(people)
-      .set({
-        unreadCount: sql`${people.unreadCount} + ${delta}`,
-      })
-      .where(eq(people.id, email[0].personId));
   }
 
   return c.json({ success: true }, 200);
@@ -626,8 +274,7 @@ emailsRouter.openapi(bulkPatchRoute, async (c) => {
       .limit(1);
 
     if (email.length === 0) continue;
-    if (!allowed.isAdmin && !allowed.inboxes.includes(email[0].recipient))
-      continue;
+    if (!isInboxAllowed(allowed, email[0].recipient)) continue;
 
     const wasRead = email[0].isRead === 1;
     if (wasRead !== isRead) {
@@ -671,18 +318,9 @@ emailsRouter.openapi(deleteEmailRoute, async (c) => {
   const { id } = c.req.valid("param");
 
   const allowed = c.get("allowedInboxes")!;
-  if (!allowed.isAdmin) {
-    const row = await db
-      .select({ recipient: emails.recipient })
-      .from(emails)
-      .where(eq(emails.id, id))
-      .limit(1);
-    if (row.length > 0 && !allowed.inboxes.includes(row[0].recipient)) {
-      return c.json({ error: "Email not found" }, 404);
-    }
-  }
-
-  const result = await deleteEmailWithAttachments(db, r2, id);
+  // Scoping is enforced inside deleteEmailWithAttachments so that received and
+  // sent emails are both covered; a denied delete comes back as null → 404.
+  const result = await deleteEmailWithAttachments(db, r2, id, allowed);
   if (!result) {
     return c.json({ error: "Email not found" }, 404);
   }
@@ -861,7 +499,7 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
     .limit(1);
   if (recv.length > 0) {
     const target = recv[0];
-    if (!allowed.isAdmin && !allowed.inboxes.includes(target.recipient)) {
+    if (!isInboxAllowed(allowed, target.recipient)) {
       return c.json({ error: "Email not found" }, 404);
     }
     if (!destEmail) {
@@ -916,11 +554,11 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
   }
   const sent = sentRow[0];
   // Authz: caller must own the inbox this message was sent from.
-  if (!allowed.isAdmin && !allowed.inboxes.includes(sent.fromAddress)) {
+  if (!isInboxAllowed(allowed, sent.fromAddress)) {
     return c.json({ error: "Email not found" }, 404);
   }
   // A new sending identity must be one the caller owns.
-  if (newFrom && !allowed.isAdmin && !allowed.inboxes.includes(newFrom)) {
+  if (newFrom && !isInboxAllowed(allowed, newFrom)) {
     return c.json({ error: "fromAddress must be one of your inboxes." }, 400);
   }
 

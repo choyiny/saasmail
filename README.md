@@ -98,6 +98,47 @@ Different inboxes call for different UX. Set each inbox to render as **Thread** 
 
 One deployment, one person timeline, but the interaction model matches the channel.
 
+### Per-Inbox Forwarding
+
+Give any inbox a **Forward to** address and every message it receives is re-sent to
+that address. Configured per inbox on the **Inboxes** page, right next to display
+name, signature, mode, and member permissions. Off by default.
+
+**Why not just use a Cloudflare Email Routing forwarding rule?** Because Email
+Routing relays forwarded mail from a shared IP pool that Outlook, Hotmail, and Live
+blocklist. Forwards to a Microsoft-hosted mailbox come back as:
+
+```
+permanent error (550): 5.7.1 Unfortunately, messages from [104.30.10.66] weren't
+sent. Please contact your Internet service provider since part of their network is
+on our block list (S3150).
+```
+
+That IP belongs to Cloudflare, not to you, so there is no delisting path. saasmail
+sidesteps it by sending the copy itself through your configured outbound provider —
+different IPs, and DKIM-signed for your own domain, so it authenticates cleanly.
+
+How the forwarded copy looks:
+
+- **From** the inbox address, with the original sender named in the display name
+  (`"Jane Customer (via Acme Support)" <support@acme.com>`). It cannot keep the
+  original `From:` — sending as `jane@example.com` from your infrastructure would
+  fail SPF and DMARC and get filtered harder than the block being avoided.
+- **Reply-To** the original sender, so replying reaches the customer.
+- Original `From` / `Date` / `Subject` / `Cc` and the SPF/DKIM/DMARC verdicts are
+  restated in a header block at the top of the body.
+- Attachments are included, up to your provider's size ceiling; anything too large
+  is named in the body rather than silently dropped. Inline images arrive as regular
+  attachments.
+- The original `Cc` recipients are **not** re-sent to — only the destination is.
+
+Forwarding is best-effort and never blocks inbound mail: it runs after the message
+is safely stored, and after the blocklist and duplicate checks, so blocked senders
+and duplicate deliveries are never forwarded. There is no retry — failures are
+logged. Loops are prevented three ways: an inbox can't forward to itself, can't
+forward to another inbox on the same instance, and any message already carrying the
+`X-SaaSMail-Forwarded-For` header is never forwarded again.
+
 ### Email Templates
 
 Create reusable HTML email templates with `{{variable}}` interpolation. Edit templates with a live HTML editor, preview rendered output, and send them via the API or the UI. Variables are automatically extracted and validated before sending. Templates are scoped to allowed inboxes.
@@ -126,6 +167,105 @@ Admin-controlled onboarding via one-time invite links. New members sign up with 
 ### API Keys
 
 Issue scoped API keys for programmatic access to send email, manage templates, enroll contacts in sequences, and query inbox data. Keys are hashed at rest and follow the `sk_…` format.
+
+### MCP Server (AI assistant access)
+
+Connect Claude, or any other MCP client, directly to your inbox. saasmail
+exposes a [Model Context Protocol](https://modelcontextprotocol.io) endpoint at
+`/mcp` over streamable HTTP, secured with OAuth 2.1.
+
+There is nothing to pre-register. The client discovers the authorization
+server, registers itself (RFC 7591), and sends you through a normal browser
+login plus a consent screen listing exactly what it is asking for. Approve it
+and the client gets a scoped token.
+
+#### Connecting a client
+
+**Claude Code**
+
+```bash
+claude mcp add --transport http saasmail https://your-domain.com/mcp
+```
+
+Then run `/mcp` inside Claude Code and choose `saasmail` to finish the browser
+login. Add `--scope user` to the command to make the connection available in
+every project rather than only the current one.
+
+**claude.ai** — Settings → Connectors → add a custom connector pointing at
+`https://your-domain.com/mcp`. On Team and Enterprise plans, only admins can
+add connectors.
+
+**Any other MCP client** — point it at `https://your-domain.com/mcp` and choose
+streamable HTTP as the transport. Clients configured by file usually want:
+
+```json
+{
+  "mcpServers": {
+    "saasmail": {
+      "type": "http",
+      "url": "https://your-domain.com/mcp"
+    }
+  }
+}
+```
+
+`"streamable-http"` is accepted as a synonym for `"http"`.
+
+#### Prerequisites
+
+Two settings (see [Configuration](#devvars)) must be right, or the handshake
+fails in ways that are hard to read:
+
+- **`BASE_URL` must exactly match the URL you hand the client** — same scheme
+  and host, no trailing slash. Every OAuth identifier derives from it, and a
+  token's audience is fixed at the moment it is issued. Connect to
+  `https://www.example.com/mcp` while `BASE_URL` says `https://example.com` and
+  tokens get minted for one identity and verified against another, so every
+  call returns 401.
+- **`BETTER_AUTH_SECRET` must be set.** It protects the OAuth signing keys.
+
+To check the endpoint is reachable and discovery is wired up before involving a
+client at all:
+
+```bash
+curl https://your-domain.com/.well-known/oauth-protected-resource/mcp
+```
+
+That returns the resource metadata (audience, authorization server, supported
+scopes). An unauthenticated `POST /mcp` should return `401` with a
+`WWW-Authenticate` header pointing back at that same document — that is the
+handshake working, not an error.
+
+#### Scopes
+
+Three scopes gate what a connected client may do:
+
+| Scope          | Grants                                                             |
+| -------------- | ------------------------------------------------------------------ |
+| `email:read`   | `whoami`, `list_people`, `get_person`, `list_emails`, `read_email` |
+| `email:send`   | `send_template`, `enroll_sequence`                                 |
+| `email:manage` | `mark_read`, `delete_email`                                        |
+
+**Access is scoped to the connecting user.** A client acting for a member with
+access to one inbox sees only that inbox — the same permission model as the web
+UI and the HTTP API, enforced by the same code. Admins see everything. A passkey
+is required, the same as for the web API.
+
+**Prefer `email:read` alone.** An assistant connected to a mailbox reads
+attacker-authored content by definition — anyone can email you. Granting
+`email:send` or `email:manage` alongside it means a message in your inbox can
+try to instruct the assistant to mail your data somewhere or delete it. The
+consent screen flags those two scopes for this reason, and `delete_email` is
+permanent (there is no trash). Grant them only to clients you actually trust.
+
+**Revoking access.** Admins can list connected OAuth clients and cut them off at
+**Settings → OAuth apps** (`GET /api/oauth-apps`, `DELETE /api/oauth-apps/{clientId}`).
+Revocation takes effect on the client's next call: the MCP endpoint checks the
+client on every request, so a revoked connection cannot keep working until its
+token expires. Banning a user has the same immediate effect.
+
+Any client can register itself (that is how MCP connectors work), so the list is
+also where you spot one you don't recognise.
 
 ### Webhooks
 
@@ -300,7 +440,7 @@ Edit `.dev.vars`:
 - `BAVIMAIL_API_KEY` and `BAVIMAIL_ALIAS_ID` — your Bavimail bearer token and alias UUID (only if using Bavimail; both must be set)
 - `POSTMARK_API_KEY` — your Postmark server API token (only if using Postmark)
 - `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending, Bavimail, or Postmark)
-- `BETTER_AUTH_SECRET` — generate a random string (`openssl rand -hex 32`)
+- `BETTER_AUTH_SECRET` — **required**; generate a random string (`openssl rand -hex 32`). Signs sessions and protects the OAuth signing keys used by the MCP endpoint. Set this before deploying: without it the auth library silently falls back to a publicly known default value.
 - `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
 
 For production, set these as Cloudflare secrets:
