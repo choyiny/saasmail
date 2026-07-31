@@ -357,7 +357,7 @@ Per-recipient delivery ledger. Enables accurate stalled-retry targeting, an audi
   email: text notNull,
   status: text notNull default 'queued',  // queued | processing | sent | suppressed | retrying |
                                        // retryable_failed | permanent_failed | unknown
-  idempotencyKey: text notNull,       // stable `${campaignId}:${contactId}`; passed to the provider where it supports one
+  idempotencyKey: text notNull,       // stable `${campaignId}:${contactId}`; stored for audit only in v1 — see wiring note below
   outboxId: text,                     // set while a send attempt is in flight via worker/src/lib/outbox.ts
   sentEmailId: text,                  // FK sent_emails.id — null until transport succeeds
   attempts: integer notNull default 0,
@@ -367,6 +367,8 @@ Per-recipient delivery ledger. Enables accurate stalled-retry targeting, an audi
   // unique(campaignId, contactId)
 }
 ```
+
+**Idempotency key wiring (resolves Finding #27):** `idempotencyKey` is persisted for audit/debugging, but no existing `EmailSender` adapter (`resend.ts`, `postmark.ts`, `bavimail.ts`, `cloudflare.ts`) or the shared `SendEmailParams`/`EmailSender.send()` interface accepts an idempotency parameter — persisting the column alone does not make sends provider-idempotent. v1 ships with the column populated but **not** forwarded to the provider; duplicate-send protection comes entirely from the atomic recipient claim + outbox below (Finding #15). Wiring an actual provider-level idempotency header (e.g. Resend's `Idempotency-Key`) is Future Considerations, tracked per adapter since not all four support one.
 
 **Insert semantics (Finding #15):** the coordinator's page insert must use `db.insert(campaignRecipients).values([...page]).onConflictDoNothing({ target: [campaignRecipients.campaignId, campaignRecipients.contactId] })` — a unique index alone does not make a retried plain `INSERT` succeed as a no-op; it makes the *statement* fail unless conflict resolution is specified. Without `onConflictDoNothing`, a replayed coordinator page throws on every retry.
 
@@ -453,6 +455,8 @@ The existing `sent_emails` table gains one nullable column in the campaigns migr
 
 `sent_emails.personId` is already nullable in the current schema — no change needed there. This ensures every campaign send appears in the person's existing email timeline with no new query logic, preserving saasmail's person-first product promise, once `contacts.personId` has been lazily linked via `findOrCreatePersonByEmail` (see `contacts` above).
 
+**Inbound replies (resolves Finding #30):** because `fromAddress` is an existing configured inbox identity, a subscriber's reply to a campaign email is not special-cased — it lands and threads exactly like any other inbound reply to that inbox today, matched through the existing inbound pipeline. No new inbound-handling logic is introduced by this feature.
+
 ---
 
 ## Feature Specifications
@@ -477,7 +481,7 @@ The existing `sent_emails` table gains one nullable column in the campaigns migr
 | DELETE | `/api/lists/:id/members/import/:jobId` | Cancel a running import job |
 | GET | `/api/lists/:id/members/export` | CSV export (query `?status=subscribed`), streamed |
 
-**`DELETE /api/lists/:id` semantics (Finding #12):** if the list has zero campaigns, hard-delete (cascades members). If the list has any campaign history, set `archivedAt` instead — archived lists are hidden from the default list view, cannot receive new campaigns or form submissions, but remain readable for campaign audit history. Returns 200 either way; the response body indicates which path was taken.
+**`DELETE /api/lists/:id` semantics (Finding #12):** if the list has zero campaigns, hard-delete (cascades members). If the list has any campaign history, set `archivedAt` instead — archived lists are hidden from the default list view, cannot receive new campaigns or form submissions, but remain readable for campaign audit history. Returns 200 either way; the response body indicates which path was taken. Archiving is one-way in v1 — there is no unarchive endpoint (resolves Finding #28); a list archived in error with no real campaign history should be recreated instead.
 
 **CSV import — resumable job, not a single request (Finding #2); durable R2-backed storage (Finding #16):**
 - `POST /api/lists/:id/members/import` streams the uploaded file to `env.R2` at `storageKey: imports/{jobId}.csv` (the existing R2 binding — no new binding required), creates an `async_jobs` row (`jobType: 'list_import'`, `status: 'running'`, `storageKey` set), enqueues a coordinator message, and returns immediately with 202 `{ jobId }`
@@ -620,6 +624,8 @@ The header URL uses a v2 token, passed through `sendWithSuppressionCheck`'s new 
 | POST | `/api/campaigns/:id/schedule` | Schedule for future datetime |
 | POST | `/api/campaigns/:id/cancel` | Cancel scheduled campaign |
 | POST | `/api/campaigns/:id/retry` | Re-enqueue a stalled/`completed_with_failures` campaign's retryable recipients |
+| GET | `/api/campaigns/:id/preview` | Render campaign content with sample reserved-variable values, without sending (resolves Finding #25) |
+| POST | `/api/campaigns/:id/test-send` | Send one fully-rendered copy to the requesting admin's own address; never creates `campaign_recipients` rows or affects stats (resolves Finding #25) |
 | GET | `/api/campaigns/:id/stats/timeseries` | Hourly open + click counts (last 24 h from send) |
 | GET | `/api/campaigns/:id/links` | Per-URL unique click count and click rate |
 
@@ -723,7 +729,7 @@ The header URL uses a v2 token, passed through `sendWithSuppressionCheck`'s new 
 
 **Stalled recovery:** see the state machine table above — `POST /api/campaigns/:id/retry` is valid from `stalled` **and** `completed_with_failures` (Finding #17) and re-enqueues recipients with `status IN ('queued', 'retrying', 'retryable_failed')` only, via the same atomic claim used by the original send path. `permanent_failed` and `unknown` recipients are surfaced in the admin UI as needing manual reconciliation and are never included in any retry, automatic or manual.
 
-**List size cap:** `POST /api/campaigns/:id/send` returns 422 if the target list has >10,000 subscribed members. The same cap is enforced on `POST /api/lists/:id/members/import`. This caps fan-out at 100 coordinator pages of 100 recipients each.
+**List size cap (enforcement extended — resolves Finding #29):** `POST /api/campaigns/:id/send` returns 422 if the target list has >10,000 subscribed members. The same cap is enforced on `POST /api/lists/:id/members/import`, on single `POST /api/lists/:id/members` adds, and on `POST /subscribe/:form_id` (the public endpoint returns the same generic 4xx used for other abuse-control rejections in §2, rather than revealing the cap was hit) — every path that can add a `subscribed`/`pending` member checks the list's current count first, not just send/import time. This caps fan-out at 100 coordinator pages of 100 recipients each.
 
 **Shared-queue safeguards (resolves Finding #11):** v1 reuses the existing `EMAIL_QUEUE` binding (`saasmail-sequence-emails`, `max_batch_size: 10`, `max_retries: 3`) for both `campaign_fan_out`/`campaign_send` and existing `SequenceEmailMessage` traffic. To keep a large campaign blast from starving time-sensitive sequence/transactional delivery on the shared consumer:
 - Fan-out pages are enqueued one coordinator message at a time (not all 100 pages at once), which naturally rate-limits how fast `campaign_send` messages enter the shared queue relative to other traffic
@@ -777,7 +783,8 @@ Returns 24 hourly buckets anchored to send time, computed live from `campaign_ev
 `clicks` is the count of distinct `(contact, link)` rows for this URL — equivalently "unique clickers," since the partial unique index on `campaign_events` makes those the same number. There is no separate raw-occurrence count in v1 (see `campaign_events` schema note). `clickRate = clicks / statsDelivered` (delivered, not targeted — targeted includes suppressed/failed recipients who never received the email, Finding #5). Sorted by `clicks` desc.
 
 **Acceptance criteria:**
-- [ ] Admin can create a draft campaign, select a list and template, and preview rendered output
+- [ ] Admin can create a draft campaign, select a list and template, and preview rendered output via `GET /preview`
+- [ ] `POST /test-send` delivers a fully-rendered copy (reserved variables substituted using the requesting admin as the sample recipient) to the admin's own address without creating `campaign_recipients` rows or affecting `statsTargeted` (Finding #25)
 - [ ] Sending to a 500-member list completes fan-out via coordinator pages without any single request exceeding platform limits (Workers Paid)
 - [ ] Sending to a 10,000-member list completes via 100 resumed coordinator pages
 - [ ] Each subscriber receives a unique unsubscribe link (v2 HMAC token, unsubscribe domain key), consistently across body, footer, and both `List-Unsubscribe*` headers, including on retry (Finding #14)
@@ -887,6 +894,8 @@ export const lists = sqliteTable("lists", {
 - `{{subscriber_email}}` — recipient's email address
 - `{{confirm_url}}` — double opt-in confirmation link (confirmation emails only)
 
+**Sanitization at ingestion (resolves Finding #26):** `contacts.name` is untrusted input — sourced from CSV import and the public, unauthenticated subscribe form — unlike existing transactional template variables, which come from an authenticated API caller. Strip control characters (`\r`, `\n`, other C0 controls) from `name` at every write path (form submission, CSV import, `POST /members`) so a personalized value can never inject extra header lines. `{{subscriber_name}}` must be HTML-escaped before interpolation — `lib/interpolate.ts`'s `interpolate()`/`renderTemplate()` do not escape today, so this is a required extension, not existing behavior. `{{subscriber_email}}` needs no additional escaping beyond existing email-format validation.
+
 **Key conventions:**
 - IDs: `nanoid()` (already used everywhere)
 - Timestamps: Unix epoch integers (not ISO strings)
@@ -994,6 +1003,8 @@ export const lists = sqliteTable("lists", {
 - Advance `async_jobs.cursor` only after the corresponding batch insert + `sendBatch()` have both succeeded (Finding #2, #15)
 - Attribute an unsubscribe via the `campaign_unsubscribe_attributions` unique-insert, never a read-then-increment on `campaigns.statsUnsubscribes` (Finding #18)
 - Validate every new migration applies cleanly via `yarn db:migrate:dev` against a clean local D1, with a hand-appended `migrations/meta/_journal.json` entry (Finding #19)
+- Strip control characters from `contacts.name` at every ingestion path (public form, CSV import, single add) and HTML-escape `{{subscriber_name}}` at interpolation time (Finding #26)
+- Check the list's current subscribed-member count against the 10,000 cap on every path that can add a member — not only send/import time (Finding #29)
 
 **Ask first:**
 - Adding any new npm/yarn dependency
@@ -1009,6 +1020,8 @@ export const lists = sqliteTable("lists", {
 - Introducing a `PROVIDER_DAILY_SEND_LIMIT` preflight config value/binding
 - Reducing the fan-out page size to support Workers Free (Future Considerations — v1 requires Workers Paid, Finding #20)
 - Repairing the upstream `0019`/`0020` drizzle-kit snapshot collision to re-enable `yarn db:generate` (out of scope for this feature; Finding #19)
+- Wiring provider-level idempotency headers (e.g. Resend's `Idempotency-Key`) into `EmailSender`/`SendEmailParams` (Finding #27, deferred)
+- Adding an unarchive endpoint for lists (Finding #28, deferred)
 
 **Never:**
 - Commit `UNSUBSCRIBE_SECRET` or any secret to the repo
@@ -1150,6 +1163,18 @@ The feature is complete when:
 
 16. **Click metric model (Finding #21):** the `campaign_events` click partial unique index enforces one row per `(campaign, contact, link)`, so "click count" and "unique clicker count" are the same number by construction. v1 exposes a single `clicks` metric per link; a separate raw (non-deduplicated) occurrence count is Future Considerations, requiring a second append-only event table.
 
+17. **Campaign preview & test-send (Finding #25):** a campaign can be previewed (`GET /preview`, rendered but never sent) and test-sent (`POST /test-send`, one real send to the requesting admin, who stands in as the sample recipient) from `draft`, `scheduled`, or `overdue` status. Test-sends never create `campaign_recipients` rows, never affect `statsTargeted`, and skip the list-size/provider-capacity preflight since they target exactly one address.
+
+18. **Untrusted personalization input (Finding #26):** `contacts.name` is the first template-variable source in this codebase populated by unauthenticated/bulk input (public form, CSV import). Control-character stripping at ingestion and HTML-escaping at interpolation are required extensions to `lib/interpolate.ts`, not pre-existing behavior.
+
+19. **Idempotency key scope (Finding #27):** `campaign_recipients.idempotencyKey` ships in v1 as a stored/audit-only field. Provider-level idempotency (forwarding it as a request header) requires per-adapter extension to `EmailSender`/`SendEmailParams` and is deferred; v1's duplicate-send protection comes entirely from the atomic recipient claim (Finding #15).
+
+20. **List archiving is one-way in v1 (Finding #28):** no unarchive endpoint ships; recreate the list if archived in error with no real campaign history.
+
+21. **List size cap enforced at every write path, not just send-time (Finding #29):** single member add and public form submission both check the 10,000 cap before inserting, in addition to the existing send/import-time checks.
+
+22. **Campaign replies use the existing inbound pipeline unmodified (Finding #30):** no special-cased reply handling is introduced; a subscriber reply threads through exactly like any other inbound message to that inbox.
+
 ---
 
 ## Second-Pass Implementation Gate
@@ -1168,6 +1193,17 @@ Every item below must be true before Phase 1 begins (mirrors `SPEC_ADVERSARIAL_R
 - [x] Workers Free/Paid support and fan-out page size are explicit (Paid required; 100-row pages justified against Queues, not a misattributed D1 limit) (Finding #20)
 - [x] Click metric names match what the schema can compute (single `clicks`/unique-click metric) (Finding #21)
 - [x] Contact linking (`findOrCreatePersonByEmail`, correct precedent) and privacy retention (concrete windows + admin export/erasure endpoints) have implementable workflows (Finding #22–#24)
+
+## Third-Pass Implementation Gate
+
+Added 2026-07-31 against the deployed repo (provider adapters, `lib/interpolate.ts`, `lib/send.ts`). Every item below must also be true before Phase 1 begins:
+
+- [x] Preview and test-send endpoints exist and are excluded from `campaign_recipients`/stats accounting (Finding #25)
+- [x] `contacts.name` sanitization (control-character stripping at ingestion, HTML-escaping at interpolation) is specified as a required extension to `lib/interpolate.ts`, not assumed (Finding #26)
+- [x] `idempotencyKey`'s scope is explicit — stored only, not forwarded to any provider adapter in v1 (Finding #27)
+- [x] List archiving is explicitly one-way in v1 (Finding #28)
+- [x] The 10,000-member list cap is checked on every member-adding path, not only send/import (Finding #29)
+- [x] Inbound reply-threading behavior for campaign sends is explicitly stated rather than left implicit (Finding #30)
 
 ---
 
