@@ -41,8 +41,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `failed` rather than retried forever. (#112)
 - Section nesting is capped at 64 levels; deeper templates are rejected as a
   parse error rather than overflowing the renderer's stack. (#112)
+- Total section expansion is capped at 20,000 body renders per template, as
+  `TEMPLATE_RENDER_ERROR` (a parse error to every caller). The 64-level cap
+  bounds how deep a template nests and the variables cap bounds the payload,
+  but neither bounds their product: a section nested inside itself cannot
+  resolve the inner name against the item frame, so it falls back to the same
+  top-level array and iterates it again, making work grow as N^depth from a
+  few hundred bytes of template. A 20-element array nested 8 deep asks for
+  2.6e10 renders. (#112)
 
 ### Changed
+
+- **Behavior change:** a template variable used inside a section that creates
+  no per-item scope is now validated, and a send that omits it fails with
+  `400` instead of substituting nothing. A section only scopes its body when
+  its value is an array or an object; an inverted `{{^key}}` section, and a
+  `{{#key}}` section given a boolean, render against the top level, so names
+  in those bodies are ordinary top-level lookups. Previously they were treated
+  as per-item and blanked, so `{{^has_orders}}Hi {{first_name}}{{/has_orders}}`
+  mailed "Hi ," and reported success. Names inside an _iterating_ section still
+  render empty when absent, since items legitimately differ in which optional
+  fields they carry. These names do not appear in
+  `GET /api/email-templates/{slug}/variables`, which is a static analysis and
+  cannot know what value a section will receive — the check happens at send
+  time. Sequence sends are unaffected; they have no failure channel and keep
+  rendering as before. (#112)
+- **Behavior change:** a variable used in scalar position that receives an
+  object or an array is rejected with `400` rather than rendering as an empty
+  string. Before the payload schema widened this was unrepresentable; now it
+  parses cleanly and mails a blank. Names used as sections are unaffected, so
+  boolean conditional sections keep working. (#112)
 
 - **BREAKING:** Template variables are now HTML-escaped by default. `{{name}}`
   escapes its value; use `{{{name}}}` to pass pre-rendered HTML through
