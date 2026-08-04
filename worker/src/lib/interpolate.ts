@@ -19,6 +19,22 @@ export class TemplateParseError extends Error {
 }
 
 /**
+ * Thrown when a well-formed template asks for more expansion than the budget
+ * allows (see `MAX_SECTION_RENDERS`).
+ *
+ * Deliberately a subclass of `TemplateParseError`: every caller in the app
+ * already catches that type and turns it into a 400 (or a `failed` sequence
+ * step). A sibling type would escape all of them as an unhandled 500 — the
+ * exact failure mode the depth caps exist to prevent.
+ */
+export class TemplateRenderError extends TemplateParseError {
+  constructor(message: string) {
+    super(message);
+    this.name = "TemplateRenderError";
+  }
+}
+
+/**
  * Escape the five characters that are significant in HTML text and in both
  * quoting styles for attribute values.
  *
@@ -248,22 +264,59 @@ function stringify(value: TemplateValue): string {
   return String(value);
 }
 
+/**
+ * Maximum number of section-body renders in one `interpolate` call.
+ *
+ * `MAX_SECTION_DEPTH` bounds how deeply a template nests and
+ * `MAX_VARIABLE_DEPTH` bounds how deeply the payload nests, but neither
+ * bounds the *product* of the two. Nesting a section inside itself is the
+ * pathological case: the inner `{{#items}}` cannot resolve against the item
+ * frame, so `lookup` falls back to the same top-level array and iterates it
+ * again — work grows as N^depth while the template stays a few hundred bytes
+ * and the payload stays flat. A 20-element array nested 8 deep asks for
+ * 2.6e10 renders; the isolate dies well before that, and on the sequence path
+ * the queue retries and burns the CPU again.
+ *
+ * The cap is on total body renders across the whole call rather than per
+ * section, since a template can also blow up by breadth. 20,000 is far above
+ * anything real — a 1,000-row invoice table is 1,000 — and costs about a
+ * millisecond when legitimately reached.
+ */
+export const MAX_SECTION_RENDERS = 20_000;
+
 /** Render-time settings threaded down the tree. */
 interface RenderContext {
   /** HTML-escape substituted values. False for plain-text output. */
   escape: boolean;
-  /**
-   * True while rendering a section body.
-   *
-   * It changes what an unresolved variable does. At top level, an unfound name
-   * survives as its own source text because `renderTemplate` refuses to send
-   * such a template at all — the verbatim `{{token}}` is a debugging signal
-   * that never reaches a recipient. Inside a section it is the opposite: those
-   * names resolve per item and are deliberately never `required`, so nothing
-   * upstream catches them, and emitting the source would mail a literal
-   * `{{empty_msg}}` to a customer. Inside a section, unfound renders empty.
-   */
+  /** True while rendering any section body; governs what an unresolved name RENDERS. */
   inSection: boolean;
+  /**
+   * True once an enclosing section has pushed a new scope frame — that is,
+   * once names are being resolved against a per-item context.
+   *
+   * It changes what an unresolved variable does. Where no frame has been
+   * pushed, an unfound name survives as its own source text and is recorded
+   * in `missing`, because it can only ever have come from the top level and
+   * a caller simply failed to supply it. Under a pushed frame it is the
+   * opposite: the name resolves per item, items legitimately differ in which
+   * optional fields they carry, and emitting the source would mail a literal
+   * `{{note}}` to a customer. There, unfound renders empty.
+   *
+   * This is deliberately *not* "are we inside a section". An inverted section
+   * pushes no frame, and neither does a truthy scalar one, so their bodies
+   * are plain top-level lookups; treating them as per-item was how
+   * `{{^has_orders}}Hi {{first_name}}{{/has_orders}}` came to mail "Hi ,"
+   * with the send reported successful.
+   */
+  scoped: boolean;
+  /**
+   * Names that resolved nowhere while no frame was pushed. `renderTemplate`
+   * turns a non-empty set into a failed send; `interpolate` on its own leaves
+   * it unread, which is what keeps the sequence path's lax behavior intact.
+   */
+  missing: Set<string>;
+  /** Remaining section-body renders; shared across the whole call. */
+  budget: { left: number };
 }
 
 function renderNodes(
@@ -280,10 +333,19 @@ function renderNodes(
     if (node.kind === "var") {
       const { found, value } = lookup(stack, node.name);
       if (!found) {
-        // Optional tags collapse to nothing; so do section-body tags (see
-        // `RenderContext.inSection`). A required top-level one survives
-        // verbatim so `renderTemplate`'s check fails the send rather than
-        // mailing a silent blank.
+        // Two separate decisions, deliberately kept apart.
+        //
+        // What to RENDER is unchanged: optional tags and anything inside a
+        // section collapse to nothing, so the empty-state pattern never mails
+        // a literal `{{empty_msg}}`; a top-level name survives as its source
+        // as the debugging signal it has always been.
+        //
+        // Whether it is a caller ERROR is the new part, and turns on
+        // `scoped` rather than `inSection` — see `RenderContext.scoped`. A
+        // name under an inverted or truthy-scalar section resolved against
+        // the top level and simply was not supplied, so it is recorded even
+        // though it still renders empty.
+        if (!node.optional && !ctx.scoped) ctx.missing.add(node.name);
         out += node.optional || ctx.inSection ? "" : node.source;
         continue;
       }
@@ -318,22 +380,47 @@ function renderSection(
 ): string {
   const { value } = lookup(stack, node.name);
   const truthy = isTruthy(value);
+
+  /** Charge one body render against the shared budget. */
+  const spend = () => {
+    if (--ctx.budget.left < 0) {
+      throw new TemplateRenderError(
+        `Template expanded past the ${MAX_SECTION_RENDERS}-render limit at {{#${node.name}}} — a section nested inside itself re-iterates the same value at every level.`,
+      );
+    }
+  };
+
+  // Inside a section for rendering purposes (unresolved names collapse to
+  // nothing) but NOT scoped, which stays false until a frame is actually
+  // pushed. Inverted and truthy-scalar sections render against the unchanged
+  // stack, so their bodies are plain top-level lookups.
   const inner: RenderContext = ctx.inSection
     ? ctx
     : { ...ctx, inSection: true };
+  const scopedInner: RenderContext = inner.scoped
+    ? inner
+    : { ...inner, scoped: true };
 
-  if (node.inverted)
-    return truthy ? "" : renderNodes(node.children, stack, inner);
+  if (node.inverted) {
+    if (truthy) return "";
+    spend();
+    return renderNodes(node.children, stack, inner);
+  }
   if (!truthy) return "";
 
   if (Array.isArray(value)) {
     return value
-      .map((item) => renderNodes(node.children, [...stack, item], inner))
+      .map((item) => {
+        spend();
+        return renderNodes(node.children, [...stack, item], scopedInner);
+      })
       .join("");
   }
   if (value && typeof value === "object") {
-    return renderNodes(node.children, [...stack, value], inner);
+    spend();
+    return renderNodes(node.children, [...stack, value], scopedInner);
   }
+  spend();
   return renderNodes(node.children, stack, inner);
 }
 
@@ -347,6 +434,17 @@ export interface InterpolateOptions {
    * equivalent, and HTML-emitting filters such as `nl2br` are skipped.
    */
   escape?: boolean;
+  /**
+   * Collects names that resolved nowhere outside a per-item frame. Supplied
+   * by `renderTemplate` so it can fail the send; callers that want the lax
+   * render (the sequence path) simply omit it.
+   */
+  collectMissing?: Set<string>;
+  /**
+   * Shares one render budget across several `interpolate` calls, so a subject
+   * and body rendered for the same send cannot each spend the full cap.
+   */
+  budget?: { left: number };
 }
 
 /**
@@ -365,6 +463,9 @@ export function interpolate(
   return renderNodes(parse(template), [variables], {
     escape: options.escape !== false,
     inSection: false,
+    scoped: false,
+    missing: options.collectMissing ?? new Set<string>(),
+    budget: options.budget ?? { left: MAX_SECTION_RENDERS },
   });
 }
 
@@ -514,13 +615,69 @@ export function renderTemplate(
     return { ok: false, missingVariables, requiredVariables };
   }
 
-  return {
-    ok: true,
+  // A name that is required and is never used as a section is only ever
+  // substituted as `{{name}}`, where `stringify` renders an object or array
+  // as "". Before the payload schema widened, the flat string record made
+  // that unrepresentable; now it parses cleanly and mails a blank, so the
+  // shape has to be checked here or not at all.
+  const sectionNames = new Set(analysis.sections.map((s) => s.name));
+  const wrongShape = requiredVariables.filter(
+    (v) =>
+      !sectionNames.has(v) &&
+      typeof variables[v] === "object" &&
+      variables[v] !== null,
+  );
+  if (wrongShape.length > 0) {
+    return {
+      ok: false,
+      missingVariables: [],
+      requiredVariables,
+      parseError: `${wrongShape.map((v) => `{{${v}}}`).join(", ")} ${wrongShape.length === 1 ? "expects" : "expect"} a text value, but an object or array was supplied — it would render as nothing.`,
+    };
+  }
+
+  // One budget for the pair: a send should not be able to spend the cap twice
+  // by splitting the work between subject and body.
+  const budget = { left: MAX_SECTION_RENDERS };
+  const collectMissing = new Set<string>();
+  let subject: string;
+  let bodyHtml: string;
+  try {
     // The subject is a plain-text header, not HTML — rendering it through the
     // escaping path would put `&amp;` and `&#39;` in front of a recipient.
-    subject: interpolate(template.subject, variables, { escape: false }),
-    bodyHtml: interpolate(template.bodyHtml, variables),
-  };
+    subject = interpolate(template.subject, variables, {
+      escape: false,
+      collectMissing,
+      budget,
+    });
+    bodyHtml = interpolate(template.bodyHtml, variables, {
+      collectMissing,
+      budget,
+    });
+  } catch (err) {
+    if (err instanceof TemplateParseError) {
+      return {
+        ok: false,
+        missingVariables: [],
+        requiredVariables,
+        parseError: err.message,
+      };
+    }
+    throw err;
+  }
+
+  // Names that resolved nowhere while no per-item frame was in scope. These
+  // are invisible to `analyzeTemplate` — it cannot tell statically whether a
+  // section will push a frame — so this is the only place they surface.
+  if (collectMissing.size > 0) {
+    return {
+      ok: false,
+      missingVariables: Array.from(collectMissing),
+      requiredVariables,
+    };
+  }
+
+  return { ok: true, subject, bodyHtml };
 }
 
 export type Node =

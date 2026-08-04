@@ -637,6 +637,17 @@ describe("sequence processor - template rendering", () => {
     expect(row[0].status).toBe("failed");
 
     expect(await db.select().from(sentEmails)).toHaveLength(0);
+
+    // The enrollment must not be left `active`. `enrollPersonInSequence`
+    // rejects anyone with an active enrollment, so a drip whose last step has
+    // a broken template would otherwise lock that contact out of every future
+    // sequence, permanently, with one console.error as the only trace.
+    const enr = await db
+      .select()
+      .from(sequenceEnrollments)
+      .where(eq(sequenceEnrollments.id, "enr-1"))
+      .limit(1);
+    expect(enr[0].status).toBe("completed");
   });
 
   it("does not HTML-escape the subject, but still escapes the body", async () => {

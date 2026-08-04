@@ -90,6 +90,29 @@ export async function handleQueueBatch(
   }
 }
 
+/**
+ * Mark a step terminally failed and settle the enrollment.
+ *
+ * Every terminal branch must go through here rather than updating the row and
+ * returning. `completeEnrollmentIfDone` lives at the very end of
+ * `processSequenceEmail`, so an early return skips it and leaves the
+ * enrollment `active` with no outstanding steps — and since
+ * `enrollPersonInSequence` refuses to enroll anyone who already has an active
+ * enrollment, that contact can never be enrolled in any sequence again. A
+ * failed final step should end the drip, not wedge the person.
+ */
+async function failStep(
+  db: ReturnType<typeof drizzle>,
+  sequenceEmailId: string,
+  enrollmentId: string,
+): Promise<void> {
+  await db
+    .update(sequenceEmails)
+    .set({ status: "failed" })
+    .where(eq(sequenceEmails.id, sequenceEmailId));
+  await completeEnrollmentIfDone(db, enrollmentId);
+}
+
 export async function processSequenceEmail(
   db: ReturnType<typeof drizzle>,
   sender: EmailSender,
@@ -179,10 +202,7 @@ export async function processSequenceEmail(
     .limit(1);
 
   if (templateRows.length === 0) {
-    await db
-      .update(sequenceEmails)
-      .set({ status: "failed" })
-      .where(eq(sequenceEmails.id, sequenceEmailId));
+    await failStep(db, sequenceEmailId, enrollment.id);
     return;
   }
 
@@ -196,10 +216,7 @@ export async function processSequenceEmail(
     .limit(1);
 
   if (personRows.length === 0) {
-    await db
-      .update(sequenceEmails)
-      .set({ status: "failed" })
-      .where(eq(sequenceEmails.id, sequenceEmailId));
+    await failStep(db, sequenceEmailId, enrollment.id);
     return;
   }
 
@@ -238,10 +255,7 @@ export async function processSequenceEmail(
           error: err.message,
         }),
       );
-      await db
-        .update(sequenceEmails)
-        .set({ status: "failed" })
-        .where(eq(sequenceEmails.id, sequenceEmailId));
+      await failStep(db, sequenceEmailId, enrollment.id);
       return;
     }
     throw err;
