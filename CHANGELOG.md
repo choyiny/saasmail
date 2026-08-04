@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /api/send/reply/{id}` — those routes could not return 400 for this
   reason before. A sequence step whose template does not parse is marked
   `failed` rather than retried forever. (#112)
+- Template `variables` payloads may nest objects and arrays up to 32 levels
+  deep; deeper is rejected with `400` naming the limit. Zod's recursive descent
+  through the self-referencing value schema has no bound of its own, so a
+  payload of a few KB but thousands of levels deep overflowed the stack — a
+  `RangeError`, which is not a `ZodError` and so surfaced as an unhandled 500.
+  The guard applies on every send path, including the MCP tools. (#227)
+- Templates are validated when they are written. `POST` and `PUT
+/api/email-templates` reject a template whose tags do not parse, with the
+  diagnostic naming the offending tag. Previously a broken template stored
+  cleanly and failed much later — on every send, on `/variables`, and by
+  marking sequence steps `failed` terminally, with a worker log as the only
+  trace. `PUT` validates the template as it will exist after the merge, since
+  editing only the subject can still unbalance a section across the pair.
+  (#227)
 - Section nesting is capped at 64 levels; deeper templates are rejected as a
   parse error rather than overflowing the renderer's stack. (#112)
 - Total section expansion is capped at 20,000 body renders per template, as
@@ -83,14 +97,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{{{name}}}` rendered as `{` + the value + `}`; it is now an unescaped
   substitution. Templates that only use `{{key}}` and ordinary text are
   unaffected. (#112)
-- `GET /api/email-templates/{slug}/variables` now returns only the **required**
-  variables — the names a caller must supply or the send is rejected. Names
-  marked optional with `{{key?}}` and names used inside a `{{#section}}` body
-  are deliberately omitted: a section-body name resolves against the current
-  item at render time, so it is not something the caller passes at the top
-  level, and listing it would suggest a contract that does not exist. The
-  response is unchanged for templates that use only `{{key}}` tags; it differs
-  only once a template adopts the new syntax. (#112)
+- `GET /api/email-templates/{slug}/variables` returns three lists. `variables`
+  keeps its name, its `string[]` type, and its meaning — the names a caller
+  must supply or the send is rejected — so existing integrations are
+  unaffected. Alongside it, `optional` carries names that render empty when
+  absent (`{{key?}}` tags and inverted sections), and `sections` carries each
+  section's name, whether it is inverted, and the names its body references.
+  Section-body names stay out of `variables`: they resolve against the current
+  item at render time, so listing them would suggest a contract that does not
+  exist. (#112, #227)
 
 ### Known limitations
 
