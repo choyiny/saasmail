@@ -4,19 +4,46 @@ import { nanoid } from "nanoid";
 import { assertInboxAllowed, isInboxAllowed } from "../lib/inbox-permissions";
 import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
-import { extractVariables } from "../lib/interpolate";
+import { analyzeTemplate, TemplateParseError } from "../lib/interpolate";
 import { sendTemplate } from "../lib/send-template";
 import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
   ErrorSchema,
   inboxForbiddenResponse,
+  SendPathErrorSchema,
 } from "../lib/openapi-send-errors";
+import { templateVariablesSchema } from "../lib/template-variables-schema";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
   Variables: Variables;
 }>();
+
+// The variables schema and its depth guard are shared with the reply,
+// sequence-enrollment, and MCP paths — see lib/template-variables-schema.ts.
+
+/**
+ * Reject a template whose tags do not parse, at write time.
+ *
+ * Without this, an unbalanced section or unknown filter stores happily and
+ * only fails much later: every send and every `/variables` call returns 400,
+ * and `sequence-processor` marks each affected step `failed` — terminal,
+ * since the poller only ever re-selects `pending` rows. Enrolled recipients
+ * silently never receive the email and the only trace is a worker log.
+ * Failing the write puts the diagnostic in front of the person who typed it.
+ *
+ * Returns the parse error message, or null when the template is fine.
+ */
+function templateParseError(subject: string, bodyHtml: string): string | null {
+  try {
+    analyzeTemplate(subject, bodyHtml);
+    return null;
+  } catch (err) {
+    if (err instanceof TemplateParseError) return err.message;
+    throw err;
+  }
+}
 
 const EmailTemplateSchema = z.object({
   id: z.string(),
@@ -51,12 +78,22 @@ const createTemplateRoute = createRoute({
   },
   responses: {
     ...json201Response(EmailTemplateSchema, "Created email template"),
+    400: {
+      description:
+        "Template has an unbalanced section or an unknown filter — see the parse diagnostic.",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
 emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
   const db = c.get("db");
   const { slug, name, subject, bodyHtml, fromAddress } = c.req.valid("json");
+
+  const parseError = templateParseError(subject, bodyHtml);
+  if (parseError) {
+    return c.json({ error: parseError }, 400);
+  }
 
   const allowed = c.get("allowedInboxes")!;
   if (fromAddress != null) {
@@ -175,6 +212,11 @@ const updateTemplateRoute = createRoute({
   },
   responses: {
     ...json200Response(EmailTemplateSchema, "Updated email template"),
+    400: {
+      description:
+        "Template has an unbalanced section or an unknown filter — see the parse diagnostic.",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -196,6 +238,17 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
   const allowed = c.get("allowedInboxes")!;
   if (updates.fromAddress !== undefined && updates.fromAddress !== null) {
     assertInboxAllowed(allowed, updates.fromAddress);
+  }
+
+  // Both fields are optional on this route, so validate the template as it
+  // will exist AFTER the merge — editing only the subject can still leave a
+  // section unbalanced across the pair.
+  const parseError = templateParseError(
+    updates.subject ?? existing[0].subject,
+    updates.bodyHtml ?? existing[0].bodyHtml,
+  );
+  if (parseError) {
+    return c.json({ error: parseError }, 400);
   }
 
   await db
@@ -254,9 +307,33 @@ const getTemplateVariablesRoute = createRoute({
   },
   responses: {
     ...json200Response(
-      z.object({ variables: z.array(z.string()) }),
+      z.object({
+        variables: z.array(z.string()).openapi({
+          description: "Variables the caller must supply, or the send fails.",
+        }),
+        optional: z.array(z.string()).openapi({
+          description:
+            "Variables that render empty when absent — `{{key?}}` tags and inverted sections.",
+        }),
+        sections: z
+          .array(
+            z.object({
+              name: z.string(),
+              inverted: z.boolean(),
+              variables: z.array(z.string()),
+            }),
+          )
+          .openapi({
+            description:
+              "Sections and the names their bodies reference. Those names resolve per-item and are not required at the top level.",
+          }),
+      }),
       "Template variables",
     ),
+    400: {
+      description: "Template has an unbalanced section",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -275,11 +352,24 @@ emailTemplatesRouter.openapi(getTemplateVariablesRoute, async (c) => {
   }
 
   const template = rows[0];
-  const subjectVars = extractVariables(template.subject);
-  const bodyVars = extractVariables(template.bodyHtml);
-  const allVars = Array.from(new Set([...subjectVars, ...bodyVars]));
+  let analysis;
+  try {
+    analysis = analyzeTemplate(template.subject, template.bodyHtml);
+  } catch (err) {
+    if (err instanceof TemplateParseError) {
+      return c.json({ error: err.message }, 400);
+    }
+    throw err;
+  }
 
-  return c.json({ variables: allVars }, 200);
+  return c.json(
+    {
+      variables: analysis.required,
+      optional: analysis.optional,
+      sections: analysis.sections,
+    },
+    200,
+  );
 });
 
 // --- SEND ---
@@ -297,7 +387,7 @@ const sendTemplateRoute = createRoute({
           schema: z.object({
             to: z.string().email(),
             fromAddress: z.string().email(),
-            variables: z.record(z.string(), z.string()).optional().default({}),
+            variables: templateVariablesSchema.optional().default({}),
           }),
         },
       },
@@ -318,15 +408,10 @@ const sendTemplateRoute = createRoute({
       "Email sent",
     ),
     400: {
-      description: "Missing required template variables",
+      description:
+        "Missing required template variables, or the template has an unbalanced section.",
       content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-            missingVariables: z.array(z.string()),
-            requiredVariables: z.array(z.string()),
-          }),
-        },
+        "application/json": { schema: SendPathErrorSchema },
       },
     },
     ...inboxForbiddenResponse,
@@ -355,6 +440,9 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   if (!result.ok) {
     if (result.code === "TEMPLATE_NOT_FOUND") {
       return c.json({ error: result.message }, 404);
+    }
+    if (result.code === "TEMPLATE_PARSE_ERROR") {
+      return c.json({ error: result.message }, 400);
     }
     return c.json(
       {

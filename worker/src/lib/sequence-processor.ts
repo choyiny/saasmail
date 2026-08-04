@@ -10,7 +10,11 @@ import { emailTemplates } from "../db/email-templates.schema";
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
-import { interpolate } from "./interpolate";
+import {
+  interpolate,
+  TemplateParseError,
+  type TemplateVariables,
+} from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
 import { sendViaOutbox } from "./outbox";
@@ -88,6 +92,29 @@ export async function handleQueueBatch(
       msg.retry();
     }
   }
+}
+
+/**
+ * Mark a step terminally failed and settle the enrollment.
+ *
+ * Every terminal branch must go through here rather than updating the row and
+ * returning. `completeEnrollmentIfDone` lives at the very end of
+ * `processSequenceEmail`, so an early return skips it and leaves the
+ * enrollment `active` with no outstanding steps — and since
+ * `enrollPersonInSequence` refuses to enroll anyone who already has an active
+ * enrollment, that contact can never be enrolled in any sequence again. A
+ * failed final step should end the drip, not wedge the person.
+ */
+async function failStep(
+  db: ReturnType<typeof drizzle>,
+  sequenceEmailId: string,
+  enrollmentId: string,
+): Promise<void> {
+  await db
+    .update(sequenceEmails)
+    .set({ status: "failed" })
+    .where(eq(sequenceEmails.id, sequenceEmailId));
+  await completeEnrollmentIfDone(db, enrollmentId);
 }
 
 export async function processSequenceEmail(
@@ -179,10 +206,7 @@ export async function processSequenceEmail(
     .limit(1);
 
   if (templateRows.length === 0) {
-    await db
-      .update(sequenceEmails)
-      .set({ status: "failed" })
-      .where(eq(sequenceEmails.id, sequenceEmailId));
+    await failStep(db, sequenceEmailId, enrollment.id);
     return;
   }
 
@@ -196,26 +220,50 @@ export async function processSequenceEmail(
     .limit(1);
 
   if (personRows.length === 0) {
-    await db
-      .update(sequenceEmails)
-      .set({ status: "failed" })
-      .where(eq(sequenceEmails.id, sequenceEmailId));
+    await failStep(db, sequenceEmailId, enrollment.id);
     return;
   }
 
   const person = personRows[0];
 
   // Merge variables: person auto-vars + enrollment custom vars (custom wins)
-  const customVars: Record<string, string> = JSON.parse(enrollment.variables);
-  const mergedVars: Record<string, string> = {
+  const customVars: TemplateVariables = JSON.parse(enrollment.variables);
+  const mergedVars: TemplateVariables = {
     name: person.name ?? "",
     email: person.email,
     ...customVars,
   };
 
-  // Interpolate template
-  const renderedSubject = interpolate(template.subject, mergedVars);
-  const renderedHtml = interpolate(template.bodyHtml, mergedVars);
+  // Interpolate template. The subject is a plain-text header, so it renders
+  // without HTML escaping; the body is HTML and stays escaped.
+  //
+  // A malformed template (unbalanced sections, unknown filter) throws
+  // TemplateParseError. Without this catch the throw would reach the queue
+  // handler, which retries — leaving the row stuck on "queued" forever and
+  // the enrollment never completing. Treat it as final, exactly like a
+  // missing template or missing person above.
+  let renderedSubject: string;
+  let renderedHtml: string;
+  try {
+    renderedSubject = interpolate(template.subject, mergedVars, {
+      escape: false,
+    });
+    renderedHtml = interpolate(template.bodyHtml, mergedVars);
+  } catch (err) {
+    if (err instanceof TemplateParseError) {
+      console.error(
+        "[sequence] template parse error",
+        JSON.stringify({
+          sequenceEmailId,
+          templateSlug: seqEmail.templateSlug,
+          error: err.message,
+        }),
+      );
+      await failStep(db, sequenceEmailId, enrollment.id);
+      return;
+    }
+    throw err;
+  }
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);

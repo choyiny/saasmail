@@ -31,6 +31,7 @@ import {
 import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
+import { analyzeTemplateClient, chipLabel } from "@/lib/template-syntax";
 import { cn } from "@/lib/utils";
 
 const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
@@ -52,18 +53,6 @@ interface ReplyComposerProps {
 }
 
 type Tab = "freeform" | "template";
-
-function extractVariables(subject: string, bodyHtml: string): string[] {
-  const vars = new Set<string>();
-  const regex = /\{\{(\w+)\}\}/g;
-  for (const src of [subject, bodyHtml]) {
-    let m: RegExpExecArray | null;
-    while ((m = regex.exec(src)) !== null) {
-      vars.add(m[1]);
-    }
-  }
-  return Array.from(vars);
-}
 
 export default function ReplyComposer({
   emailId,
@@ -175,13 +164,31 @@ export default function ReplyComposer({
   const selectedTemplate =
     templates.find((t) => t.slug === selectedSlug) ?? null;
 
-  const requiredVars = useMemo(() => {
-    if (!selectedTemplate) return [];
-    return extractVariables(
-      selectedTemplate.subject,
-      selectedTemplate.bodyHtml,
-    );
+  // Only top-level names, same contract the send API validates — names
+  // scoped inside a {{#section}} resolve per item, not from this form, so
+  // they're deliberately excluded (see src/lib/template-syntax.ts).
+  const templateAnalysis = useMemo(() => {
+    if (!selectedTemplate) return null;
+    try {
+      return analyzeTemplateClient(
+        selectedTemplate.subject,
+        selectedTemplate.bodyHtml,
+      );
+    } catch {
+      // A stored template shouldn't fail to parse, but if one somehow does,
+      // fall back to no prompts rather than crashing the composer.
+      return null;
+    }
   }, [selectedTemplate]);
+  const requiredVars = templateAnalysis?.required ?? [];
+  // A required name that's actually a section (e.g. {{#items}}) needs an
+  // array of objects, not the plain string this form's inputs collect — used
+  // below to warn that such a template can't be filled in from here. The
+  // chip text itself comes from the shared `chipLabel`.
+  const sectionVarNames = useMemo(
+    () => new Set((templateAnalysis?.sections ?? []).map((s) => s.name)),
+    [templateAnalysis],
+  );
 
   useEffect(() => {
     if (!selectedTemplate) return;
@@ -467,7 +474,9 @@ export default function ReplyComposer({
                                   className="grid grid-cols-[120px_1fr] items-center gap-3"
                                 >
                                   <label className="truncate font-mono text-xs text-text-tertiary">
-                                    {`{{${v}}}`}
+                                    {templateAnalysis
+                                      ? chipLabel(v, templateAnalysis)
+                                      : `{{${v}}}`}
                                   </label>
                                   <input
                                     value={templateVars[v] ?? ""}
@@ -482,6 +491,15 @@ export default function ReplyComposer({
                                 </div>
                               ))}
                             </div>
+                            {[...sectionVarNames].some((n) =>
+                              requiredVars.includes(n),
+                            ) && (
+                              <p className="mt-2 text-[11px] font-light text-text-tertiary">
+                                Section variables (#) need an array of objects —
+                                this form can only send plain text, so send
+                                those via the API instead.
+                              </p>
+                            )}
                           </div>
                         )}
                       </>

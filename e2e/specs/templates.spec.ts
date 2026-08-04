@@ -3,10 +3,14 @@
 //
 // Preview mechanics: TemplateEditorPage uses a Code/Split/Preview view
 // toggle that defaults to split-pane. Left pane = HTML Source
-// (CodeMirror). Right pane = an <iframe srcDoc={bodyHtml}>. There are
-// no variable-value input fields in the UI — the preview renders the
-// raw HTML including any {{variable}} tokens. Variable names are shown
-// as read-only chips in a Variables row above the editor.
+// (CodeMirror). Right pane = an <iframe srcDoc={...}> rendered through the
+// same client-side analyzer/renderer as the variable chips (see
+// src/lib/template-syntax.ts). There are no variable-value input fields in
+// the UI — instead each detected variable is substituted with a sample
+// placeholder shaped like `<name>`, HTML-escaped like a real send, so a
+// `{{name}}` tag in the source renders as the literal text "<name>" in the
+// preview rather than the raw token. Variable names are shown as read-only
+// chips, grouped by Required/Optional/Sections, above the editor.
 //
 // The update API uses PUT /api/email-templates/:slug (not PATCH).
 
@@ -65,10 +69,12 @@ test.describe.serial("templates CRUD", () => {
       page.locator("code").filter({ hasText: "{{product}}" }),
     ).toBeVisible();
 
-    // Preview iframe should contain the typed HTML
+    // Preview iframe renders the template with sample values substituted —
+    // "{{name}}" becomes the literal text "<name>" (HTML-escaped, so it
+    // shows as text rather than being parsed as a tag), not the raw token.
     const previewFrame = page.frameLocator('iframe[title="Email preview"]');
-    await expect(previewFrame.locator("body")).toContainText("{{name}}");
-    await expect(previewFrame.locator("body")).toContainText("{{product}}");
+    await expect(previewFrame.locator("body")).toContainText("<name>");
+    await expect(previewFrame.locator("body")).toContainText("<product>");
 
     // Save and expect redirect back to /templates. The header action
     // button reads "Create template" in new mode, "Save changes" in edit.

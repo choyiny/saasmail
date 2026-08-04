@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:workers";
 import {
   applyMigrations,
@@ -11,6 +11,12 @@ import {
 import { suppressions } from "../db/suppressions.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
+import { MAX_VARIABLE_DEPTH } from "../lib/template-variables-schema";
+
+/** Builds a value nested `n` array-levels deep, terminating in a string leaf. */
+function buildNestedArray(n: number): unknown {
+  return n <= 0 ? "leaf" : [buildNestedArray(n - 1)];
+}
 
 describe("email templates router", () => {
   let apiKey: string;
@@ -55,6 +61,41 @@ describe("email templates router", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("rejects a template whose sections do not parse", async () => {
+      // Storing this would defer the failure to send time, where every send
+      // 400s and every sequence step is marked `failed` — a terminal state
+      // the poller never revisits, with no signal to the author.
+      const res = await authFetch("/api/email-templates", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          slug: "broken",
+          name: "Broken",
+          subject: "Hi",
+          bodyHtml: "{{#items}}<li>{{label}}</li>",
+        }),
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toContain("Unclosed section");
+    });
+
+    it("rejects a template with an unknown filter", async () => {
+      const res = await authFetch("/api/email-templates", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          slug: "bad-filter",
+          name: "Bad filter",
+          subject: "Hi",
+          bodyHtml: "<p>{{name|upper}}</p>",
+        }),
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toContain("Unknown filter");
+    });
   });
 
   describe("GET /api/email-templates", () => {
@@ -89,6 +130,38 @@ describe("email templates router", () => {
     });
   });
 
+  describe("GET /api/email-templates/:slug/variables", () => {
+    it("returns the required variables", async () => {
+      await createTestTemplate({
+        slug: "welcome",
+        subject: "Hello {{name}}",
+        bodyHtml: "<p>Hi {{name}}, from {{company}}</p>",
+      });
+
+      const res = await authFetch("/api/email-templates/welcome/variables", {
+        apiKey,
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(new Set(data.variables)).toEqual(new Set(["name", "company"]));
+    });
+
+    it("returns 400, not 500, for a template with an unbalanced section", async () => {
+      await createTestTemplate({
+        slug: "broken",
+        subject: "Hello",
+        bodyHtml: "{{#a}}oops",
+      });
+
+      const res = await authFetch("/api/email-templates/broken/variables", {
+        apiKey,
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toBeTruthy();
+    });
+  });
+
   describe("PUT /api/email-templates/:slug", () => {
     it("updates template fields", async () => {
       await createTestTemplate({ slug: "welcome" });
@@ -114,6 +187,48 @@ describe("email templates router", () => {
         body: JSON.stringify({ name: "Test" }),
       });
       expect(res.status).toBe(404);
+    });
+
+    it("rejects an update that leaves the template unparseable", async () => {
+      await createTestTemplate({ slug: "welcome" });
+
+      const res = await authFetch("/api/email-templates/welcome", {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({ bodyHtml: "{{#items}}<li>{{label}}</li>" }),
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain("Unclosed section");
+    });
+
+    it("validates the merged template, not just the fields being changed", async () => {
+      // Both fields are optional on this route. A body that opens a section
+      // closed by the subject only parses as a pair, so validating the
+      // incoming field alone would reject a template that is in fact fine —
+      // and, in the reverse direction, accept one that is not.
+      await createTestTemplate({
+        slug: "paired",
+        subject: "Hi",
+        bodyHtml: "<p>plain</p>",
+      });
+
+      // Changing only the subject must still be checked against the stored body.
+      const bad = await authFetch("/api/email-templates/paired", {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({ subject: "{{/nope}}" }),
+      });
+      expect(bad.status).toBe(400);
+
+      // And a well-formed pair still goes through.
+      const good = await authFetch("/api/email-templates/paired", {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({
+          bodyHtml: "{{#items}}<li>{{label}}</li>{{/items}}",
+        }),
+      });
+      expect(good.status).toBe(200);
     });
   });
 
@@ -184,6 +299,137 @@ describe("email templates router", () => {
       // No sent_emails row should have been written for the suppressed send
       const sentRows = await db.select().from(sentEmails);
       expect(sentRows).toHaveLength(0);
+    });
+
+    it("returns TEMPLATE_PARSE_ERROR with the parse diagnostic for an unbalanced section", async () => {
+      await createTestTemplate({
+        slug: "broken",
+        subject: "Hi",
+        bodyHtml: "{{#a}}oops",
+      });
+
+      const res = await authFetch("/api/email-templates/broken/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "person@example.com",
+          fromAddress: "support@example.com",
+          variables: {},
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toMatch(/\{\{#a\}\}/);
+      expect(data.missingVariables).toBeUndefined();
+      expect(data.requiredVariables).toBeUndefined();
+    });
+  });
+
+  describe("templates: sections and nested variables", () => {
+    beforeEach(() => {
+      // DemoSender always succeeds, so the send path runs end-to-end and
+      // actually stores the rendered body instead of failing on the fake
+      // RESEND_API_KEY the global test env sets. See send-router.test.ts for
+      // the same pattern.
+      (env as any).DEMO_MODE = "1";
+    });
+
+    afterEach(() => {
+      (env as any).DEMO_MODE = "0";
+    });
+
+    it("accepts an array of objects in the send payload and renders each item", async () => {
+      await createTestTemplate({
+        slug: "digest",
+        subject: "Your digest",
+        bodyHtml: "{{#items}}<li>{{label}}</li>{{/items}}",
+      });
+
+      const res = await authFetch("/api/email-templates/digest/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "a@example.com",
+          fromAddress: "support@example.com",
+          variables: { items: [{ label: "one" }, { label: "two" }] },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+
+      const rows = await getDb().select().from(sentEmails);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].bodyHtml).toContain("<li>one</li>");
+      expect(rows[0].bodyHtml).toContain("<li>two</li>");
+    });
+
+    it("reports optional and section variables from /variables", async () => {
+      await createTestTemplate({
+        slug: "digest2",
+        subject: "Hi {{name}}",
+        bodyHtml: "{{promo?}}{{#items}}{{label}}{{/items}}",
+      });
+
+      const res = await authFetch("/api/email-templates/digest2/variables", {
+        apiKey,
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.variables).toEqual(["name", "items"]);
+      expect(body.optional).toEqual(["promo"]);
+      expect(body.sections).toEqual([
+        { name: "items", inverted: false, variables: ["label"] },
+      ]);
+    });
+
+    it("rejects a variables payload nested past MAX_VARIABLE_DEPTH with 400, not 500", async () => {
+      await createTestTemplate({
+        slug: "deep",
+        subject: "S",
+        bodyHtml: "<p>B</p>",
+      });
+
+      const res = await authFetch("/api/email-templates/deep/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "a@example.com",
+          fromAddress: "support@example.com",
+          // One level past the cap — buildNestedArray(MAX_VARIABLE_DEPTH)
+          // puts its deepest leaf at depth MAX_VARIABLE_DEPTH + 1.
+          variables: { items: buildNestedArray(MAX_VARIABLE_DEPTH) },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      // The Zod validation error surfaces as { error: { message: "<json array>" } };
+      // assert the underlying custom-issue message, not its exact envelope shape.
+      expect(data.error.message).toContain(String(MAX_VARIABLE_DEPTH));
+      expect(data.error.message).toMatch(/nested too deeply/i);
+    });
+
+    it("accepts a variables payload nested right at MAX_VARIABLE_DEPTH", async () => {
+      await createTestTemplate({
+        slug: "deep-ok",
+        subject: "S",
+        bodyHtml: "<p>B</p>",
+      });
+
+      const res = await authFetch("/api/email-templates/deep-ok/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "a@example.com",
+          fromAddress: "support@example.com",
+          // Deepest leaf lands exactly at MAX_VARIABLE_DEPTH — within bounds.
+          variables: { items: buildNestedArray(MAX_VARIABLE_DEPTH - 1) },
+        }),
+      });
+
+      expect(res.status).toBe(201);
     });
   });
 

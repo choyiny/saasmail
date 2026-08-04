@@ -105,7 +105,9 @@ Sending to a recipient **cancels any active sequence enrollment** for that perso
 
 ## 2. Send using a template
 
-Templates let you store the subject + HTML body once and render with variables at send time. Variables in templates use `{{name}}` syntax (Mustache-style).
+Templates let you store the subject + HTML body once and render with variables at send time. Variables in templates use `{{name}}` syntax (Mustache-flavored, but a stricter grammar of its own).
+
+This section covers _sending_ through an existing template. To write or edit one — conditionals, loops, optional variables, escaping — use `/create-saasmail-template`, which documents the grammar and the required-vs-optional contract in full.
 
 ### Discover templates and their variables
 
@@ -116,8 +118,15 @@ curl -H "Authorization: Bearer $SAASMAIL_KEY" "$SAASMAIL_URL/api/email-templates
 # Get the required variables for a given template
 curl -H "Authorization: Bearer $SAASMAIL_KEY" \
   "$SAASMAIL_URL/api/email-templates/welcome-email/variables"
-# → { "variables": ["firstName", "verifyUrl"] }
+# → { "variables": ["firstName", "verifyUrl"],   ← must supply, or the send 400s
+#     "optional":  ["couponCode"],               ← render empty when absent
+#     "sections":  [{ "name": "items", "inverted": false,
+#                     "variables": ["name", "price"] }] }
 ```
+
+`variables` is the send contract. `sections` tells you which names take an array or
+object — `items` above wants a list of `{ name, price }` objects — and those inner
+names are never listed in `variables`, because they resolve per item at render time.
 
 Always call the `/variables` endpoint before sending if you don't know the template intimately — `POST .../send` will reject the request with `400` and list the missing variables, but checking up front avoids a round trip.
 

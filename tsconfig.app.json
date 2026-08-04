@@ -6,7 +6,7 @@
     "jsx": "react-jsx",
     "moduleResolution": "bundler",
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./src/*"], "@worker/*": ["./worker/src/*"] },
     "strict": false,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,

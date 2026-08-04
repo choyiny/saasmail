@@ -556,3 +556,168 @@ describe("sequence processor - crash-redelivery idempotency", () => {
     expect(outbox).toHaveLength(1);
   });
 });
+
+describe("sequence processor - template rendering", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createTestUser();
+  });
+
+  /** Seed a sequence, enrollment, and one queued step for `slug`. */
+  async function seedStep(
+    slug: string,
+    personEmail = "a@test.com",
+    variables: Record<string, unknown> = {},
+  ) {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await createTestPerson({ id: "p1", email: personEmail, name: "O'Brien" });
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Test",
+      steps: JSON.stringify([{ order: 1, templateSlug: slug, delayHours: 0 }]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-1",
+      sequenceId: "seq-1",
+      personId: "p1",
+      status: "active",
+      variables: JSON.stringify(variables),
+      fromAddress: "test@test.com",
+      enrolledAt: now,
+    });
+    await db.insert(sequenceEmails).values({
+      id: "se-1",
+      enrollmentId: "enr-1",
+      stepOrder: 1,
+      templateSlug: slug,
+      scheduledAt: now - 100,
+      status: "queued",
+    });
+    return db;
+  }
+
+  it("renders a section from nested enrollment variables", async () => {
+    // Enrollment variables were typed and validated as Record<string,string>,
+    // so a drip template using {{#items}} could never be given its data —
+    // the section rendered as nothing and the row was still marked sent.
+    const db = await seedStep("digest", "a@test.com", {
+      items: [{ label: "one" }, { label: "two" }],
+    });
+    await createTestTemplate({
+      slug: "digest",
+      subject: "Your digest",
+      bodyHtml: "<ul>{{#items}}<li>{{label}}</li>{{/items}}</ul>",
+    });
+
+    const fakeSender: EmailSender = {
+      provider: "none",
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (_params: SendEmailParams) => ({
+        id: "fake-id",
+        error: null,
+      })),
+    };
+
+    await processSequenceEmail(
+      db,
+      fakeSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    const sent = await db.select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    // `toContain`, not `toBe`: the processor appends an unsubscribe footer.
+    expect(sent[0].bodyHtml).toContain("<ul><li>one</li><li>two</li></ul>");
+  });
+
+  it("marks the row failed on a malformed template instead of leaving it queued", async () => {
+    // interpolate throws TemplateParseError on an unbalanced template. Without
+    // a catch here the throw reaches the queue handler, which retries forever
+    // while the row stays "queued" and the enrollment never resolves.
+    const db = await seedStep("broken");
+    await createTestTemplate({
+      slug: "broken",
+      subject: "Hi {{name}}",
+      bodyHtml: "<p>{{#items}}oops</p>",
+    });
+
+    const fakeSender: EmailSender = {
+      provider: "none",
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (_params: SendEmailParams) => ({
+        id: "should-not-be-called",
+        error: null,
+      })),
+    };
+
+    // Must not throw — a parse error is final, not retryable.
+    await processSequenceEmail(
+      db,
+      fakeSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    expect(fakeSender.send).not.toHaveBeenCalled();
+
+    const row = await db
+      .select()
+      .from(sequenceEmails)
+      .where(eq(sequenceEmails.id, "se-1"))
+      .limit(1);
+    expect(row[0].status).toBe("failed");
+
+    expect(await db.select().from(sentEmails)).toHaveLength(0);
+
+    // The enrollment must not be left `active`. `enrollPersonInSequence`
+    // rejects anyone with an active enrollment, so a drip whose last step has
+    // a broken template would otherwise lock that contact out of every future
+    // sequence, permanently, with one console.error as the only trace.
+    const enr = await db
+      .select()
+      .from(sequenceEnrollments)
+      .where(eq(sequenceEnrollments.id, "enr-1"))
+      .limit(1);
+    expect(enr[0].status).toBe("completed");
+  });
+
+  it("does not HTML-escape the subject, but still escapes the body", async () => {
+    // A Subject header is plain text: the recipient must see O'Brien, not
+    // O&#39;Brien. The body is HTML and stays escaped.
+    const db = await seedStep("greet");
+    await createTestTemplate({
+      slug: "greet",
+      subject: "Hi {{name}} & friends",
+      bodyHtml: "<p>Hi {{name}}</p>",
+    });
+
+    const fakeSender: EmailSender = {
+      provider: "none",
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (_params: SendEmailParams) => ({
+        id: "fake-id",
+        error: null,
+      })),
+    };
+
+    await processSequenceEmail(
+      db,
+      fakeSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    const sent = await db.select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].subject).toBe("Hi O'Brien & friends");
+    expect(sent[0].bodyHtml).toContain("Hi O&#39;Brien");
+  });
+});
