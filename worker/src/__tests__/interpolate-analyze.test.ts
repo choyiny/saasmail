@@ -26,6 +26,38 @@ describe("analyzeTemplate — the validation split", () => {
     expect(a.optional).toEqual(["b"]);
   });
 
+  it("reports a name used as both an inverted and a regular section as regular", () => {
+    // Order must not decide polarity. Writing the empty-state branch first
+    // used to leave the merged entry `inverted: true` while `required`
+    // (correctly) contained "items" — the API and the editor chip then
+    // described a required section as an optional absence branch.
+    const emptyFirst = analyzeTemplate(
+      "{{^items}}none{{/items}}{{#items}}{{label}}{{/items}}",
+    );
+    expect(emptyFirst.required).toEqual(["items"]);
+    expect(emptyFirst.sections).toEqual([
+      { name: "items", inverted: false, variables: ["label"] },
+    ]);
+
+    // The reverse order already worked; pin that it still does.
+    const loopFirst = analyzeTemplate(
+      "{{#items}}{{label}}{{/items}}{{^items}}none{{/items}}",
+    );
+    expect(loopFirst.sections).toEqual(emptyFirst.sections);
+  });
+
+  it("keeps a section inverted when every occurrence is inverted", () => {
+    const a = analyzeTemplate(
+      "{{^items}}none{{/items}}",
+      "{{^items}}x{{/items}}",
+    );
+    expect(a.required).toEqual([]);
+    expect(a.optional).toEqual(["items"]);
+    expect(a.sections).toEqual([
+      { name: "items", inverted: true, variables: [] },
+    ]);
+  });
+
   it("treats {{#a?}} as optional", () => {
     const a = analyzeTemplate("{{#a?}}x{{/a}}");
     expect(a.required).toEqual([]);

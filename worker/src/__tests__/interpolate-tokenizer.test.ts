@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, tokenize } from "../lib/interpolate";
+import { escapeHtml, tokenize, TemplateParseError } from "../lib/interpolate";
 
 describe("escapeHtml", () => {
   it("escapes the five HTML-significant characters", () => {
@@ -113,6 +113,25 @@ describe("tokenize", () => {
         source: "{{.}}",
       },
     ]);
+  });
+
+  it("rejects an inherited Object.prototype member as a filter name", () => {
+    // Membership must be `hasOwn`, not `in`. With `in`, these names pass
+    // validation and are then invoked as filters: `|toString` renders
+    // "[object Object]" into the email, and `|__defineGetter__` throws a
+    // TypeError from applyFilters — which no caller's TemplateParseError
+    // handling catches, so it escapes as an unhandled 500 and, on the
+    // sequence path, an infinite queue retry.
+    for (const name of [
+      "toString",
+      "valueOf",
+      "hasOwnProperty",
+      "constructor",
+      "__defineGetter__",
+    ]) {
+      expect(() => tokenize(`{{name|${name}}}`)).toThrow(TemplateParseError);
+      expect(() => tokenize(`{{name|${name}}}`)).toThrow(/Unknown filter/);
+    }
   });
 
   it("leaves a run with no valid name as literal text", () => {

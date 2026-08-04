@@ -160,7 +160,12 @@ export function tokenize(template: string): Token[] {
     // enough; the leading empty segment is what `filter(Boolean)` drops.
     const filters = (filterClause ?? "").split("|").filter(Boolean);
     for (const f of filters) {
-      if (!(f in FILTERS)) {
+      // `hasOwn`, not `in`: `in` walks the prototype chain, so `|toString` or
+      // `|__defineGetter__` would pass validation and then be CALLED as a
+      // filter — rendering `[object Object]` into an email, or throwing a
+      // TypeError from `applyFilters`, which is outside every caller's
+      // TemplateParseError handling and escapes as an unhandled 500.
+      if (!hasOwn(FILTERS, f)) {
         throw new TemplateParseError(
           `Unknown filter "${f}" in ${source}. Available filters: ${Object.keys(FILTERS).join(", ")}.`,
         );
@@ -426,6 +431,12 @@ export function analyzeTemplate(...sources: string[]): TemplateAnalysis {
 
       const existing = sectionsByName.get(node.name);
       if (existing) {
+        // A name used as both `{{^items}}` and `{{#items}}` is only an
+        // absence branch if EVERY occurrence is inverted — mirroring the way
+        // `required` wins over `optional` below. Keeping the first-seen flag
+        // would report a required section as an optional empty-state branch
+        // whenever the author wrote the empty-state half first.
+        existing.inverted = existing.inverted && node.inverted;
         for (const v of inner) {
           if (!existing.variables.includes(v)) existing.variables.push(v);
         }
