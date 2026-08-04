@@ -11,6 +11,12 @@ import {
 import { suppressions } from "../db/suppressions.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
+import { MAX_VARIABLE_DEPTH } from "../routers/email-templates-router";
+
+/** Builds a value nested `n` array-levels deep, terminating in a string leaf. */
+function buildNestedArray(n: number): unknown {
+  return n <= 0 ? "leaf" : [buildNestedArray(n - 1)];
+}
 
 describe("email templates router", () => {
   let apiKey: string;
@@ -299,6 +305,54 @@ describe("email templates router", () => {
       expect(body.sections).toEqual([
         { name: "items", inverted: false, variables: ["label"] },
       ]);
+    });
+
+    it("rejects a variables payload nested past MAX_VARIABLE_DEPTH with 400, not 500", async () => {
+      await createTestTemplate({
+        slug: "deep",
+        subject: "S",
+        bodyHtml: "<p>B</p>",
+      });
+
+      const res = await authFetch("/api/email-templates/deep/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "a@example.com",
+          fromAddress: "support@example.com",
+          // One level past the cap — buildNestedArray(MAX_VARIABLE_DEPTH)
+          // puts its deepest leaf at depth MAX_VARIABLE_DEPTH + 1.
+          variables: { items: buildNestedArray(MAX_VARIABLE_DEPTH) },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      // The Zod validation error surfaces as { error: { message: "<json array>" } };
+      // assert the underlying custom-issue message, not its exact envelope shape.
+      expect(data.error.message).toContain(String(MAX_VARIABLE_DEPTH));
+      expect(data.error.message).toMatch(/nested too deeply/i);
+    });
+
+    it("accepts a variables payload nested right at MAX_VARIABLE_DEPTH", async () => {
+      await createTestTemplate({
+        slug: "deep-ok",
+        subject: "S",
+        bodyHtml: "<p>B</p>",
+      });
+
+      const res = await authFetch("/api/email-templates/deep-ok/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "a@example.com",
+          fromAddress: "support@example.com",
+          // Deepest leaf lands exactly at MAX_VARIABLE_DEPTH — within bounds.
+          variables: { items: buildNestedArray(MAX_VARIABLE_DEPTH - 1) },
+        }),
+      });
+
+      expect(res.status).toBe(201);
     });
   });
 
