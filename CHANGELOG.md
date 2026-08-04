@@ -53,6 +53,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trace. `PUT` validates the template as it will exist after the merge, since
   editing only the subject can still unbalance a section across the pair.
   (#227)
+- The template editor understands the full grammar. Detected variables are
+  grouped into Required / Optional / Sections with each chip showing the tag as
+  written (`{{^promo}}`, `{{#promo?}}`, `{{name?}}`), the live preview
+  substitutes sample values so a section renders as repeated content, and a
+  "Syntax & styling" card documents the tag table, escaping, and multi-line
+  values. The editor now renders through the worker's own renderer rather than
+  a copy, so the preview and the chips cannot disagree with what a send does.
+  (#112)
+- The sequence editor's enroll snippet and the template list's variable badge
+  use the same analyzer. Both previously scanned for `{{name}}` with a regex
+  that, for a section template, collected the per-item names the endpoint
+  ignores and omitted the section name it rejects the request for — so the
+  snippet was copy-pasteable into a `400`. The snippet now shows a section as
+  an array of its own fields. (#112)
 - Section nesting is capped at 64 levels; deeper templates are rejected as a
   parse error rather than overflowing the renderer's stack. (#112)
 - Total section expansion is capped at 20,000 body renders per template, as
@@ -106,15 +120,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Section-body names stay out of `variables`: they resolve against the current
   item at render time, so listing them would suggest a contract that does not
   exist. (#112, #227)
-
-### Known limitations
-
-- The template editor UI does not recognise sections yet: its variable list
-  comes from an older extractor, so a template using `{{#items}}…{{/items}}`
-  will show a misleading set of variables in the editor and its preview may
-  not match what is sent. Exercise section templates through the API until the
-  follow-up lands. Sending is unaffected — the API and sequence sends use the
-  new renderer.
 
 ## [0.10.0] - 2026-06-23
 
