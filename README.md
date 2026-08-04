@@ -147,8 +147,17 @@ Create reusable HTML email templates with `{{variable}}` interpolation. Edit tem
 body are _not_ validated, because they resolve against the current item at
 render time rather than against what the caller passed. An unresolved name
 inside a section renders **empty**; only the section's own name is required.
-`GET /api/email-templates/{slug}/variables` reflects exactly this: it lists the
-required names, and omits both `{{key?}}` optionals and section-body names.
+
+`GET /api/email-templates/{slug}/variables` returns three lists:
+
+- `variables` — top-level names the caller must supply, or the send fails.
+  This is the send contract; its shape and meaning are unchanged.
+- `optional` — names that render empty when absent: `{{key?}}` tags and
+  inverted (`{{^key}}`) section names.
+- `sections` — each section's name, whether it's inverted, and the names its
+  body references. Those body names resolve per item at render time and are
+  never part of `variables`, even though the response now surfaces them for
+  the editor and API callers building a form around a template.
 
 #### Template syntax
 

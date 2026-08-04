@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { env } from "cloudflare:workers";
 import {
   applyMigrations,
@@ -240,6 +240,65 @@ describe("email templates router", () => {
       expect(data.error).toMatch(/\{\{#a\}\}/);
       expect(data.missingVariables).toBeUndefined();
       expect(data.requiredVariables).toBeUndefined();
+    });
+  });
+
+  describe("templates: sections and nested variables", () => {
+    beforeEach(() => {
+      // DemoSender always succeeds, so the send path runs end-to-end and
+      // actually stores the rendered body instead of failing on the fake
+      // RESEND_API_KEY the global test env sets. See send-router.test.ts for
+      // the same pattern.
+      (env as any).DEMO_MODE = "1";
+    });
+
+    afterEach(() => {
+      (env as any).DEMO_MODE = "0";
+    });
+
+    it("accepts an array of objects in the send payload and renders each item", async () => {
+      await createTestTemplate({
+        slug: "digest",
+        subject: "Your digest",
+        bodyHtml: "{{#items}}<li>{{label}}</li>{{/items}}",
+      });
+
+      const res = await authFetch("/api/email-templates/digest/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "a@example.com",
+          fromAddress: "support@example.com",
+          variables: { items: [{ label: "one" }, { label: "two" }] },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+
+      const rows = await getDb().select().from(sentEmails);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].bodyHtml).toContain("<li>one</li>");
+      expect(rows[0].bodyHtml).toContain("<li>two</li>");
+    });
+
+    it("reports optional and section variables from /variables", async () => {
+      await createTestTemplate({
+        slug: "digest2",
+        subject: "Hi {{name}}",
+        bodyHtml: "{{promo?}}{{#items}}{{label}}{{/items}}",
+      });
+
+      const res = await authFetch("/api/email-templates/digest2/variables", {
+        apiKey,
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.variables).toEqual(["name", "items"]);
+      expect(body.optional).toEqual(["promo"]);
+      expect(body.sections).toEqual([
+        { name: "items", inverted: false, variables: ["label"] },
+      ]);
     });
   });
 

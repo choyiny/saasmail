@@ -12,7 +12,7 @@ import { computeConversationId, externalsOnly } from "./conversation-id";
 import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
-import { renderTemplate } from "./interpolate";
+import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
@@ -66,7 +66,7 @@ export type ReplyEmailPayload = {
   bodyText?: string;
   cc?: SendCcEntry[];
   templateSlug?: string;
-  variables?: Record<string, string>;
+  variables?: TemplateVariables;
   replyTo?: string;
 };
 

@@ -19,6 +19,31 @@ export const emailTemplatesRouter = new OpenAPIHono<{
   Variables: Variables;
 }>();
 
+/**
+ * A template variable value. Recursive so arrays of objects can reach
+ * `{{#section}}` bodies; `z.lazy` is what lets the schema refer to itself.
+ *
+ * The `.openapi("TemplateValue")` name is required, not decorative: without a
+ * registered ref id, `@asteasolutions/zod-to-openapi` has no way to stop
+ * expanding a self-referencing lazy schema and either recurses forever while
+ * building `/doc` or (depending on version) silently degrades to an opaque
+ * `{}` schema. Naming it turns the self-reference into a proper
+ * `$ref: '#/components/schemas/TemplateValue'` — verified against
+ * `openapi-doc.test.ts` and `openapi-bootstrap.test.ts`.
+ */
+const templateValueSchema: z.ZodType<unknown> = z
+  .lazy(() =>
+    z.union([
+      z.string(),
+      z.number(),
+      z.boolean(),
+      z.null(),
+      z.array(templateValueSchema),
+      z.record(z.string(), templateValueSchema),
+    ]),
+  )
+  .openapi("TemplateValue");
+
 const EmailTemplateSchema = z.object({
   id: z.string(),
   slug: z.string(),
@@ -255,7 +280,27 @@ const getTemplateVariablesRoute = createRoute({
   },
   responses: {
     ...json200Response(
-      z.object({ variables: z.array(z.string()) }),
+      z.object({
+        variables: z.array(z.string()).openapi({
+          description: "Variables the caller must supply, or the send fails.",
+        }),
+        optional: z.array(z.string()).openapi({
+          description:
+            "Variables that render empty when absent — `{{key?}}` tags and inverted sections.",
+        }),
+        sections: z
+          .array(
+            z.object({
+              name: z.string(),
+              inverted: z.boolean(),
+              variables: z.array(z.string()),
+            }),
+          )
+          .openapi({
+            description:
+              "Sections and the names their bodies reference. Those names resolve per-item and are not required at the top level.",
+          }),
+      }),
       "Template variables",
     ),
     400: {
@@ -290,7 +335,14 @@ emailTemplatesRouter.openapi(getTemplateVariablesRoute, async (c) => {
     throw err;
   }
 
-  return c.json({ variables: analysis.required }, 200);
+  return c.json(
+    {
+      variables: analysis.required,
+      optional: analysis.optional,
+      sections: analysis.sections,
+    },
+    200,
+  );
 });
 
 // --- SEND ---
@@ -308,7 +360,10 @@ const sendTemplateRoute = createRoute({
           schema: z.object({
             to: z.string().email(),
             fromAddress: z.string().email(),
-            variables: z.record(z.string(), z.string()).optional().default({}),
+            variables: z
+              .record(z.string(), templateValueSchema)
+              .optional()
+              .default({}),
           }),
         },
       },
