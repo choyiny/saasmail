@@ -48,6 +48,50 @@ describe("analyzeTemplate — the validation split", () => {
     const a = analyzeTemplate("Hi {{name}}", "<p>{{name}} {{email}}</p>");
     expect(a.required).toEqual(["name", "email"]);
   });
+
+  it("does not leak names from a doubly-nested section into required/optional", () => {
+    // Guards against collectInner's nested-section branch accidentally
+    // recursing via walkTopLevel instead of into itself, which would only
+    // leak names at depth >= 2 — a bug the single-nesting tests above would
+    // not catch.
+    const a = analyzeTemplate(
+      "{{#orders}}{{id}}{{#lines}}{{sku}}{{/lines}}{{/orders}}",
+    );
+    expect(a.required).toEqual(["orders"]);
+    expect(a.required).not.toContain("id");
+    expect(a.required).not.toContain("sku");
+    expect(a.required).not.toContain("lines");
+    expect(a.optional).not.toContain("id");
+    expect(a.optional).not.toContain("sku");
+    expect(a.optional).not.toContain("lines");
+  });
+
+  it("resolves a name that is both required and optional in favor of required", () => {
+    // Guards against the dedup loop running backwards (deleting from
+    // `required` based on `optional` membership instead of the other way
+    // around), which would silently make a required name optional.
+    const a = analyzeTemplate("{{name}}{{name?}}");
+    expect(a.required).toEqual(["name"]);
+    expect(a.optional).toEqual([]);
+  });
+
+  it("resolves the same required/optional collision across two sources", () => {
+    // The merge happens after both sources are walked, so this must hold
+    // regardless of which source declares the name optional first.
+    const a = analyzeTemplate("{{name?}}", "{{name}}");
+    expect(a.required).toEqual(["name"]);
+    expect(a.optional).toEqual([]);
+  });
+
+  it("merges duplicate section entries across sources by name", () => {
+    const a = analyzeTemplate(
+      "{{#items}}{{price}}{{/items}}",
+      "{{#items}}{{qty}}{{/items}}",
+    );
+    expect(a.sections).toEqual([
+      { name: "items", inverted: false, variables: ["price", "qty"] },
+    ]);
+  });
 });
 
 describe("extractVariables", () => {

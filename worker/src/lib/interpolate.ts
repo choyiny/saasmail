@@ -305,7 +305,14 @@ export interface TemplateAnalysis {
 export function analyzeTemplate(...sources: string[]): TemplateAnalysis {
   const required = new Set<string>();
   const optional = new Set<string>();
-  const sections: TemplateAnalysis["sections"] = [];
+  // Keyed by name so the same section appearing in multiple sources (e.g. a
+  // subject and body both using {{#items}}) merges into one entry instead of
+  // being reported twice. A Map preserves insertion order, so output stays
+  // stable by first appearance.
+  const sectionsByName = new Map<
+    string,
+    TemplateAnalysis["sections"][number]
+  >();
 
   /** Collect names referenced anywhere beneath a section, at any depth. */
   function collectInner(nodes: Node[], into: Set<string>): void {
@@ -330,11 +337,19 @@ export function analyzeTemplate(...sources: string[]): TemplateAnalysis {
       (node.inverted || node.optional ? optional : required).add(node.name);
       const inner = new Set<string>();
       collectInner(node.children, inner);
-      sections.push({
-        name: node.name,
-        inverted: node.inverted,
-        variables: Array.from(inner),
-      });
+
+      const existing = sectionsByName.get(node.name);
+      if (existing) {
+        for (const v of inner) {
+          if (!existing.variables.includes(v)) existing.variables.push(v);
+        }
+      } else {
+        sectionsByName.set(node.name, {
+          name: node.name,
+          inverted: node.inverted,
+          variables: Array.from(inner),
+        });
+      }
     }
   }
 
@@ -346,7 +361,7 @@ export function analyzeTemplate(...sources: string[]): TemplateAnalysis {
   return {
     required: Array.from(required),
     optional: Array.from(optional),
-    sections,
+    sections: Array.from(sectionsByName.values()),
   };
 }
 
