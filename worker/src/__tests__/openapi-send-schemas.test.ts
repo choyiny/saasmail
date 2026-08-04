@@ -7,7 +7,7 @@ describe("OpenAPI send schemas", () => {
     await applyMigrations();
   });
 
-  it("GET /doc registers SendEmailSchema, CcEntry, and ReplyEmailSchema", async () => {
+  it("GET /doc registers SendEmailSchema, CcEntry, ReplyEmailSchema, and TemplateValue", async () => {
     const res = await exports.default.fetch("http://localhost/doc");
     expect(res.status).toBe(200);
     const doc = (await res.json()) as {
@@ -20,8 +20,17 @@ describe("OpenAPI send schemas", () => {
     };
 
     const schemas = doc.components.schemas ?? {};
+    // `TemplateValue` is the recursive schema for template variable values.
+    // It has to be a named component rather than an inline one — a self
+    // referencing `z.lazy` union can only be expressed via `$ref`, so
+    // inlining it would recurse forever when the document is generated.
     expect(Object.keys(schemas).sort()).toEqual(
-      ["CcEntry", "ReplyEmailSchema", "SendEmailSchema"].sort(),
+      [
+        "CcEntry",
+        "ReplyEmailSchema",
+        "SendEmailSchema",
+        "TemplateValue",
+      ].sort(),
     );
 
     const send = schemas.SendEmailSchema;
