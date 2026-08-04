@@ -568,7 +568,11 @@ describe("sequence processor - template rendering", () => {
   });
 
   /** Seed a sequence, enrollment, and one queued step for `slug`. */
-  async function seedStep(slug: string, personEmail = "a@test.com") {
+  async function seedStep(
+    slug: string,
+    personEmail = "a@test.com",
+    variables: Record<string, unknown> = {},
+  ) {
     const db = getDb();
     const now = Math.floor(Date.now() / 1000);
     await createTestPerson({ id: "p1", email: personEmail, name: "O'Brien" });
@@ -584,7 +588,7 @@ describe("sequence processor - template rendering", () => {
       sequenceId: "seq-1",
       personId: "p1",
       status: "active",
-      variables: "{}",
+      variables: JSON.stringify(variables),
       fromAddress: "test@test.com",
       enrolledAt: now,
     });
@@ -598,6 +602,41 @@ describe("sequence processor - template rendering", () => {
     });
     return db;
   }
+
+  it("renders a section from nested enrollment variables", async () => {
+    // Enrollment variables were typed and validated as Record<string,string>,
+    // so a drip template using {{#items}} could never be given its data —
+    // the section rendered as nothing and the row was still marked sent.
+    const db = await seedStep("digest", "a@test.com", {
+      items: [{ label: "one" }, { label: "two" }],
+    });
+    await createTestTemplate({
+      slug: "digest",
+      subject: "Your digest",
+      bodyHtml: "<ul>{{#items}}<li>{{label}}</li>{{/items}}</ul>",
+    });
+
+    const fakeSender: EmailSender = {
+      provider: "none",
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (_params: SendEmailParams) => ({
+        id: "fake-id",
+        error: null,
+      })),
+    };
+
+    await processSequenceEmail(
+      db,
+      fakeSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    const sent = await db.select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    // `toContain`, not `toBe`: the processor appends an unsubscribe footer.
+    expect(sent[0].bodyHtml).toContain("<ul><li>one</li><li>two</li></ul>");
+  });
 
   it("marks the row failed on a malformed template instead of leaving it queued", async () => {
     // interpolate throws TemplateParseError on an unbalanced template. Without

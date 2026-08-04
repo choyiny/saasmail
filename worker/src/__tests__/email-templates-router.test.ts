@@ -11,7 +11,7 @@ import {
 import { suppressions } from "../db/suppressions.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
-import { MAX_VARIABLE_DEPTH } from "../routers/email-templates-router";
+import { MAX_VARIABLE_DEPTH } from "../lib/template-variables-schema";
 
 /** Builds a value nested `n` array-levels deep, terminating in a string leaf. */
 function buildNestedArray(n: number): unknown {
@@ -60,6 +60,41 @@ describe("email templates router", () => {
         }),
       });
       expect(res.status).toBe(400);
+    });
+
+    it("rejects a template whose sections do not parse", async () => {
+      // Storing this would defer the failure to send time, where every send
+      // 400s and every sequence step is marked `failed` — a terminal state
+      // the poller never revisits, with no signal to the author.
+      const res = await authFetch("/api/email-templates", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          slug: "broken",
+          name: "Broken",
+          subject: "Hi",
+          bodyHtml: "{{#items}}<li>{{label}}</li>",
+        }),
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toContain("Unclosed section");
+    });
+
+    it("rejects a template with an unknown filter", async () => {
+      const res = await authFetch("/api/email-templates", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          slug: "bad-filter",
+          name: "Bad filter",
+          subject: "Hi",
+          bodyHtml: "<p>{{name|upper}}</p>",
+        }),
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toContain("Unknown filter");
     });
   });
 
@@ -152,6 +187,48 @@ describe("email templates router", () => {
         body: JSON.stringify({ name: "Test" }),
       });
       expect(res.status).toBe(404);
+    });
+
+    it("rejects an update that leaves the template unparseable", async () => {
+      await createTestTemplate({ slug: "welcome" });
+
+      const res = await authFetch("/api/email-templates/welcome", {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({ bodyHtml: "{{#items}}<li>{{label}}</li>" }),
+      });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toContain("Unclosed section");
+    });
+
+    it("validates the merged template, not just the fields being changed", async () => {
+      // Both fields are optional on this route. A body that opens a section
+      // closed by the subject only parses as a pair, so validating the
+      // incoming field alone would reject a template that is in fact fine —
+      // and, in the reverse direction, accept one that is not.
+      await createTestTemplate({
+        slug: "paired",
+        subject: "Hi",
+        bodyHtml: "<p>plain</p>",
+      });
+
+      // Changing only the subject must still be checked against the stored body.
+      const bad = await authFetch("/api/email-templates/paired", {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({ subject: "{{/nope}}" }),
+      });
+      expect(bad.status).toBe(400);
+
+      // And a well-formed pair still goes through.
+      const good = await authFetch("/api/email-templates/paired", {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({
+          bodyHtml: "{{#items}}<li>{{label}}</li>{{/items}}",
+        }),
+      });
+      expect(good.status).toBe(200);
     });
   });
 

@@ -7,13 +7,14 @@ import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { sequences } from "../db/sequences.schema";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { isDemoMode } from "./is-dev";
+import type { TemplateVariables } from "./interpolate";
 import type { SequenceEmailMessage } from "./sequence-processor";
 
 export type EnrollSequenceInput = {
   personId?: string;
   personEmail?: string;
   fromAddress: string;
-  variables: Record<string, string>;
+  variables: TemplateVariables;
   skipSteps: number[];
   delayOverrides: Record<string, number>;
 };
@@ -32,7 +33,7 @@ export type EnrollmentRecord = {
   personId: string;
   fromAddress: string;
   status: string;
-  variables: Record<string, string>;
+  variables: TemplateVariables;
   enrolledAt: number;
   cancelledAt: number | null;
 };

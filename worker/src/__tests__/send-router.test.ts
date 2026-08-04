@@ -326,6 +326,43 @@ describe("send router", () => {
       expect(data).not.toHaveProperty("missingVariables");
       expect(data).not.toHaveProperty("requiredVariables");
     });
+
+    it("accepts nested section variables on a reply", async () => {
+      // The reply route's schema was `Record<string, string>` while
+      // ReplyEmailPayload already accepted TemplateVariables, so any template
+      // using {{#items}} was 400'd here while working on the templates route.
+      const person = await createTestPerson({
+        id: "p-nested",
+        email: "d@example.com",
+      });
+      await createTestEmail({
+        id: "rcv-nested",
+        personId: person.id,
+        recipient: "me@saasmail.test",
+        subject: "hi",
+        messageId: "nested@example.com",
+      });
+      await createTestTemplate({
+        slug: "digest",
+        subject: "Your digest",
+        bodyHtml: "<ul>{{#items}}<li>{{label}}</li>{{/items}}</ul>",
+      });
+
+      const res = await authFetch("/api/send/reply/rcv-nested", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          fromAddress: "me@saasmail.test",
+          templateSlug: "digest",
+          variables: { items: [{ label: "one" }, { label: "two" }] },
+        }),
+      });
+
+      expect(res.status).toBe(201);
+      const db = getDb();
+      const rows = await db.select().from(sentEmails);
+      expect(rows[0].bodyHtml).toBe("<ul><li>one</li><li>two</li></ul>");
+    });
   });
 
   describe("GET /api/people/grouped after sending", () => {

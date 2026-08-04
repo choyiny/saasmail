@@ -13,118 +13,37 @@ import {
   inboxForbiddenResponse,
   SendPathErrorSchema,
 } from "../lib/openapi-send-errors";
+import { templateVariablesSchema } from "../lib/template-variables-schema";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
   Variables: Variables;
 }>();
 
-/**
- * A template variable value. Recursive so arrays of objects can reach
- * `{{#section}}` bodies; `z.lazy` is what lets the schema refer to itself.
- *
- * The `.openapi("TemplateValue")` name is required, not decorative: without a
- * registered ref id, `@asteasolutions/zod-to-openapi` has no way to stop
- * expanding a self-referencing lazy schema and either recurses forever while
- * building `/doc` or (depending on version) silently degrades to an opaque
- * `{}` schema. Naming it turns the self-reference into a proper
- * `$ref: '#/components/schemas/TemplateValue'` — verified against
- * `openapi-doc.test.ts` and `openapi-bootstrap.test.ts`.
- */
-const templateValueSchema: z.ZodType<unknown> = z
-  .lazy(() =>
-    z.union([
-      z.string(),
-      z.number(),
-      z.boolean(),
-      z.null(),
-      z.array(templateValueSchema),
-      z.record(z.string(), templateValueSchema),
-    ]),
-  )
-  .openapi("TemplateValue");
+// The variables schema and its depth guard are shared with the reply,
+// sequence-enrollment, and MCP paths — see lib/template-variables-schema.ts.
 
 /**
- * Maximum nesting depth allowed in a send request's `variables` payload.
+ * Reject a template whose tags do not parse, at write time.
  *
- * `templateValueSchema` is unbounded on its own: Zod's recursive descent
- * through a self-referencing `z.lazy` has no depth limit, so a payload of
- * only a few KB but thousands of levels deep blows Zod's own call stack —
- * a `RangeError` with no app-level `onError` handler to catch it, surfacing
- * as an unhandled 500 for any authenticated caller. A `.superRefine`
- * attached directly to the recursive schema does not help: Zod crashes
- * descending into the lazy schema before any refinement on it ever runs.
+ * Without this, an unbalanced section or unknown filter stores happily and
+ * only fails much later: every send and every `/variables` call returns 400,
+ * and `sequence-processor` marks each affected step `failed` — terminal,
+ * since the poller only ever re-selects `pending` rows. Enrolled recipients
+ * silently never receive the email and the only trace is a worker log.
+ * Failing the write puts the diagnostic in front of the person who typed it.
  *
- * The fix (`templateVariablesSchema` below) walks the raw, not-yet-parsed
- * value ITERATIVELY — an explicit stack, not a recursive function, so the
- * guard itself cannot be the thing that overflows — before Zod ever
- * descends into the recursive schema. 32 is generous: real templates nest a
- * handful of section/object levels at most.
+ * Returns the parse error message, or null when the template is fine.
  */
-export const MAX_VARIABLE_DEPTH = 32;
-
-/**
- * Iteratively finds the first depth (if any) that exceeds `maxDepth` in
- * `root`. Depth 0 is `root` itself; each array item or object property adds
- * one level. Returns `null` when every value is within bounds.
- */
-function findExcessiveDepth(root: unknown, maxDepth: number): number | null {
-  const stack: Array<{ value: unknown; depth: number }> = [
-    { value: root, depth: 0 },
-  ];
-  while (stack.length > 0) {
-    const { value, depth } = stack.pop()!;
-    if (depth > maxDepth) return depth;
-    if (Array.isArray(value)) {
-      for (const item of value) stack.push({ value: item, depth: depth + 1 });
-    } else if (value !== null && typeof value === "object") {
-      for (const key of Object.keys(value as Record<string, unknown>)) {
-        stack.push({
-          value: (value as Record<string, unknown>)[key],
-          depth: depth + 1,
-        });
-      }
-    }
+function templateParseError(subject: string, bodyHtml: string): string | null {
+  try {
+    analyzeTemplate(subject, bodyHtml);
+    return null;
+  } catch (err) {
+    if (err instanceof TemplateParseError) return err.message;
+    throw err;
   }
-  return null;
 }
-
-/**
- * The send route's `variables` schema.
- *
- * Composed with `z.preprocess`, not `.superRefine().pipe(...)`. Both run the
- * depth guard before the recursive schema, but they differ in how
- * `@asteasolutions/zod-to-openapi` documents them: for a plain `.pipe(x)`,
- * the generator documents the PRE-pipe ("in") schema, which here is just
- * `z.record(z.string(), z.unknown())` — an unhelpful `{}` shape that drops
- * the `TemplateValue` ref entirely (verified against the real `/doc` output
- * while building this). `z.preprocess(fn, schema)` is internally the same
- * pipe machinery but with the check function on the "in" side wrapped as a
- * `ZodTransform`, and for exactly that shape the generator documents the
- * POST-pipe ("out") schema instead — `schema` here, i.e. the recursive,
- * named `templateValueSchema`. That's the one difference that makes this
- * composition preserve the OpenAPI component; confirmed against `/doc` in
- * `openapi-doc.test.ts`.
- *
- * The preprocess function returns `z.NEVER` on failure specifically so the
- * inner schema's own (recursive) parse never runs against the
- * still-too-deep raw value — returning the original value instead would
- * just move the crash one step later.
- */
-const templateVariablesSchema = z.preprocess(
-  (raw, ctx) => {
-    const excess = findExcessiveDepth(raw, MAX_VARIABLE_DEPTH);
-    if (excess !== null) {
-      ctx.addIssue({
-        code: "custom",
-        message: `Template variables are nested too deeply — the limit is ${MAX_VARIABLE_DEPTH} levels.`,
-      });
-      return z.NEVER;
-    }
-    return raw;
-  },
-  z.record(z.string(), templateValueSchema),
-);
 
 const EmailTemplateSchema = z.object({
   id: z.string(),
@@ -159,12 +78,22 @@ const createTemplateRoute = createRoute({
   },
   responses: {
     ...json201Response(EmailTemplateSchema, "Created email template"),
+    400: {
+      description:
+        "Template has an unbalanced section or an unknown filter — see the parse diagnostic.",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
 emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
   const db = c.get("db");
   const { slug, name, subject, bodyHtml, fromAddress } = c.req.valid("json");
+
+  const parseError = templateParseError(subject, bodyHtml);
+  if (parseError) {
+    return c.json({ error: parseError }, 400);
+  }
 
   const allowed = c.get("allowedInboxes")!;
   if (fromAddress != null) {
@@ -283,6 +212,11 @@ const updateTemplateRoute = createRoute({
   },
   responses: {
     ...json200Response(EmailTemplateSchema, "Updated email template"),
+    400: {
+      description:
+        "Template has an unbalanced section or an unknown filter — see the parse diagnostic.",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -304,6 +238,17 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
   const allowed = c.get("allowedInboxes")!;
   if (updates.fromAddress !== undefined && updates.fromAddress !== null) {
     assertInboxAllowed(allowed, updates.fromAddress);
+  }
+
+  // Both fields are optional on this route, so validate the template as it
+  // will exist AFTER the merge — editing only the subject can still leave a
+  // section unbalanced across the pair.
+  const parseError = templateParseError(
+    updates.subject ?? existing[0].subject,
+    updates.bodyHtml ?? existing[0].bodyHtml,
+  );
+  if (parseError) {
+    return c.json({ error: parseError }, 400);
   }
 
   await db

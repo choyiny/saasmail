@@ -10,7 +10,11 @@ import { emailTemplates } from "../db/email-templates.schema";
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
-import { interpolate, TemplateParseError } from "./interpolate";
+import {
+  interpolate,
+  TemplateParseError,
+  type TemplateVariables,
+} from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
 import { sendViaOutbox } from "./outbox";
@@ -223,8 +227,8 @@ export async function processSequenceEmail(
   const person = personRows[0];
 
   // Merge variables: person auto-vars + enrollment custom vars (custom wins)
-  const customVars: Record<string, string> = JSON.parse(enrollment.variables);
-  const mergedVars: Record<string, string> = {
+  const customVars: TemplateVariables = JSON.parse(enrollment.variables);
+  const mergedVars: TemplateVariables = {
     name: person.name ?? "",
     email: person.email,
     ...customVars,
