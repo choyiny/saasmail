@@ -294,7 +294,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
         400,
       );
     }
-    if (result.code === "MISSING_BODY") {
+    if (
+      result.code === "MISSING_BODY" ||
+      result.code === "TEMPLATE_PARSE_ERROR"
+    ) {
       return c.json({ error: result.message }, 400);
     }
     return c.json({ error: result.message }, 404);

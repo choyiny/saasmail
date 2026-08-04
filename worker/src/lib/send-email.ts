@@ -95,7 +95,8 @@ export type ReplyEmailFailure =
         | "EMAIL_NOT_FOUND"
         | "EMAIL_HAS_NO_PERSON"
         | "TEMPLATE_NOT_FOUND"
-        | "MISSING_BODY";
+        | "MISSING_BODY"
+        | "TEMPLATE_PARSE_ERROR";
       message: string;
     }
   | {
@@ -442,6 +443,13 @@ export async function replyToEmail(
 
     const rendered = renderTemplate(templateRows[0], variables ?? {});
     if (!rendered.ok) {
+      if (rendered.parseError) {
+        return {
+          ok: false,
+          code: "TEMPLATE_PARSE_ERROR",
+          message: rendered.parseError,
+        };
+      }
       return {
         ok: false,
         code: "MISSING_VARIABLES",

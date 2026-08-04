@@ -7,6 +7,7 @@ import {
   createTestUser,
   createTestPerson,
   createTestEmail,
+  createTestTemplate,
   authFetch,
   getDb,
   buildSendForm,
@@ -289,6 +290,41 @@ describe("send router", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].kind).toBe("sent");
       expect(rows[0].filename).toBe("evidence.png");
+    });
+
+    it("returns TEMPLATE_PARSE_ERROR with the parse diagnostic for an unbalanced template", async () => {
+      const person = await createTestPerson({
+        id: "p-parse",
+        email: "c@example.com",
+      });
+      await createTestEmail({
+        id: "rcv-parse",
+        personId: person.id,
+        recipient: "me@saasmail.test",
+        subject: "hi",
+        messageId: "parse@example.com",
+      });
+      await createTestTemplate({
+        slug: "broken",
+        subject: "Hi",
+        bodyHtml: "{{#a}}oops",
+      });
+
+      const res = await authFetch("/api/send/reply/rcv-parse", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm({
+          fromAddress: "me@saasmail.test",
+          templateSlug: "broken",
+          variables: {},
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = (await res.json()) as { error: string };
+      expect(data.error).toMatch(/\{\{#a\}\}/);
+      expect(data).not.toHaveProperty("missingVariables");
+      expect(data).not.toHaveProperty("requiredVariables");
     });
   });
 
