@@ -249,12 +249,37 @@ function renderNodes(nodes: Node[], stack: Frame[]): string {
   return out;
 }
 
-/** Placeholder until Task 5 — sections render as nothing. */
+/**
+ * A section's value decides whether its body renders, and how many times.
+ * Arrays are the interesting case: non-empty arrays iterate, empty arrays are
+ * falsy — which is what makes `{{^items}}` a usable "nothing here yet" branch.
+ */
+function isTruthy(value: TemplateValue): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value === null || value === undefined) return false;
+  if (typeof value === "object") return true;
+  return Boolean(value);
+}
+
 function renderSection(
-  _node: Extract<Node, { kind: "section" }>,
-  _stack: Frame[],
+  node: Extract<Node, { kind: "section" }>,
+  stack: Frame[],
 ): string {
-  return "";
+  const { value } = lookup(stack, node.name);
+  const truthy = isTruthy(value);
+
+  if (node.inverted) return truthy ? "" : renderNodes(node.children, stack);
+  if (!truthy) return "";
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => renderNodes(node.children, [...stack, item]))
+      .join("");
+  }
+  if (value && typeof value === "object") {
+    return renderNodes(node.children, [...stack, value]);
+  }
+  return renderNodes(node.children, stack);
 }
 
 /**
