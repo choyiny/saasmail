@@ -1,3 +1,146 @@
+/** Any value a template variable can carry. */
+export type TemplateValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | TemplateValue[]
+  | { [key: string]: TemplateValue };
+
+export type TemplateVariables = Record<string, TemplateValue>;
+
+/** Thrown when a template's section tags are unbalanced or a filter is unknown. */
+export class TemplateParseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TemplateParseError";
+  }
+}
+
+/**
+ * Escape the five characters that are significant in HTML text and in both
+ * quoting styles for attribute values.
+ *
+ * This is one character stricter than the helper in `inbound-forward.ts`,
+ * which omits `'` — single-quoted attributes are a real escape context in
+ * email HTML, so a value landing in one must not be able to close it.
+ */
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Value filters. Deliberately a fixed one-entry registry, not a pipeline. */
+const FILTERS: Record<string, (s: string) => string> = {
+  nl2br: (s) => s.replace(/\r\n|\r|\n/g, "<br>"),
+};
+
+export type Token =
+  | { kind: "text"; value: string }
+  | {
+      kind: "var";
+      name: string;
+      raw: boolean;
+      optional: boolean;
+      filters: string[];
+      source: string;
+    }
+  | {
+      kind: "open";
+      name: string;
+      inverted: boolean;
+      optional: boolean;
+      source: string;
+    }
+  | { kind: "close"; name: string; source: string };
+
+/*
+ * Tag grammar, in order: optional third `{` for raw output, an optional
+ * `#`/`^`/`/` sigil, the name (word characters, or a bare `.` for the current
+ * item), an optional `?` marking it optional, zero or more `|filter` clauses,
+ * and a matching third `}` when the tag opened with one.
+ *
+ * Names are `[\w.]+`, so `{{not-a-var}}` does not match and survives as literal
+ * text — the pre-rewrite behavior, which an existing test pins.
+ */
+const TAG =
+  /\{\{(\{)?\s*([#^/]?)\s*([\w.]+)\s*(\?)?\s*((?:\|\s*\w+\s*)*)(\})?\}\}/g;
+
+export function tokenize(template: string): Token[] {
+  const tokens: Token[] = [];
+  let lastIndex = 0;
+  TAG.lastIndex = 0;
+
+  let match: RegExpExecArray | null;
+  while ((match = TAG.exec(template)) !== null) {
+    const [source, rawOpen, sigil, name, optional, filterClause, rawClose] =
+      match;
+
+    // A tag that opened with `{{{` must close with `}}}`. When the brace counts
+    // disagree it is not a tag at all — emit it as text.
+    if (Boolean(rawOpen) !== Boolean(rawClose)) continue;
+
+    if (match.index > lastIndex) {
+      tokens.push({
+        kind: "text",
+        value: template.slice(lastIndex, match.index),
+      });
+    }
+    lastIndex = match.index + source.length;
+
+    if (sigil === "/") {
+      tokens.push({ kind: "close", name, source });
+      continue;
+    }
+    if (sigil === "#" || sigil === "^") {
+      tokens.push({
+        kind: "open",
+        name,
+        inverted: sigil === "^",
+        optional: Boolean(optional),
+        source,
+      });
+      continue;
+    }
+
+    const filters = (filterClause ?? "")
+      .split("|")
+      .map((f) => f.trim())
+      .filter(Boolean);
+    for (const f of filters) {
+      if (!(f in FILTERS)) {
+        throw new TemplateParseError(
+          `Unknown filter "${f}" in ${source}. Available filters: ${Object.keys(FILTERS).join(", ")}.`,
+        );
+      }
+    }
+
+    tokens.push({
+      kind: "var",
+      name,
+      raw: Boolean(rawOpen),
+      optional: Boolean(optional),
+      filters,
+      source,
+    });
+  }
+
+  if (lastIndex < template.length) {
+    tokens.push({ kind: "text", value: template.slice(lastIndex) });
+  }
+  return tokens;
+}
+
+/** Apply a tag's filters to an already-escaped (or deliberately raw) value. */
+function applyFilters(value: string, filters: string[]): string {
+  return filters.reduce((acc, f) => FILTERS[f](acc), value);
+}
+
 const VARIABLE_REGEX = /\{\{(\w+)\}\}/g;
 
 /**
