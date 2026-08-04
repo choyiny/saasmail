@@ -60,16 +60,27 @@ export type Token =
   | { kind: "close"; name: string; source: string };
 
 /*
- * Tag grammar, in order: optional third `{` for raw output, an optional
- * `#`/`^`/`/` sigil, the name (word characters, or a bare `.` for the current
- * item), an optional `?` marking it optional, zero or more `|filter` clauses,
- * and a matching third `}` when the tag opened with one.
+ * Tag grammar, as two fully separate alternatives rather than one pattern
+ * with independently-optional third braces: a strict `{{{...}}}` raw form
+ * and a strict `{{...}}` form. Each requires an exact, matching brace count
+ * on both ends. In order within each: an optional `#`/`^`/`/` sigil, the
+ * name (word characters, or a bare `.` for the current item), an optional
+ * `?` marking it optional, and zero or more `|filter` clauses.
+ *
+ * Keeping the two forms from sharing a group is deliberate: an earlier
+ * single-pattern version let a lone extra `{` or `}` sitting next to a
+ * *different* tag get folded into that tag's brace count (e.g. matching
+ * `{{{` + `name` + `}}` as a bogus "almost raw" tag), which is exactly the
+ * situation that arises when a literal `{{`/`}}` happens to sit next to a
+ * real tag. With this form, `{{{{x}}` fails the raw alternative outright
+ * (only 2 of the 3 required opening braces belong to it) and falls through
+ * to the plain alternative, which finds `{{x}}` starting two characters in.
  *
  * Names are `[\w.]+`, so `{{not-a-var}}` does not match and survives as literal
  * text — the pre-rewrite behavior, which an existing test pins.
  */
 const TAG =
-  /\{\{(\{)?\s*([#^/]?)\s*([\w.]+)\s*(\?)?\s*((?:\|\s*\w+\s*)*)(\})?\}\}/g;
+  /\{\{\{\s*([#^/]?)\s*([\w.]+)\s*(\?)?\s*((?:\|\s*\w+\s*)*)\}\}\}|\{\{\s*([#^/]?)\s*([\w.]+)\s*(\?)?\s*((?:\|\s*\w+\s*)*)\}\}/g;
 
 export function tokenize(template: string): Token[] {
   const tokens: Token[] = [];
@@ -78,12 +89,53 @@ export function tokenize(template: string): Token[] {
 
   let match: RegExpExecArray | null;
   while ((match = TAG.exec(template)) !== null) {
-    const [source, rawOpen, sigil, name, optional, filterClause, rawClose] =
-      match;
+    const [
+      source,
+      rawSigil,
+      rawName,
+      rawOptional,
+      rawFilterClause,
+      plainSigil,
+      plainName,
+      plainOptional,
+      plainFilterClause,
+    ] = match;
 
-    // A tag that opened with `{{{` must close with `}}}`. When the brace counts
-    // disagree it is not a tag at all — emit it as text.
-    if (Boolean(rawOpen) !== Boolean(rawClose)) continue;
+    const raw = rawName !== undefined;
+    const sigil = raw ? rawSigil : plainSigil;
+    const name = raw ? rawName : plainName;
+    const optional = raw ? rawOptional : plainOptional;
+    const filterClause = raw ? rawFilterClause : plainFilterClause;
+
+    // Even with the two brace forms kept separate, a tag can still sit
+    // directly against *extra* braces that belong to neither alternative —
+    // e.g. the `{{` in `{{{{x}}` that isn't part of `{{x}}`, or the trailing
+    // `}}` in `{{date}}}}`. An even run of those pairs off into its own
+    // literal `{{`/`}}` text, exactly as the legacy regex would leave it.
+    // An odd leftover (as in `{{{name}}`, one brace short of a raw close)
+    // means the tag boundary itself is ambiguous, so the whole run —
+    // leftover braces and the tag content alike — is left as literal text
+    // rather than guessing which tag was meant.
+    let leadStart = match.index;
+    while (leadStart > 0 && template[leadStart - 1] === "{") leadStart--;
+    const leadingExtra = match.index - leadStart;
+
+    const matchEnd = match.index + source.length;
+    let trailEnd = matchEnd;
+    while (trailEnd < template.length && template[trailEnd] === "}") {
+      trailEnd++;
+    }
+    const trailingExtra = trailEnd - matchEnd;
+
+    if (leadingExtra % 2 !== 0 || trailingExtra % 2 !== 0) {
+      // Retry from just past this match's own start — not `trailEnd` —
+      // so a smaller, valid match nested inside the same brace run still
+      // gets a chance. E.g. `{{{{url}}}}` rejects the 3-brace raw reading
+      // (one stray `{` and one stray `}` outside it, both odd) but must
+      // still find the plain `{{url}}` starting two characters later.
+      TAG.lastIndex = match.index + 1;
+      continue;
+    }
 
     if (match.index > lastIndex) {
       tokens.push({
@@ -123,7 +175,7 @@ export function tokenize(template: string): Token[] {
     tokens.push({
       kind: "var",
       name,
-      raw: Boolean(rawOpen),
+      raw,
       optional: Boolean(optional),
       filters,
       source,
@@ -155,17 +207,89 @@ export function extractVariables(template: string): string[] {
   return Array.from(vars);
 }
 
+/** A scope frame in the context stack. */
+type Frame = TemplateValue;
+
+interface Lookup {
+  found: boolean;
+  value: TemplateValue;
+}
+
 /**
- * Replace {{variableName}} tokens with values from the variables object.
- * Unmatched tokens are left as-is.
+ * Resolve a name against the context stack, innermost frame first, so a
+ * section body can reference both its own item's fields and top-level values.
+ */
+function lookup(stack: Frame[], name: string): Lookup {
+  if (name === ".") {
+    return { found: stack.length > 0, value: stack[stack.length - 1] };
+  }
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const frame = stack[i];
+    if (
+      frame &&
+      typeof frame === "object" &&
+      !Array.isArray(frame) &&
+      name in frame
+    ) {
+      return {
+        found: true,
+        value: (frame as Record<string, TemplateValue>)[name],
+      };
+    }
+  }
+  return { found: false, value: undefined };
+}
+
+function stringify(value: TemplateValue): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return "";
+  return String(value);
+}
+
+function renderNodes(nodes: Node[], stack: Frame[]): string {
+  let out = "";
+  for (const node of nodes) {
+    if (node.kind === "text") {
+      out += node.value;
+      continue;
+    }
+    if (node.kind === "var") {
+      const { found, value } = lookup(stack, node.name);
+      if (!found) {
+        // Optional tags collapse to nothing; required ones survive verbatim so
+        // `renderTemplate`'s check is what fails the send, not a silent blank.
+        out += node.optional ? "" : node.source;
+        continue;
+      }
+      const text = node.raw ? stringify(value) : escapeHtml(stringify(value));
+      out += applyFilters(text, node.filters);
+      continue;
+    }
+    out += renderSection(node, stack);
+  }
+  return out;
+}
+
+/** Placeholder until Task 5 — sections render as nothing. */
+function renderSection(
+  _node: Extract<Node, { kind: "section" }>,
+  _stack: Frame[],
+): string {
+  return "";
+}
+
+/**
+ * Render a template against a set of variables.
+ *
+ * Values are HTML-escaped by default; `{{{name}}}` opts a value out for
+ * pre-rendered HTML chunks. Escaping applies to substituted values only — the
+ * template's own markup and prose pass through untouched.
  */
 export function interpolate(
   template: string,
-  variables: Record<string, string>,
+  variables: TemplateVariables,
 ): string {
-  return template.replace(VARIABLE_REGEX, (match, key) => {
-    return key in variables ? variables[key] : match;
-  });
+  return renderNodes(parse(template), [variables]);
 }
 
 export type RenderTemplateResult =
