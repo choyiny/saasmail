@@ -200,12 +200,17 @@ sending something half-formed. This affects
 `GET /api/email-templates/{slug}/variables`, and `POST /api/send/reply/{id}`.
 A sequence step whose template does not parse is marked `failed`.
 
-> **Caveat: the editor UI does not understand sections yet.** Its variable
-> list is computed by an older extractor, so a template using
-> `{{#items}}…{{/items}}` shows a misleading variable list in the editor and
-> its preview may not match what actually goes out. Sending is unaffected —
-> the API and sequence sends use the new renderer. Exercise section templates
-> via the API until the follow-up UI change lands.
+The `variables` payload itself — the JSON you POST, not the template markup —
+may nest objects and arrays up to 32 levels deep. A payload nested deeper than
+that is rejected with `400` naming the limit, rather than risking a stack
+overflow while validating it. This is independent of the 64-level cap on
+section nesting above: one bounds the data you send, the other bounds the
+template you write.
+
+The template editor's UI understands this grammar too — grouping detected
+variables into Required, Optional, and Sections, and rendering a live preview
+with sample values in place of the raw tokens — so what you see while editing
+matches what a real send does.
 
 ##### Upgrading: escaping is now the default
 

@@ -31,6 +31,7 @@ import {
 import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
+import { analyzeTemplateClient } from "@/lib/template-syntax";
 import { cn } from "@/lib/utils";
 
 const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
@@ -52,18 +53,6 @@ interface ReplyComposerProps {
 }
 
 type Tab = "freeform" | "template";
-
-function extractVariables(subject: string, bodyHtml: string): string[] {
-  const vars = new Set<string>();
-  const regex = /\{\{(\w+)\}\}/g;
-  for (const src of [subject, bodyHtml]) {
-    let m: RegExpExecArray | null;
-    while ((m = regex.exec(src)) !== null) {
-      vars.add(m[1]);
-    }
-  }
-  return Array.from(vars);
-}
 
 export default function ReplyComposer({
   emailId,
@@ -175,12 +164,21 @@ export default function ReplyComposer({
   const selectedTemplate =
     templates.find((t) => t.slug === selectedSlug) ?? null;
 
+  // Only top-level names, same contract the send API validates — names
+  // scoped inside a {{#section}} resolve per item, not from this form, so
+  // they're deliberately excluded (see src/lib/template-syntax.ts).
   const requiredVars = useMemo(() => {
     if (!selectedTemplate) return [];
-    return extractVariables(
-      selectedTemplate.subject,
-      selectedTemplate.bodyHtml,
-    );
+    try {
+      return analyzeTemplateClient(
+        selectedTemplate.subject,
+        selectedTemplate.bodyHtml,
+      ).required;
+    } catch {
+      // A stored template shouldn't fail to parse, but if one somehow does,
+      // fall back to no prompts rather than crashing the composer.
+      return [];
+    }
   }, [selectedTemplate]);
 
   useEffect(() => {
