@@ -172,20 +172,6 @@ function applyFilters(value: string, filters: string[]): string {
   return filters.reduce((acc, f) => FILTERS[f](acc), value);
 }
 
-const VARIABLE_REGEX = /\{\{(\w+)\}\}/g;
-
-/**
- * Extract unique variable names from a template string.
- */
-export function extractVariables(template: string): string[] {
-  const vars = new Set<string>();
-  let match: RegExpExecArray | null;
-  while ((match = VARIABLE_REGEX.exec(template)) !== null) {
-    vars.add(match[1]);
-  }
-  return Array.from(vars);
-}
-
 /** A scope frame in the context stack. */
 type Frame = TemplateValue;
 
@@ -296,26 +282,118 @@ export function interpolate(
   return renderNodes(parse(template), [variables]);
 }
 
-export type RenderTemplateResult =
-  | { ok: true; subject: string; bodyHtml: string }
-  | { ok: false; missingVariables: string[]; requiredVariables: string[] };
+export interface TemplateAnalysis {
+  /** Names the caller must supply or the send fails. */
+  required: string[];
+  /** Names that render empty when absent. */
+  optional: string[];
+  /** Sections and the names their bodies reference, for the editor and API. */
+  sections: Array<{ name: string; inverted: boolean; variables: string[] }>;
+}
 
 /**
- * Validate that every variable a template references was supplied, then
- * interpolate its subject and body.
+ * Describe what a template needs.
  *
- * Missing variables are reported rather than silently left as `{{token}}`
- * so callers can fail the send instead of mailing a half-rendered template.
+ * The split matters: a name inside a section body resolves against the section
+ * item at render time, so it is NOT something the caller supplies at the top
+ * level. Reporting those as required would fail every send that uses a section.
+ *
+ * A regular `{{#items}}` IS required — absent, it renders nothing and a digest
+ * goes out silently empty. An inverted `{{^items}}` is not, since handling
+ * absence is its purpose. `{{#items?}}` opts a regular section out.
+ */
+export function analyzeTemplate(...sources: string[]): TemplateAnalysis {
+  const required = new Set<string>();
+  const optional = new Set<string>();
+  const sections: TemplateAnalysis["sections"] = [];
+
+  /** Collect names referenced anywhere beneath a section, at any depth. */
+  function collectInner(nodes: Node[], into: Set<string>): void {
+    for (const node of nodes) {
+      if (node.kind === "var") {
+        if (node.name !== ".") into.add(node.name);
+      } else if (node.kind === "section") {
+        into.add(node.name);
+        collectInner(node.children, into);
+      }
+    }
+  }
+
+  function walkTopLevel(nodes: Node[]): void {
+    for (const node of nodes) {
+      if (node.kind === "text") continue;
+      if (node.kind === "var") {
+        if (node.name === ".") continue;
+        (node.optional ? optional : required).add(node.name);
+        continue;
+      }
+      (node.inverted || node.optional ? optional : required).add(node.name);
+      const inner = new Set<string>();
+      collectInner(node.children, inner);
+      sections.push({
+        name: node.name,
+        inverted: node.inverted,
+        variables: Array.from(inner),
+      });
+    }
+  }
+
+  for (const source of sources) walkTopLevel(parse(source));
+
+  // A name that is required somewhere is required overall.
+  for (const name of required) optional.delete(name);
+
+  return {
+    required: Array.from(required),
+    optional: Array.from(optional),
+    sections,
+  };
+}
+
+/**
+ * Names a caller must supply. Kept as the pre-rewrite entry point so existing
+ * call sites keep working; it is exactly the analysis's `required` set.
+ */
+export function extractVariables(template: string): string[] {
+  return analyzeTemplate(template).required;
+}
+
+export type RenderTemplateResult =
+  | { ok: true; subject: string; bodyHtml: string }
+  | {
+      ok: false;
+      missingVariables: string[];
+      requiredVariables: string[];
+      parseError?: string;
+    };
+
+/**
+ * Validate that every required variable was supplied, then render.
+ *
+ * Missing variables are reported rather than silently left as `{{token}}` so
+ * callers fail the send instead of mailing a half-rendered template.
  */
 export function renderTemplate(
   template: { subject: string; bodyHtml: string },
-  variables: Record<string, string>,
+  variables: TemplateVariables,
 ): RenderTemplateResult {
-  const subjectVars = extractVariables(template.subject);
-  const bodyVars = extractVariables(template.bodyHtml);
-  const requiredVariables = Array.from(new Set([...subjectVars, ...bodyVars]));
-  const missingVariables = requiredVariables.filter((v) => !(v in variables));
+  let analysis: TemplateAnalysis;
+  try {
+    analysis = analyzeTemplate(template.subject, template.bodyHtml);
+  } catch (err) {
+    if (err instanceof TemplateParseError) {
+      return {
+        ok: false,
+        missingVariables: [],
+        requiredVariables: [],
+        parseError: err.message,
+      };
+    }
+    throw err;
+  }
 
+  const requiredVariables = analysis.required;
+  const missingVariables = requiredVariables.filter((v) => !(v in variables));
   if (missingVariables.length > 0) {
     return { ok: false, missingVariables, requiredVariables };
   }
