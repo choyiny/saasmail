@@ -117,13 +117,30 @@ describe("tokenize", () => {
 
   it("leaves a run with no valid name as literal text", () => {
     // Preserves the existing "{{not-a-var}} stays verbatim" behavior: none of
-    // these contain a `[\w.]+` name for either brace form to match against,
-    // so no tag is found anywhere and the whole input is literal text.
+    // these contain a `\w+` (or bare `.`) name for either brace form to match
+    // against, so no tag is found anywhere and the input is one text token.
     for (const input of ["{{not-a-var}}", "{{}}", "{{ }}"]) {
-      const tokens = tokenize(input);
-      expect(
-        tokens.map((t) => (t.kind === "text" ? t.value : "")).join(""),
-      ).toContain("{{");
+      expect(tokenize(input)).toEqual([{ kind: "text", value: input }]);
+    }
+  });
+
+  it("does not treat a padded, dotted, or hyphenated name as a tag", () => {
+    // Tag names match legacy exactly: `\w+` (or a bare `.`), with no
+    // whitespace anywhere inside the tag. Anything laxer would turn prose
+    // like `{{ note }}` in a stored template into a REQUIRED variable and
+    // start rejecting sends, and would read `{{user.name}}` as a flat key
+    // literally named "user.name" rather than the path it resembles.
+    for (const input of [
+      "{{ spaced }}",
+      "{{ name }}",
+      "{{name }}",
+      "{{ name}}",
+      "{{example.com}}",
+      "{{user.name}}",
+      "{{name ?}}",
+      "{{name| nl2br}}",
+    ]) {
+      expect(tokenize(input)).toEqual([{ kind: "text", value: input }]);
     }
   });
 
@@ -133,8 +150,11 @@ describe("tokenize", () => {
     // in interpolate.ts), so this is not read as a malformed raw tag; it is
     // read as a lone literal "{" immediately followed by the plain tag
     // "{{name}}". Symmetrically, "{{name}}}" is a plain tag followed by one
-    // leftover literal "}". This is the same brace-run divergence from the
-    // legacy flat regex documented and asserted in interpolate-compat.test.ts.
+    // leftover literal "}". Note these two inputs do NOT diverge from the
+    // legacy flat regex — it read them the same way, as "{" + tag and tag +
+    // "}" — so a change in what they render is a real regression, not an
+    // accepted break. The genuine brace-run divergence is the clean 3+ run
+    // ("{{{name}}}"), pinned separately in interpolate-compat.test.ts.
     expect(tokenize("{{{name}}")).toEqual([
       { kind: "text", value: "{" },
       {

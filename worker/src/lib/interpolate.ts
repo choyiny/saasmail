@@ -40,6 +40,15 @@ const FILTERS: Record<string, (s: string) => string> = {
   nl2br: (s) => s.replace(/\r\n|\r|\n/g, "<br>"),
 };
 
+/**
+ * Filters whose output is HTML and which are therefore skipped in plain-text
+ * render mode (see `InterpolateOptions.escape`). `nl2br` emits a `<br>` tag;
+ * running it while rendering a Subject header would put the literal characters
+ * `<br>` in front of the recipient. Skipping leaves the value's own newlines
+ * intact, which is the closest thing to "no formatting applied".
+ */
+const HTML_ONLY_FILTERS = new Set(["nl2br"]);
+
 export type Token =
   | { kind: "text"; value: string }
   | {
@@ -85,11 +94,19 @@ export type Token =
  * excludes 3+ brace runs from the legacy-identity check instead of
  * asserting a property the feature deliberately breaks.
  *
- * Names are `[\w.]+`, so `{{not-a-var}}` does not match and survives as literal
- * text — the pre-rewrite behavior, which an existing test pins.
+ * A name is `\w+` or a bare `.`, with NO whitespace anywhere inside the tag —
+ * not between the braces and the sigil, the sigil and the name, the name and
+ * `?`/`|`/the closing braces. That is deliberately as strict as the legacy
+ * `/\{\{(\w+)\}\}/g`, which left `{{ spaced }}`, `{{dotted.name}}`, and
+ * `{{not-a-var}}` alone as literal text. Being laxer would silently promote
+ * prose like `{{ note }}` in a stored template into a REQUIRED variable and
+ * start rejecting sends for a name the caller never heard of, and would read
+ * `{{user.name}}` as a flat key literally named `"user.name"` rather than the
+ * Mustache path it looks like. Neither is worth the convenience; anything
+ * that does not match survives as text exactly as it did before the rewrite.
  */
 const TAG =
-  /\{\{\{\s*([#^/]?)\s*([\w.]+)\s*(\?)?\s*((?:\|\s*\w+\s*)*)\}\}\}|\{\{\s*([#^/]?)\s*([\w.]+)\s*(\?)?\s*((?:\|\s*\w+\s*)*)\}\}/g;
+  /\{\{\{([#^/]?)(\w+|\.)(\?)?((?:\|\w+)*)\}\}\}|\{\{([#^/]?)(\w+|\.)(\?)?((?:\|\w+)*)\}\}/g;
 
 export function tokenize(template: string): Token[] {
   const tokens: Token[] = [];
@@ -139,10 +156,9 @@ export function tokenize(template: string): Token[] {
       continue;
     }
 
-    const filters = (filterClause ?? "")
-      .split("|")
-      .map((f) => f.trim())
-      .filter(Boolean);
+    // The clause is a run of `|name` with no whitespace, so splitting is
+    // enough; the leading empty segment is what `filter(Boolean)` drops.
+    const filters = (filterClause ?? "").split("|").filter(Boolean);
     for (const f of filters) {
       if (!(f in FILTERS)) {
         throw new TemplateParseError(
@@ -168,8 +184,15 @@ export function tokenize(template: string): Token[] {
 }
 
 /** Apply a tag's filters to an already-escaped (or deliberately raw) value. */
-function applyFilters(value: string, filters: string[]): string {
-  return filters.reduce((acc, f) => FILTERS[f](acc), value);
+function applyFilters(
+  value: string,
+  filters: string[],
+  escape: boolean,
+): string {
+  return filters.reduce(
+    (acc, f) => (!escape && HTML_ONLY_FILTERS.has(f) ? acc : FILTERS[f](acc)),
+    value,
+  );
 }
 
 /** A scope frame in the context stack. */
@@ -183,7 +206,16 @@ interface Lookup {
 /**
  * Resolve a name against the context stack, innermost frame first, so a
  * section body can reference both its own item's fields and top-level values.
+ *
+ * Membership is `hasOwn`, not `in`: `in` walks the prototype chain, so
+ * `{{constructor}}` / `{{toString}}` / `{{hasOwnProperty}}` would resolve to
+ * built-in functions nobody supplied. Section frames come straight from
+ * caller-supplied JSON, so this is the only line keeping inherited members out.
  */
+function hasOwn(obj: object, name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, name);
+}
+
 function lookup(stack: Frame[], name: string): Lookup {
   if (name === ".") {
     return { found: stack.length > 0, value: stack[stack.length - 1] };
@@ -194,7 +226,7 @@ function lookup(stack: Frame[], name: string): Lookup {
       frame &&
       typeof frame === "object" &&
       !Array.isArray(frame) &&
-      name in frame
+      hasOwn(frame, name)
     ) {
       return {
         found: true,
@@ -211,7 +243,29 @@ function stringify(value: TemplateValue): string {
   return String(value);
 }
 
-function renderNodes(nodes: Node[], stack: Frame[]): string {
+/** Render-time settings threaded down the tree. */
+interface RenderContext {
+  /** HTML-escape substituted values. False for plain-text output. */
+  escape: boolean;
+  /**
+   * True while rendering a section body.
+   *
+   * It changes what an unresolved variable does. At top level, an unfound name
+   * survives as its own source text because `renderTemplate` refuses to send
+   * such a template at all — the verbatim `{{token}}` is a debugging signal
+   * that never reaches a recipient. Inside a section it is the opposite: those
+   * names resolve per item and are deliberately never `required`, so nothing
+   * upstream catches them, and emitting the source would mail a literal
+   * `{{empty_msg}}` to a customer. Inside a section, unfound renders empty.
+   */
+  inSection: boolean;
+}
+
+function renderNodes(
+  nodes: Node[],
+  stack: Frame[],
+  ctx: RenderContext,
+): string {
   let out = "";
   for (const node of nodes) {
     if (node.kind === "text") {
@@ -221,16 +275,21 @@ function renderNodes(nodes: Node[], stack: Frame[]): string {
     if (node.kind === "var") {
       const { found, value } = lookup(stack, node.name);
       if (!found) {
-        // Optional tags collapse to nothing; required ones survive verbatim so
-        // `renderTemplate`'s check is what fails the send, not a silent blank.
-        out += node.optional ? "" : node.source;
+        // Optional tags collapse to nothing; so do section-body tags (see
+        // `RenderContext.inSection`). A required top-level one survives
+        // verbatim so `renderTemplate`'s check fails the send rather than
+        // mailing a silent blank.
+        out += node.optional || ctx.inSection ? "" : node.source;
         continue;
       }
-      const text = node.raw ? stringify(value) : escapeHtml(stringify(value));
-      out += applyFilters(text, node.filters);
+      const text =
+        node.raw || !ctx.escape
+          ? stringify(value)
+          : escapeHtml(stringify(value));
+      out += applyFilters(text, node.filters, ctx.escape);
       continue;
     }
-    out += renderSection(node, stack);
+    out += renderSection(node, stack, ctx);
   }
   return out;
 }
@@ -250,36 +309,58 @@ function isTruthy(value: TemplateValue): boolean {
 function renderSection(
   node: Extract<Node, { kind: "section" }>,
   stack: Frame[],
+  ctx: RenderContext,
 ): string {
   const { value } = lookup(stack, node.name);
   const truthy = isTruthy(value);
+  const inner: RenderContext = ctx.inSection
+    ? ctx
+    : { ...ctx, inSection: true };
 
-  if (node.inverted) return truthy ? "" : renderNodes(node.children, stack);
+  if (node.inverted)
+    return truthy ? "" : renderNodes(node.children, stack, inner);
   if (!truthy) return "";
 
   if (Array.isArray(value)) {
     return value
-      .map((item) => renderNodes(node.children, [...stack, item]))
+      .map((item) => renderNodes(node.children, [...stack, item], inner))
       .join("");
   }
   if (value && typeof value === "object") {
-    return renderNodes(node.children, [...stack, value]);
+    return renderNodes(node.children, [...stack, value], inner);
   }
-  return renderNodes(node.children, stack);
+  return renderNodes(node.children, stack, inner);
+}
+
+export interface InterpolateOptions {
+  /**
+   * HTML-escape substituted values. Defaults to true.
+   *
+   * Set false for plain-text output. A Subject header is plain text, not
+   * HTML: escaping it would mail a literal `O&#39;Brien` to a recipient
+   * whose name is `O'Brien`. In this mode `{{key}}` and `{{{key}}}` are
+   * equivalent, and HTML-emitting filters such as `nl2br` are skipped.
+   */
+  escape?: boolean;
 }
 
 /**
  * Render a template against a set of variables.
  *
  * Values are HTML-escaped by default; `{{{name}}}` opts a value out for
- * pre-rendered HTML chunks. Escaping applies to substituted values only — the
- * template's own markup and prose pass through untouched.
+ * pre-rendered HTML chunks, and `{ escape: false }` opts the whole render out
+ * for plain-text destinations. Escaping applies to substituted values only —
+ * the template's own markup and prose pass through untouched.
  */
 export function interpolate(
   template: string,
   variables: TemplateVariables,
+  options: InterpolateOptions = {},
 ): string {
-  return renderNodes(parse(template), [variables]);
+  return renderNodes(parse(template), [variables], {
+    escape: options.escape !== false,
+    inSection: false,
+  });
 }
 
 export interface TemplateAnalysis {
@@ -334,7 +415,12 @@ export function analyzeTemplate(...sources: string[]): TemplateAnalysis {
         (node.optional ? optional : required).add(node.name);
         continue;
       }
-      (node.inverted || node.optional ? optional : required).add(node.name);
+      // `{{#.}}` iterates the current item, exactly as `{{.}}` renders it —
+      // there is no top-level name to supply, so requiring "." would make the
+      // template permanently unsendable.
+      if (node.name !== ".") {
+        (node.inverted || node.optional ? optional : required).add(node.name);
+      }
       const inner = new Set<string>();
       collectInner(node.children, inner);
 
@@ -408,14 +494,20 @@ export function renderTemplate(
   }
 
   const requiredVariables = analysis.required;
-  const missingVariables = requiredVariables.filter((v) => !(v in variables));
+  // `hasOwn`, not `in`: `in` would count inherited members like `constructor`
+  // as "supplied" and let a send proceed with a variable nobody passed.
+  const missingVariables = requiredVariables.filter(
+    (v) => !Object.prototype.hasOwnProperty.call(variables, v),
+  );
   if (missingVariables.length > 0) {
     return { ok: false, missingVariables, requiredVariables };
   }
 
   return {
     ok: true,
-    subject: interpolate(template.subject, variables),
+    // The subject is a plain-text header, not HTML — rendering it through the
+    // escaping path would put `&amp;` and `&#39;` in front of a recipient.
+    subject: interpolate(template.subject, variables, { escape: false }),
     bodyHtml: interpolate(template.bodyHtml, variables),
   };
 }
@@ -437,6 +529,20 @@ export type Node =
       optional: boolean;
       children: Node[];
     };
+
+/**
+ * Maximum section nesting depth.
+ *
+ * `parse` itself is iterative, but rendering and `analyzeTemplate`'s inner
+ * collection both recurse once per level, so an arbitrarily deep template
+ * would overflow the stack — a `RangeError` escaping as an unhandled 500 from
+ * `/variables` or a send, and workerd's stack is smaller than Node's. Nothing
+ * validates a template's balance at save time, so an admin can store one.
+ * Capping here turns that into a `TemplateParseError`, which every caller
+ * already handles. Real templates nest a handful of levels; 64 is far beyond
+ * anything hand-written.
+ */
+export const MAX_SECTION_DEPTH = 64;
 
 /**
  * Fold the token stream into a tree.
@@ -462,6 +568,11 @@ export function parse(template: string): Node[] {
         currentChildren().push(token);
         break;
       case "open": {
+        if (stack.length >= MAX_SECTION_DEPTH) {
+          throw new TemplateParseError(
+            `Sections nested too deeply at ${token.source} — the limit is ${MAX_SECTION_DEPTH} levels.`,
+          );
+        }
         const node: Extract<Node, { kind: "section" }> = {
           kind: "section",
           name: token.name,

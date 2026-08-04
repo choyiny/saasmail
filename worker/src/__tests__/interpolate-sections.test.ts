@@ -141,13 +141,41 @@ describe("interpolate — context stack isolation", () => {
     // If the renderer pushed each item onto a SHARED stack array without
     // popping between iterations, `lookup`'s innermost-first search would
     // still find `extra` from item A's leaked frame while rendering item B.
-    // Item B has no `extra` of its own, so the correct result is that its
-    // `{{extra}}` tag is unresolved and survives verbatim as source text.
+    // Item B has no `extra` of its own, so its `{{extra}}` must not resolve;
+    // inside a section an unresolved name renders empty, giving "leak".
+    //
+    // The test still detects a leak: a leaking implementation would find item
+    // A's value again and produce "leakleak", which "leak" distinguishes.
     expect(
       interpolate("{{#items}}{{extra}}{{/items}}", {
         items: [{ extra: "leak" }, {}],
       }),
-    ).toBe("leak{{extra}}");
+    ).toBe("leak");
+  });
+});
+
+describe("interpolate — unresolved names inside a section", () => {
+  it("renders an unfound section-body name as empty, not as its source text", () => {
+    // Section-body names are deliberately never `required` (they resolve per
+    // item), so nothing upstream catches a missing one. Emitting the source
+    // would mail a literal "{{empty_msg}}" to a customer — the README's own
+    // advertised empty-state pattern doing exactly the wrong thing.
+    expect(interpolate("{{^items}}{{empty_msg}}{{/items}}", {})).toBe("");
+    expect(
+      interpolate("{{#items}}{{missing}}{{/items}}", { items: [{}, {}] }),
+    ).toBe("");
+  });
+
+  it("still emits source text for an unfound name at top level", () => {
+    // Top-level required names are caught by renderTemplate before a send, so
+    // the verbatim token stays as the debugging signal.
+    expect(interpolate("{{missing}}", {})).toBe("{{missing}}");
+  });
+
+  it("keeps the section-body rule at every nesting depth", () => {
+    expect(
+      interpolate("{{#a}}{{#b}}{{gone}}{{/b}}{{/a}}", { a: true, b: true }),
+    ).toBe("");
   });
 });
 

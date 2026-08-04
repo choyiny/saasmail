@@ -83,6 +83,22 @@ describe("analyzeTemplate — the validation split", () => {
     expect(a.optional).toEqual([]);
   });
 
+  it("does not require the dot as a section name", () => {
+    // `{{#.}}` iterates the current item; there is no top-level "." for a
+    // caller to supply, so requiring it made such a template unsendable.
+    const a = analyzeTemplate("{{#.}}x{{/.}}");
+    expect(a.required).toEqual([]);
+    expect(a.optional).toEqual([]);
+  });
+
+  it("does not treat padded or dotted names as variables", () => {
+    // Legacy left these as literal prose; promoting them to required would
+    // start failing sends for names the caller never heard of.
+    const a = analyzeTemplate("{{ spaced }} {{ name }} {{example.com}}");
+    expect(a.required).toEqual([]);
+    expect(a.optional).toEqual([]);
+  });
+
   it("merges duplicate section entries across sources by name", () => {
     const a = analyzeTemplate(
       "{{#items}}{{price}}{{/items}}",
@@ -123,6 +139,25 @@ describe("renderTemplate", () => {
     const r = renderTemplate({ subject: "Hi", bodyHtml: "{{promo?}}" }, {});
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.bodyHtml).toBe("");
+  });
+
+  it("renders the subject as plain text and the body as HTML", () => {
+    const r = renderTemplate(
+      { subject: "Hi {{name}}", bodyHtml: "<p>Hi {{name}}</p>" },
+      { name: `O'Brien & <VIP>` },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.subject).toBe(`Hi O'Brien & <VIP>`);
+    expect(r.bodyHtml).toBe("<p>Hi O&#39;Brien &amp; &lt;VIP&gt;</p>");
+  });
+
+  it("does not count an inherited member as a supplied variable", () => {
+    // With `v in variables` the missing-check would report `constructor` as
+    // supplied and let the send through with nothing behind it.
+    const r = renderTemplate({ subject: "x", bodyHtml: "{{constructor}}" }, {});
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.missingVariables).toEqual(["constructor"]);
   });
 
   it("reports a parse error instead of throwing", () => {

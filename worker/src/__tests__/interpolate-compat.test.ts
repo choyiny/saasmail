@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { interpolate } from "../lib/interpolate";
+import { interpolate, renderTemplate } from "../lib/interpolate";
 
 /**
  * The pre-rewrite implementation, frozen verbatim. The differential test below
@@ -26,7 +26,23 @@ function makeRandom(seed: number): () => number {
   };
 }
 
-const NAMES = ["name", "email", "feature", "date", "time", "url", "x", "y"];
+// "spaced" is here on purpose: `LITERALS` contains "{{ spaced }}", and unless
+// "spaced" is also a name the generator supplies a value for, both renderers
+// leave that literal alone for the same reason (nothing to substitute) and the
+// fuzz proves nothing about whitespace-padded tags. With it supplied, any
+// implementation that accepts `{{ spaced }}` as a tag substitutes where legacy
+// did not, and the differential fails.
+const NAMES = [
+  "name",
+  "email",
+  "feature",
+  "date",
+  "time",
+  "url",
+  "x",
+  "y",
+  "spaced",
+];
 // HTML-free values only: where the two implementations intentionally diverge
 // (values containing markup) is covered by the escaping tests, not here.
 const VALUES = ["Alice", "", "hi there", "10:00 GMT", "Ada Lovelace", "42"];
@@ -262,6 +278,28 @@ describe("interpolate — golden corpus from seeds/generate-demo.ts", () => {
       expect(interpolate(body, CORPUS_VARS)).toBe(expectedBody);
     },
   );
+
+  it("renders a seeded subject with an HTML-significant value exactly as before", () => {
+    // The corpus above deliberately uses HTML-free values, which is precisely
+    // how subject escaping went unnoticed: a Subject header is PLAIN TEXT, so
+    // a recipient named O'Brien must not receive "O&#39;Brien". Five of the
+    // seeded demo templates put {{name}} in the subject, so this is a stock
+    // install's behavior, not an exotic case. The body of the same render
+    // stays escaped — it really is HTML.
+    const vars = { name: `O'Brien & Sons <VIP> "Ltd"` };
+    const r = renderTemplate(
+      { subject: CORPUS[1].subject, bodyHtml: "<p>Hi {{name}},</p>" },
+      vars,
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.subject).toBe(`Long time no see, O'Brien & Sons <VIP> "Ltd"`);
+    // Byte-identical to what the pre-rewrite renderer produced for a subject.
+    expect(r.subject).toBe(legacyInterpolate(CORPUS[1].subject, vars));
+    expect(r.bodyHtml).toBe(
+      "<p>Hi O&#39;Brien &amp; Sons &lt;VIP&gt; &quot;Ltd&quot;,</p>",
+    );
+  });
 
   it("does not escape apostrophes in the template's own prose", () => {
     // The seeded bodies contain "It's" / "you'll" as literal text. Escaping the

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { interpolate, TemplateParseError } from "../lib/interpolate";
+import {
+  analyzeTemplate,
+  interpolate,
+  MAX_SECTION_DEPTH,
+  TemplateParseError,
+} from "../lib/interpolate";
 
 const CHUNKS = [
   "{{",
@@ -47,10 +52,33 @@ describe("interpolate — robustness", () => {
     }
   });
 
-  it("handles deeply nested sections without blowing the stack", () => {
-    const depth = 200;
-    const template = "{{#a}}".repeat(depth) + "x" + "{{/a}}".repeat(depth);
+  it("renders sections nested to exactly the depth limit", () => {
+    const template =
+      "{{#a}}".repeat(MAX_SECTION_DEPTH) +
+      "x" +
+      "{{/a}}".repeat(MAX_SECTION_DEPTH);
     expect(interpolate(template, { a: true })).toBe("x");
+  });
+
+  it("rejects nesting past the limit with a parse error, not a RangeError", () => {
+    // Rendering and analyzeTemplate's inner collection both recurse per level,
+    // so unbounded depth would overflow the stack and escape as an unhandled
+    // 500 (workerd's stack is smaller than Node's). The cap converts that into
+    // a TemplateParseError, which every caller already handles as a 400.
+    const depth = MAX_SECTION_DEPTH + 1;
+    const template = "{{#a}}".repeat(depth) + "x" + "{{/a}}".repeat(depth);
+    expect(() => interpolate(template, { a: true })).toThrow(
+      TemplateParseError,
+    );
+    expect(() => interpolate(template, { a: true })).toThrow(
+      /nested too deeply/i,
+    );
+  });
+
+  it("caps analyzeTemplate the same way, since it recurses too", () => {
+    const depth = MAX_SECTION_DEPTH + 1;
+    const template = "{{#a}}".repeat(depth) + "{{x}}" + "{{/a}}".repeat(depth);
+    expect(() => analyzeTemplate(template)).toThrow(TemplateParseError);
   });
 
   it("handles a very long template", () => {

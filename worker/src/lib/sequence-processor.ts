@@ -10,7 +10,7 @@ import { emailTemplates } from "../db/email-templates.schema";
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
-import { interpolate } from "./interpolate";
+import { interpolate, TemplateParseError } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
 import { generateMessageId } from "./message-id";
 import { sendViaOutbox } from "./outbox";
@@ -213,9 +213,39 @@ export async function processSequenceEmail(
     ...customVars,
   };
 
-  // Interpolate template
-  const renderedSubject = interpolate(template.subject, mergedVars);
-  const renderedHtml = interpolate(template.bodyHtml, mergedVars);
+  // Interpolate template. The subject is a plain-text header, so it renders
+  // without HTML escaping; the body is HTML and stays escaped.
+  //
+  // A malformed template (unbalanced sections, unknown filter) throws
+  // TemplateParseError. Without this catch the throw would reach the queue
+  // handler, which retries — leaving the row stuck on "queued" forever and
+  // the enrollment never completing. Treat it as final, exactly like a
+  // missing template or missing person above.
+  let renderedSubject: string;
+  let renderedHtml: string;
+  try {
+    renderedSubject = interpolate(template.subject, mergedVars, {
+      escape: false,
+    });
+    renderedHtml = interpolate(template.bodyHtml, mergedVars);
+  } catch (err) {
+    if (err instanceof TemplateParseError) {
+      console.error(
+        "[sequence] template parse error",
+        JSON.stringify({
+          sequenceEmailId,
+          templateSlug: seqEmail.templateSlug,
+          error: err.message,
+        }),
+      );
+      await db
+        .update(sequenceEmails)
+        .set({ status: "failed" })
+        .where(eq(sequenceEmails.id, sequenceEmailId));
+      return;
+    }
+    throw err;
+  }
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);

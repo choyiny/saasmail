@@ -556,3 +556,118 @@ describe("sequence processor - crash-redelivery idempotency", () => {
     expect(outbox).toHaveLength(1);
   });
 });
+
+describe("sequence processor - template rendering", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createTestUser();
+  });
+
+  /** Seed a sequence, enrollment, and one queued step for `slug`. */
+  async function seedStep(slug: string, personEmail = "a@test.com") {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await createTestPerson({ id: "p1", email: personEmail, name: "O'Brien" });
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Test",
+      steps: JSON.stringify([{ order: 1, templateSlug: slug, delayHours: 0 }]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-1",
+      sequenceId: "seq-1",
+      personId: "p1",
+      status: "active",
+      variables: "{}",
+      fromAddress: "test@test.com",
+      enrolledAt: now,
+    });
+    await db.insert(sequenceEmails).values({
+      id: "se-1",
+      enrollmentId: "enr-1",
+      stepOrder: 1,
+      templateSlug: slug,
+      scheduledAt: now - 100,
+      status: "queued",
+    });
+    return db;
+  }
+
+  it("marks the row failed on a malformed template instead of leaving it queued", async () => {
+    // interpolate throws TemplateParseError on an unbalanced template. Without
+    // a catch here the throw reaches the queue handler, which retries forever
+    // while the row stays "queued" and the enrollment never resolves.
+    const db = await seedStep("broken");
+    await createTestTemplate({
+      slug: "broken",
+      subject: "Hi {{name}}",
+      bodyHtml: "<p>{{#items}}oops</p>",
+    });
+
+    const fakeSender: EmailSender = {
+      provider: "none",
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (_params: SendEmailParams) => ({
+        id: "should-not-be-called",
+        error: null,
+      })),
+    };
+
+    // Must not throw — a parse error is final, not retryable.
+    await processSequenceEmail(
+      db,
+      fakeSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    expect(fakeSender.send).not.toHaveBeenCalled();
+
+    const row = await db
+      .select()
+      .from(sequenceEmails)
+      .where(eq(sequenceEmails.id, "se-1"))
+      .limit(1);
+    expect(row[0].status).toBe("failed");
+
+    expect(await db.select().from(sentEmails)).toHaveLength(0);
+  });
+
+  it("does not HTML-escape the subject, but still escapes the body", async () => {
+    // A Subject header is plain text: the recipient must see O'Brien, not
+    // O&#39;Brien. The body is HTML and stays escaped.
+    const db = await seedStep("greet");
+    await createTestTemplate({
+      slug: "greet",
+      subject: "Hi {{name}} & friends",
+      bodyHtml: "<p>Hi {{name}}</p>",
+    });
+
+    const fakeSender: EmailSender = {
+      provider: "none",
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (_params: SendEmailParams) => ({
+        id: "fake-id",
+        error: null,
+      })),
+    };
+
+    await processSequenceEmail(
+      db,
+      fakeSender,
+      env as unknown as CloudflareBindings,
+      "se-1",
+    );
+
+    const sent = await db.select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].subject).toBe("Hi O'Brien & friends");
+    expect(sent[0].bodyHtml).toContain("Hi O&#39;Brien");
+  });
+});

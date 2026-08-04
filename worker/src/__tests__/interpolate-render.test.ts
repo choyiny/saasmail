@@ -60,6 +60,91 @@ describe("interpolate — nl2br filter", () => {
   });
 });
 
+describe("interpolate — plain-text mode ({ escape: false })", () => {
+  it("emits HTML-significant characters literally", () => {
+    expect(
+      interpolate(
+        "Hi {{v}}",
+        { v: `O'Brien & Sons <VIP> "Ltd"` },
+        {
+          escape: false,
+        },
+      ),
+    ).toBe(`Hi O'Brien & Sons <VIP> "Ltd"`);
+  });
+
+  it.each([
+    ["&", "&"],
+    ["'", "'"],
+    ['"', '"'],
+    ["<", "<"],
+    [">", ">"],
+  ])("passes %s through unchanged", (value) => {
+    expect(interpolate("{{v}}", { v: value }, { escape: false })).toBe(value);
+  });
+
+  it("still escapes the same values when escaping is on (the HTML body path)", () => {
+    expect(interpolate("{{v}}", { v: `&'"<>` })).toBe(
+      "&amp;&#39;&quot;&lt;&gt;",
+    );
+  });
+
+  it("treats a raw tag the same as a plain one", () => {
+    expect(interpolate("{{{v}}}", { v: "<b>x</b>" }, { escape: false })).toBe(
+      "<b>x</b>",
+    );
+  });
+
+  it("skips nl2br rather than injecting a literal <br> into plain text", () => {
+    // nl2br's whole purpose is producing HTML. In a Subject header there is no
+    // HTML to produce, so it is a no-op and the value's newlines survive
+    // untouched — a visible "<br>" in a subject line would be worse.
+    expect(interpolate("{{v|nl2br}}", { v: "a\nb" }, { escape: false })).toBe(
+      "a\nb",
+    );
+    expect(interpolate("{{v|nl2br}}", { v: "a\nb" })).toBe("a<br>b");
+  });
+
+  it("defaults to escaping when no options are passed", () => {
+    expect(interpolate("{{v}}", { v: "<b>" })).toBe("&lt;b&gt;");
+    expect(interpolate("{{v}}", { v: "<b>" }, {})).toBe("&lt;b&gt;");
+  });
+});
+
+describe("interpolate — inherited object members are not variables", () => {
+  it.each([
+    "constructor",
+    "toString",
+    "valueOf",
+    "hasOwnProperty",
+    "__proto__",
+  ])("does not resolve %s from the prototype chain", (name) => {
+    // `name in frame` would find these and render e.g. the source of
+    // Object's constructor into an email.
+    expect(interpolate(`{{${name}}}`, {})).toBe(`{{${name}}}`);
+  });
+
+  it("does not resolve an inherited member from a section item either", () => {
+    // Section frames come straight from caller-supplied JSON.
+    expect(
+      interpolate("{{#items}}{{toString}}{{/items}}", { items: [{}] }),
+    ).toBe("");
+  });
+
+  it("still resolves an own property that shadows a prototype member", () => {
+    expect(interpolate("{{toString}}", { toString: "mine" })).toBe("mine");
+  });
+});
+
+describe("interpolate — tag names match the legacy grammar exactly", () => {
+  it.each(["{{ spaced }}", "{{ name }}", "{{example.com}}", "{{user.name}}"])(
+    "leaves %s as literal text",
+    (template) => {
+      expect(interpolate(template, { spaced: "S", name: "N" })).toBe(template);
+    },
+  );
+});
+
 describe("interpolate — non-string values", () => {
   it("stringifies numbers and booleans", () => {
     expect(interpolate("{{a}} {{b}}", { a: 42, b: true })).toBe("42 true");
