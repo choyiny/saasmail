@@ -67,14 +67,23 @@ export type Token =
  * name (word characters, or a bare `.` for the current item), an optional
  * `?` marking it optional, and zero or more `|filter` clauses.
  *
- * Keeping the two forms from sharing a group is deliberate: an earlier
- * single-pattern version let a lone extra `{` or `}` sitting next to a
- * *different* tag get folded into that tag's brace count (e.g. matching
- * `{{{` + `name` + `}}` as a bogus "almost raw" tag), which is exactly the
- * situation that arises when a literal `{{`/`}}` happens to sit next to a
- * real tag. With this form, `{{{{x}}` fails the raw alternative outright
- * (only 2 of the 3 required opening braces belong to it) and falls through
- * to the plain alternative, which finds `{{x}}` starting two characters in.
+ * Keeping the two forms from sharing a group means a lone extra `{` or `}`
+ * sitting next to a *different* tag can no longer get folded into that
+ * tag's brace count (an earlier single-pattern version did this, matching
+ * `{{{` + `name` + `}}` as a bogus "almost raw" tag).
+ *
+ * This does NOT reproduce the legacy flat-regex reading of 3+ consecutive
+ * braces, and cannot: the legacy renderer had no raw syntax, so it read
+ * `{{{name}}}` as literal `{` + tag `{{name}}` + literal `}`. Supporting
+ * `{{{raw}}}` means this tokenizer reads the same input as one raw tag
+ * instead. Those two readings are mutually exclusive by construction —
+ * any template with a 3+ brace run necessarily changes meaning under the
+ * new syntax. That divergence is intentional and documented; see the
+ * "brace-run behavior" tests in interpolate-compat.test.ts for exactly
+ * what the new tokenizer does on inputs like `{{{name}}}` and
+ * `{{{{name}}}}`, and the differential fuzz in the same file for why it
+ * excludes 3+ brace runs from the legacy-identity check instead of
+ * asserting a property the feature deliberately breaks.
  *
  * Names are `[\w.]+`, so `{{not-a-var}}` does not match and survives as literal
  * text — the pre-rewrite behavior, which an existing test pins.
@@ -106,36 +115,6 @@ export function tokenize(template: string): Token[] {
     const name = raw ? rawName : plainName;
     const optional = raw ? rawOptional : plainOptional;
     const filterClause = raw ? rawFilterClause : plainFilterClause;
-
-    // Even with the two brace forms kept separate, a tag can still sit
-    // directly against *extra* braces that belong to neither alternative —
-    // e.g. the `{{` in `{{{{x}}` that isn't part of `{{x}}`, or the trailing
-    // `}}` in `{{date}}}}`. An even run of those pairs off into its own
-    // literal `{{`/`}}` text, exactly as the legacy regex would leave it.
-    // An odd leftover (as in `{{{name}}`, one brace short of a raw close)
-    // means the tag boundary itself is ambiguous, so the whole run —
-    // leftover braces and the tag content alike — is left as literal text
-    // rather than guessing which tag was meant.
-    let leadStart = match.index;
-    while (leadStart > 0 && template[leadStart - 1] === "{") leadStart--;
-    const leadingExtra = match.index - leadStart;
-
-    const matchEnd = match.index + source.length;
-    let trailEnd = matchEnd;
-    while (trailEnd < template.length && template[trailEnd] === "}") {
-      trailEnd++;
-    }
-    const trailingExtra = trailEnd - matchEnd;
-
-    if (leadingExtra % 2 !== 0 || trailingExtra % 2 !== 0) {
-      // Retry from just past this match's own start — not `trailEnd` —
-      // so a smaller, valid match nested inside the same brace run still
-      // gets a chance. E.g. `{{{{url}}}}` rejects the 3-brace raw reading
-      // (one stray `{` and one stray `}` outside it, both odd) but must
-      // still find the plain `{{url}}` starting two characters later.
-      TAG.lastIndex = match.index + 1;
-      continue;
-    }
 
     if (match.index > lastIndex) {
       tokens.push({

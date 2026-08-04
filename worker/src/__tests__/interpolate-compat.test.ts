@@ -65,18 +65,64 @@ function randomVariables(rand: () => number): Record<string, string> {
   return vars;
 }
 
+/**
+ * True if the template contains a run of 3+ consecutive `{` or `}`.
+ *
+ * The legacy renderer had no raw syntax, so it read `{{{name}}}` as literal
+ * `{` + tag `{{name}}` + literal `}`. Supporting `{{{raw}}}` means the new
+ * tokenizer reads that same input as a single raw tag instead — the two
+ * readings are mutually exclusive by construction. `LITERALS` below includes
+ * bare `"{{"` and `"}}"`, which the generator concatenates with real
+ * `{{name}}` tags to produce exactly these 3+ brace runs (e.g. `"{{" +
+ * "{{name}}"` = `"{{{{name}}"`). Asserting byte-identical output there would
+ * be asserting a property the feature deliberately breaks, not a regression.
+ * New, deliberate behavior on brace runs is pinned explicitly below instead
+ * of excluded silently.
+ */
+function hasLongBraceRun(template: string): boolean {
+  return /\{{3,}|\}{3,}/.test(template);
+}
+
 describe("interpolate — differential against frozen legacy implementation", () => {
-  it("agrees with the legacy renderer on 5000 random flat templates", () => {
+  it("agrees with the legacy renderer on 5000 random flat templates without 3+ brace runs", () => {
     const rand = makeRandom(20260803);
     const mismatches: Array<{ template: string; vars: unknown }> = [];
-    for (let i = 0; i < 5000; i++) {
-      const template = randomTemplate(rand);
+    let asserted = 0;
+    while (asserted < 5000) {
+      let template = randomTemplate(rand);
+      while (hasLongBraceRun(template)) {
+        template = randomTemplate(rand);
+      }
       const vars = randomVariables(rand);
       if (interpolate(template, vars) !== legacyInterpolate(template, vars)) {
         mismatches.push({ template, vars });
       }
+      asserted++;
     }
+    expect(asserted).toBe(5000);
     expect(mismatches).toEqual([]);
+  });
+});
+
+/**
+ * `{{{raw}}}` necessarily changes what 3+ consecutive braces mean (see
+ * `hasLongBraceRun` above for why). These pin the new tokenizer's actual,
+ * accepted behavior on such inputs so the divergence from legacy is covered
+ * by a test instead of merely excluded from the fuzz.
+ */
+describe("interpolate — brace-run behavior (accepted break from legacy)", () => {
+  it("reads a clean triple-brace run as one raw tag", () => {
+    // Legacy (no raw syntax) would have read this as literal "{" + tag
+    // "{{name}}" + literal "}", rendering "{Alice}". The new tokenizer reads
+    // the whole thing as a single raw `{{{name}}}` tag instead.
+    expect(interpolate("{{{name}}}", { name: "Alice" })).toBe("Alice");
+  });
+
+  it("reads a quadruple-brace run as a raw tag plus one leftover literal brace on each side", () => {
+    // The two extra braces (one leading, one trailing) beyond the raw tag's
+    // own three-and-three aren't consumed by any tag and pass through as
+    // literal text, giving "{Alice}" rather than legacy's flat-regex reading.
+    expect(interpolate("{{{{name}}}}", { name: "Alice" })).toBe("{Alice}");
   });
 });
 

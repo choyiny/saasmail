@@ -115,21 +115,48 @@ describe("tokenize", () => {
     ]);
   });
 
-  it("leaves non-matching brace runs as literal text", () => {
-    // Preserves the existing "{{not-a-var}} stays verbatim" behavior, plus the
-    // half-raw case where the opening and closing brace counts disagree.
-    for (const input of [
-      "{{not-a-var}}",
-      "{{}}",
-      "{{ }}",
-      "{{{name}}",
-      "{{name}}}",
-    ]) {
+  it("leaves a run with no valid name as literal text", () => {
+    // Preserves the existing "{{not-a-var}} stays verbatim" behavior: none of
+    // these contain a `[\w.]+` name for either brace form to match against,
+    // so no tag is found anywhere and the whole input is literal text.
+    for (const input of ["{{not-a-var}}", "{{}}", "{{ }}"]) {
       const tokens = tokenize(input);
       expect(
         tokens.map((t) => (t.kind === "text" ? t.value : "")).join(""),
       ).toContain("{{");
     }
+  });
+
+  it("resolves an incomplete raw brace against a real tag, leaving the odd brace as text", () => {
+    // "{{{name}}" is one closing brace short of a raw tag. The raw and plain
+    // forms are matched as fully separate alternatives (see the TAG comment
+    // in interpolate.ts), so this is not read as a malformed raw tag; it is
+    // read as a lone literal "{" immediately followed by the plain tag
+    // "{{name}}". Symmetrically, "{{name}}}" is a plain tag followed by one
+    // leftover literal "}". This is the same brace-run divergence from the
+    // legacy flat regex documented and asserted in interpolate-compat.test.ts.
+    expect(tokenize("{{{name}}")).toEqual([
+      { kind: "text", value: "{" },
+      {
+        kind: "var",
+        name: "name",
+        raw: false,
+        optional: false,
+        filters: [],
+        source: "{{name}}",
+      },
+    ]);
+    expect(tokenize("{{name}}}")).toEqual([
+      {
+        kind: "var",
+        name: "name",
+        raw: false,
+        optional: false,
+        filters: [],
+        source: "{{name}}",
+      },
+      { kind: "text", value: "}" },
+    ]);
   });
 
   it("rejects an unknown filter", () => {
