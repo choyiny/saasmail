@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the send, so a template can add a variable before every caller supplies it. (#227)
 - `{{key|nl2br}}` converts newlines to `<br>` after escaping, for multi-line
   values such as message bodies and address blocks. (#227)
+- Malformed templates now fail with a `400` carrying the parse diagnostic
+  (internally `TEMPLATE_PARSE_ERROR`) instead of rendering something
+  half-formed. Unbalanced or mismatched section tags (`{{#items}}` with no
+  `{{/items}}`, `{{/other}}` closing the wrong section) and unknown filters
+  are parse errors. This is a new failure mode on
+  `POST /api/email-templates/{slug}/send`,
+  `GET /api/email-templates/{slug}/variables`, and
+  `POST /api/send/reply/{id}` — those routes could not return 400 for this
+  reason before. A sequence step whose template does not parse is marked
+  `failed` rather than retried forever. (#112)
+- Section nesting is capped at 64 levels; deeper templates are rejected as a
+  parse error rather than overflowing the renderer's stack. (#112)
 
 ### Changed
 
@@ -36,12 +48,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   escapes its value; use `{{{name}}}` to pass pre-rendered HTML through
   unescaped. Templates that intentionally rendered HTML from a variable must
   switch those tags to the triple-brace form. Affects both the templates API
-  and sequence sends. (#227)
+  and sequence sends. Escaping applies to the HTML body; the subject line is
+  a plain-text header and is substituted as-is, as it always was. (#227)
 - **BREAKING:** Templates containing three or more consecutive braces now
   parse differently, because `{{{key}}}` means raw output. Previously
   `{{{name}}}` rendered as `{` + the value + `}`; it is now an unescaped
   substitution. Templates that only use `{{key}}` and ordinary text are
   unaffected. (#112)
+- `GET /api/email-templates/{slug}/variables` now returns only the **required**
+  variables — the names a caller must supply or the send is rejected. Names
+  marked optional with `{{key?}}` and names used inside a `{{#section}}` body
+  are deliberately omitted: a section-body name resolves against the current
+  item at render time, so it is not something the caller passes at the top
+  level, and listing it would suggest a contract that does not exist. The
+  response is unchanged for templates that use only `{{key}}` tags; it differs
+  only once a template adopts the new syntax. (#112)
+
+### Known limitations
+
+- The template editor UI does not recognise sections yet: its variable list
+  comes from an older extractor, so a template using `{{#items}}…{{/items}}`
+  will show a misleading set of variables in the editor and its preview may
+  not match what is sent. Exercise section templates through the API until the
+  follow-up lands. Sending is unaffected — the API and sequence sends use the
+  new renderer.
 
 ## [0.10.0] - 2026-06-23
 

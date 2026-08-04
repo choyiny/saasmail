@@ -141,7 +141,14 @@ forward to another inbox on the same instance, and any message already carrying 
 
 ### Email Templates
 
-Create reusable HTML email templates with `{{variable}}` interpolation. Edit templates with a live HTML editor, preview rendered output, and send them via the API or the UI. Variables are automatically extracted and validated before sending. Templates are scoped to allowed inboxes.
+Create reusable HTML email templates with `{{variable}}` interpolation. Edit templates with a live HTML editor, preview rendered output, and send them via the API or the UI. Top-level variables are automatically extracted and validated before sending — a send that omits one is rejected with `400` rather than mailing a half-rendered template. Templates are scoped to allowed inboxes.
+
+**Validation covers top-level names only.** Names used inside a `{{#section}}`
+body are _not_ validated, because they resolve against the current item at
+render time rather than against what the caller passed. An unresolved name
+inside a section renders **empty**; only the section's own name is required.
+`GET /api/email-templates/{slug}/variables` reflects exactly this: it lists the
+required names, and omits both `{{key?}}` optionals and section-body names.
 
 #### Template syntax
 
@@ -167,12 +174,36 @@ Create reusable HTML email templates with `{{variable}}` interpolation. Edit tem
 ```
 
 Names inside a section resolve against the current item first, then fall back
-to the top level — so `{{currency}}` above can live outside `items`.
+to the top level — so `{{currency}}` above can live outside `items`. A name a
+section body cannot resolve renders empty; it is not reported as missing,
+because only the section's own name (`items`) is a caller contract.
+
+A tag name is a run of word characters (or a bare `.`), with no spaces inside
+the braces. Anything else — `{{ spaced }}`, `{{user.name}}`, `{{not-a-var}}` —
+is left alone as literal text, exactly as before the rewrite, so prose that
+happens to contain braces is never mistaken for a variable. Sections may nest
+up to 64 levels.
+
+An unbalanced or mismatched section tag is a **parse error**: the request
+fails with `400` and a diagnostic naming the offending tag, rather than
+sending something half-formed. This affects
+`POST /api/email-templates/{slug}/send`,
+`GET /api/email-templates/{slug}/variables`, and `POST /api/send/reply/{id}`.
+A sequence step whose template does not parse is marked `failed`.
+
+> **Caveat: the editor UI does not understand sections yet.** Its variable
+> list is computed by an older extractor, so a template using
+> `{{#items}}…{{/items}}` shows a misleading variable list in the editor and
+> its preview may not match what actually goes out. Sending is unaffected —
+> the API and sequence sends use the new renderer. Exercise section templates
+> via the API until the follow-up UI change lands.
 
 ##### Upgrading: escaping is now the default
 
-Variables were previously substituted raw. They are now HTML-escaped, so a
-value containing markup renders as text rather than as HTML.
+Variables were previously substituted raw. They are now HTML-escaped in the
+body, so a value containing markup renders as text rather than as HTML. The
+subject line is a plain-text header, not HTML, so values substituted there are
+passed through unchanged — as they always have been.
 
 **If any of your templates deliberately pass HTML through a variable, change
 those tags from `{{key}}` to `{{{key}}}` before upgrading.** Templates whose
