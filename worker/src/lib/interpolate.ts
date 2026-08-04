@@ -198,3 +198,82 @@ export function renderTemplate(
     bodyHtml: interpolate(template.bodyHtml, variables),
   };
 }
+
+export type Node =
+  | { kind: "text"; value: string }
+  | {
+      kind: "var";
+      name: string;
+      raw: boolean;
+      optional: boolean;
+      filters: string[];
+      source: string;
+    }
+  | {
+      kind: "section";
+      name: string;
+      inverted: boolean;
+      optional: boolean;
+      children: Node[];
+    };
+
+/**
+ * Fold the token stream into a tree.
+ *
+ * Unbalanced or mismatched section tags are a parse error rather than a
+ * best-effort render: silently mis-nesting would produce a plausible-looking
+ * email with the wrong content, which is worse than a failed send.
+ */
+export function parse(template: string): Node[] {
+  const root: Node[] = [];
+  const stack: Array<{
+    node: Extract<Node, { kind: "section" }>;
+    source: string;
+  }> = [];
+
+  const currentChildren = () =>
+    stack.length === 0 ? root : stack[stack.length - 1].node.children;
+
+  for (const token of tokenize(template)) {
+    switch (token.kind) {
+      case "text":
+      case "var":
+        currentChildren().push(token);
+        break;
+      case "open": {
+        const node: Extract<Node, { kind: "section" }> = {
+          kind: "section",
+          name: token.name,
+          inverted: token.inverted,
+          optional: token.optional,
+          children: [],
+        };
+        currentChildren().push(node);
+        stack.push({ node, source: token.source });
+        break;
+      }
+      case "close": {
+        const open = stack.pop();
+        if (!open) {
+          throw new TemplateParseError(
+            `Unexpected ${token.source} — no section is open here.`,
+          );
+        }
+        if (open.node.name !== token.name) {
+          throw new TemplateParseError(
+            `${token.source} does not match the open section ${open.source}.`,
+          );
+        }
+        break;
+      }
+    }
+  }
+
+  if (stack.length > 0) {
+    throw new TemplateParseError(
+      `Unclosed section ${stack[stack.length - 1].source} — add a matching {{/${stack[stack.length - 1].node.name}}}.`,
+    );
+  }
+
+  return root;
+}
