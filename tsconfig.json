@@ -3,7 +3,7 @@
   "references": [{ "path": "./tsconfig.app.json" }],
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] },
+    "paths": { "@/*": ["./src/*"], "@worker/*": ["./worker/src/*"] },
     "noImplicitAny": false,
     "skipLibCheck": true,
     "allowJs": true

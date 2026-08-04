@@ -21,8 +21,11 @@ import {
 import { fetchTemplate, createTemplate, updateTemplate } from "@/lib/api";
 import {
   analyzeTemplateClient,
-  sampleValues,
+  chipLabel,
+  isSectionName,
   renderPreview,
+  sampleValues,
+  sectionChipLabel,
   type TemplateAnalysis,
 } from "@/lib/template-syntax";
 import { cn } from "@/lib/utils";
@@ -85,7 +88,6 @@ export default function TemplateEditorPage() {
       return EMPTY_ANALYSIS;
     }
   }, [subject, bodyHtml]);
-  const variables = analysis.required;
 
   const previewHtml = useMemo(() => {
     try {
@@ -366,10 +368,7 @@ export default function TemplateEditorPage() {
         <SyntaxCard />
 
         {/* --- API reference (collapsible, no longer a slide-over) --- */}
-        <ApiReferenceCard
-          slug={slugValue || slug || ""}
-          variables={variables}
-        />
+        <ApiReferenceCard slug={slugValue || slug || ""} analysis={analysis} />
       </form>
     </PageContainer>
   );
@@ -439,28 +438,6 @@ function ToggleButton({
 
 /** Whether `name` belongs to a section, so plain-variable groups can skip it
  *  — a section already gets its own chip with the correct sigil below. */
-function isSectionName(analysis: TemplateAnalysis, name: string): boolean {
-  return analysis.sections.some((s) => s.name === name);
-}
-
-/**
- * The exact tag text for a section's chip. Must always be a string that
- * really appears in the template — never a syntax that contradicts it:
- *   - inverted (`{{^key}}`) always renders that way, `?` or not, since
- *     inversion alone already makes it optional.
- *   - a non-inverted section that's optional (`analysis.optional` includes
- *     it) got there via a trailing `?`, so it renders as `{{#key?}}`.
- *   - otherwise it's a plain required section, `{{#key}}`.
- */
-function sectionChipLabel(
-  section: TemplateAnalysis["sections"][number],
-  analysis: TemplateAnalysis,
-): string {
-  if (section.inverted) return `{{^${section.name}}}`;
-  if (analysis.optional.includes(section.name)) return `{{#${section.name}?}}`;
-  return `{{#${section.name}}}`;
-}
-
 function VarGroup({
   label,
   items,
@@ -640,19 +617,33 @@ function SyntaxCard() {
 
 function ApiReferenceCard({
   slug,
-  variables,
+  analysis,
 }: {
   slug: string;
-  variables: string[];
+  analysis: TemplateAnalysis;
 }) {
   const [open, setOpen] = useState(false);
+  const variables = analysis.required;
 
+  // A required section name takes an ARRAY of items, not a string. Emitting
+  // `"items": "<items>"` here would have the reader send a scalar, which
+  // passes validation and then renders one row with every field blank — the
+  // send succeeds and the email is silently wrong. (A required section is
+  // always non-inverted; an inverted one is optional by definition.)
+  const sectionsByName = new Map(analysis.sections.map((s) => [s.name, s]));
   const varsObject = variables.reduce(
     (acc, v) => {
-      acc[v] = `<${v}>`;
+      const section = sectionsByName.get(v);
+      acc[v] = section
+        ? [
+            Object.fromEntries(
+              section.variables.map((inner) => [inner, `<${inner}>`]),
+            ),
+          ]
+        : `<${v}>`;
       return acc;
     },
-    {} as Record<string, string>,
+    {} as Record<string, unknown>,
   );
 
   const curlBody = JSON.stringify(
@@ -725,7 +716,7 @@ function ApiReferenceCard({
                     className="rounded-full bg-violet/10 px-2 py-0.5 text-[11px] font-mono"
                     style={{ color: "#7c5cfc" }}
                   >
-                    {`{{${v}}}`}
+                    {chipLabel(v, analysis)}
                   </code>
                 ))}
               </div>

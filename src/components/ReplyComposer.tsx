@@ -31,7 +31,7 @@ import {
 import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
-import { analyzeTemplateClient } from "@/lib/template-syntax";
+import { analyzeTemplateClient, chipLabel } from "@/lib/template-syntax";
 import { cn } from "@/lib/utils";
 
 const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
@@ -182,9 +182,9 @@ export default function ReplyComposer({
   }, [selectedTemplate]);
   const requiredVars = templateAnalysis?.required ?? [];
   // A required name that's actually a section (e.g. {{#items}}) needs an
-  // array of objects, not the plain string this form's inputs collect —
-  // label it with its real syntax rather than the bare {{name}} used for
-  // scalar variables, so the prompt isn't misleading about what's needed.
+  // array of objects, not the plain string this form's inputs collect — used
+  // below to warn that such a template can't be filled in from here. The
+  // chip text itself comes from the shared `chipLabel`.
   const sectionVarNames = useMemo(
     () => new Set((templateAnalysis?.sections ?? []).map((s) => s.name)),
     [templateAnalysis],
@@ -474,8 +474,8 @@ export default function ReplyComposer({
                                   className="grid grid-cols-[120px_1fr] items-center gap-3"
                                 >
                                   <label className="truncate font-mono text-xs text-text-tertiary">
-                                    {sectionVarNames.has(v)
-                                      ? `{{#${v}}}`
+                                    {templateAnalysis
+                                      ? chipLabel(v, templateAnalysis)
                                       : `{{${v}}}`}
                                   </label>
                                   <input
