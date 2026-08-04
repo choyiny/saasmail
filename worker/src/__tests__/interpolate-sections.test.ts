@@ -117,10 +117,42 @@ describe("interpolate — sibling and nested inverted sections", () => {
   });
 
   it("renders an inverted section nested inside a regular section, per item", () => {
+    // Asserted per-item (not on the concatenation of a multi-item array) so
+    // that a flipped inverted-condition bug can't cancel out: with items
+    // [{tags:[]}, {tags:["x"]}] concatenated into one string, a correctly
+    // inverted implementation and one with `^` treated as `#` both produce
+    // "none" overall (just from different items), so a single combined
+    // assertion would pass either way.
     expect(
       interpolate("{{#items}}{{^tags}}none{{/tags}}{{/items}}", {
-        items: [{ tags: [] }, { tags: ["x"] }],
+        items: [{ tags: [] }],
       }),
     ).toBe("none");
+    expect(
+      interpolate("{{#items}}{{^tags}}none{{/tags}}{{/items}}", {
+        items: [{ tags: ["x"] }],
+      }),
+    ).toBe("");
+  });
+});
+
+describe("interpolate — context stack isolation", () => {
+  it("does not leak a field from one item's scope into the next item's lookup", () => {
+    // If the renderer pushed each item onto a SHARED stack array without
+    // popping between iterations, `lookup`'s innermost-first search would
+    // still find `extra` from item A's leaked frame while rendering item B.
+    // Item B has no `extra` of its own, so the correct result is that its
+    // `{{extra}}` tag is unresolved and survives verbatim as source text.
+    expect(
+      interpolate("{{#items}}{{extra}}{{/items}}", {
+        items: [{ extra: "leak" }, {}],
+      }),
+    ).toBe("leak{{extra}}");
+  });
+});
+
+describe("interpolate — isTruthy edge cases", () => {
+  it("treats an empty object as truthy and renders its section body once", () => {
+    expect(interpolate("{{#obj}}yes{{/obj}}", { obj: {} })).toBe("yes");
   });
 });
