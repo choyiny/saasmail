@@ -167,19 +167,28 @@ export default function ReplyComposer({
   // Only top-level names, same contract the send API validates — names
   // scoped inside a {{#section}} resolve per item, not from this form, so
   // they're deliberately excluded (see src/lib/template-syntax.ts).
-  const requiredVars = useMemo(() => {
-    if (!selectedTemplate) return [];
+  const templateAnalysis = useMemo(() => {
+    if (!selectedTemplate) return null;
     try {
       return analyzeTemplateClient(
         selectedTemplate.subject,
         selectedTemplate.bodyHtml,
-      ).required;
+      );
     } catch {
       // A stored template shouldn't fail to parse, but if one somehow does,
       // fall back to no prompts rather than crashing the composer.
-      return [];
+      return null;
     }
   }, [selectedTemplate]);
+  const requiredVars = templateAnalysis?.required ?? [];
+  // A required name that's actually a section (e.g. {{#items}}) needs an
+  // array of objects, not the plain string this form's inputs collect —
+  // label it with its real syntax rather than the bare {{name}} used for
+  // scalar variables, so the prompt isn't misleading about what's needed.
+  const sectionVarNames = useMemo(
+    () => new Set((templateAnalysis?.sections ?? []).map((s) => s.name)),
+    [templateAnalysis],
+  );
 
   useEffect(() => {
     if (!selectedTemplate) return;
@@ -465,7 +474,9 @@ export default function ReplyComposer({
                                   className="grid grid-cols-[120px_1fr] items-center gap-3"
                                 >
                                   <label className="truncate font-mono text-xs text-text-tertiary">
-                                    {`{{${v}}}`}
+                                    {sectionVarNames.has(v)
+                                      ? `{{#${v}}}`
+                                      : `{{${v}}}`}
                                   </label>
                                   <input
                                     value={templateVars[v] ?? ""}
@@ -480,6 +491,15 @@ export default function ReplyComposer({
                                 </div>
                               ))}
                             </div>
+                            {[...sectionVarNames].some((n) =>
+                              requiredVars.includes(n),
+                            ) && (
+                              <p className="mt-2 text-[11px] font-light text-text-tertiary">
+                                Section variables (#) need an array of objects —
+                                this form can only send plain text, so send
+                                those via the API instead.
+                              </p>
+                            )}
                           </div>
                         )}
                       </>

@@ -238,7 +238,8 @@ export default function TemplateEditorPage() {
                     <code className="rounded bg-bg-muted px-1 py-0.5 font-mono text-[10px]">
                       {`{{variable}}`}
                     </code>{" "}
-                    for placeholders.
+                    for placeholders. Plain text here, not HTML — values are
+                    substituted unescaped, unlike the body.
                   </>
                 }
               >
@@ -291,20 +292,31 @@ export default function TemplateEditorPage() {
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-bg-subtle/40 px-5 py-2.5">
               <VarGroup
                 label="Required"
-                names={analysis.required}
-                render={(v) => `{{${v}}}`}
+                // Section names get their own accurate chip (with the right
+                // sigil) in the Sections group below — showing them again
+                // here as bare `{{name}}` would be a string that never
+                // actually appears in the template.
+                items={analysis.required
+                  .filter((v) => !isSectionName(analysis, v))
+                  .map((v) => ({ name: v, label: `{{${v}}}` }))}
                 className="bg-violet/10 text-[#7c5cfc]"
               />
               <VarGroup
                 label="Optional"
-                names={analysis.optional}
-                render={(v) => `{{${v}?}}`}
+                // Same exclusion: an inverted or `?`-marked section lands in
+                // `analysis.optional` too, but its optionality is already
+                // shown correctly (as ^ or #...?) in the Sections chip.
+                items={analysis.optional
+                  .filter((v) => !isSectionName(analysis, v))
+                  .map((v) => ({ name: v, label: `{{${v}?}}` }))}
                 className="bg-bg-muted text-text-secondary"
               />
               <VarGroup
                 label="Sections"
-                names={analysis.sections.map((s) => s.name)}
-                render={(v) => `{{#${v}}}`}
+                items={analysis.sections.map((s) => ({
+                  name: s.name,
+                  label: sectionChipLabel(s, analysis),
+                }))}
                 className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
               />
             </div>
@@ -425,32 +437,54 @@ function ToggleButton({
 
 /* ------------------------------- variable chips ------------------------------- */
 
+/** Whether `name` belongs to a section, so plain-variable groups can skip it
+ *  — a section already gets its own chip with the correct sigil below. */
+function isSectionName(analysis: TemplateAnalysis, name: string): boolean {
+  return analysis.sections.some((s) => s.name === name);
+}
+
+/**
+ * The exact tag text for a section's chip. Must always be a string that
+ * really appears in the template — never a syntax that contradicts it:
+ *   - inverted (`{{^key}}`) always renders that way, `?` or not, since
+ *     inversion alone already makes it optional.
+ *   - a non-inverted section that's optional (`analysis.optional` includes
+ *     it) got there via a trailing `?`, so it renders as `{{#key?}}`.
+ *   - otherwise it's a plain required section, `{{#key}}`.
+ */
+function sectionChipLabel(
+  section: TemplateAnalysis["sections"][number],
+  analysis: TemplateAnalysis,
+): string {
+  if (section.inverted) return `{{^${section.name}}}`;
+  if (analysis.optional.includes(section.name)) return `{{#${section.name}?}}`;
+  return `{{#${section.name}}}`;
+}
+
 function VarGroup({
   label,
-  names,
-  render,
+  items,
   className,
 }: {
   label: string;
-  names: string[];
-  render: (name: string) => string;
+  items: Array<{ name: string; label: string }>;
   className: string;
 }) {
-  if (names.length === 0) return null;
+  if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
         {label}
       </span>
-      {names.map((n) => (
+      {items.map((item) => (
         <code
-          key={n}
+          key={item.name}
           className={cn(
             "rounded-full px-2 py-0.5 font-mono text-[11px]",
             className,
           )}
         >
-          {render(n)}
+          {item.label}
         </code>
       ))}
     </div>
@@ -462,7 +496,8 @@ function VarGroup({
 const SYNTAX_ROWS: Array<{ tag: string; meaning: string }> = [
   {
     tag: "{{key}}",
-    meaning: "Value, HTML-escaped. Safe for user-generated content.",
+    meaning:
+      "Value, HTML-escaped in the body. The subject is plain text, so it's substituted unescaped there.",
   },
   {
     tag: "{{{key}}}",
@@ -476,6 +511,10 @@ const SYNTAX_ROWS: Array<{ tag: string; meaning: string }> = [
   {
     tag: "{{#key}}…{{/key}}",
     meaning: "Renders if truthy; repeats for each item in an array.",
+  },
+  {
+    tag: "{{#key?}}…{{/key}}",
+    meaning: "Same as {{#key}}, but doesn't fail the send if missing.",
   },
   {
     tag: "{{^key}}…{{/key}}",

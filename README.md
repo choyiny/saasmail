@@ -161,15 +161,16 @@ inside a section renders **empty**; only the section's own name is required.
 
 #### Template syntax
 
-| Tag                 | Behavior                                            |
-| ------------------- | --------------------------------------------------- |
-| `{{key}}`           | Value, HTML-escaped                                 |
-| `{{{key}}}`         | Value, raw — for pre-rendered HTML                  |
-| `{{key?}}`          | Optional; renders empty instead of failing the send |
-| `{{key\|nl2br}}`    | Escaped, then newlines become `<br>`                |
-| `{{#key}}…{{/key}}` | Renders if truthy; iterates arrays                  |
-| `{{^key}}…{{/key}}` | Renders if falsy or empty                           |
-| `{{.}}`             | Current item inside an array-of-strings section     |
+| Tag                  | Behavior                                                   |
+| -------------------- | ---------------------------------------------------------- |
+| `{{key}}`            | Value, HTML-escaped in the body; plain text in the subject |
+| `{{{key}}}`          | Value, raw — for pre-rendered HTML                         |
+| `{{key?}}`           | Optional; renders empty instead of failing the send        |
+| `{{key\|nl2br}}`     | Escaped, then newlines become `<br>`                       |
+| `{{#key}}…{{/key}}`  | Renders if truthy; iterates arrays                         |
+| `{{#key?}}…{{/key}}` | Same as `{{#key}}`, but doesn't fail the send if missing   |
+| `{{^key}}…{{/key}}`  | Renders if falsy or empty                                  |
+| `{{.}}`              | Current item inside an array-of-strings section            |
 
 ```html
 {{#items}}
