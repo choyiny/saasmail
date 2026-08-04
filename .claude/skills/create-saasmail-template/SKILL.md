@@ -89,18 +89,32 @@ empty list — it fails the send. That is deliberate: a digest whose `items` the
 caller forgot to pass would otherwise go out silently empty, which is worse than a
 `400`. If absence is legitimate, write `{{#items?}}`.
 
-**Names inside a section body are never required, and never validated.** They
+**Names inside a section body never appear in `variables`.** They are expected to
 resolve against the current item at render time, so the caller does not supply them
-at the top level. An unresolvable one renders **empty** — no error, no literal
-`{{token}}` mailed to a customer.
+at the top level, and an unresolvable one renders **empty** rather than mailing a
+literal `{{token}}` to a customer.
 
-That has a consequence worth internalizing, because it is the sharpest edge in the
-grammar: **wrapping a tag in a section silently removes it from validation.** Move
-`{{upgradeUrl}}` inside a `{{^isPaidPlan}}` block and it drops out of `variables`; a
-caller that forgets it now gets no error and ships `<a href="">` — a dead link — to
-a real customer. Same for a typo (`{{prcie}}`), which just renders nothing. Keep
-values that must be present at the top level, or verify them in the caller, and
-proofread section bodies with a real test send.
+But "inside a section" is narrower than it looks, and the difference is the
+sharpest thing in the grammar. A section only creates a per-item scope when its
+value is an **array or an object**. An inverted `{{^key}}` section, and a regular
+`{{#key}}` section given a boolean or other scalar, render their bodies against the
+unchanged top level — so names in _those_ bodies are ordinary top-level lookups.
+
+The send path treats the two cases differently, and correctly:
+
+- **Under an iterating section**, an unresolved name renders empty and is not an
+  error. Items legitimately differ in which optional fields they carry.
+- **Under a scope-less section** (inverted, or scalar-valued), an unresolved name
+  is a caller error and **fails the send** with that name in `missingVariables`.
+  `{{^isPaidPlan}}<a href="{{upgradeUrl}}">` with no `upgradeUrl` supplied returns
+  400 rather than mailing `<a href="">`.
+
+One asymmetry to know: that second check is dynamic, so those names do **not**
+appear in `/variables` — the analyzer cannot tell statically whether a section
+will receive an array or a boolean. `/variables` is the static contract; the send
+catches the rest. A test send with a realistic payload is still the only way to
+prove a section body is right, and a typo inside an iterating body (`{{prcie}}`)
+remains silent by design.
 
 **Required wins over optional, and `#` wins over `^`.** If a name appears as both
 `{{a}}` and `{{a?}}`, it is required. If it appears as both `{{^promo}}` and
@@ -170,7 +184,20 @@ resolve against the item they are nested in, falling back outward as above.
 Values substituted into the **body** are HTML-escaped: `&`, `<`, `>`, `"`, and `'`
 become entities. This is the default because template values routinely carry
 user-typed content, and an email signed by your own domain is the last place you
-want that content injecting markup.
+want that content introducing tags.
+
+**Escaping those five characters is the whole guarantee — it is not a
+sanitizer.** Two gaps matter when you place a tag:
+
+- **Quote every attribute.** `<a href="{{url}}">` is safe; `<a href={{url}}>` is
+  not, because a space is not escaped. `url = "# onmouseover=alert(1)"` renders
+  `<a href=# onmouseover=alert(1)>` — a handler injected through the _escaped_
+  form.
+- **Escaping is not a URL check.** `<a href="{{url}}">` with
+  `url = "javascript:alert(1)"` passes through untouched; there is no scheme
+  allowlist. If a URL can come from an end user, validate the scheme before you
+  pass it in. (Inbox signatures go through `sanitize-signature.ts`, which strips
+  `javascript:` and `vbscript:`; the template renderer applies no such filter.)
 
 `{{{key}}}` opts a single value out, for HTML you produced yourself and trust — a
 pre-rendered block, a sanitized rich-text field. Never wrap a value that originated
@@ -284,8 +311,9 @@ bounds the data you send, the other the template you write.)
 | `400 "Missing required template variables"` | Caller omitted a name in `variables`. The body lists `missingVariables` and `requiredVariables` — reconcile against `/variables`.                                                                                         |
 | Literal `{{key}}` in a delivered email      | A sequence step whose enrollment omitted that variable. Direct template sends can't do this; they `400` first.                                                                                                            |
 | A blank where a list should be              | A scalar `{{items}}` used on an array. Use a section.                                                                                                                                                                     |
-| A blank inside a repeated block             | A name the item does not have (often a typo). Section-body names render empty by design.                                                                                                                                  |
+| A blank inside a repeated block             | A name the item does not have (often a typo). Only _iterating_ sections blank silently; under an inverted or boolean section the same miss fails the send.                                                                |
 | Escaped markup visible to the recipient     | Value carries HTML but the tag is `{{key}}`. Use `{{{key}}}` — only if the value is trusted.                                                                                                                              |
+| `400` naming a render limit                 | A section nested inside itself: the inner tag re-resolves to the same top-level value and re-iterates it, so work grows as N^depth. Restructure so the inner section uses a different name.                               |
 | Sequence step silently never arrives        | Its template does not parse; the step is marked `failed` and never retried. Write-time validation prevents this for templates created through the API.                                                                    |
 
 ## Changing a live template

@@ -222,17 +222,23 @@ its absence. A name inverted in one place and regular in another is required —
 required always wins. If you want the "no such key" case to be legal, every
 occurrence must be inverted, or the regular one must be written `{{#isPaidPlan?}}`.
 
-**`upgradeUrl` is _not_ required**, even though the email is useless without it,
-because it sits inside the `{{^isPaidPlan}}` section. Section-body names are never
-part of the send contract. A caller that forgets it gets no error — it renders
-empty and ships `<a href="">Choose a plan</a>`, a dead link, to a real customer.
-This is the sharpest edge in the whole grammar: **moving a tag inside a section
-silently removes it from validation.** If a value must be present, either keep its
-tag at the top level or verify it in the caller.
+**`upgradeUrl` is absent from every list, yet the send still fails without it.**
+It sits inside `{{^isPaidPlan}}`, and an inverted section pushes no per-item
+scope — so the name is really a top-level lookup. The analyzer cannot see that
+statically (it does not know what value `isPaidPlan` will receive), so
+`/variables` omits it; the renderer _can_ see it, so a send that omits it returns
+`{"missingVariables": ["upgradeUrl"]}` instead of mailing `<a href="">`.
 
-`planName` has the same exposure. If the caller sets `isPaidPlan: true` and forgets
-`planName`, the sentence renders "You are already on — nothing to do." Guard
-content like that with an inner section when a blank is unacceptable:
+Take the lesson, not the list: **`/variables` is the static contract, and it is a
+lower bound.** A section body can require more than it advertises. That is why the
+workflow ends with a test send rather than with reading `/variables`.
+
+`planName` behaves the same way — `{{#isPaidPlan}}` given `true` is scalar, so it
+pushes no scope either, and omitting `planName` fails the send. Had `isPaidPlan`
+been an array of objects, the identical template would treat `planName` as a
+per-item field and render it empty without complaint. If you want the blank to be
+deliberate rather than an error, mark it optional (`{{planName?}}`) or guard it
+with an inner section:
 
 ```html
 {{#isPaidPlan}}

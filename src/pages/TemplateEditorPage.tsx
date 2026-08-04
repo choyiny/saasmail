@@ -587,12 +587,22 @@ function SyntaxCard() {
 
           <div className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-light text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
             <strong className="font-medium">Escaped by default.</strong> A value
-            containing HTML renders as visible text, so content typed by your
-            users can't inject markup into an email signed by your domain. Use{" "}
+            containing HTML renders as visible text, so it can't introduce tags
+            into an email signed by your domain. Use{" "}
             <code className="rounded bg-amber-100 px-1 font-mono dark:bg-amber-500/20">
               {`{{{key}}}`}
             </code>{" "}
             only for HTML your own code produced.
+            <div className="mt-1.5">
+              Escaping covers <code className="font-mono">{`& < > " '`}</code>{" "}
+              only — it is not a URL check. Keep every attribute quoted (
+              <code className="font-mono">{`href="{{url}}"`}</code>, never{" "}
+              <code className="font-mono">{`href={{url}}`}</code>), and don't
+              put an untrusted value in an{" "}
+              <code className="font-mono">href</code> without checking its
+              scheme: <code className="font-mono">javascript:</code> passes
+              through.
+            </div>
           </div>
 
           <div className="rounded-[6px] border border-border bg-bg-subtle/50 px-3 py-2.5 text-xs font-light text-text-secondary">
