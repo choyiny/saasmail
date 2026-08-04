@@ -89,6 +89,38 @@ describe("email templates router", () => {
     });
   });
 
+  describe("GET /api/email-templates/:slug/variables", () => {
+    it("returns the required variables", async () => {
+      await createTestTemplate({
+        slug: "welcome",
+        subject: "Hello {{name}}",
+        bodyHtml: "<p>Hi {{name}}, from {{company}}</p>",
+      });
+
+      const res = await authFetch("/api/email-templates/welcome/variables", {
+        apiKey,
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(new Set(data.variables)).toEqual(new Set(["name", "company"]));
+    });
+
+    it("returns 400, not 500, for a template with an unbalanced section", async () => {
+      await createTestTemplate({
+        slug: "broken",
+        subject: "Hello",
+        bodyHtml: "{{#a}}oops",
+      });
+
+      const res = await authFetch("/api/email-templates/broken/variables", {
+        apiKey,
+      });
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toBeTruthy();
+    });
+  });
+
   describe("PUT /api/email-templates/:slug", () => {
     it("updates template fields", async () => {
       await createTestTemplate({ slug: "welcome" });
@@ -184,6 +216,30 @@ describe("email templates router", () => {
       // No sent_emails row should have been written for the suppressed send
       const sentRows = await db.select().from(sentEmails);
       expect(sentRows).toHaveLength(0);
+    });
+
+    it("returns TEMPLATE_PARSE_ERROR with the parse diagnostic for an unbalanced section", async () => {
+      await createTestTemplate({
+        slug: "broken",
+        subject: "Hi",
+        bodyHtml: "{{#a}}oops",
+      });
+
+      const res = await authFetch("/api/email-templates/broken/send", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          to: "person@example.com",
+          fromAddress: "support@example.com",
+          variables: {},
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const data = await res.json();
+      expect(data.error).toMatch(/\{\{#a\}\}/);
+      expect(data.missingVariables).toBeUndefined();
+      expect(data.requiredVariables).toBeUndefined();
     });
   });
 

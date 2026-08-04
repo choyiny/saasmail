@@ -22,6 +22,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPI bootstrap: add unauthenticated `GET /api/health` and `GET /api/config` to the generated spec.
 - OpenAPI notifications: convert `notifications-router` to zod-openapi; document config, WebSocket stream, push subscribe/unsubscribe, and subscription management routes.
 - New outbound email provider: **Postmark**. Set `POSTMARK_API_KEY` (your Postmark server API token) as a secret to send through Postmark. Runtime precedence is Bavimail > Postmark > Resend > Cloudflare Email Sending.
+- Mustache-style sections in templates: `{{#items}}…{{/items}}` renders
+  conditionally and iterates arrays, `{{^items}}…{{/items}}` inverts, and
+  `{{.}}` refers to the current item. (#112)
+- `{{key?}}` marks a variable optional — it renders empty instead of failing
+  the send, so a template can add a variable before every caller supplies it. (#227)
+- `{{key|nl2br}}` converts newlines to `<br>` after escaping, for multi-line
+  values such as message bodies and address blocks. (#227)
+
+### Changed
+
+- **BREAKING:** Template variables are now HTML-escaped by default. `{{name}}`
+  escapes its value; use `{{{name}}}` to pass pre-rendered HTML through
+  unescaped. Templates that intentionally rendered HTML from a variable must
+  switch those tags to the triple-brace form. Affects both the templates API
+  and sequence sends. (#227)
+- **BREAKING:** Templates containing three or more consecutive braces now
+  parse differently, because `{{{key}}}` means raw output. Previously
+  `{{{name}}}` rendered as `{` + the value + `}`; it is now an unescaped
+  substitution. Templates that only use `{{key}}` and ordinary text are
+  unaffected. (#112)
 
 ## [0.10.0] - 2026-06-23
 

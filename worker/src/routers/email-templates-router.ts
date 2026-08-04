@@ -4,13 +4,14 @@ import { nanoid } from "nanoid";
 import { assertInboxAllowed, isInboxAllowed } from "../lib/inbox-permissions";
 import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
-import { extractVariables } from "../lib/interpolate";
+import { analyzeTemplate, TemplateParseError } from "../lib/interpolate";
 import { sendTemplate } from "../lib/send-template";
 import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
   ErrorSchema,
   inboxForbiddenResponse,
+  SendPathErrorSchema,
 } from "../lib/openapi-send-errors";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
@@ -257,6 +258,10 @@ const getTemplateVariablesRoute = createRoute({
       z.object({ variables: z.array(z.string()) }),
       "Template variables",
     ),
+    400: {
+      description: "Template has an unbalanced section",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -275,11 +280,17 @@ emailTemplatesRouter.openapi(getTemplateVariablesRoute, async (c) => {
   }
 
   const template = rows[0];
-  const subjectVars = extractVariables(template.subject);
-  const bodyVars = extractVariables(template.bodyHtml);
-  const allVars = Array.from(new Set([...subjectVars, ...bodyVars]));
+  let analysis;
+  try {
+    analysis = analyzeTemplate(template.subject, template.bodyHtml);
+  } catch (err) {
+    if (err instanceof TemplateParseError) {
+      return c.json({ error: err.message }, 400);
+    }
+    throw err;
+  }
 
-  return c.json({ variables: allVars }, 200);
+  return c.json({ variables: analysis.required }, 200);
 });
 
 // --- SEND ---
@@ -318,15 +329,10 @@ const sendTemplateRoute = createRoute({
       "Email sent",
     ),
     400: {
-      description: "Missing required template variables",
+      description:
+        "Missing required template variables, or the template has an unbalanced section.",
       content: {
-        "application/json": {
-          schema: z.object({
-            error: z.string(),
-            missingVariables: z.array(z.string()),
-            requiredVariables: z.array(z.string()),
-          }),
-        },
+        "application/json": { schema: SendPathErrorSchema },
       },
     },
     ...inboxForbiddenResponse,
@@ -355,6 +361,9 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   if (!result.ok) {
     if (result.code === "TEMPLATE_NOT_FOUND") {
       return c.json({ error: result.message }, 404);
+    }
+    if (result.code === "TEMPLATE_PARSE_ERROR") {
+      return c.json({ error: result.message }, 400);
     }
     return c.json(
       {

@@ -32,6 +32,7 @@ export type SendTemplateSuccess = {
 
 export type SendTemplateFailure =
   | { ok: false; code: "TEMPLATE_NOT_FOUND"; message: string }
+  | { ok: false; code: "TEMPLATE_PARSE_ERROR"; message: string }
   | {
       ok: false;
       code: "MISSING_VARIABLES";
@@ -80,6 +81,13 @@ export async function sendTemplate(
 
   const rendered = renderTemplate(rows[0], variables);
   if (!rendered.ok) {
+    if (rendered.parseError) {
+      return {
+        ok: false,
+        code: "TEMPLATE_PARSE_ERROR",
+        message: rendered.parseError,
+      };
+    }
     return {
       ok: false,
       code: "MISSING_VARIABLES",

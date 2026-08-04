@@ -143,6 +143,51 @@ forward to another inbox on the same instance, and any message already carrying 
 
 Create reusable HTML email templates with `{{variable}}` interpolation. Edit templates with a live HTML editor, preview rendered output, and send them via the API or the UI. Variables are automatically extracted and validated before sending. Templates are scoped to allowed inboxes.
 
+#### Template syntax
+
+| Tag                 | Behavior                                            |
+| ------------------- | --------------------------------------------------- |
+| `{{key}}`           | Value, HTML-escaped                                 |
+| `{{{key}}}`         | Value, raw — for pre-rendered HTML                  |
+| `{{key?}}`          | Optional; renders empty instead of failing the send |
+| `{{key\|nl2br}}`    | Escaped, then newlines become `<br>`                |
+| `{{#key}}…{{/key}}` | Renders if truthy; iterates arrays                  |
+| `{{^key}}…{{/key}}` | Renders if falsy or empty                           |
+| `{{.}}`             | Current item inside an array-of-strings section     |
+
+```html
+{{#items}}
+<tr>
+  <td>{{name}}</td>
+  <td>{{currency}}{{price}}</td>
+</tr>
+{{/items}} {{^items}}
+<p>Nothing to show yet.</p>
+{{/items}}
+```
+
+Names inside a section resolve against the current item first, then fall back
+to the top level — so `{{currency}}` above can live outside `items`.
+
+##### Upgrading: escaping is now the default
+
+Variables were previously substituted raw. They are now HTML-escaped, so a
+value containing markup renders as text rather than as HTML.
+
+**If any of your templates deliberately pass HTML through a variable, change
+those tags from `{{key}}` to `{{{key}}}` before upgrading.** Templates whose
+variables carry plain text need no change.
+
+One related consequence: because `{{{key}}}` now means raw output, any run of
+three or more consecutive braces is read differently than before. `{{{name}}}`
+used to render as `{` followed by the substituted value followed by `}`; it is
+now an unescaped substitution. This only affects templates that stack braces
+against a tag — ordinary `{{key}}` tags in ordinary text are untouched.
+
+This also applies to sequence sends, which share the same renderer.
+Multi-line values still collapse in HTML — use `{{key|nl2br}}`, or wrap the
+block in `style="white-space: pre-line"`.
+
 ### Email Sequencing
 
 Build multi-step drip campaigns. Enroll a contact into a sequence and saasmail sends templated emails on a schedule. Supports step skipping, delay overrides, custom variables, and automatic cancellation when the contact replies. Enrollment is enforced against the member's allowed inboxes.
