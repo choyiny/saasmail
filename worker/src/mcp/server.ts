@@ -17,7 +17,7 @@ import {
 // `{{#section}}` is sendable from MCP too. Aliased on import because the
 // name it carries in the OpenAPI document is meaningless here — the MCP SDK
 // converts this to JSON Schema on its own.
-import { templateValueSchema as mcpTemplateValueSchema } from "../lib/template-variables-schema";
+import { templateVariablesSchema } from "../lib/template-variables-schema";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { searchEmails } from "../lib/queries/search";
 
@@ -337,8 +337,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         fromAddress: z
           .string()
           .describe("Sender identity; must be one of your allowed inboxes."),
-        variables: z
-          .record(z.string(), mcpTemplateValueSchema)
+        variables: templateVariablesSchema
           .optional()
           .describe(
             "Values for the template's {{placeholders}}. Missing ones are reported back with the full required list. Values may be nested arrays/objects for {{#section}} bodies.",
@@ -444,8 +443,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .string()
           .optional()
           .describe("Render this saved template instead of bodyHtml."),
-        variables: z
-          .record(z.string(), mcpTemplateValueSchema)
+        variables: templateVariablesSchema
           .optional()
           .describe(
             "Values for the template's placeholders. May be nested arrays/objects for {{#section}} bodies.",
@@ -522,8 +520,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         fromAddress: z
           .string()
           .describe("Sender identity; must be one of your allowed inboxes."),
-        variables: z
-          .record(z.string(), mcpTemplateValueSchema)
+        variables: templateVariablesSchema
           .optional()
           .describe(
             "Values for placeholders used by the sequence templates. May be nested arrays/objects for {{#section}} bodies.",
