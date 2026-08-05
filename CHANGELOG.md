@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `PATCH /api/emails/bulk` works. It was registered after `PATCH /api/emails/{id}`, and Hono matches in registration order, so the request bound `id: "bulk"`, was answered by the single-email handler, and returned `404` without marking anything — the bulk handler was unreachable dead code. Registering it before the parameterised route makes it live; it applies the same inbox scoping it always contained, silently skipping ids the caller may not access.
 - README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).
 
 ### Added

@@ -196,45 +196,12 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
   return c.json(email, 200);
 });
 
-// Mark email read/unread
-const patchEmailRoute = createRoute({
-  method: "patch",
-  path: "/{id}",
-  tags: ["Emails"],
-  description: "Mark an email as read or unread.",
-  request: {
-    params: z.object({ id: z.string() }),
-    body: {
-      content: {
-        "application/json": {
-          schema: z.object({
-            isRead: z.boolean(),
-          }),
-        },
-      },
-    },
-  },
-  responses: {
-    ...json200Response(z.object({ success: z.boolean() }), "Updated"),
-  },
-});
-
-emailsRouter.openapi(patchEmailRoute, async (c) => {
-  const db = c.get("db");
-  const { id } = c.req.valid("param");
-  const { isRead } = c.req.valid("json");
-  const allowed = c.get("allowedInboxes")!;
-
-  const result = await setEmailRead(db, id, isRead, allowed);
-
-  if (!result) {
-    return c.json({ error: "Email not found" }, 404);
-  }
-
-  return c.json({ success: true }, 200);
-});
-
-// Bulk mark read/unread
+// Bulk mark read/unread.
+//
+// Registered before PATCH /{id}: Hono matches in registration order, so with
+// the parameterised route first, `PATCH /api/emails/bulk` binds id="bulk" and
+// is answered by the single-email handler — which looks up an email with that
+// id, finds none, and returns 404. This route was unreachable.
 const bulkPatchRoute = createRoute({
   method: "patch",
   path: "/bulk",
@@ -289,6 +256,44 @@ emailsRouter.openapi(bulkPatchRoute, async (c) => {
         .set({ unreadCount: sql`${people.unreadCount} + ${delta}` })
         .where(eq(people.id, email[0].personId));
     }
+  }
+
+  return c.json({ success: true }, 200);
+});
+
+// Mark email read/unread
+const patchEmailRoute = createRoute({
+  method: "patch",
+  path: "/{id}",
+  tags: ["Emails"],
+  description: "Mark an email as read or unread.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            isRead: z.boolean(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    ...json200Response(z.object({ success: z.boolean() }), "Updated"),
+  },
+});
+
+emailsRouter.openapi(patchEmailRoute, async (c) => {
+  const db = c.get("db");
+  const { id } = c.req.valid("param");
+  const { isRead } = c.req.valid("json");
+  const allowed = c.get("allowedInboxes")!;
+
+  const result = await setEmailRead(db, id, isRead, allowed);
+
+  if (!result) {
+    return c.json({ error: "Email not found" }, 404);
   }
 
   return c.json({ success: true }, 200);
