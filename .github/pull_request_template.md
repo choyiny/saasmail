@@ -8,6 +8,26 @@
 
 -
 
+## Release impact
+
+<!--
+Tick exactly one version bump. This applies the label that "Check PR labels"
+requires — without it the check stays red. Tick the change type too, so the
+release notes file this PR under the right heading.
+-->
+
+- [ ] Patch — bug fix or internal change, no new behaviour
+- [ ] Minor — new backwards-compatible behaviour
+- [ ] Major — breaking change
+
+<!-- Change type (optional, categorises the release notes): -->
+
+- [ ] Feature
+- [ ] Bug Fix
+- [ ] Refactor
+- [ ] Documentation
+- [ ] Chore
+
 ## Test plan
 
 <!-- How did you verify this works? Include commands run and/or scenarios exercised. -->

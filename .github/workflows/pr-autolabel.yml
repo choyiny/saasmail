@@ -1,0 +1,36 @@
+name: Autolabel PRs
+
+# Applies the major/minor/patch label that "Check PR labels" requires, based on
+# the checkboxes in the PR body (see .github/release-drafter.yml autolabeler).
+#
+# This is deliberately separate from the Release Drafter workflow, which runs on
+# `push` to main. On `pull_request`, the GITHUB_TOKEN is read-only for pull
+# requests opened from a fork, so the autolabeler silently cannot apply a label
+# and every outside contributor's PR stays red until a maintainer labels it by
+# hand. `pull_request_target` runs in the context of the base repository, so the
+# token can write labels — the same mechanism "Check PR labels" already uses.
+#
+# Safety: this job never checks out the pull request's code. It only reads PR
+# metadata through the API, so untrusted code from the fork is never executed.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, edited, synchronize]
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  autolabel:
+    permissions:
+      contents: read
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter@v7
+        with:
+          disable-releaser: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

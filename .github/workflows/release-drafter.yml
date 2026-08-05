@@ -1,11 +1,10 @@
 name: Release Drafter
 
+# Drafts the next release from merged PRs. Labelling happens in
+# pr-autolabel.yml, which needs `pull_request_target` to be able to write labels
+# on pull requests opened from a fork.
 on:
   push:
-    branches:
-      - main
-  pull_request:
-    types: [opened, reopened, synchronize]
     branches:
       - main
 
@@ -20,5 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: release-drafter/release-drafter@v7
+        with:
+          disable-autolabeler: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
