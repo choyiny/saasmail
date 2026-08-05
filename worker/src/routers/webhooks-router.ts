@@ -33,7 +33,17 @@ webhooksRouter.openapi(getRoute, async (c) => {
 // Exported so the bearer-token field guard's test fails if a field is added
 // here without being classified in `BODY_GUARDS`.
 export const PutWebhookSchema = z.object({
-  url: z.string(),
+  /**
+   * Optional so the secret can be rotated on its own.
+   *
+   * Required, it made rotation unreachable: sending the current URL back
+   * alongside a new secret is refused to OAuth callers (setting a non-empty
+   * URL is the exfiltration half), sending a blank one wipes the whole
+   * configuration before the secret is read, and omitting it failed
+   * validation. Absent now means "leave the destination alone" — which cannot
+   * arm anything, so the guard that refuses a non-empty URL still holds.
+   */
+  url: z.string().optional(),
   secret: z.string().nullable().optional(),
 });
 const putRoute = createRoute({
@@ -58,6 +68,21 @@ webhooksRouter.openapi(putRoute, async (c) => {
   const db = c.get("db");
   const user = c.get("user");
   const body = c.req.valid("json");
+
+  // Secret-only: keep the destination, change what signs it.
+  if (body.url === undefined) {
+    const existing = await getWebhookConfig(db);
+    if (!existing) {
+      return c.json({ error: "No webhook URL configured." }, 400);
+    }
+    const secret =
+      body.secret === null || body.secret === ""
+        ? null
+        : (body.secret ?? existing.secret ?? null);
+    await setWebhookConfig(db, { url: existing.url, secret }, user?.id ?? null);
+    return c.json({ url: existing.url, hasSecret: !!secret }, 200);
+  }
+
   const url = body.url.trim();
 
   if (!url) {

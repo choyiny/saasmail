@@ -730,3 +730,80 @@ describe("inbox assignments are shrink-only for a bearer caller", () => {
     expect(await held()).toEqual(["u-member"]);
   });
 });
+
+/**
+ * Rotation, end to end rather than through the guard alone.
+ *
+ * `BODY_GUARDS` marks the webhook `secret` free, and the guard-level test
+ * agreed — but the route made the permission unreachable, so "free" described
+ * a capability the server did not have. Sending the current URL back with a
+ * new secret is refused (that is the exfiltration half), a blank URL wiped the
+ * configuration before the secret was read, and omitting the URL failed
+ * validation. This exercises the request an app would actually send.
+ */
+describe("a bearer caller can rotate the webhook secret", () => {
+  beforeAll(applyMigrations);
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createUserWithPassword(ADMIN, "admin");
+  });
+
+  async function configure() {
+    const { apiKey } = await createTestUser({
+      id: "u-setup",
+      role: "admin",
+      email: "setup@x.com",
+    });
+    const res = await authFetch("/api/webhook", {
+      apiKey,
+      method: "PUT",
+      body: JSON.stringify({ url: "https://hooks.x.com/a", secret: "old" }),
+    });
+    expect(res.status).toBe(200);
+  }
+
+  it("keeps the destination and reports a secret", async () => {
+    await configure();
+    const res = await bearerJson("/api/webhook", await adminToken(), "PUT", {
+      secret: "rotated",
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      url: "https://hooks.x.com/a",
+      hasSecret: true,
+    });
+  });
+
+  it("can clear the secret without losing the destination", async () => {
+    await configure();
+    const res = await bearerJson("/api/webhook", await adminToken(), "PUT", {
+      secret: null,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      url: "https://hooks.x.com/a",
+      hasSecret: false,
+    });
+  });
+
+  it("still refuses to point the webhook somewhere new", async () => {
+    await configure();
+    const res = await bearerJson("/api/webhook", await adminToken(), "PUT", {
+      url: "https://evil.example/collect",
+      secret: "rotated",
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "OAUTH_SCOPE_DENIED" });
+
+    const after = await bearer("/api/webhook", await adminToken());
+    expect(await after.json()).toMatchObject({ url: "https://hooks.x.com/a" });
+  });
+
+  it("refuses a secret-only rotation when nothing is configured", async () => {
+    const res = await bearerJson("/api/webhook", await adminToken(), "PUT", {
+      secret: "rotated",
+    });
+    expect(res.status).toBe(400);
+  });
+});
