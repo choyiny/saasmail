@@ -3,11 +3,14 @@
  * itself is exercised indirectly via the router tests — this file covers the
  * pure logic (union, dedupe, admin cap) that decides *who* gets notified.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import {
   MAX_ADMIN_FANOUT,
   computeFanoutTargets,
+  filterNotifiableUsers,
 } from "../lib/notification-fanout";
+import { applyMigrations, cleanDb, getDb } from "./helpers";
+import { users, passkeys } from "../db/auth.schema";
 
 describe("computeFanoutTargets", () => {
   it("unions permission users and admins", () => {
@@ -87,5 +90,112 @@ describe("computeFanoutTargets", () => {
     });
     expect(userIds).toHaveLength(MAX_ADMIN_FANOUT);
     expect(adminTruncated).toBe(false);
+  });
+});
+
+/**
+ * `computeFanoutTargets` decides who is *interested*; this decides who is
+ * *permitted*. The notification payload carries sender, subject and a body
+ * preview, so a user the API refuses must not be sent one.
+ *
+ * The env is passed explicitly rather than taken from the ambient test
+ * bindings, which set DISABLE_PASSKEY_GATE="true" — under those the passkey
+ * branch never runs, so a test relying on them would assert nothing.
+ */
+describe("filterNotifiableUsers", () => {
+  const GATE_ON = { DISABLE_PASSKEY_GATE: "false" } as any;
+  const GATE_OFF = { DISABLE_PASSKEY_GATE: "true" } as any;
+
+  beforeAll(applyMigrations);
+  beforeEach(cleanDb);
+
+  async function insertUser(
+    id: string,
+    opts: { banned?: boolean; banExpires?: Date | null } = {},
+  ) {
+    const now = Date.now();
+    await getDb()
+      .insert(users)
+      .values({
+        id,
+        name: id,
+        email: `${id}@test.local`,
+        emailVerified: false,
+        createdAt: new Date(now),
+        updatedAt: new Date(now),
+        role: "member",
+        banned: opts.banned ?? false,
+        banExpires: opts.banExpires ?? null,
+      });
+  }
+
+  async function givePasskey(userId: string) {
+    await getDb()
+      .insert(passkeys)
+      .values({
+        id: `pk-${userId}`,
+        userId,
+        publicKey: "x",
+        credentialID: `cred-${userId}`,
+        counter: 0,
+        deviceType: "singleDevice",
+        backedUp: false,
+        transports: null,
+        createdAt: new Date(),
+      });
+  }
+
+  it("drops a banned user even in dev", async () => {
+    await insertUser("ok");
+    await insertUser("banned", { banned: true });
+
+    const result = await filterNotifiableUsers(getDb(), GATE_OFF, [
+      "ok",
+      "banned",
+    ]);
+    expect(result).toEqual(["ok"]);
+  });
+
+  it("keeps a user whose ban has expired", async () => {
+    await insertUser("expired", {
+      banned: true,
+      banExpires: new Date(Date.now() - 60_000),
+    });
+
+    const result = await filterNotifiableUsers(getDb(), GATE_OFF, ["expired"]);
+    expect(result).toEqual(["expired"]);
+  });
+
+  it("drops a user with no passkey when the gate is enforced", async () => {
+    await insertUser("enrolled");
+    await givePasskey("enrolled");
+    await insertUser("no-passkey");
+
+    const result = await filterNotifiableUsers(getDb(), GATE_ON, [
+      "enrolled",
+      "no-passkey",
+    ]);
+    expect(result).toEqual(["enrolled"]);
+  });
+
+  it("keeps a passkey-less user in dev, matching requirePasskey", async () => {
+    await insertUser("no-passkey");
+
+    const result = await filterNotifiableUsers(getDb(), GATE_OFF, [
+      "no-passkey",
+    ]);
+    expect(result).toEqual(["no-passkey"]);
+  });
+
+  it("drops a banned user who does have a passkey", async () => {
+    await insertUser("banned", { banned: true });
+    await givePasskey("banned");
+
+    const result = await filterNotifiableUsers(getDb(), GATE_ON, ["banned"]);
+    expect(result).toEqual([]);
+  });
+
+  it("returns an empty list for no candidates without querying", async () => {
+    expect(await filterNotifiableUsers(getDb(), GATE_ON, [])).toEqual([]);
   });
 });

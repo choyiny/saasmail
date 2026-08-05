@@ -1,3 +1,8 @@
+import { inArray } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { users, passkeys } from "../db/auth.schema";
+import { isDevEnvironment } from "./is-dev";
+
 // Cap admin WebSocket fanout so a deployment with many admin accounts does
 // not incur unbounded DO RPCs on every inbound email. A presence-aware
 // implementation (only notifying users with an active stream) would be the
@@ -24,4 +29,55 @@ export function computeFanoutTargets(args: {
     ...args.adminUserIds.slice(0, cap),
   ]);
   return { userIds: [...userIds], adminTruncated };
+}
+
+/**
+ * Narrow a fanout target list to users who are actually allowed to read mail.
+ *
+ * A notification carries the sender's name, the subject, and a 140-character
+ * body preview — that is mail content, not merely a signal that mail arrived.
+ * Membership of `inbox_permissions` is therefore not sufficient on its own:
+ *
+ *  - A **banned** user is refused everywhere else (`/mcp` answers "account
+ *    suspended"), so pushing them the contents of new mail contradicts the ban.
+ *  - A user with **no registered passkey** is refused by `requirePasskey`,
+ *    whose stated purpose is that "passkey registration is actually required to
+ *    access data". Delivering a subject and preview to them would make that
+ *    false, which is the same reason `/mcp` re-checks passkeys on bearer
+ *    requests rather than exempting itself.
+ *
+ * The passkey condition is skipped in development, matching `requirePasskey`
+ * and the MCP handler, so local dev and e2e (which run with the gate disabled)
+ * still receive notifications.
+ */
+export async function filterNotifiableUsers(
+  db: DrizzleD1Database<any>,
+  env: CloudflareBindings,
+  userIds: string[],
+): Promise<string[]> {
+  if (userIds.length === 0) return [];
+
+  const now = new Date();
+  const userRows = await db
+    .select({
+      id: users.id,
+      banned: users.banned,
+      banExpires: users.banExpires,
+    })
+    .from(users)
+    .where(inArray(users.id, userIds));
+
+  const notBanned = userRows
+    .filter((u) => !(u.banned && (!u.banExpires || u.banExpires > now)))
+    .map((u) => u.id);
+
+  if (isDevEnvironment(env) || notBanned.length === 0) return notBanned;
+
+  const withPasskey = await db
+    .select({ userId: passkeys.userId })
+    .from(passkeys)
+    .where(inArray(passkeys.userId, notBanned));
+
+  const enrolled = new Set(withPasskey.map((p) => p.userId));
+  return notBanned.filter((id) => enrolled.has(id));
 }

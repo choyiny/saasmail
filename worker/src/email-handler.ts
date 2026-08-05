@@ -15,6 +15,7 @@ import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 import {
   MAX_ADMIN_FANOUT,
   computeFanoutTargets,
+  filterNotifiableUsers,
 } from "./lib/notification-fanout";
 import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
@@ -234,13 +235,21 @@ export async function handleEmail(
             .where(eq(users.role, "admin"))
             .limit(MAX_ADMIN_FANOUT + 1),
         ]);
-        const { userIds, adminTruncated } = computeFanoutTargets({
+        const { userIds: candidates, adminTruncated } = computeFanoutTargets({
           permissionUserIds: permRows.map((r) => r.userId),
           adminUserIds: adminRows.map((r) => r.id),
         });
         if (adminTruncated) {
           console.warn(
             `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
+          );
+        }
+        // The payload carries the sender, subject and a body preview, so a
+        // recipient who may not read mail must not receive it either.
+        const userIds = await filterNotifiableUsers(db, env, candidates);
+        if (userIds.length < candidates.length) {
+          console.log(
+            `[notify] skipped ${candidates.length - userIds.length} ineligible recipient(s) (banned or no passkey)`,
           );
         }
         const deliverPayload = JSON.stringify({
