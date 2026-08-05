@@ -10,6 +10,8 @@ import {
   getDb,
 } from "./helpers";
 import { attachments } from "../db/attachments.schema";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
+import { sentEmails } from "../db/sent-emails.schema";
 
 describe("attachments router", () => {
   let apiKey: string;
@@ -103,6 +105,181 @@ describe("attachments router", () => {
         apiKey,
       });
       expect(res.status).toBe(404);
+    });
+
+    it("does not license shared caches to store mailbox content", async () => {
+      await createTestAttachment();
+
+      const res = await authFetch("/api/attachments/att-1/inline", { apiKey });
+      const cacheControl = res.headers.get("Cache-Control") ?? "";
+      expect(cacheControl).toContain("private");
+      expect(cacheControl).not.toContain("public");
+    });
+  });
+
+  // Every test above authenticates as an admin, for whom resolveAllowedInboxes
+  // short-circuits to { isAdmin: true } — which is why an unscoped attachment
+  // read passed a full suite unnoticed. These exercise a member.
+  describe("inbox scoping", () => {
+    const MINE = "mine@saasmail.test";
+    const THEIRS = "theirs@saasmail.test";
+
+    /** A member who may read MINE and nothing else. */
+    async function createMember() {
+      const { userId, apiKey: memberKey } = await createTestUser({
+        id: "member1",
+        role: "member",
+        email: "member@test.com",
+      });
+      await getDb()
+        .insert(inboxPermissions)
+        .values({
+          userId,
+          email: MINE,
+          createdAt: Math.floor(Date.now() / 1000),
+          createdBy: null,
+        });
+      return memberKey;
+    }
+
+    async function putAttachment(opts: {
+      id: string;
+      emailId: string;
+      kind: "inbound" | "sent";
+    }) {
+      const r2Key = `attachments/${opts.emailId}/f.pdf`;
+      await env.R2.put(r2Key, new TextEncoder().encode("x"), {
+        httpMetadata: { contentType: "application/pdf" },
+      });
+      await getDb()
+        .insert(attachments)
+        .values({
+          id: opts.id,
+          emailId: opts.emailId,
+          kind: opts.kind,
+          filename: "f.pdf",
+          contentType: "application/pdf",
+          size: 1,
+          r2Key,
+          contentId: null,
+          createdAt: Math.floor(Date.now() / 1000),
+        });
+    }
+
+    async function seedInbound() {
+      await createTestPerson({ id: "s1", email: "ext@test.com" });
+      await createTestEmail({ id: "mine-1", personId: "s1", recipient: MINE });
+      await createTestEmail({
+        id: "theirs-1",
+        personId: "s1",
+        recipient: THEIRS,
+        messageId: "msg-2@example.com",
+      });
+      await putAttachment({
+        id: "att-mine",
+        emailId: "mine-1",
+        kind: "inbound",
+      });
+      await putAttachment({
+        id: "att-theirs",
+        emailId: "theirs-1",
+        kind: "inbound",
+      });
+    }
+
+    /**
+     * A sent attachment belongs to the inbox it was sent FROM. Scoping it by
+     * the external to_address instead would deny everything, and scoping it by
+     * nothing at all is the bug this suite covers.
+     */
+    async function seedSent() {
+      const now = Math.floor(Date.now() / 1000);
+      await getDb()
+        .insert(sentEmails)
+        .values([
+          {
+            id: "sent-mine",
+            personId: null,
+            fromAddress: MINE,
+            toAddress: "ext@test.com",
+            subject: "s",
+            sentAt: now,
+            createdAt: now,
+          },
+          {
+            id: "sent-theirs",
+            personId: null,
+            fromAddress: THEIRS,
+            toAddress: "ext@test.com",
+            subject: "s",
+            sentAt: now,
+            createdAt: now,
+          },
+        ]);
+      await putAttachment({
+        id: "att-sent-mine",
+        emailId: "sent-mine",
+        kind: "sent",
+      });
+      await putAttachment({
+        id: "att-sent-theirs",
+        emailId: "sent-theirs",
+        kind: "sent",
+      });
+    }
+
+    it("serves an inbound attachment from an inbox the member holds", async () => {
+      await seedInbound();
+      const memberKey = await createMember();
+
+      const res = await authFetch("/api/attachments/att-mine", {
+        apiKey: memberKey,
+      });
+      expect(res.status).toBe(200);
+    });
+
+    it("hides an inbound attachment from an inbox the member does not hold", async () => {
+      await seedInbound();
+      const memberKey = await createMember();
+
+      const res = await authFetch("/api/attachments/att-theirs", {
+        apiKey: memberKey,
+      });
+      expect(res.status).toBe(404);
+      // 404, not 403 — a 403 would confirm the id exists.
+      expect(await res.json()).toEqual({ error: "Attachment not found" });
+    });
+
+    it("hides an unauthorized attachment on the inline route too", async () => {
+      await seedInbound();
+      const memberKey = await createMember();
+
+      const res = await authFetch("/api/attachments/att-theirs/inline", {
+        apiKey: memberKey,
+      });
+      expect(res.status).toBe(404);
+    });
+
+    it("scopes a sent attachment by the inbox it was sent from", async () => {
+      await seedSent();
+      const memberKey = await createMember();
+
+      const mine = await authFetch("/api/attachments/att-sent-mine", {
+        apiKey: memberKey,
+      });
+      expect(mine.status).toBe(200);
+
+      const theirs = await authFetch("/api/attachments/att-sent-theirs", {
+        apiKey: memberKey,
+      });
+      expect(theirs.status).toBe(404);
+    });
+
+    it("still serves everything to an admin", async () => {
+      await seedInbound();
+
+      const res = await authFetch("/api/attachments/att-theirs", { apiKey });
+      expect(res.status).toBe(200);
     });
   });
 });
