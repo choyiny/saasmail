@@ -62,7 +62,9 @@ const streamRoute = createRoute({
   security: bearerSecurity,
   description: `Real-time in-app notification stream via WebSocket upgrade to the user's NotificationsHub Durable Object.
 
-Requires \`Upgrade: websocket\` and \`Connection: Upgrade\` headers, plus an \`Origin\` header matching one of the instance's \`TRUSTED_ORIGINS\`. Session cookie or API key authentication.`,
+Requires \`Upgrade: websocket\` and \`Connection: Upgrade\` headers. Session cookie, API key, or OAuth bearer authentication.
+
+Session-cookie callers must also send an \`Origin\` header matching one of the instance's \`TRUSTED_ORIGINS\`; this defends against Cross-Site WebSocket Hijacking, which relies on the browser attaching the cookie to a cross-origin handshake automatically. Bearer callers are exempt: their credential is not ambient, so it cannot be attached to a socket opened by an attacker's page, and a native client has no browser origin to send.`,
   responses: {
     101: {
       description: "Switching Protocols — WebSocket connection established.",
@@ -87,12 +89,32 @@ notificationsRouter.openapi(streamRoute, async (c) => {
     return c.json({ error: "Expected WebSocket upgrade" }, 426);
   }
 
-  const origin = c.req.header("Origin");
-  const trustedOrigins = c.env.TRUSTED_ORIGINS
-    ? c.env.TRUSTED_ORIGINS.split(",").map((o) => o.trim())
-    : [];
-  if (!origin || !trustedOrigins.includes(origin)) {
-    return c.json({ error: "Forbidden" }, 403);
+  // The Origin allow-list defends against Cross-Site WebSocket Hijacking, which
+  // exists because a browser attaches the session cookie to a cross-origin
+  // handshake automatically: an attacker's page opens the socket and the
+  // victim's credential rides along. `Origin` is the right defence there
+  // precisely because a page cannot forge it.
+  //
+  // A bearer credential is not ambient. It has to be set explicitly on the
+  // request, and no attacker page can cause a victim's token to be attached to
+  // a socket it opened, so the attack the check prevents cannot occur. The
+  // check is still fatal to those callers — a native client has no browser
+  // origin to send at all.
+  //
+  // So the check follows the credential it protects rather than the route.
+  //
+  // Scoped to OAuth deliberately, not to every bearer credential. The same
+  // argument applies to `sk_` API keys — they are not ambient either — but the
+  // suite asserts a 403 for them today, and changing a tested contract is not
+  // needed to unblock a native client. Left alone rather than quietly widened.
+  if (c.get("authMethod") !== "oauth") {
+    const origin = c.req.header("Origin");
+    const trustedOrigins = c.env.TRUSTED_ORIGINS
+      ? c.env.TRUSTED_ORIGINS.split(",").map((o) => o.trim())
+      : [];
+    if (!origin || !trustedOrigins.includes(origin)) {
+      return c.json({ error: "Forbidden" }, 403);
+    }
   }
 
   const user = c.get("user");

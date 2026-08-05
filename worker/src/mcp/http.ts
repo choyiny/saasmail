@@ -4,15 +4,9 @@ import {
   oauthProviderAuthServerMetadata,
   oauthProviderOpenIdConfigMetadata,
 } from "@better-auth/oauth-provider";
-import { verifyJwsAccessToken } from "better-auth/oauth2";
-import type { JSONWebKeySet, JWTPayload } from "jose";
-import { eq } from "drizzle-orm";
 import { createAuth } from "../auth";
+import { resolveOAuthPrincipal } from "../lib/oauth-principal";
 import { OAUTH_SCOPES } from "../auth";
-import { parseScopes } from "../auth/scopes";
-import { users, passkeys, oauthClients } from "../db/auth.schema";
-import { resolveAllowedInboxes } from "../lib/inbox-permissions";
-import { isDevEnvironment } from "../lib/is-dev";
 import { buildMcpServer } from "./server";
 import {
   MCP_PATH,
@@ -94,118 +88,27 @@ export function registerMcpRoutes(app: App) {
 
     if (!token) return unauthorized(baseURL, "missing authorization header");
 
-    let jwt: JWTPayload;
-    try {
-      jwt = await verifyAccessTokenLocally(c.env, token, baseURL);
-    } catch {
-      return unauthorized(baseURL, "invalid access token");
-    }
-
     const db = c.get("db");
 
-    // `sub` is the user id — pairwise subject identifiers are not enabled.
-    const userId = jwt.sub;
-    if (!userId) return unauthorized(baseURL, "invalid token subject");
-
-    // Tokens verify offline against JWKS, so without this a revoked client
-    // would keep working until its token expired and could refresh past that.
-    // Checking `azp` (the authorized party, i.e. the client) on every call is
-    // what makes "revoke access at any time" true rather than aspirational.
-    const clientId = typeof jwt.azp === "string" ? jwt.azp : undefined;
-    if (!clientId) return unauthorized(baseURL, "invalid token client");
-    const client = await db
-      .select({ disabled: oauthClients.disabled })
-      .from(oauthClients)
-      .where(eq(oauthClients.clientId, clientId))
-      .limit(1);
-    if (client.length === 0 || client[0].disabled) {
-      return unauthorized(baseURL, "client revoked");
+    // Same resolver `/api/*` uses, so client revocation, ban and passkey
+    // rules cannot drift between the two bearer surfaces. The audience stays
+    // narrowed to this endpoint, preserving previous behaviour exactly.
+    const result = await resolveOAuthPrincipal({
+      db: c.get("db"),
+      env: c.env,
+      token,
+      baseURL,
+      audience: mcpAudience(baseURL),
+    });
+    if (!result.ok) {
+      return unauthorized(baseURL, result.failure.message);
     }
-
-    const rows = await db
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-        role: users.role,
-        banned: users.banned,
-        banExpires: users.banExpires,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    // The user may have been deleted since the token was minted.
-    if (rows.length === 0) return unauthorized(baseURL, "unknown user");
-    const user = rows[0];
-
-    // Tokens are verified offline, so this row is the only thing that can
-    // revoke a live one. better-auth honours a ban on the session path; without
-    // this the MCP path would keep serving a banned user until the token
-    // expired, and keep refreshing it after that.
-    if (user.banned && (!user.banExpires || user.banExpires > new Date())) {
-      return unauthorized(baseURL, "account suspended");
-    }
-
-    // Same rule requirePasskey enforces on /api/*. /mcp sits outside that
-    // middleware, and MCP grants strictly more than the web API does (send and
-    // delete), so exempting it would make "passkey registration is required to
-    // access data" false for the most powerful surface.
-    if (!isDevEnvironment(c.env)) {
-      const pk = await db
-        .select({ id: passkeys.id })
-        .from(passkeys)
-        .where(eq(passkeys.userId, user.id))
-        .limit(1);
-      if (pk.length === 0) {
-        return unauthorized(baseURL, "passkey registration required");
-      }
-    }
-
-    const allowed = await resolveAllowedInboxes(db, user);
-    const scopes = parseScopes(jwt.scope ?? (jwt as { scp?: unknown }).scp);
+    const { user, allowed, scopes } = result.principal;
 
     const server = buildMcpServer({ db, env: c.env, user, allowed, scopes });
     const transport = new StreamableHTTPTransport();
     await server.connect(transport);
     return transport.handleRequest(c);
-  });
-}
-
-/** Stable key so the JWKS is cached across requests rather than re-read. */
-const JWKS_CACHE_KEY = {};
-
-/**
- * Verify an MCP access token without leaving the isolate.
- *
- * The library's `mcpHandler` helper takes a `jwksUrl` *string*, which it
- * fetches over the network — meaning the Worker would issue a subrequest to
- * its own public hostname on every MCP call. That re-enters the Worker, adds
- * latency, and breaks anywhere the instance can't reach itself (tests, private
- * routes, Access-protected hostnames).
- *
- * `verifyJwsAccessToken` accepts a *function* JWKS source, so the keys are read
- * straight from the jwt plugin in-process. This is the same mechanism the
- * provider's own introspect endpoint uses internally. Everything else about the
- * OAuth flow still runs through the oauth-provider plugin.
- */
-async function verifyAccessTokenLocally(
-  env: CloudflareBindings,
-  token: string,
-  baseURL: string,
-): Promise<JWTPayload> {
-  return verifyJwsAccessToken(token, {
-    // Constructed inside the closure, not before the call: the JWKS is cached
-    // per isolate against JWKS_CACHE_KEY, so this runs about once every five
-    // minutes. Building a full betterAuth instance (Drizzle adapter + five
-    // plugins + endpoint table) eagerly would pay that cost on every request
-    // and discard it.
-    jwksFetch: async () =>
-      (await createAuth(env).api.getJwks()) as unknown as JSONWebKeySet,
-    jwksCacheKey: JWKS_CACHE_KEY,
-    verifyOptions: {
-      issuer: oauthIssuer(baseURL),
-      audience: mcpAudience(baseURL),
-    },
   });
 }
 
