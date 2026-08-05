@@ -11,6 +11,15 @@ export const SCOPE_MANAGE = "email:manage";
 
 export const MCP_SCOPES = [SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE] as const;
 
+/**
+ * Gates the admin surface for OAuth bearer callers on /api/*. Held *in
+ * addition to* `role === "admin"` — a consented scope must never promote a
+ * member. Kept out of MCP_SCOPES because the MCP tools expose no admin
+ * operation, and a scope nothing honours is one a user could be asked to grant
+ * for nothing.
+ */
+export const SCOPE_ADMIN = "admin:manage";
+
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 /**
