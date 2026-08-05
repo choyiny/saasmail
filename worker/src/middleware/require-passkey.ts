@@ -24,6 +24,10 @@ export const requirePasskey: MiddlewareHandler<{
 }> = async (c, next) => {
   if (isDevEnvironment(c.env)) return next();
   if (c.get("authMethod") === "apiKey") return next();
+  // OAuth callers are not exempt — `resolveOAuthPrincipal` applies the same
+  // check while resolving the token and rejects with this route's own
+  // `PASSKEY_REQUIRED` shape. Re-running it here would only repeat the query.
+  if (c.get("authMethod") === "oauth") return next();
 
   const user = c.get("user");
   if (!user) {

@@ -98,7 +98,18 @@
     // VAPID_PUBLIC_KEY and VAPID_SUBJECT are public config (safe to commit here).
     // Generate all three with `yarn vapid:generate`. Leave blank to disable push.
     "VAPID_PUBLIC_KEY": "",
-    "VAPID_SUBJECT": "mailto:admin@<your-domain>"
+    "VAPID_SUBJECT": "mailto:admin@<your-domain>",
+
+    // Native push (Expo) needs no configuration here: APNs/FCM credentials
+    // live on the Expo project that built the app, not on this deployment.
+    // A deployment serving only native clients can leave the VAPID vars blank.
+    //
+    // Notification previews are OFF by default. A native payload travels
+    // through Expo and then Apple or Google before reaching a lock screen, so
+    // by default it says only that mail arrived and the client fetches the
+    // rest over an authenticated connection. Set to "true" to include the
+    // sender and subject in the notification itself.
+    "PUSH_PREVIEWS": "false"
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

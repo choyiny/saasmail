@@ -27,6 +27,7 @@ describe("OpenAPI notifications routes", () => {
     expect(paths.sort()).toEqual(
       [
         "/api/notifications/config",
+        "/api/notifications/expo/subscribe",
         "/api/notifications/stream",
         "/api/notifications/subscribe",
         "/api/notifications/subscriptions",

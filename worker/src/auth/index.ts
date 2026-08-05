@@ -5,7 +5,7 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import { drizzle } from "drizzle-orm/d1";
 import { schema } from "../db/schema";
-import { MCP_SCOPES } from "./scopes";
+import { MCP_SCOPES, SCOPE_ADMIN } from "./scopes";
 import { mcpAudience, oauthIssuer } from "../mcp/resource";
 
 /**
@@ -18,6 +18,12 @@ export const OAUTH_SCOPES = [
   "email",
   "offline_access",
   ...MCP_SCOPES,
+  // Gates the admin surface on /api/*. Deliberately not part of MCP_SCOPES:
+  // the MCP tools do not expose admin operations, and a scope no tool honours
+  // would be one a user could be asked to grant for nothing. It is never
+  // implied — a client must request it, the user must consent to it, and the
+  // account must still hold role "admin".
+  SCOPE_ADMIN,
 ];
 
 export function createAuth(env?: CloudflareBindings) {

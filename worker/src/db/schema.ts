@@ -12,6 +12,7 @@ import { sequenceEmails } from "./sequence-emails.schema";
 import { senderIdentities } from "./sender-identities.schema";
 import { inboxPermissions } from "./inbox-permissions.schema";
 import { pushSubscriptions } from "./push-subscriptions.schema";
+import { expoPushSubscriptions } from "./expo-push-subscriptions.schema";
 import { appSettings } from "./app-settings.schema";
 import { suppressions } from "./suppressions.schema";
 import { blocklist } from "./blocklist.schema";
@@ -32,6 +33,7 @@ export const schema = {
   senderIdentities,
   inboxPermissions,
   pushSubscriptions,
+  expoPushSubscriptions,
   appSettings,
   suppressions,
   blocklist,
