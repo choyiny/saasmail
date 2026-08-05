@@ -72,6 +72,9 @@ export async function applyMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions(endpoint)`,
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER NOT NULL, updated_by TEXT)`,
     `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
+    `CREATE TABLE IF NOT EXISTS expo_push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, installation_id TEXT NOT NULL, token TEXT NOT NULL, token_version INTEGER NOT NULL DEFAULT 1, platform TEXT, device_name TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_used_at INTEGER)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS expo_push_user_installation_idx ON expo_push_subscriptions(user_id, installation_id)`,
+    `CREATE INDEX IF NOT EXISTS expo_push_user_idx ON expo_push_subscriptions(user_id)`,
     `CREATE TABLE IF NOT EXISTS suppressions (id TEXT PRIMARY KEY, email TEXT NOT NULL, reason TEXT NOT NULL, source TEXT, note TEXT, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS suppressions_email_unique ON suppressions(email)`,
     `CREATE TABLE IF NOT EXISTS blocklist (id TEXT PRIMARY KEY, type TEXT NOT NULL, value TEXT NOT NULL, note TEXT, created_by TEXT, created_at INTEGER NOT NULL)`,
@@ -270,6 +273,7 @@ export async function cleanDb() {
     DELETE FROM blocklist;
     DELETE FROM suppressions;
     DELETE FROM push_subscriptions;
+    DELETE FROM expo_push_subscriptions;
     DELETE FROM inbox_permissions;
     DELETE FROM sender_identities;
     DELETE FROM sequence_emails;

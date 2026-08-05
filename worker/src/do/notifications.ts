@@ -2,7 +2,18 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { schema } from "../db/schema";
 import { pushSubscriptions } from "../db/push-subscriptions.schema";
+import { expoPushSubscriptions } from "../db/expo-push-subscriptions.schema";
 import { sendPush, type PushPayload, type VapidConfig } from "../lib/web-push";
+import { buildMessage, sendExpoPush } from "../lib/expo-push";
+
+interface DeliverPayload {
+  inbox: string;
+  threadId: string;
+  personId: string;
+  senderName: string;
+  subject: string;
+  bodyPreview: string;
+}
 
 export class NotificationsHub implements DurableObject {
   ctx: DurableObjectState;
@@ -47,14 +58,7 @@ export class NotificationsHub implements DurableObject {
   }
 
   private async handleDeliver(request: Request): Promise<Response> {
-    const payload = (await request.json()) as {
-      inbox: string;
-      threadId: string;
-      personId: string;
-      senderName: string;
-      subject: string;
-      bodyPreview: string;
-    };
+    const payload = (await request.json()) as DeliverPayload;
 
     // Fan out to any live WebSocket clients (best-effort, non-blocking for push).
     const sockets = this.ctx.getWebSockets();
@@ -80,14 +84,60 @@ export class NotificationsHub implements DurableObject {
       return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
     }
 
+    const db = drizzle(this.env.DB, { schema });
+
+    // Routing identifiers only. Whether the sender and subject travel with the
+    // notification is decided per transport below: the web-push payload is
+    // encrypted end-to-end to the browser, whereas a native payload passes
+    // through Expo and then Apple or Google in the clear, which is a different
+    // exposure for a self-hosted product.
+    const routing = {
+      url: `/inbox/${encodeURIComponent(payload.inbox)}/${payload.personId}`,
+      threadId: payload.threadId,
+      personId: payload.personId,
+      inbox: payload.inbox,
+    };
+
+    const [web, expo] = await Promise.all([
+      this.deliverWebPush(db, userId, payload, routing),
+      this.deliverExpoPush(db, userId, payload, routing),
+    ]);
+
+    console.log(
+      `[push] deliver: user=${userId} web(sent=${web.sent} pruned=${web.pruned}) expo(sent=${expo.sent} pruned=${expo.pruned}) wsCount=${wsCount}`,
+    );
+
+    // `via: "push"` means push was *attempted* — i.e. the user had at least one
+    // subscription on some transport — not that a send succeeded. That is the
+    // pre-existing contract and callers key on it; a delivery that fails at the
+    // push service is still a delivery that was tried, and reporting "ws"
+    // instead would hide the attempt entirely.
+    const attemptedPush = web.attempted + expo.attempted > 0;
+    return Response.json({
+      via: attemptedPush ? "push" : wsCount > 0 ? "ws" : "none",
+      sent: web.sent + expo.sent,
+      pruned: web.pruned + expo.pruned,
+      wsCount,
+    });
+  }
+
+  /**
+   * Encrypted Web Push to browsers. Unchanged in behaviour; the VAPID guard
+   * moved in here from the top of `handleDeliver` so that a deployment serving
+   * only native clients works with no VAPID keys configured at all. Previously
+   * an unset key skipped every transport, not just this one.
+   */
+  private async deliverWebPush(
+    db: ReturnType<typeof drizzle>,
+    userId: string,
+    payload: DeliverPayload,
+    routing: Record<string, unknown>,
+  ): Promise<{ sent: number; pruned: number; attempted: number }> {
     const vapidPublic = this.env.VAPID_PUBLIC_KEY ?? "";
     const vapidPrivate = this.env.VAPID_PRIVATE_KEY ?? "";
     const vapidSubject = this.env.VAPID_SUBJECT ?? "";
     if (!vapidPublic || !vapidPrivate || !vapidSubject) {
-      console.warn(
-        `[push] deliver: VAPID not configured (publicKey=${vapidPublic ? "set" : "empty"}, privateKey=${vapidPrivate ? "set" : "empty"}, subject=${vapidSubject ? "set" : "empty"}); skipping push for user=${userId}`,
-      );
-      return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
+      return { sent: 0, pruned: 0, attempted: 0 };
     }
     // Subject must be a real mailto:/https: URL — the example placeholder
     // "mailto:admin@<your-domain>" would silently 400 at the push service.
@@ -96,25 +146,15 @@ export class NotificationsHub implements DurableObject {
       /[<>]/.test(vapidSubject)
     ) {
       console.warn(
-        `[push] deliver: VAPID_SUBJECT looks invalid (${vapidSubject}); push services will reject. Expected mailto:you@example.com or https://example.com`,
+        `[push] VAPID_SUBJECT looks invalid (${vapidSubject}); push services will reject. Expected mailto:you@example.com or https://example.com`,
       );
     }
 
-    const db = drizzle(this.env.DB, { schema });
     const subs = await db
       .select()
       .from(pushSubscriptions)
       .where(eq(pushSubscriptions.userId, userId));
-
-    if (subs.length === 0) {
-      console.log(
-        `[push] deliver: no subscriptions for user=${userId} (wsCount=${wsCount})`,
-      );
-      return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
-    }
-    console.log(
-      `[push] deliver: user=${userId} subs=${subs.length} wsCount=${wsCount} inbox=${payload.inbox}`,
-    );
+    if (subs.length === 0) return { sent: 0, pruned: 0, attempted: 0 };
 
     const vapid: VapidConfig = {
       publicKey: vapidPublic,
@@ -127,40 +167,21 @@ export class NotificationsHub implements DurableObject {
       tag: `thread:${payload.threadId}`,
       icon: "/saasmail-logo.png",
       badge: "/saasmail-logo.png",
-      data: {
-        url: `/inbox/${encodeURIComponent(payload.inbox)}/${payload.personId}`,
-        threadId: payload.threadId,
-      },
+      data: routing,
     };
 
     const results = await Promise.allSettled(
       subs.map(async (sub) => {
-        const host = (() => {
-          try {
-            return new URL(sub.endpoint).host;
-          } catch {
-            return "invalid-endpoint";
-          }
-        })();
         try {
           const { status } = await sendPush(
             { endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth },
             pushPayload,
             vapid,
           );
-          if (status >= 400) {
-            console.warn(
-              `[push] send: non-2xx status=${status} host=${host} sub=${sub.id}`,
-            );
-          } else {
-            console.log(
-              `[push] send: ok status=${status} host=${host} sub=${sub.id}`,
-            );
-          }
           return { id: sub.id, status };
         } catch (err) {
           console.error(
-            `[push] send: threw host=${host} sub=${sub.id}: ${err instanceof Error ? `${err.name}: ${err.message}` : String(err)}`,
+            `[push] web send threw for sub=${sub.id}: ${err instanceof Error ? err.message : String(err)}`,
           );
           return { id: sub.id, status: 0 };
         }
@@ -185,11 +206,68 @@ export class NotificationsHub implements DurableObject {
       }
       // 401/403/0/other: leave the row, log-only.
     }
+    return { sent, pruned, attempted: subs.length };
+  }
 
-    console.log(
-      `[push] deliver: user=${userId} sent=${sent} pruned=${pruned} total=${subs.length} wsCount=${wsCount}`,
+  /**
+   * Native push via Expo. Needs no configuration: credentials live on the Expo
+   * project that built the app, not on this deployment.
+   *
+   * The payload carries no sender or subject unless the deployment opts in.
+   * A native notification passes through Expo and then Apple or Google before
+   * reaching a lock screen, so the default is a wake-up that tells the client
+   * *that* something arrived and where to look, leaving it to fetch the content
+   * over an authenticated connection.
+   */
+  private async deliverExpoPush(
+    db: ReturnType<typeof drizzle>,
+    userId: string,
+    payload: DeliverPayload,
+    routing: Record<string, unknown>,
+  ): Promise<{ sent: number; pruned: number; attempted: number }> {
+    const subs = await db
+      .select()
+      .from(expoPushSubscriptions)
+      .where(eq(expoPushSubscriptions.userId, userId));
+    if (subs.length === 0) return { sent: 0, pruned: 0, attempted: 0 };
+
+    const withPreview = this.env.PUSH_PREVIEWS === "true";
+
+    const messages = subs.map((sub) =>
+      buildMessage({
+        token: sub.token,
+        senderName: payload.senderName,
+        subject: payload.subject,
+        data: routing,
+        withPreview,
+      }),
     );
-    return Response.json({ via: "push", sent, pruned, wsCount });
+
+    const result = await sendExpoPush(messages);
+
+    let pruned = 0;
+    if (result.invalidTokens.length > 0) {
+      for (const token of result.invalidTokens) {
+        // Delete by token, not by installation: a row whose token has since
+        // been rotated is live again and must survive a stale verdict about
+        // the old one.
+        const del = await db
+          .delete(expoPushSubscriptions)
+          .where(eq(expoPushSubscriptions.token, token));
+        pruned++;
+        void del;
+      }
+    }
+
+    if (result.sent > 0) {
+      const now = Math.floor(Date.now() / 1000);
+      await db
+        .update(expoPushSubscriptions)
+        .set({ lastUsedAt: now })
+        .where(eq(expoPushSubscriptions.userId, userId));
+    }
+
+    return { sent: result.sent, pruned, attempted: subs.length };
   }
 
   webSocketMessage(_ws: WebSocket, _message: string | ArrayBuffer) {}

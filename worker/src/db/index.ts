@@ -13,6 +13,7 @@ export * from "./sequence-emails.schema";
 export * from "./sender-identities.schema";
 export * from "./inbox-permissions.schema";
 export * from "./push-subscriptions.schema";
+export * from "./expo-push-subscriptions.schema";
 export * from "./app-settings.schema";
 export * from "./suppressions.schema";
 export * from "./blocklist.schema";
