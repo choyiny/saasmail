@@ -12,6 +12,7 @@ import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
 import { emailsRouter } from "./routers/emails-router";
 import { conversationsRouter } from "./routers/conversations-router";
+import { inboxesRouter } from "./routers/inboxes-router";
 import {
   sendRouter,
   CcEntrySchema,
@@ -323,6 +324,7 @@ const requireAdmin: MiddlewareHandler<{
 app.route("/api/people", peopleRouter);
 app.route("/api/emails", emailsRouter);
 app.route("/api/conversations", conversationsRouter);
+app.route("/api/inboxes", inboxesRouter);
 app.route("/api/send", sendRouter);
 app.route("/api/attachments", attachmentsRouter);
 app.route("/api/stats", statsRouter);

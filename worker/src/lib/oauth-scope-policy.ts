@@ -132,6 +132,12 @@ const RULES: Rule[] = [
   { method: "*", pattern: /^\/api\/notifications(\/|$)/, cls: read },
 
   // --- reading mail and its surrounding objects ---
+  //
+  // The caller's own sending identities. Read-scoped rather than send-scoped
+  // on purpose: this discloses which addresses the caller already controls, it
+  // does not send anything, and a read-only client still needs it to label a
+  // message with the inbox that received it.
+  { method: "GET", pattern: /^\/api\/inboxes$/, cls: read },
   { method: "GET", pattern: /^\/api\/people(\/|$)/, cls: read },
   { method: "GET", pattern: /^\/api\/emails(\/|$)/, cls: read },
   { method: "GET", pattern: /^\/api\/conversations(\/|$)/, cls: read },
