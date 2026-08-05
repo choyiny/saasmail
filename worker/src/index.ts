@@ -240,7 +240,6 @@ app.route("/api/api-keys", apiKeysRouter);
 app.route("/api/invites", invitesRouter);
 app.route("/api/sequences", sequencesRouter);
 app.route("/api/notifications", notificationsRouter);
-app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
 
 // Admin routes (require admin role)
@@ -260,6 +259,15 @@ app.route("/api/oauth-apps", oauthAppsRouter);
 app.use("/api/suppressions/*", requireAdmin);
 app.use("/api/suppressions", requireAdmin);
 app.route("/api/suppressions", suppressionsRouter);
+
+// Blocklist — admin-only global security state, same shape as suppressions.
+// `DELETE /api/blocklist/mail` permanently deletes every hidden message from
+// blocked senders across the whole deployment (rows and R2 objects), and it is
+// not inbox-scoped, so without this guard any member could destroy mail in
+// inboxes they cannot even read.
+app.use("/api/blocklist/*", requireAdmin);
+app.use("/api/blocklist", requireAdmin);
+app.route("/api/blocklist", blocklistRouter);
 
 // Webhook config — admin-only global instance config.
 app.use("/api/webhook", requireAdmin);

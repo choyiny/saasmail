@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- The blocklist API is admin-only. `/api/blocklist` was mounted without the `requireAdmin` guard that `/api/suppressions`, `/api/webhook`, and `/api/oauth-apps` each carry, so any authenticated member could read, add, and remove global block rules. Most seriously, `DELETE /api/blocklist/mail` permanently deletes every hidden message from blocked senders across the whole deployment — rows and R2 objects — and is not inbox-scoped, so a member could destroy mail in inboxes they cannot read. Blocklist is global security state and is now guarded like the rest of it.
+
 ### Fixed
 
 - README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).

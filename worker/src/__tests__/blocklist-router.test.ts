@@ -97,4 +97,66 @@ describe("blocklist router", () => {
     expect(del.status).toBe(200);
     expect(await getDb().query.blocklist.findMany()).toHaveLength(0);
   });
+
+  // Every test above authenticates as an admin, since createTestUser defaults
+  // to role "admin" — which is why an unguarded router passed the suite.
+  describe("admin guard", () => {
+    async function memberKey() {
+      const { apiKey } = await createTestUser({
+        id: "member1",
+        role: "member",
+        email: "member@test.com",
+      });
+      return apiKey;
+    }
+
+    it("denies a member the block rule list", async () => {
+      const r = await authFetch("/api/blocklist", {
+        apiKey: await memberKey(),
+      });
+      expect(r.status).toBe(403);
+    });
+
+    it("denies a member creating a block rule", async () => {
+      const r = await authFetch("/api/blocklist", {
+        apiKey: await memberKey(),
+        method: "POST",
+        body: JSON.stringify({ type: "email", value: "spam@evil.com" }),
+      });
+      expect(r.status).toBe(403);
+      expect(await getDb().query.blocklist.findMany()).toHaveLength(0);
+    });
+
+    it("denies a member unblocking a rule", async () => {
+      await getDb().insert(blocklist).values({
+        id: "blk-9",
+        type: "email",
+        value: "a@evil.com",
+        createdAt: 100,
+      });
+
+      const r = await authFetch("/api/blocklist/blk-9", {
+        apiKey: await memberKey(),
+        method: "DELETE",
+      });
+      expect(r.status).toBe(403);
+      expect(await getDb().query.blocklist.findMany()).toHaveLength(1);
+    });
+
+    // The destructive one: this permanently deletes every hidden message from
+    // blocked senders across the entire deployment, and is not inbox-scoped.
+    it("denies a member purging blocked mail", async () => {
+      const r = await authFetch("/api/blocklist/mail", {
+        apiKey: await memberKey(),
+        method: "DELETE",
+      });
+      expect(r.status).toBe(403);
+    });
+
+    it("still allows an admin", async () => {
+      const { apiKey } = await createTestUser();
+      const r = await authFetch("/api/blocklist", { apiKey });
+      expect(r.status).toBe(200);
+    });
+  });
 });
