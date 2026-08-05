@@ -4,13 +4,24 @@
  *   - 426 when an authenticated request has no `Upgrade: websocket` header
  *   - 403 when an authenticated WS upgrade has a missing/untrusted Origin
  *
- * The success path (101 upgrade to the Durable Object) is not covered here:
- * it requires a live NOTIFICATIONS_HUB binding in the test wrangler config
- * and a real WebSocket-capable client. The branch that matters for safety is
- * the rejection surface, which is what this file locks down.
+ * The rejection surface is the part that matters for safety and is what this
+ * file mostly locks down. The 101 upgrade itself is exercised for the bearer
+ * cases below — the NOTIFICATIONS_HUB binding is present in the test wrangler
+ * config, so the handshake does complete under miniflare.
  */
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { exports } from "cloudflare:workers";
+import {
+  type Credentials,
+  createUserWithPassword,
+  getAccessToken,
+} from "./mcp-helpers";
+
+const OAUTH_USER: Credentials = {
+  name: "Streamer",
+  email: "streamer@saasmail.test",
+  password: "correct-horse-battery",
+};
 import { applyMigrations, cleanDb, createTestUser, authFetch } from "./helpers";
 
 const STREAM_URL = "http://localhost/api/notifications/stream";
@@ -107,5 +118,58 @@ describe("notifications-router /config", () => {
     // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY are set in vitest.config.test.ts
     expect(json.vapidPublicKey).toBe("test-vapid-public");
     expect(json.pushEnabled).toBe(true);
+  });
+
+  /**
+   * A native client has no browser origin to send, and its credential is not
+   * ambient — no attacker page can cause a victim's access token to be attached
+   * to a socket it opened — so the CSWSH defence that the Origin allow-list
+   * provides has nothing to defend here. Cookie callers are unaffected, which
+   * the tests above pin.
+   */
+  describe("OAuth bearer callers", () => {
+    it("upgrades without an Origin header", async () => {
+      await createUserWithPassword(OAUTH_USER, "admin");
+      const token = await getAccessToken(OAUTH_USER, "openid email:read");
+
+      const res = await exports.default.fetch(STREAM_URL, {
+        headers: {
+          Upgrade: "websocket",
+          Connection: "Upgrade",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      expect(res.status).not.toBe(403);
+      expect(res.status).toBe(101);
+    });
+
+    it("is not rejected for an origin the browser flow would refuse", async () => {
+      await createUserWithPassword(OAUTH_USER, "admin");
+      const token = await getAccessToken(OAUTH_USER, "openid email:read");
+
+      const res = await exports.default.fetch(STREAM_URL, {
+        headers: {
+          Upgrade: "websocket",
+          Connection: "Upgrade",
+          Origin: "https://evil.example.com",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      // The token is the authorization; an attacker cannot make a victim send
+      // one, so the origin carries no signal for this credential.
+      expect(res.status).toBe(101);
+    });
+
+    it("still refuses a non-upgrade request", async () => {
+      await createUserWithPassword(OAUTH_USER, "admin");
+      const token = await getAccessToken(OAUTH_USER, "openid email:read");
+
+      const res = await exports.default.fetch(STREAM_URL, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(426);
+    });
   });
 });
