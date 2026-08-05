@@ -163,7 +163,9 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
   );
 });
 
-const PatchInboxBodySchema = z
+// Exported so the bearer-token field guard's test fails if a field is added
+// here without being classified in `BODY_GUARDS`.
+export const PatchInboxBodySchema = z
   .object({
     displayName: z.string().nullable().optional(),
     displayMode: z.enum(["thread", "chat"]).optional(),

@@ -47,7 +47,7 @@ import {
   bearerAccessToken,
   resolveOAuthPrincipal,
 } from "./lib/oauth-principal";
-import { classifyRoute } from "./lib/oauth-scope-policy";
+import { classifyRoute, guardBearerBody } from "./lib/oauth-scope-policy";
 import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
@@ -288,6 +288,19 @@ app.use("/api/*", async (c, next) => {
   // member.
   if (cls.requiresAdminRole && c.get("user")?.role !== "admin") {
     return c.json({ error: "Forbidden" }, 403);
+  }
+
+  // Four routes are safe by path and not by body: an invite is a credential, a
+  // role change can promote, and `forwardTo` / the webhook URL repoint every
+  // future message. The clamps live beside the path table rather than in the
+  // handlers so both halves of the boundary are read together, and
+  // `guardBearerBody` reads the body only for a route it guards — caching it on
+  // anything else would break a multipart send.
+  const refusal = await guardBearerBody(c.req.method, c.req.path, () =>
+    c.req.json().catch(() => null),
+  );
+  if (refusal) {
+    return c.json({ error: refusal, code: "OAUTH_SCOPE_DENIED" }, 403);
   }
 
   return next();

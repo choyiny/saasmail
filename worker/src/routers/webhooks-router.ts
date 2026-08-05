@@ -29,7 +29,10 @@ webhooksRouter.openapi(getRoute, async (c) => {
 });
 
 // PUT /api/webhook — set/replace/clear config
-const PutBody = z.object({
+//
+// Exported so the bearer-token field guard's test fails if a field is added
+// here without being classified in `BODY_GUARDS`.
+export const PutWebhookSchema = z.object({
   url: z.string(),
   secret: z.string().nullable().optional(),
 });
@@ -40,7 +43,7 @@ const putRoute = createRoute({
   description:
     "Set the global outbound webhook. Blank `url` disables it. Omit `secret` to keep the existing one; pass null or '' to clear it. Admin only.",
   request: {
-    body: { content: { "application/json": { schema: PutBody } } },
+    body: { content: { "application/json": { schema: PutWebhookSchema } } },
   },
   responses: {
     ...json200Response(ConfigResponse, "Updated"),

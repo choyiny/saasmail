@@ -232,21 +232,19 @@ describe("OAuth bearer access to /api/*", () => {
   });
 
   /**
-   * Admin operations a token must not perform even holding admin:manage.
-   * These escalate the principal or open a standing channel — a different risk
-   * from an admin doing the same thing in a browser, because a token acts with
-   * no human present and may be compromised silently.
+   * What a token must not do even holding admin:manage. The line is drawn at
+   * durable privilege — one that survives revoking the client and expiring the
+   * token — rather than around the admin surface as a category, so most of what
+   * this block once listed is now reachable in a clamped shape. Those routes
+   * and their clamps live in `admin-over-oauth.test.ts`.
    */
-  describe("escalation and standing-channel routes are denied to tokens", () => {
+  describe("durable privilege is denied to tokens", () => {
     const escalating = [
-      ["PUT", "/api/admin/inboxes/support@x.com/assignments"],
-      ["PATCH", "/api/admin/users/u1/role"],
-      ["POST", "/api/admin/invites"],
+      // An sk_ key authenticates as apiKey, which skips this policy entirely,
+      // never expires, and is not revoked with the client.
+      ["POST", "/api/api-keys"],
+      // Returns the tokens of live invites, admin-role ones included.
       ["GET", "/api/admin/invites"],
-      ["DELETE", "/api/oauth-apps/abc"],
-      ["PUT", "/api/webhook"],
-      ["POST", "/api/webhook/test"],
-      ["PATCH", "/api/admin/inboxes/support@x.com"],
     ] as const;
 
     for (const [method, path] of escalating) {
@@ -254,21 +252,6 @@ describe("OAuth bearer access to /api/*", () => {
         expect(classifyRoute(method, path).kind).toBe("denied");
       });
     }
-
-    it("refuses to rewrite inbox assignments for an admin-scoped token", async () => {
-      const token = await getAccessToken(ADMIN, "openid admin:manage");
-      const res = await bearer(
-        "/api/admin/inboxes/support@saasmail.test/assignments",
-        token,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userIds: ["anyone"] }),
-        },
-      );
-      expect(res.status).toBe(403);
-      expect(await res.json()).toMatchObject({ code: "OAUTH_SCOPE_DENIED" });
-    });
 
     it("still allows ordinary admin reads with admin:manage", async () => {
       const token = await getAccessToken(ADMIN, "openid admin:manage");
