@@ -28,7 +28,9 @@ const InviteSchema = z.object({
   createdAt: z.number(),
 });
 
-const CreateInviteSchema = z.object({
+// Exported so the bearer-token field guard's test fails if a field is added
+// here without being classified in `BODY_GUARDS`.
+export const CreateInviteSchema = z.object({
   role: z.enum(["admin", "member"]).default("member"),
   email: z.string().email().optional(),
   expiresInDays: z.number().min(1).max(30).default(7),
@@ -43,7 +45,8 @@ const UserSchema = z.object({
   hasPasskey: z.boolean(),
 });
 
-const UpdateRoleSchema = z.object({
+// Exported for the same reason as `CreateInviteSchema`.
+export const UpdateRoleSchema = z.object({
   role: z.enum(["admin", "member"]),
 });
 

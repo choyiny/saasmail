@@ -43,6 +43,11 @@ export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
+import {
+  bearerAccessToken,
+  resolveOAuthPrincipal,
+} from "./lib/oauth-principal";
+import { classifyRoute, guardBearerBody } from "./lib/oauth-scope-policy";
 import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
@@ -76,10 +81,16 @@ app.use("*", logger());
 // the OAuth protected-resource metadata URL, plus the `Mcp-Session-Id` header
 // used by the streamable-HTTP transport. Without these a cross-origin MCP
 // client sees an opaque 401 and reports "Couldn't reach the MCP server".
+// `allowHeaders` is explicit because Hono's default is empty: a cross-origin
+// client that preflights a request carrying `Authorization` gets the header
+// stripped from the allow-list and the browser blocks the real request. That
+// was survivable while the only bearer callers were server-side, but a browser
+// or native client presenting an access token needs it.
 app.use(
   "*",
   cors({
     origin: "*",
+    allowHeaders: ["Authorization", "Content-Type", "Mcp-Session-Id"],
     exposeHeaders: ["WWW-Authenticate", "Mcp-Session-Id"],
   }),
 );
@@ -197,7 +208,102 @@ app.use("/api/*", async (c, next) => {
     }
   }
 
+  // Try an OAuth 2.1 access token. These are the tokens this deployment
+  // already issues; until now they were only accepted by /mcp, so a
+  // third-party or native client had no way to reach the API it was granted
+  // scopes for. The same resolver backs both surfaces, so revocation, ban and
+  // passkey rules cannot drift apart between them.
+  const accessToken = bearerAccessToken(authHeader);
+  if (accessToken) {
+    const result = await resolveOAuthPrincipal({
+      db: c.get("db"),
+      env: c.env,
+      token: accessToken,
+      baseURL: c.env.BASE_URL || "http://localhost:8080",
+    });
+
+    if (result.ok) {
+      c.set("user", result.principal.user);
+      c.set("authMethod", "oauth");
+      c.set("oauthScopes", result.principal.scopes);
+      c.set("oauthClientId", result.principal.clientId);
+      c.set("allowedInboxes", result.principal.allowed);
+      return next();
+    }
+
+    // Answer in this surface's own vocabulary rather than /mcp's bearer
+    // challenge. A client that gets a generic 401 for a missing passkey would
+    // refresh its token and retry forever against something a new token cannot
+    // fix, so that case keeps the documented 403 the web client already knows.
+    if (result.failure.reason === "passkey_required") {
+      return c.json(
+        { error: "Passkey registration required", code: "PASSKEY_REQUIRED" },
+        403,
+      );
+    }
+    return c.json({ error: result.failure.message }, 401);
+  }
+
   return c.json({ error: "Unauthorized" }, 401);
+});
+
+// Scope enforcement for OAuth bearer callers.
+//
+// Only OAuth requests are gated: a session or API-key caller acts as the user
+// with their whole surface, exactly as before. A token acts on behalf of a
+// client the user consented to for specific capabilities, so it gets only
+// those. Unclassified routes are refused rather than allowed, so adding a
+// route without classifying it breaks an integration instead of quietly
+// widening every token.
+app.use("/api/*", async (c, next) => {
+  if (isUnauthenticatedPath(c.req.path)) return next();
+  if (c.get("authMethod") !== "oauth") return next();
+
+  const cls = classifyRoute(c.req.method, c.req.path);
+
+  if (cls.kind === "denied") {
+    return c.json(
+      {
+        error: "This endpoint is not available to OAuth clients",
+        code: "OAUTH_SCOPE_DENIED",
+      },
+      403,
+    );
+  }
+
+  const granted = c.get("oauthScopes") ?? [];
+  if (!granted.includes(cls.scope)) {
+    return c.json(
+      {
+        error: `Missing required scope: ${cls.scope}`,
+        code: "OAUTH_INSUFFICIENT_SCOPE",
+        required: cls.scope,
+      },
+      403,
+    );
+  }
+
+  // The scope says the client may act on the admin surface; the role says this
+  // user may. Both are required — a consented scope must never promote a
+  // member.
+  if (cls.requiresAdminRole && c.get("user")?.role !== "admin") {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  // Four routes are safe by path and not by body: an invite is a credential, a
+  // role change can promote, and `forwardTo` / the webhook URL repoint every
+  // future message. The clamps live beside the path table rather than in the
+  // handlers so both halves of the boundary are read together, and
+  // `guardBearerBody` reads the body only for a route it guards — caching it on
+  // anything else would break a multipart send.
+  const refusal = await guardBearerBody(c.req.method, c.req.path, () =>
+    c.req.json().catch(() => null),
+  );
+  if (refusal) {
+    return c.json({ error: refusal, code: "OAUTH_SCOPE_DENIED" }, 403);
+  }
+
+  return next();
 });
 
 // Enforce passkey registration for session-cookie users. Runs before

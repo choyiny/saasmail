@@ -29,8 +29,21 @@ webhooksRouter.openapi(getRoute, async (c) => {
 });
 
 // PUT /api/webhook — set/replace/clear config
-const PutBody = z.object({
-  url: z.string(),
+//
+// Exported so the bearer-token field guard's test fails if a field is added
+// here without being classified in `BODY_GUARDS`.
+export const PutWebhookSchema = z.object({
+  /**
+   * Optional so the secret can be rotated on its own.
+   *
+   * Required, it made rotation unreachable: sending the current URL back
+   * alongside a new secret is refused to OAuth callers (setting a non-empty
+   * URL is the exfiltration half), sending a blank one wipes the whole
+   * configuration before the secret is read, and omitting it failed
+   * validation. Absent now means "leave the destination alone" — which cannot
+   * arm anything, so the guard that refuses a non-empty URL still holds.
+   */
+  url: z.string().optional(),
   secret: z.string().nullable().optional(),
 });
 const putRoute = createRoute({
@@ -40,7 +53,7 @@ const putRoute = createRoute({
   description:
     "Set the global outbound webhook. Blank `url` disables it. Omit `secret` to keep the existing one; pass null or '' to clear it. Admin only.",
   request: {
-    body: { content: { "application/json": { schema: PutBody } } },
+    body: { content: { "application/json": { schema: PutWebhookSchema } } },
   },
   responses: {
     ...json200Response(ConfigResponse, "Updated"),
@@ -55,6 +68,21 @@ webhooksRouter.openapi(putRoute, async (c) => {
   const db = c.get("db");
   const user = c.get("user");
   const body = c.req.valid("json");
+
+  // Secret-only: keep the destination, change what signs it.
+  if (body.url === undefined) {
+    const existing = await getWebhookConfig(db);
+    if (!existing) {
+      return c.json({ error: "No webhook URL configured." }, 400);
+    }
+    const secret =
+      body.secret === null || body.secret === ""
+        ? null
+        : (body.secret ?? existing.secret ?? null);
+    await setWebhookConfig(db, { url: existing.url, secret }, user?.id ?? null);
+    return c.json({ url: existing.url, hasSecret: !!secret }, 200);
+  }
+
   const url = body.url.trim();
 
   if (!url) {
