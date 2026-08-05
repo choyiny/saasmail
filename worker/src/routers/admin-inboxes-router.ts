@@ -368,6 +368,46 @@ adminInboxesRouter.openapi(putAssignmentsRoute, async (c) => {
   const { userIds } = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
+  const existing = await db
+    .select({ userId: inboxPermissions.userId })
+    .from(inboxPermissions)
+    .where(eq(inboxPermissions.email, email));
+
+  /*
+    A bearer caller may take an inbox away from someone, never give one.
+
+    This closes the one chain that still crossed the line the policy draws.
+    Every step of it is otherwise permitted: mint a member invite pinned to an
+    address the caller controls (the clamp allows exactly this, and the 201
+    body carries the token), redeem it through the public accept route, then
+    assign that fresh member every inbox. The result is a standing account with
+    mail access that outlives revoking the client and expiring the token —
+    durable privilege, assembled entirely out of allowed calls.
+
+    Shrink-only rather than a blanket denial because revocation is the half
+    that de-privileges, and an operator locking someone out from their phone is
+    exactly when it matters most. Granting is the durable half and stays in the
+    browser, alongside promotion and admin invites, for the same reason.
+
+    Checked here rather than in `BODY_GUARDS` because the question is not what
+    the body says, it is how the body compares to what is already stored — the
+    guard table is deliberately syntactic and has no database.
+  */
+  if (c.get("authMethod") === "oauth") {
+    const held = new Set(existing.map((r) => r.userId));
+    const added = userIds.filter((id) => !held.has(id));
+    if (added.length > 0) {
+      return c.json(
+        {
+          error:
+            "OAuth clients may remove inbox assignments but not add them. Grant access from the web dashboard.",
+          code: "OAUTH_SCOPE_DENIED",
+        },
+        403,
+      );
+    }
+  }
+
   await db.delete(inboxPermissions).where(eq(inboxPermissions.email, email));
   if (userIds.length > 0) {
     await db.insert(inboxPermissions).values(

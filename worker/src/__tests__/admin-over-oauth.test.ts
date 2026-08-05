@@ -24,6 +24,7 @@ import {
 } from "./helpers";
 import { users } from "../db/auth.schema";
 import { invitations } from "../db/invitations.schema";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
 import {
   type Credentials,
   Jar,
@@ -553,18 +554,17 @@ describe("admin operations over an OAuth bearer token", () => {
       expect(revoked.status).toBe(404);
     });
 
-    it("replaces inbox assignments", async () => {
-      await createUserWithPassword(OTHER_ADMIN, "admin");
-      const id = await userId(OTHER_ADMIN.email);
-
+    it("clears inbox assignments", async () => {
+      // The path is reachable, but only downward — granting is refused by the
+      // shrink-only check in the handler, exercised in its own describe below.
       const res = await bearerJson(
         `/api/admin/inboxes/${INBOX}/assignments`,
         await adminToken(),
         "PUT",
-        { userIds: [id] },
+        { userIds: [] },
       );
       expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({ assignedUserIds: [id] });
+      expect(await res.json()).toMatchObject({ assignedUserIds: [] });
     });
   });
 
@@ -635,5 +635,98 @@ describe("admin operations over an OAuth bearer token", () => {
       });
       expect(forwarded.status).toBe(200);
     });
+  });
+});
+
+/**
+ * The composition the reclassification had to close.
+ *
+ * Every call in the chain is individually permitted, and together they
+ * assemble a durable privilege out of them: mint a member invite pinned to an
+ * address the caller controls (the clamp allows exactly that, and the 201 body
+ * carries the token), redeem it through the public accept route, then hand the
+ * new member every inbox. That access outlives revoking the client and
+ * expiring the token, so the last step is the one that has to give.
+ */
+describe("inbox assignments are shrink-only for a bearer caller", () => {
+  beforeAll(applyMigrations);
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createUserWithPassword(ADMIN, "admin");
+    await createTestUser({ id: "u-member", role: "member", email: "m@x.com" });
+  });
+
+  const path = `/api/admin/inboxes/${INBOX}/assignments`;
+
+  async function grant(userIdToGrant: string) {
+    await getDb()
+      .insert(inboxPermissions)
+      .values({
+        userId: userIdToGrant,
+        email: INBOX,
+        createdAt: Math.floor(Date.now() / 1000),
+        createdBy: null,
+      });
+  }
+
+  async function held(): Promise<string[]> {
+    const rows = await getDb()
+      .select({ userId: inboxPermissions.userId })
+      .from(inboxPermissions)
+      .where(eq(inboxPermissions.email, INBOX));
+    return rows.map((r) => r.userId);
+  }
+
+  it("refuses to add an assignment, and writes nothing", async () => {
+    const res = await bearerJson(path, await adminToken(), "PUT", {
+      userIds: ["u-member"],
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "OAUTH_SCOPE_DENIED" });
+    expect(await held()).toEqual([]);
+  });
+
+  it("allows removing every assignment", async () => {
+    await grant("u-member");
+    const res = await bearerJson(path, await adminToken(), "PUT", {
+      userIds: [],
+    });
+    expect(res.status).toBe(200);
+    expect(await held()).toEqual([]);
+  });
+
+  it("allows a replace that keeps the existing set", async () => {
+    await grant("u-member");
+    const res = await bearerJson(path, await adminToken(), "PUT", {
+      userIds: ["u-member"],
+    });
+    expect(res.status).toBe(200);
+    expect(await held()).toEqual(["u-member"]);
+  });
+
+  it("refuses a body that removes one and adds another", async () => {
+    await createTestUser({ id: "u-other", role: "member", email: "o@x.com" });
+    await grant("u-member");
+    const res = await bearerJson(path, await adminToken(), "PUT", {
+      userIds: ["u-other"],
+    });
+    expect(res.status).toBe(403);
+    expect(await held()).toEqual(["u-member"]);
+  });
+
+  it("does not constrain an API-key caller", async () => {
+    const { apiKey } = await createTestUser({
+      id: "u-keyadmin",
+      role: "admin",
+      email: "k@x.com",
+    });
+    const res = await authFetch(path, {
+      apiKey,
+      method: "PUT",
+      body: JSON.stringify({ userIds: ["u-member"] }),
+    });
+    expect(res.status).toBe(200);
+    expect(await held()).toEqual(["u-member"]);
   });
 });
