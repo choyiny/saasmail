@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Autolabelling now works on pull requests from forks.** `Check PR labels` requires one of `major`/`minor`/`patch`, but the autolabeler ran on `pull_request`, where the `GITHUB_TOKEN` is read-only for fork pull requests — so it could never apply the label, and an outside contributor's PR stayed red until a maintainer labelled it by hand. The autolabeler moves to its own `pull_request_target` workflow (the same event `Check PR labels` already uses) and the pull request template gains the version-bump checkboxes its regexes look for. The job checks out no pull request code, so untrusted code is never executed.
+- The label check reports under its own name. Its job was called `test`, so a missing version label surfaced on the pull request page as a failing check named "test" — indistinguishable at a glance from the test suite going red, on a pull request where the suite had not run at all. It is now `verify-label`.
 - README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).
 
 ### Added

@@ -5,7 +5,10 @@ on:
     types: [opened, labeled, unlabeled, synchronize]
 
 jobs:
-  test:
+  # Named for what it checks. As `test` it surfaced on the PR page as a failing
+  # check called "test", which reads as the test suite having broken — when the
+  # actual message is only that a version label is missing.
+  verify-label:
     runs-on: ubuntu-latest
     steps:
       - uses: jesusvasquez333/verify-pr-label-action@v1.4.0
