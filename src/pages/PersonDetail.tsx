@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { CheckCheck, ShieldBan } from "lucide-react";
+import { ShieldBan } from "lucide-react";
 import {
   fetchPersonEmails,
   markEmailRead,
@@ -31,6 +31,7 @@ import ThreadInboxSection, {
   type ThreadInboxGroup,
 } from "@/components/ThreadInboxSection";
 import ChatInboxSection from "@/components/ChatInboxSection";
+import MarkAllReadButton from "@/components/MarkAllReadButton";
 import type { ComposePrefill } from "@/pages/ComposeModal";
 import { onEmailSent } from "@/lib/email-events";
 import { showToast } from "@/lib/toast";
@@ -401,6 +402,13 @@ export default function PersonDetail({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {activeGroup && (
+              <MarkAllReadButton
+                unreadCount={unreadIn(activeGroup)}
+                scopeLabel={activeGroup.inbox}
+                onMarkAllRead={() => handleMarkInboxRead(activeGroup.inbox)}
+              />
+            )}
             {enrollmentInfo?.enrollment ? (
               <SequenceStatus
                 personId={person.id}
@@ -499,23 +507,6 @@ export default function PersonDetail({
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* Per-inbox action row — visible when the active tab has unread emails */}
-      {activeGroup && unreadIn(activeGroup) > 0 && (
-        <div className="shrink-0 border-b border-border bg-bg-subtle/40 px-4 py-2">
-          <button
-            type="button"
-            onClick={() => handleMarkInboxRead(activeGroup.inbox)}
-            className="inline-flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-          >
-            <CheckCheck size={12} />
-            Mark all in {inboxLabel(activeGroup.inbox)} as read
-            <span className="ml-1 rounded-full bg-text-primary/[0.06] px-1.5 text-[10px] font-bold tabular-nums text-text-secondary">
-              {unreadIn(activeGroup)}
-            </span>
-          </button>
         </div>
       )}
 
