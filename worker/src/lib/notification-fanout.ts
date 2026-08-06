@@ -31,25 +31,7 @@ export function computeFanoutTargets(args: {
   return { userIds: [...userIds], adminTruncated };
 }
 
-/**
- * Narrow a fanout target list to users who are actually allowed to read mail.
- *
- * A notification carries the sender's name, the subject, and a 140-character
- * body preview — that is mail content, not merely a signal that mail arrived.
- * Membership of `inbox_permissions` is therefore not sufficient on its own:
- *
- *  - A **banned** user is refused everywhere else (`/mcp` answers "account
- *    suspended"), so pushing them the contents of new mail contradicts the ban.
- *  - A user with **no registered passkey** is refused by `requirePasskey`,
- *    whose stated purpose is that "passkey registration is actually required to
- *    access data". Delivering a subject and preview to them would make that
- *    false, which is the same reason `/mcp` re-checks passkeys on bearer
- *    requests rather than exempting itself.
- *
- * The passkey condition is skipped in development, matching `requirePasskey`
- * and the MCP handler, so local dev and e2e (which run with the gate disabled)
- * still receive notifications.
- */
+// The passkey condition is skipped in development, matching `requirePasskey`.
 export async function filterNotifiableUsers(
   db: DrizzleD1Database<any>,
   env: CloudflareBindings,

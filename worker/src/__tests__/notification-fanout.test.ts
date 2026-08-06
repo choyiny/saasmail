@@ -93,15 +93,8 @@ describe("computeFanoutTargets", () => {
   });
 });
 
-/**
- * `computeFanoutTargets` decides who is *interested*; this decides who is
- * *permitted*. The notification payload carries sender, subject and a body
- * preview, so a user the API refuses must not be sent one.
- *
- * The env is passed explicitly rather than taken from the ambient test
- * bindings, which set DISABLE_PASSKEY_GATE="true" — under those the passkey
- * branch never runs, so a test relying on them would assert nothing.
- */
+// Env is passed explicitly: the ambient test bindings set
+// DISABLE_PASSKEY_GATE="true", under which the passkey branch never runs.
 describe("filterNotifiableUsers", () => {
   const GATE_ON = { DISABLE_PASSKEY_GATE: "false" } as any;
   const GATE_OFF = { DISABLE_PASSKEY_GATE: "true" } as any;

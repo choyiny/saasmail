@@ -244,8 +244,8 @@ export async function handleEmail(
             `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
           );
         }
-        // The payload carries the sender, subject and a body preview, so a
-        // recipient who may not read mail must not receive it either.
+        // Payload carries subject and a body preview, so drop anyone the API
+        // would refuse.
         const userIds = await filterNotifiableUsers(db, env, candidates);
         if (userIds.length < candidates.length) {
           console.log(
