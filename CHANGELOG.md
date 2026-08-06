@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Attachment reads are scoped to the caller's allowed inboxes. `GET /api/attachments/{id}` and `/{id}/inline` looked the attachment up by id alone and never consulted `allowedInboxes`, so any authenticated user could read any attachment in the deployment — including from inboxes they hold no permission on — given only its id. Both routes now resolve the owning inbox through the attachment's message and apply the same check the email detail routes make: an inbound attachment is scoped by `emails.recipient`, a sent one by `sent_emails.from_address` (the external `to_address` is not an inbox anyone holds). An attachment the caller may not read answers `404`, not `403`, so the response does not confirm that the id exists. Every existing test in the suite authenticated as an admin, for whom `resolveAllowedInboxes` short-circuits, which is why this went unnoticed.
-- Inline attachments are no longer served with `Cache-Control: public`. The responses are authenticated mailbox content, and `public` licenses shared caches and proxies in front of the worker to store them and serve them to a different caller. They are now `private`, keeping the immutable long-lived caching in the requesting browser only.
+- Attachment reads are scoped to the caller's allowed inboxes. `GET /api/attachments/{id}` and `/{id}/inline` looked the attachment up by id alone, so any authenticated user could read any attachment in the deployment given only its id. Both routes now resolve the owning inbox through the attachment's message — `emails.recipient` for inbound, `sent_emails.from_address` for sent — and answer `404` when it is not allowed, so the response does not confirm the id exists.
+- Inline attachments are served with `Cache-Control: private` instead of `public`, so shared caches in front of the worker cannot store authenticated mailbox content and hand it to a different caller.
 
 ### Fixed
 

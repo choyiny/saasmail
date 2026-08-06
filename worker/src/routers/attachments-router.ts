@@ -11,21 +11,10 @@ export const attachmentsRouter = new OpenAPIHono<{
   Variables: Variables;
 }>();
 
-/**
- * Fetch an attachment only if the caller owns the inbox of the message it
- * belongs to.
- *
- * The owning inbox differs by kind, and getting this backwards silently grants
- * access: an inbound attachment belongs to `emails.recipient` (the inbox that
- * received it), while a sent one belongs to `sent_emails.from_address` (the
- * inbox it was sent from) — the external `to_address` is not an inbox anyone
- * holds permission on. This mirrors the pair of checks the email detail routes
- * already make.
- *
- * Returns null both when the attachment does not exist and when the caller may
- * not read it, so callers answer 404 either way. A 403 would confirm that an
- * attachment id exists, which is most of what an id-guessing attacker wants.
- */
+// The owning inbox is `emails.recipient` for inbound and
+// `sent_emails.from_address` for sent — the external `to_address` is nobody's
+// inbox. Null covers both "missing" and "not allowed" so both answer 404; a 403
+// would confirm the id exists.
 async function findReadableAttachment(
   db: Variables["db"],
   allowed: NonNullable<Variables["allowedInboxes"]>,
@@ -52,7 +41,7 @@ async function findReadableAttachment(
           .where(eq(emails.id, att.emailId))
           .limit(1);
 
-  // An attachment whose message row is gone is unreachable rather than public.
+  // Orphaned attachment (message row gone) fails closed.
   if (owner.length === 0) return null;
   if (!isInboxAllowed(allowed, owner[0].inbox)) return null;
 
@@ -135,10 +124,8 @@ attachmentsRouter.openapi(inlineRoute, async (c) => {
       "Content-Type": att.contentType,
       "Content-Disposition": "inline",
       "Content-Length": att.size.toString(),
-      // `private`, not `public`: this is authenticated mailbox content, and
-      // `public` licenses shared caches and proxies in front of the worker to
-      // store it and hand it to a different caller. The body is immutable for
-      // a given id, so the requesting browser's own cache can still keep it.
+      // `public` would let shared caches serve this mailbox content to another
+      // caller.
       "Cache-Control": "private, max-age=31536000, immutable",
     },
   });

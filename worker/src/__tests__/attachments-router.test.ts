@@ -117,14 +117,12 @@ describe("attachments router", () => {
     });
   });
 
-  // Every test above authenticates as an admin, for whom resolveAllowedInboxes
-  // short-circuits to { isAdmin: true } — which is why an unscoped attachment
-  // read passed a full suite unnoticed. These exercise a member.
+  // Every test above authenticates as an admin, for whom scoping
+  // short-circuits. These need a member.
   describe("inbox scoping", () => {
     const MINE = "mine@saasmail.test";
     const THEIRS = "theirs@saasmail.test";
 
-    /** A member who may read MINE and nothing else. */
     async function createMember() {
       const { userId, apiKey: memberKey } = await createTestUser({
         id: "member1",
@@ -187,11 +185,7 @@ describe("attachments router", () => {
       });
     }
 
-    /**
-     * A sent attachment belongs to the inbox it was sent FROM. Scoping it by
-     * the external to_address instead would deny everything, and scoping it by
-     * nothing at all is the bug this suite covers.
-     */
+    // A sent attachment belongs to the inbox it was sent FROM.
     async function seedSent() {
       const now = Math.floor(Date.now() / 1000);
       await getDb()
