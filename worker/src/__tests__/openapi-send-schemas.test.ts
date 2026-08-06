@@ -27,6 +27,7 @@ describe("OpenAPI send schemas", () => {
     expect(Object.keys(schemas).sort()).toEqual(
       [
         "CcEntry",
+        "Inbox",
         "ReplyEmailSchema",
         "SendEmailSchema",
         "TemplateValue",
