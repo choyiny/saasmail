@@ -14,7 +14,15 @@ export const domainsRouter = new OpenAPIHono<{
 const DnsRecordSchema = z.object({
   name: z.string(),
   type: z.enum(["MX", "TXT"]),
-  value: z.string(),
+  value: z.string().nullable().openapi({
+    description:
+      "`null` when only Cloudflare can supply the value — the DKIM public key is generated per domain, so the operator copies it from Email Routing → Settings.",
+  }),
+  action: z.enum(["add", "replace"]).openapi({
+    description:
+      "`replace` means edit the record already at this name rather than adding a second one. SPF arrives pre-merged: only one SPF record per name is legal.",
+  }),
+  note: z.string().nullable(),
 });
 
 const DomainDnsSchema = z.object({
@@ -22,6 +30,7 @@ const DomainDnsSchema = z.object({
   mx: z.array(z.string()),
   spf: z.enum(["cloudflare", "elsewhere", "none", "unknown"]),
   spfRecord: z.string().nullable(),
+  dkim: z.enum(["cloudflare", "elsewhere", "none", "unknown"]),
   missingRecords: z.array(DnsRecordSchema),
 });
 
@@ -37,7 +46,7 @@ const listDomainsRoute = createRoute({
   path: "/",
   tags: ["Domains"],
   description:
-    "List the domains this deployment handles mail for, derived from received messages + sender_identities, each with its live MX/SPF status read over DNS-over-HTTPS. `routing`/`spf` are `unknown` when the resolver could not be reached — that is not a misconfiguration.",
+    "List the domains this deployment handles mail for, derived from received messages + sender_identities, each with its live MX/SPF/DKIM status read over DNS-over-HTTPS. `routing`/`spf`/`dkim` are `unknown` when the resolver could not be reached — that is not a misconfiguration, and a check that answered `unknown` contributes no missing records of its own. Each entry in `missingRecords` carries an `action`: `add` for a name with nothing on it, `replace` where a record already exists and must be edited instead of duplicated. The DKIM entry has a `null` value because Cloudflare generates that key per domain — the operator must copy it from Email Routing → Settings in the dashboard.",
   responses: {
     ...json200Response(z.array(DomainSchema), "Domains and their DNS status"),
   },
