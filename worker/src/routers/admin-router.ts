@@ -296,21 +296,9 @@ adminRouter.openapi(deleteUserRoute, async (c) => {
     return c.json({ error: "User not found" }, 404);
   }
 
-  // Burn the invitations this user redeemed, before the row goes.
-  //
-  // `invitations.used_by` is ON DELETE SET NULL, and both redeem paths read a
-  // null `usedBy` as "never used" — so without this, deleting a user hands
-  // their spent invite token back its validity. The token is still in whatever
-  // inbox it was mailed to, `POST /api/invites/accept` is public, and the
-  // invite carries the role it was created with. Removing an admin would
-  // therefore re-arm an admin-role signup link for as long as the original
-  // expiry had left to run, which is the exact opposite of what the operator
-  // just asked for.
-  //
-  // Deleted rather than tombstoned because the schema has nowhere to record
-  // "spent but its user is gone": the only marker of consumption *is* the
-  // foreign key the delete nulls. A spent invite that survives its user is an
-  // open credential, and keeping it for audit is not worth that.
+  // `invitations.used_by` is ON DELETE SET NULL and a null `usedBy` reads as
+  // "never used", so the cascade would put this user's spent invite tokens back
+  // in circulation. Must run before the users delete nulls the column.
   await db.delete(invitations).where(eq(invitations.usedBy, id));
 
   await db.delete(users).where(eq(users.id, id));

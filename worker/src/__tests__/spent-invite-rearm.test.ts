@@ -10,16 +10,8 @@ import {
 import { users } from "../db/auth.schema";
 import { invitations } from "../db/invitations.schema";
 
-/**
- * Deleting a user must not resurrect the invitation they signed up with.
- *
- * `invitations.used_by` is `ON DELETE SET NULL` (migration 0004), and both
- * redeem paths treat a null `usedBy` as "never used". So a bare
- * `DELETE FROM users` silently returns a spent invite to circulation — while
- * the token is still sitting in whoever's inbox it was mailed to, while
- * `POST /api/invites/accept` is public, and carrying whatever role it was
- * minted with.
- */
+// `invitations.used_by` is ON DELETE SET NULL (migration 0004) and a null
+// `usedBy` reads as "never used", so deleting a user un-spends their invite.
 describe("deleting a user does not re-arm their invitation", () => {
   let adminKey: string;
   let adminId: string;
@@ -35,7 +27,6 @@ describe("deleting a user does not re-arm their invitation", () => {
     }));
   });
 
-  /** An invite that has already been redeemed by `usedBy`. */
   async function seedSpentInvite(opts: {
     token: string;
     role: "admin" | "member";
@@ -84,10 +75,6 @@ describe("deleting a user does not re-arm their invitation", () => {
     expect(rows).toHaveLength(0);
   });
 
-  /**
-   * The one that matters: the public accept endpoint, exercised end to end.
-   * Without the fix this returns 200 and mints a fresh admin account.
-   */
   it("does not let the spent token create a new admin account afterwards", async () => {
     const { userId: victimId } = await createTestUser({
       id: "u-victim",
@@ -152,7 +139,6 @@ describe("deleting a user does not re-arm their invitation", () => {
       role: "member",
       email: "victim@x.com",
     });
-    // Nobody has used this one; deleting an unrelated user must not touch it.
     await seedSpentInvite({ token: "tok-open", role: "member", usedBy: null });
 
     await authFetch(`/api/admin/users/${victimId}`, {
