@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).
+- **Signing in no longer abandons a pending OAuth authorization.** When a client starts an authorization while the browser has no session, the provider redirects to `/login` carrying the request as signed, time-bounded query parameters — but both sign-in paths then navigated to `/`, discarding it. The client waited for a callback that never arrived. Sign-in now hands those parameters back to `/api/auth/oauth2/authorize` and the flow continues to consent. This is the path every third-party client takes on first connect, since it always arrives logged out; the existing OAuth tests all authenticate before calling authorize, so the branch had no coverage.
 
 ### Added
 

@@ -4,6 +4,15 @@ import { Mail, Fingerprint, ArrowRight } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
 
+// Sign-in must hand a parked OAuth request back or the client hangs. Not an
+// open redirect: always our own authorize endpoint, and the server re-verifies
+// `sig`/`exp`.
+function pendingAuthorizeUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  if (!params.has("client_id") || !params.has("sig")) return null;
+  return `/api/auth/oauth2/authorize${window.location.search}`;
+}
+
 export default function LoginPage() {
   const { brandName } = useBranding();
   const [error, setError] = useState("");
@@ -49,7 +58,7 @@ export default function LoginPage() {
       if (result?.error) {
         setError(result.error.message || "Passkey sign-in failed");
       } else {
-        window.location.href = "/";
+        window.location.href = pendingAuthorizeUrl() ?? "/";
       }
     } catch {
       setError("Passkey sign-in failed. Please try again.");
@@ -67,7 +76,7 @@ export default function LoginPage() {
       if (result?.error) {
         setError(result.error.message || "Sign-in failed");
       } else {
-        window.location.href = "/";
+        window.location.href = pendingAuthorizeUrl() ?? "/";
       }
     } catch {
       setError("Sign-in failed. Please try again.");
