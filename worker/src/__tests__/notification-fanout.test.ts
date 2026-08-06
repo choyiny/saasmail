@@ -3,11 +3,16 @@
  * itself is exercised indirectly via the router tests — this file covers the
  * pure logic (union, dedupe, admin cap) that decides *who* gets notified.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { inArray } from "drizzle-orm";
 import {
   MAX_ADMIN_FANOUT,
+  ID_CHUNK_SIZE,
   computeFanoutTargets,
+  filterNotifiableUsers,
 } from "../lib/notification-fanout";
+import { applyMigrations, cleanDb, getDb } from "./helpers";
+import { users, passkeys } from "../db/auth.schema";
 
 describe("computeFanoutTargets", () => {
   it("unions permission users and admins", () => {
@@ -87,5 +92,143 @@ describe("computeFanoutTargets", () => {
     });
     expect(userIds).toHaveLength(MAX_ADMIN_FANOUT);
     expect(adminTruncated).toBe(false);
+  });
+});
+
+// Env is passed explicitly: the ambient test bindings set
+// DISABLE_PASSKEY_GATE="true", under which the passkey branch never runs.
+describe("filterNotifiableUsers", () => {
+  const GATE_ON = { DISABLE_PASSKEY_GATE: "false" } as any;
+  const GATE_OFF = { DISABLE_PASSKEY_GATE: "true" } as any;
+
+  beforeAll(applyMigrations);
+  beforeEach(cleanDb);
+
+  async function insertUser(
+    id: string,
+    opts: { banned?: boolean; banExpires?: Date | null } = {},
+  ) {
+    const now = Date.now();
+    await getDb()
+      .insert(users)
+      .values({
+        id,
+        name: id,
+        email: `${id}@test.local`,
+        emailVerified: false,
+        createdAt: new Date(now),
+        updatedAt: new Date(now),
+        role: "member",
+        banned: opts.banned ?? false,
+        banExpires: opts.banExpires ?? null,
+      });
+  }
+
+  async function givePasskey(userId: string) {
+    await getDb()
+      .insert(passkeys)
+      .values({
+        id: `pk-${userId}`,
+        userId,
+        publicKey: "x",
+        credentialID: `cred-${userId}`,
+        counter: 0,
+        deviceType: "singleDevice",
+        backedUp: false,
+        transports: null,
+        createdAt: new Date(),
+      });
+  }
+
+  it("drops a banned user even in dev", async () => {
+    await insertUser("ok");
+    await insertUser("banned", { banned: true });
+
+    const result = await filterNotifiableUsers(getDb(), GATE_OFF, [
+      "ok",
+      "banned",
+    ]);
+    expect(result).toEqual(["ok"]);
+  });
+
+  it("keeps a user whose ban has expired", async () => {
+    await insertUser("expired", {
+      banned: true,
+      banExpires: new Date(Date.now() - 60_000),
+    });
+
+    const result = await filterNotifiableUsers(getDb(), GATE_OFF, ["expired"]);
+    expect(result).toEqual(["expired"]);
+  });
+
+  it("drops a user with no passkey when the gate is enforced", async () => {
+    await insertUser("enrolled");
+    await givePasskey("enrolled");
+    await insertUser("no-passkey");
+
+    const result = await filterNotifiableUsers(getDb(), GATE_ON, [
+      "enrolled",
+      "no-passkey",
+    ]);
+    expect(result).toEqual(["enrolled"]);
+  });
+
+  it("keeps a passkey-less user in dev, matching requirePasskey", async () => {
+    await insertUser("no-passkey");
+
+    const result = await filterNotifiableUsers(getDb(), GATE_OFF, [
+      "no-passkey",
+    ]);
+    expect(result).toEqual(["no-passkey"]);
+  });
+
+  it("drops a banned user who does have a passkey", async () => {
+    await insertUser("banned", { banned: true });
+    await givePasskey("banned");
+
+    const result = await filterNotifiableUsers(getDb(), GATE_ON, ["banned"]);
+    expect(result).toEqual([]);
+  });
+
+  it("returns an empty list for no candidates without querying", async () => {
+    expect(await filterNotifiableUsers(getDb(), GATE_ON, [])).toEqual([]);
+  });
+
+  // 250 spans three chunks, and the assertion below proves it breaks one query.
+  const OVER_CEILING = 250;
+  const overCeilingIds = Array.from(
+    { length: OVER_CEILING },
+    (_, i) => `bulk-${i}`,
+  );
+
+  it("cannot be queried in one statement at this size", async () => {
+    expect(OVER_CEILING).toBeGreaterThan(ID_CHUNK_SIZE);
+    await expect(
+      getDb()
+        .select({ id: users.id })
+        .from(users)
+        .where(inArray(users.id, overCeilingIds)),
+    ).rejects.toThrow();
+  });
+
+  it("notifies every eligible user past the ceiling", async () => {
+    const banned = new Set(["bulk-3", "bulk-101", "bulk-249"]);
+    const noPasskey = new Set(["bulk-7", "bulk-150", "bulk-200"]);
+    for (const id of overCeilingIds) {
+      await insertUser(id, { banned: banned.has(id) });
+      if (!noPasskey.has(id)) await givePasskey(id);
+    }
+
+    const result = await filterNotifiableUsers(
+      getDb(),
+      GATE_ON,
+      overCeilingIds,
+    );
+
+    const expected = overCeilingIds.filter(
+      (id) => !banned.has(id) && !noPasskey.has(id),
+    );
+    expect(result).toHaveLength(OVER_CEILING - 6);
+    expect(new Set(result)).toEqual(new Set(expected));
   });
 });

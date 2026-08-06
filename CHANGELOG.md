@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Notifications are no longer delivered to users who may not read mail. Inbound fanout selected recipients from `inbox_permissions` plus admins and checked nothing else, so a **banned** user — refused everywhere else as "account suspended" — and a user with **no registered passkey** — refused by `requirePasskey` on every `/api/*` call — both kept receiving WebSocket frames and Web Push carrying the sender's name, the subject, and a 140-character body preview. That is mail content, not merely a signal that mail arrived, so it made "passkey registration is required to access data" false for anyone holding a subscription. Both conditions are now applied before delivery, with the passkey condition skipped in development exactly as `requirePasskey` and the MCP handler skip it.
+
 ### Fixed
 
 - README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).

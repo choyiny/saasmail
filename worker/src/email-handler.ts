@@ -15,6 +15,7 @@ import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 import {
   MAX_ADMIN_FANOUT,
   computeFanoutTargets,
+  filterNotifiableUsers,
 } from "./lib/notification-fanout";
 import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
@@ -234,13 +235,21 @@ export async function handleEmail(
             .where(eq(users.role, "admin"))
             .limit(MAX_ADMIN_FANOUT + 1),
         ]);
-        const { userIds, adminTruncated } = computeFanoutTargets({
+        const { userIds: candidates, adminTruncated } = computeFanoutTargets({
           permissionUserIds: permRows.map((r) => r.userId),
           adminUserIds: adminRows.map((r) => r.id),
         });
         if (adminTruncated) {
           console.warn(
             `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
+          );
+        }
+        // Payload carries subject and a body preview, so drop anyone the API
+        // would refuse.
+        const userIds = await filterNotifiableUsers(db, env, candidates);
+        if (userIds.length < candidates.length) {
+          console.log(
+            `[notify] skipped ${candidates.length - userIds.length} ineligible recipient(s) (banned or no passkey)`,
           );
         }
         const deliverPayload = JSON.stringify({
@@ -272,8 +281,11 @@ export async function handleEmail(
           );
         }
       } catch (err) {
-        // Non-fatal: real-time push is best-effort.
-        console.warn("Real-time fanout error:", err);
+        // Still non-fatal, but logged as an error so it is not read as "no recipients".
+        console.error(
+          `[notify] fanout failed for ${recipientCanonical} (email ${emailId}) — recipients were not notified:`,
+          err,
+        );
       }
     })(),
   );
