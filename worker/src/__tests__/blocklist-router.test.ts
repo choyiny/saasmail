@@ -98,8 +98,7 @@ describe("blocklist router", () => {
     expect(await getDb().query.blocklist.findMany()).toHaveLength(0);
   });
 
-  // Every test above authenticates as an admin, since createTestUser defaults
-  // to role "admin" — which is why an unguarded router passed the suite.
+  // createTestUser defaults to role "admin" — pass role to test a guard.
   describe("admin guard", () => {
     async function memberKey() {
       const { apiKey } = await createTestUser({
@@ -143,8 +142,6 @@ describe("blocklist router", () => {
       expect(await getDb().query.blocklist.findMany()).toHaveLength(1);
     });
 
-    // The destructive one: this permanently deletes every hidden message from
-    // blocked senders across the entire deployment, and is not inbox-scoped.
     it("denies a member purging blocked mail", async () => {
       const r = await authFetch("/api/blocklist/mail", {
         apiKey: await memberKey(),

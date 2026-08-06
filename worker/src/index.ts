@@ -260,11 +260,7 @@ app.use("/api/suppressions/*", requireAdmin);
 app.use("/api/suppressions", requireAdmin);
 app.route("/api/suppressions", suppressionsRouter);
 
-// Blocklist — admin-only global security state, same shape as suppressions.
-// `DELETE /api/blocklist/mail` permanently deletes every hidden message from
-// blocked senders across the whole deployment (rows and R2 objects), and it is
-// not inbox-scoped, so without this guard any member could destroy mail in
-// inboxes they cannot even read.
+// Blocklist — admin-only global security state.
 app.use("/api/blocklist/*", requireAdmin);
 app.use("/api/blocklist", requireAdmin);
 app.route("/api/blocklist", blocklistRouter);
