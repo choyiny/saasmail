@@ -920,3 +920,37 @@ export async function cancelOutboxItem(
 ): Promise<{ deleted: boolean }> {
   return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
 }
+
+// ---- Domains (admin) ----
+
+/** "unknown" is "the lookup did not finish", never a verdict about the zone. */
+export type DnsState = "cloudflare" | "elsewhere" | "none" | "unknown";
+
+export interface DnsRecord {
+  name: string;
+  type: "MX" | "TXT";
+  /** Null only on DKIM: Cloudflare generates that key per zone, so the worker sends none. */
+  value: string | null;
+  /** "replace" means edit the record already at this name — SPF arrives pre-merged. */
+  action: "add" | "replace";
+  note: string | null;
+}
+
+export interface Domain {
+  domain: string;
+  inboxCount: number;
+  messageCount: number;
+  dns: {
+    routing: DnsState;
+    /** Hosts observed, in resolver order. Priority is deliberately not returned. */
+    mx: string[];
+    spf: DnsState;
+    spfRecord: string | null;
+    dkim: DnsState;
+    missingRecords: DnsRecord[];
+  };
+}
+
+export async function fetchDomains(): Promise<Domain[]> {
+  return apiFetch("/api/domains");
+}

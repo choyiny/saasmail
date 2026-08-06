@@ -35,6 +35,7 @@ import MessageLinkPage from "@/pages/MessageLinkPage";
 import UnsubscribePage from "@/pages/UnsubscribePage";
 import BlocklistPage from "@/pages/BlocklistPage";
 import OutboxPage from "@/pages/OutboxPage";
+import DomainsPage from "@/pages/DomainsPage";
 
 const queryClient = new QueryClient();
 
@@ -149,6 +150,7 @@ function App() {
                   path="/admin/suppressions"
                   element={<SuppressionsPage />}
                 />
+                <Route path="/admin/domains" element={<DomainsPage />} />
                 <Route path="/templates" element={<TemplatesPage />} />
                 <Route path="/templates/new" element={<TemplateEditorPage />} />
                 <Route

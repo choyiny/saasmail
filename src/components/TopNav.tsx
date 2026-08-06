@@ -6,6 +6,7 @@ import {
   FileText,
   ListOrdered,
   Key,
+  Globe,
   Settings as SettingsIcon,
   Shield,
   Users,
@@ -185,6 +186,13 @@ export default function TopNav() {
                       Inboxes
                     </DropdownMenuItem>
                     <DropdownMenuItem
+                      onClick={() => navigate("/admin/domains")}
+                      className="cursor-pointer"
+                    >
+                      <Globe className="h-4 w-4" />
+                      Domains
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
                       onClick={() => navigate("/admin/users")}
                       className="cursor-pointer"
                     >
@@ -319,6 +327,13 @@ export default function TopNav() {
                   >
                     <InboxIcon className="h-4 w-4" />
                     Inboxes
+                  </button>
+                  <button
+                    onClick={() => navigate("/admin/domains")}
+                    className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+                  >
+                    <Globe className="h-4 w-4" />
+                    Domains
                   </button>
                   <button
                     onClick={() => navigate("/admin/users")}
