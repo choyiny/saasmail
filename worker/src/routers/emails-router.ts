@@ -196,12 +196,8 @@ emailsRouter.openapi(getEmailRoute, async (c) => {
   return c.json(email, 200);
 });
 
-// Bulk mark read/unread.
-//
-// Registered before PATCH /{id}: Hono matches in registration order, so with
-// the parameterised route first, `PATCH /api/emails/bulk` binds id="bulk" and
-// is answered by the single-email handler — which looks up an email with that
-// id, finds none, and returns 404. This route was unreachable.
+// Bulk mark read/unread. Must stay above PATCH /{id}: Hono matches in
+// registration order, so /{id} first swallows "bulk" as an id.
 const bulkPatchRoute = createRoute({
   method: "patch",
   path: "/bulk",

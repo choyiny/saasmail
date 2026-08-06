@@ -463,10 +463,6 @@ describe("emails router", () => {
       expect(res.status).toBe(404);
     });
   });
-
-  // Note: PATCH /api/emails/bulk is unreachable because PATCH /{id} is
-  // registered first and "bulk" matches as an {id} param. Skipping tests
-  // for this endpoint as it's a known routing issue.
 });
 
 describe("reply stores generated message-id", () => {
@@ -715,9 +711,6 @@ describe("send stores generated message-id", () => {
       });
     }
 
-    // Registration order regression: with PATCH /{id} declared first, this
-    // request bound id="bulk", fell through to the single-email handler, and
-    // came back 404 with nothing marked. The route was unreachable.
     it("is reachable and not shadowed by PATCH /{id}", async () => {
       const { apiKey } = await createTestUser();
       await seedTwoUnread();
