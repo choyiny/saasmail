@@ -282,6 +282,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Deleting a user no longer re-arms the invitation they signed up with.** `invitations.used_by` is `ON DELETE SET NULL`, and both redeem paths read a null `usedBy` as "never used" — so `DELETE /api/admin/users/{id}`, which issues a bare `DELETE FROM users`, silently returned that user's spent invite token to circulation. The token is still in whatever inbox it was mailed to, `POST /api/invites/accept` is public and unauthenticated, and the invite carries the role it was minted with, so removing an admin re-opened an admin-role signup link for whatever remained of the original expiry (up to 30 days). Removing someone's access is precisely when it must not come back. The user's redeemed invitations are now deleted with them; unredeemed invitations and other users' invitations are untouched.
 - Closed stored-XSS surface on per-inbox signatures: a new HTMLRewriter-based sanitizer (`worker/src/lib/sanitize-signature.ts`) strips dangerous tags (`script`, `style`, `iframe`, etc.), every `on*` event handler, `style` attributes, and unsafe URL schemes (`javascript:`, `vbscript:`, non-image `data:`). Signatures are sanitized at write time in the PATCH inbox endpoint (with a 20 000-character schema cap) and on the client in `ComposeModal` and `ReplyComposer` as defense-in-depth.
 - `inbox-permissions.ts` lowercases addresses at resolution time, closing a latent permission-check bypass for mixed-case `inbox_permissions.email` rows.
 

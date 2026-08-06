@@ -296,6 +296,11 @@ adminRouter.openapi(deleteUserRoute, async (c) => {
     return c.json({ error: "User not found" }, 404);
   }
 
+  // `invitations.used_by` is ON DELETE SET NULL and a null `usedBy` reads as
+  // "never used", so the cascade would put this user's spent invite tokens back
+  // in circulation. Must run before the users delete nulls the column.
+  await db.delete(invitations).where(eq(invitations.usedBy, id));
+
   await db.delete(users).where(eq(users.id, id));
   return c.json({ success: true as const }, 200);
 });
