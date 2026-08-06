@@ -4,19 +4,9 @@ import { Mail, Fingerprint, ArrowRight } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
 
-/**
- * When the OAuth provider needs a session it redirects here with the pending
- * authorization request in the query string, signed (`sig`) and time-bounded
- * (`exp`) by the server. Sending the user to "/" after sign-in throws that
- * away, so the client that started the flow never receives its code and simply
- * hangs — the case a native or third-party client hits every time, since it
- * always arrives logged out.
- *
- * Handing the same parameters straight back to `/api/auth/oauth2/authorize`
- * resumes the request. This is not an open redirect: the destination is always
- * our own authorize endpoint, never a URL taken from the query, and the server
- * re-verifies the signature and expiry before acting on it.
- */
+// Sign-in must hand a parked OAuth request back or the client hangs. Not an
+// open redirect: always our own authorize endpoint, and the server re-verifies
+// `sig`/`exp`.
 function pendingAuthorizeUrl(): string | null {
   const params = new URLSearchParams(window.location.search);
   if (!params.has("client_id") || !params.has("sig")) return null;

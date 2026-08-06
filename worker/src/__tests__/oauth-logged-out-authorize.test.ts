@@ -1,17 +1,5 @@
-/**
- * The logged-out leg of the authorization-code flow.
- *
- * Every other OAuth test signs in *before* calling authorize (see `runFlow` in
- * mcp-helpers), so the branch a real client actually takes — arriving with no
- * session, being sent to the login page, and coming back — has no coverage.
- * That is the branch a native or third-party client hits on every first
- * connection, since it never has a browser session to begin with.
- *
- * These assert the contract `LoginPage` depends on: authorize hands the pending
- * request to the login page as signed query parameters, and replaying those
- * exact parameters once a session exists resumes the flow rather than starting
- * a new one.
- */
+// The logged-out leg of authorize: every other OAuth test signs in first (see
+// `runFlow` in mcp-helpers), so this branch is otherwise uncovered.
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { applyMigrations, cleanDb } from "./helpers";
 import {
@@ -32,7 +20,6 @@ const USER: Credentials = {
   password: "correct-horse-battery",
 };
 
-/** Start an authorization request with whatever session the jar holds. */
 async function authorize(jar: Jar, params: Record<string, string>) {
   return jar.absorb(
     await req(`/api/auth/oauth2/authorize?${new URLSearchParams(params)}`, {
@@ -89,17 +76,13 @@ describe("authorize with no session", () => {
       location.slice(location.indexOf("?") + 1),
     );
 
-    // These two are exactly what LoginPage keys on to decide that a pending
-    // authorization exists and must be resumed rather than dropped.
+    // LoginPage keys on these two to detect a pending authorization.
     expect(query.get("client_id")).toBe(params.client_id);
     expect(query.get("sig"), "login redirect was not signed").toBeTruthy();
 
-    // Signed *and* bounded, so replaying it later is not an open-ended grant.
     expect(query.get("exp"), "login redirect had no expiry").toBeTruthy();
     expect(Number(query.get("exp"))).toBeGreaterThan(Date.now() / 1000);
 
-    // The rest of the request survives the round trip, or resuming would
-    // silently change what the user is consenting to.
     expect(query.get("scope")).toBe(params.scope);
     expect(query.get("redirect_uri")).toBe(REDIRECT_URI);
     expect(query.get("state")).toBe("test-state");
@@ -109,18 +92,15 @@ describe("authorize with no session", () => {
   it("resumes the flow when those parameters are replayed with a session", async () => {
     const { params } = await buildParams();
 
-    // 1. Arrive logged out and get bounced to the login page.
     const jar = new Jar();
     const first = await authorize(jar, params);
     const location = first.headers.get("location") ?? "";
     const pending = location.slice(location.indexOf("?") + 1);
     expect(pending).toBeTruthy();
 
-    // 2. Sign in, as the user does on that page.
     await signIn(jar, USER);
 
-    // 3. Hand the same parameters straight back — what LoginPage now does
-    //    instead of navigating to "/".
+    // Replay the same parameters, as LoginPage now does.
     const resumed = jar.absorb(
       await req(`/api/auth/oauth2/authorize?${pending}`, {
         headers: { cookie: jar.header },
@@ -128,8 +108,6 @@ describe("authorize with no session", () => {
       }),
     );
 
-    // The flow moves on: either straight to the client with a code, or to the
-    // consent screen. What matters is that it is no longer asking for a login.
     const next = resumed.headers.get("location") ?? "";
     expect(
       next,
