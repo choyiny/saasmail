@@ -38,6 +38,7 @@ import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
+import { domainsRouter } from "./routers/domains-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
@@ -260,6 +261,12 @@ app.route("/api/oauth-apps", oauthAppsRouter);
 app.use("/api/suppressions/*", requireAdmin);
 app.use("/api/suppressions", requireAdmin);
 app.route("/api/suppressions", suppressionsRouter);
+
+// Domain health — admin-only deployment-wide DNS config, same guard as
+// suppressions and webhook rather than a move under /api/admin/.
+app.use("/api/domains", requireAdmin);
+app.use("/api/domains/*", requireAdmin);
+app.route("/api/domains", domainsRouter);
 
 // Webhook config — admin-only global instance config.
 app.use("/api/webhook", requireAdmin);
