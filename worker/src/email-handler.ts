@@ -281,8 +281,11 @@ export async function handleEmail(
           );
         }
       } catch (err) {
-        // Non-fatal: real-time push is best-effort.
-        console.warn("Real-time fanout error:", err);
+        // Still non-fatal, but logged as an error so it is not read as "no recipients".
+        console.error(
+          `[notify] fanout failed for ${recipientCanonical} (email ${emailId}) — recipients were not notified:`,
+          err,
+        );
       }
     })(),
   );

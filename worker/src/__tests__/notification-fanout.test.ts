@@ -4,8 +4,10 @@
  * pure logic (union, dedupe, admin cap) that decides *who* gets notified.
  */
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { inArray } from "drizzle-orm";
 import {
   MAX_ADMIN_FANOUT,
+  ID_CHUNK_SIZE,
   computeFanoutTargets,
   filterNotifiableUsers,
 } from "../lib/notification-fanout";
@@ -190,5 +192,43 @@ describe("filterNotifiableUsers", () => {
 
   it("returns an empty list for no candidates without querying", async () => {
     expect(await filterNotifiableUsers(getDb(), GATE_ON, [])).toEqual([]);
+  });
+
+  // 250 spans three chunks, and the assertion below proves it breaks one query.
+  const OVER_CEILING = 250;
+  const overCeilingIds = Array.from(
+    { length: OVER_CEILING },
+    (_, i) => `bulk-${i}`,
+  );
+
+  it("cannot be queried in one statement at this size", async () => {
+    expect(OVER_CEILING).toBeGreaterThan(ID_CHUNK_SIZE);
+    await expect(
+      getDb()
+        .select({ id: users.id })
+        .from(users)
+        .where(inArray(users.id, overCeilingIds)),
+    ).rejects.toThrow();
+  });
+
+  it("notifies every eligible user past the ceiling", async () => {
+    const banned = new Set(["bulk-3", "bulk-101", "bulk-249"]);
+    const noPasskey = new Set(["bulk-7", "bulk-150", "bulk-200"]);
+    for (const id of overCeilingIds) {
+      await insertUser(id, { banned: banned.has(id) });
+      if (!noPasskey.has(id)) await givePasskey(id);
+    }
+
+    const result = await filterNotifiableUsers(
+      getDb(),
+      GATE_ON,
+      overCeilingIds,
+    );
+
+    const expected = overCeilingIds.filter(
+      (id) => !banned.has(id) && !noPasskey.has(id),
+    );
+    expect(result).toHaveLength(OVER_CEILING - 6);
+    expect(new Set(result)).toEqual(new Set(expected));
   });
 });

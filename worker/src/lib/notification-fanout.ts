@@ -9,6 +9,20 @@ import { isDevEnvironment } from "./is-dev";
 // proper long-term fix; until then this keeps worst-case cost predictable.
 export const MAX_ADMIN_FANOUT = 50;
 
+// D1 rejects a query carrying more than 100 bound parameters; 90 leaves headroom.
+export const ID_CHUNK_SIZE = 90;
+
+async function selectByIdChunks<T>(
+  ids: string[],
+  run: (chunk: string[]) => Promise<T[]>,
+): Promise<T[]> {
+  const pending: Promise<T[]>[] = [];
+  for (let i = 0; i < ids.length; i += ID_CHUNK_SIZE) {
+    pending.push(run(ids.slice(i, i + ID_CHUNK_SIZE)));
+  }
+  return (await Promise.all(pending)).flat();
+}
+
 /**
  * Compute the deduplicated set of user IDs that should receive a real-time
  * notification for an inbound email: users with an explicit `inbox_permissions`
@@ -40,14 +54,16 @@ export async function filterNotifiableUsers(
   if (userIds.length === 0) return [];
 
   const now = new Date();
-  const userRows = await db
-    .select({
-      id: users.id,
-      banned: users.banned,
-      banExpires: users.banExpires,
-    })
-    .from(users)
-    .where(inArray(users.id, userIds));
+  const userRows = await selectByIdChunks(userIds, (chunk) =>
+    db
+      .select({
+        id: users.id,
+        banned: users.banned,
+        banExpires: users.banExpires,
+      })
+      .from(users)
+      .where(inArray(users.id, chunk)),
+  );
 
   const notBanned = userRows
     .filter((u) => !(u.banned && (!u.banExpires || u.banExpires > now)))
@@ -55,10 +71,12 @@ export async function filterNotifiableUsers(
 
   if (isDevEnvironment(env) || notBanned.length === 0) return notBanned;
 
-  const withPasskey = await db
-    .select({ userId: passkeys.userId })
-    .from(passkeys)
-    .where(inArray(passkeys.userId, notBanned));
+  const withPasskey = await selectByIdChunks(notBanned, (chunk) =>
+    db
+      .select({ userId: passkeys.userId })
+      .from(passkeys)
+      .where(inArray(passkeys.userId, chunk)),
+  );
 
   const enrolled = new Set(withPasskey.map((p) => p.userId));
   return notBanned.filter((id) => enrolled.has(id));
