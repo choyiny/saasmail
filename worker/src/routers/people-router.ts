@@ -4,7 +4,12 @@ import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
-import { json200Response, escapeLike, escapeFts } from "../lib/helpers";
+import {
+  json200Response,
+  escapeLike,
+  escapeFts,
+  chunkForD1BoundParams,
+} from "../lib/helpers";
 import {
   getPersonScoped,
   listPeople,
@@ -379,22 +384,43 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
 
     // Participants — senders (from `emails`) + outbound senders (from
     // `sent_emails` joined to `people` when person_id is set).
-    const participantRows = await db.all<{
+    //
+    // Chunked: each query binds `IN (...)` once. A prior UNION form bound the
+    // same id list twice (×2), and D1's 100-parameter cap 500'd once a
+    // real mailbox crossed ~50 group threads (mail.redleg.dev: 57 groups →
+    // 114 binds → empty inbox while /api/stats still showed unread).
+    // Miniflare does not enforce the cap, so this only shows up in prod.
+    const participantRows: Array<{
       conversation_id: string;
       id: string;
       email: string;
       name: string | null;
-    }>(sql`
-      SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
-      FROM ${emails} e
-      JOIN ${people} s ON s.id = e.person_id
-      WHERE e.conversation_id IN ${ids}
-      UNION
-      SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
-      FROM ${sentEmails} se
-      JOIN ${people} s ON s.id = se.person_id
-      WHERE se.conversation_id IN ${ids} AND se.person_id IS NOT NULL
-    `);
+    }> = [];
+    for (const chunk of chunkForD1BoundParams(ids, 1)) {
+      const fromInbox = await db.all<{
+        conversation_id: string;
+        id: string;
+        email: string;
+        name: string | null;
+      }>(sql`
+        SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
+        FROM ${emails} e
+        JOIN ${people} s ON s.id = e.person_id
+        WHERE e.conversation_id IN ${chunk}
+      `);
+      const fromSent = await db.all<{
+        conversation_id: string;
+        id: string;
+        email: string;
+        name: string | null;
+      }>(sql`
+        SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
+        FROM ${sentEmails} se
+        JOIN ${people} s ON s.id = se.person_id
+        WHERE se.conversation_id IN ${chunk} AND se.person_id IS NOT NULL
+      `);
+      participantRows.push(...fromInbox, ...fromSent);
+    }
     const participantsByConv = new Map<
       string,
       Array<{ id: string; email: string; name: string | null }>
@@ -411,16 +437,28 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
 
     // CC participants — pull `cc` JSON from both emails + sent_emails rows in
     // each conversation, parse, dedupe by lowercased email. Skip parse errors.
-    const ccRows = await db.all<{
+    // Same D1 bind cap — chunk + split instead of a doubled UNION IN.
+    const ccRows: Array<{
       conversation_id: string;
       cc: string | null;
-    }>(sql`
-      SELECT conversation_id, cc FROM ${emails}
-      WHERE conversation_id IN ${ids} AND cc IS NOT NULL
-      UNION ALL
-      SELECT conversation_id, cc FROM ${sentEmails}
-      WHERE conversation_id IN ${ids} AND cc IS NOT NULL
-    `);
+    }> = [];
+    for (const chunk of chunkForD1BoundParams(ids, 1)) {
+      const fromInbox = await db.all<{
+        conversation_id: string;
+        cc: string | null;
+      }>(sql`
+        SELECT conversation_id, cc FROM ${emails}
+        WHERE conversation_id IN ${chunk} AND cc IS NOT NULL
+      `);
+      const fromSent = await db.all<{
+        conversation_id: string;
+        cc: string | null;
+      }>(sql`
+        SELECT conversation_id, cc FROM ${sentEmails}
+        WHERE conversation_id IN ${chunk} AND cc IS NOT NULL
+      `);
+      ccRows.push(...fromInbox, ...fromSent);
+    }
     const ccByConv = new Map<
       string,
       Map<string, { email: string; name: string | null }>

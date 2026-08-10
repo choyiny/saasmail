@@ -327,5 +327,32 @@ describe("people router", () => {
       }).then((r) => r.json());
       expect(asc.data[0].id).toBe("s1");
     });
+
+    it("returns group rows when there are more conversations than the old doubled-IN fit under D1's bind cap", async () => {
+      // Prod: 57 group conversations × 2 IN lists = 114 binds → D1 500.
+      // Miniflare doesn't enforce the cap, but this pins the chunked path
+      // still assembles every group.
+      const GROUP_COUNT = 55;
+      await createTestPerson({ id: "g-person", email: "member@test.com" });
+      for (let i = 0; i < GROUP_COUNT; i++) {
+        await createTestEmail({
+          id: `eg-${i}`,
+          personId: "g-person",
+          messageId: `group-${i}@example.com`,
+          conversationId: `c_bulk_${i}`,
+          cc: JSON.stringify([{ email: `cc${i}@example.com`, name: null }]),
+        });
+      }
+
+      const res = await authFetch("/api/people/grouped?limit=100", { apiKey });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const groups = body.data.filter(
+        (row: { type: string }) => row.type === "group",
+      );
+      expect(groups).toHaveLength(GROUP_COUNT);
+      expect(groups[0].participants.length).toBeGreaterThan(0);
+      expect(groups[0].ccParticipants.length).toBeGreaterThan(0);
+    });
   });
 });
