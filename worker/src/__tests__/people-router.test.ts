@@ -328,10 +328,11 @@ describe("people router", () => {
       expect(asc.data[0].id).toBe("s1");
     });
 
-    it("returns group rows when there are more conversations than the old doubled-IN fit under D1's bind cap", async () => {
-      // Prod: 57 group conversations × 2 IN lists = 114 binds → D1 500.
-      // Miniflare doesn't enforce the cap, but this pins the chunked path
-      // still assembles every group.
+    it("hydrates group participants after pagination when many group threads exist", async () => {
+      // Prod bug: hydrating participants for EVERY group before pagination
+      // doubled a large IN list and exceeded D1's 100-param cap (~50+
+      // groups). Miniflare doesn't enforce the cap; this pins the
+      // page-only hydrate path still returns populated group rows.
       const GROUP_COUNT = 55;
       await createTestPerson({ id: "g-person", email: "member@test.com" });
       for (let i = 0; i < GROUP_COUNT; i++) {

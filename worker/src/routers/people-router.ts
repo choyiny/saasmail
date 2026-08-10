@@ -4,12 +4,7 @@ import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
-import {
-  json200Response,
-  escapeLike,
-  escapeFts,
-  chunkForD1BoundParams,
-} from "../lib/helpers";
+import { json200Response, escapeLike, escapeFts } from "../lib/helpers";
 import {
   getPersonScoped,
   listPeople,
@@ -117,7 +112,9 @@ const listGroupedPeopleRoute = createRoute({
           "Sort direction. When omitted, defaults to the natural direction for the chosen sort key (recency/unread/attachments default to desc; inbox defaults to asc).",
       }),
       page: z.coerce.number().optional().default(1),
-      limit: z.coerce.number().optional().default(50),
+      // Cap at 100 so post-pagination group hydration stays under D1's
+      // 100 bound-parameter limit (one `IN (...)` of page ids).
+      limit: z.coerce.number().min(1).max(100).optional().default(50),
     }),
   },
   responses: {
@@ -271,6 +268,9 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
 
   // ----- GROUP CONVERSATION ROWS (conversation_id IS NOT NULL) -----
   // Activity-style subquery scoped to the inbox set the user can see.
+  // Participants / CC are hydrated AFTER pagination — loading them for
+  // every group up front doubled a large `IN (...)` list and blew D1's
+  // 100-param cap once a mailbox had ~50+ group threads.
   const groupInboxScope = allowed.isAdmin
     ? sql``
     : allowed.inboxes.length === 0
@@ -364,157 +364,22 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     ORDER BY g.lastEmailAt DESC
   `);
 
-  // Resolve participants (senders/people who posted into the thread) and
-  // CC participants (raw email/name pairs from the cc JSON column) for each
-  // group row, in two follow-up queries — keeps SQL simpler than crafting
-  // a single mega-join.
-  let groupRows: Array<{
-    type: "group";
-    id: string;
-    inbox: string;
-    participants: Array<{ id: string; email: string; name: string | null }>;
-    ccParticipants: Array<{ email: string; name: string | null }>;
-    lastEmailAt: number;
-    unreadCount: number;
-    totalCount: number;
-    hasAttachment: number;
-  }> = [];
-  if (groupRowsRaw.length > 0) {
-    const ids = groupRowsRaw.map((r) => r.conversation_id);
-
-    // Participants — senders (from `emails`) + outbound senders (from
-    // `sent_emails` joined to `people` when person_id is set).
-    //
-    // Chunked: each query binds `IN (...)` once. A prior UNION form bound the
-    // same id list twice (×2), and D1's 100-parameter cap 500'd once a
-    // real mailbox crossed ~50 group threads (mail.redleg.dev: 57 groups →
-    // 114 binds → empty inbox while /api/stats still showed unread).
-    // Miniflare does not enforce the cap, so this only shows up in prod.
-    const participantRows: Array<{
-      conversation_id: string;
+  // Lightweight group rows — participants/CC filled in for the page only.
+  const groupRows = groupRowsRaw.map((r) => ({
+    type: "group" as const,
+    id: r.conversation_id,
+    inbox: r.inbox,
+    participants: [] as Array<{
       id: string;
       email: string;
       name: string | null;
-    }> = [];
-    for (const chunk of chunkForD1BoundParams(ids, 1)) {
-      const fromInbox = await db.all<{
-        conversation_id: string;
-        id: string;
-        email: string;
-        name: string | null;
-      }>(sql`
-        SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
-        FROM ${emails} e
-        JOIN ${people} s ON s.id = e.person_id
-        WHERE e.conversation_id IN ${chunk}
-      `);
-      const fromSent = await db.all<{
-        conversation_id: string;
-        id: string;
-        email: string;
-        name: string | null;
-      }>(sql`
-        SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
-        FROM ${sentEmails} se
-        JOIN ${people} s ON s.id = se.person_id
-        WHERE se.conversation_id IN ${chunk} AND se.person_id IS NOT NULL
-      `);
-      participantRows.push(...fromInbox, ...fromSent);
-    }
-    const participantsByConv = new Map<
-      string,
-      Array<{ id: string; email: string; name: string | null }>
-    >();
-    for (const r of participantRows) {
-      const list = participantsByConv.get(r.conversation_id) ?? [];
-      // Dedupe by id (UNION at SQL level can still produce dupes across the
-      // two branches because the joins differ).
-      if (!list.some((p) => p.id === r.id)) {
-        list.push({ id: r.id, email: r.email, name: r.name });
-      }
-      participantsByConv.set(r.conversation_id, list);
-    }
-
-    // CC participants — pull `cc` JSON from both emails + sent_emails rows in
-    // each conversation, parse, dedupe by lowercased email. Skip parse errors.
-    // Same D1 bind cap — chunk + split instead of a doubled UNION IN.
-    const ccRows: Array<{
-      conversation_id: string;
-      cc: string | null;
-    }> = [];
-    for (const chunk of chunkForD1BoundParams(ids, 1)) {
-      const fromInbox = await db.all<{
-        conversation_id: string;
-        cc: string | null;
-      }>(sql`
-        SELECT conversation_id, cc FROM ${emails}
-        WHERE conversation_id IN ${chunk} AND cc IS NOT NULL
-      `);
-      const fromSent = await db.all<{
-        conversation_id: string;
-        cc: string | null;
-      }>(sql`
-        SELECT conversation_id, cc FROM ${sentEmails}
-        WHERE conversation_id IN ${chunk} AND cc IS NOT NULL
-      `);
-      ccRows.push(...fromInbox, ...fromSent);
-    }
-    const ccByConv = new Map<
-      string,
-      Map<string, { email: string; name: string | null }>
-    >();
-    for (const r of ccRows) {
-      if (!r.cc) continue;
-      let parsed: any;
-      try {
-        parsed = JSON.parse(r.cc);
-      } catch {
-        continue;
-      }
-      if (!Array.isArray(parsed)) continue;
-      let map = ccByConv.get(r.conversation_id);
-      if (!map) {
-        map = new Map();
-        ccByConv.set(r.conversation_id, map);
-      }
-      for (const entry of parsed) {
-        if (!entry || typeof entry.email !== "string") continue;
-        const key = entry.email.toLowerCase();
-        if (!map.has(key)) {
-          map.set(key, {
-            email: entry.email,
-            name: typeof entry.name === "string" ? entry.name : null,
-          });
-        }
-      }
-    }
-
-    // Sender-side exclusion: if a participant also appears in CC, drop the CC
-    // entry — they're already represented as a participant.
-    groupRows = groupRowsRaw.map((r) => {
-      const participants = participantsByConv.get(r.conversation_id) ?? [];
-      const senderEmails = new Set(
-        participants.map((p) => p.email.toLowerCase()),
-      );
-      const ccMap = ccByConv.get(r.conversation_id);
-      const ccParticipants = ccMap
-        ? Array.from(ccMap.values()).filter(
-            (cc) => !senderEmails.has(cc.email.toLowerCase()),
-          )
-        : [];
-      return {
-        type: "group" as const,
-        id: r.conversation_id,
-        inbox: r.inbox,
-        participants,
-        ccParticipants,
-        lastEmailAt: r.lastEmailAt,
-        unreadCount: r.unreadCount,
-        totalCount: r.totalCount,
-        hasAttachment: r.hasAttachment,
-      };
-    });
-  }
+    }>,
+    ccParticipants: [] as Array<{ email: string; name: string | null }>,
+    lastEmailAt: r.lastEmailAt,
+    unreadCount: r.unreadCount,
+    totalCount: r.totalCount,
+    hasAttachment: r.hasAttachment,
+  }));
 
   // Merge persons + groups, sort, paginate. Recency is the secondary
   // tiebreaker (most-recent first) for every sort except recency itself
@@ -569,6 +434,107 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     totalUnreadEmails += r.unreadCount;
   }
   const data = merged.slice(offset, offset + limit);
+
+  // Hydrate participants + CC only for group rows on this page.
+  // Limit is capped at 100; each follow-up binds the page ids once (split
+  // queries, not a UNION of two identical IN lists).
+  const pageGroupIds = data
+    .filter((r): r is Extract<Row, { type: "group" }> => r.type === "group")
+    .map((r) => r.id);
+  if (pageGroupIds.length > 0) {
+    const fromInboxParticipants = await db.all<{
+      conversation_id: string;
+      id: string;
+      email: string;
+      name: string | null;
+    }>(sql`
+      SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
+      FROM ${emails} e
+      JOIN ${people} s ON s.id = e.person_id
+      WHERE e.conversation_id IN ${pageGroupIds}
+    `);
+    const fromSentParticipants = await db.all<{
+      conversation_id: string;
+      id: string;
+      email: string;
+      name: string | null;
+    }>(sql`
+      SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
+      FROM ${sentEmails} se
+      JOIN ${people} s ON s.id = se.person_id
+      WHERE se.conversation_id IN ${pageGroupIds} AND se.person_id IS NOT NULL
+    `);
+    const participantsByConv = new Map<
+      string,
+      Array<{ id: string; email: string; name: string | null }>
+    >();
+    for (const r of [...fromInboxParticipants, ...fromSentParticipants]) {
+      const list = participantsByConv.get(r.conversation_id) ?? [];
+      if (!list.some((p) => p.id === r.id)) {
+        list.push({ id: r.id, email: r.email, name: r.name });
+      }
+      participantsByConv.set(r.conversation_id, list);
+    }
+
+    const fromInboxCc = await db.all<{
+      conversation_id: string;
+      cc: string | null;
+    }>(sql`
+      SELECT conversation_id, cc FROM ${emails}
+      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+    `);
+    const fromSentCc = await db.all<{
+      conversation_id: string;
+      cc: string | null;
+    }>(sql`
+      SELECT conversation_id, cc FROM ${sentEmails}
+      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+    `);
+    const ccByConv = new Map<
+      string,
+      Map<string, { email: string; name: string | null }>
+    >();
+    for (const r of [...fromInboxCc, ...fromSentCc]) {
+      if (!r.cc) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(r.cc);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parsed)) continue;
+      let map = ccByConv.get(r.conversation_id);
+      if (!map) {
+        map = new Map();
+        ccByConv.set(r.conversation_id, map);
+      }
+      for (const entry of parsed) {
+        if (!entry || typeof entry.email !== "string") continue;
+        const key = entry.email.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, {
+            email: entry.email,
+            name: typeof entry.name === "string" ? entry.name : null,
+          });
+        }
+      }
+    }
+
+    for (const row of data) {
+      if (row.type !== "group") continue;
+      const participants = participantsByConv.get(row.id) ?? [];
+      const senderEmails = new Set(
+        participants.map((p) => p.email.toLowerCase()),
+      );
+      const ccMap = ccByConv.get(row.id);
+      row.participants = participants;
+      row.ccParticipants = ccMap
+        ? Array.from(ccMap.values()).filter(
+            (cc) => !senderEmails.has(cc.email.toLowerCase()),
+          )
+        : [];
+    }
+  }
 
   return c.json(
     {

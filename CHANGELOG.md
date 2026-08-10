@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Inbox list: hydrate group participants/CC after pagination so `GET /api/people/grouped` no longer 500s on mailboxes with 50+ group threads (D1's 100 bound-parameter cap). Stats still counted unread while the people list failed empty.
 - README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).
 
 ### Added
