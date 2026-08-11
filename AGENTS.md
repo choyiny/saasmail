@@ -52,8 +52,9 @@ From [`CONTRIBUTING.md`](./CONTRIBUTING.md) + the PR template:
 2. `yarn format` / `yarn tsc --noEmit` / `yarn test` (and `yarn test:e2e` if UI or HTTP surface changed).
 3. User-visible change → entry under `## [Unreleased]` in `CHANGELOG.md`.
 4. Schema or data migration → see below; include the generated files.
-5. Label the PR `major`, `minor`, or `patch`.
-6. Behavior/setup change → update `README.md` (or other docs) when relevant.
+5. Behavior/setup change → update `README.md` (or other docs) when relevant.
+
+A maintainer will add the required `major` / `minor` / `patch` label for release-drafter (fork openers cannot set labels on this repo).
 
 ## Migrations (D1 / drizzle-kit)
 

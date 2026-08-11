@@ -25,7 +25,7 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 6. If you changed the schema, generate a migration: `yarn db:generate` (data-only backfills: see [AGENTS.md](AGENTS.md) / [migrations/README.md](migrations/README.md))
 7. Add an entry under `## [Unreleased]` in `CHANGELOG.md` for any user-visible change
 8. Commit and push your branch
-9. Open a pull request against `main` and label it `major`, `minor`, or `patch` (required by CI)
+9. Open a pull request against `main` (a maintainer adds the `major` / `minor` / `patch` label CI requires)
 
 > Note: [AGENTS.md](AGENTS.md) holds contributor/CI notes used by coding agents (and humans). [CLAUDE.md](CLAUDE.md) is optional [Claude Code](https://claude.ai/claude-code) skill context — you don't need Claude Code to contribute.
 
