@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Attachment reads are scoped to the caller's allowed inboxes. `GET /api/attachments/{id}` and `/{id}/inline` looked the attachment up by id alone, so any authenticated user could read any attachment in the deployment given only its id. Both routes now resolve the owning inbox through the attachment's message — `emails.recipient` for inbound, `sent_emails.from_address` for sent — and answer `404` when it is not allowed, so the response does not confirm the id exists.
+- Inline attachments are served with `Cache-Control: private` instead of `public`, so shared caches in front of the worker cannot store authenticated mailbox content and hand it to a different caller.
+- Attachment downloads sanitize the filename before interpolating it into `Content-Disposition` and add an RFC 5987 `filename*` field, so a stored filename carrying quotes or CR/LF can no longer inject headers or split the response.
+
 ### Fixed
 
 - Inbox list: hydrate group participants/CC after pagination so `GET /api/people/grouped` no longer 500s on mailboxes with 50+ group threads (D1's 100 bound-parameter cap). Stats still counted unread while the people list failed empty.
