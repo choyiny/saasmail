@@ -2,6 +2,8 @@
 
 Self-hosted email server on Cloudflare Workers. See README.md for full documentation.
 
+Contributor and coding-agent conventions (format check, tests, drizzle migrations including data-only `--custom`): see **[AGENTS.md](./AGENTS.md)**.
+
 ## Development
 
 - Use `yarn` for all dependency commands (not npm)
@@ -10,6 +12,7 @@ Self-hosted email server on Cloudflare Workers. See README.md for full documenta
 - Database: Drizzle ORM with D1 in `worker/src/db/`
 - Run `yarn tsc --noEmit` to type-check before committing
 - Run `yarn test` for tests
+- Run `yarn format` / `yarn format:check` before pushing (CI enforces Prettier)
 
 ## Skills
 
