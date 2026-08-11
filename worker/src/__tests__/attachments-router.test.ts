@@ -23,7 +23,7 @@ describe("attachments router", () => {
     ({ apiKey } = await createTestUser());
   });
 
-  async function createTestAttachment() {
+  async function createTestAttachment(filename = "test.pdf") {
     const db = getDb();
     await createTestPerson({ id: "s1", email: "a@test.com" });
     await createTestEmail({ id: "e1", personId: "s1" });
@@ -37,7 +37,7 @@ describe("attachments router", () => {
     await db.insert(attachments).values({
       id: "att-1",
       emailId: "e1",
-      filename: "test.pdf",
+      filename,
       contentType: "application/pdf",
       size: content.byteLength,
       r2Key,
@@ -83,6 +83,19 @@ describe("attachments router", () => {
         apiKey,
       });
       expect(res.status).toBe(404);
+    });
+
+    it("sanitizes filename in content-disposition header", async () => {
+      await createTestAttachment('te"st\r\nx.pdf');
+
+      const res = await authFetch("/api/attachments/att-1", { apiKey });
+      expect(res.status).toBe(200);
+      const contentDisposition = res.headers.get("Content-Disposition");
+      expect(contentDisposition).toBeTruthy();
+      expect(contentDisposition).toContain(`filename="te_stx.pdf"`);
+      expect(contentDisposition).toContain("filename*=UTF-8''te_stx.pdf");
+      expect(contentDisposition).not.toContain("\r");
+      expect(contentDisposition).not.toContain("\n");
     });
   });
 

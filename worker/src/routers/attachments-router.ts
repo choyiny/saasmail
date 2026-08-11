@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { attachments } from "../db/attachments.schema";
+import { sanitizeFilename } from "../lib/sanitize-filename";
 import type { Variables } from "../variables";
 
 export const attachmentsRouter = new OpenAPIHono<{
@@ -40,10 +41,12 @@ attachmentsRouter.openapi(downloadRoute, async (c) => {
     return c.json({ error: "File not found in storage" }, 404);
   }
 
+  const safeFilename = sanitizeFilename(att[0].filename).replaceAll('"', "_");
+
   return new Response(object.body, {
     headers: {
       "Content-Type": att[0].contentType,
-      "Content-Disposition": `attachment; filename="${att[0].filename}"`,
+      "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`,
       "Content-Length": att[0].size.toString(),
     },
   });
