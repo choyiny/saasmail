@@ -1,3 +1,5 @@
+-- Custom SQL migration file, put your code below! --
+
 -- One-shot: clear unread counts for mail already hidden by the blocklist.
 -- Going forward, POST /api/blocklist marks matching unread on create.
 UPDATE emails
