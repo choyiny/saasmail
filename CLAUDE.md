@@ -19,3 +19,4 @@ Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, 
 - `/saasmail-onboarding` — Interactive setup wizard for deploying a new saasmail instance
 - `/use-saasmail` — How to call a deployed saasmail instance's HTTP API to send emails (raw or via templates) and enroll recipients in sequences
 - `/create-saasmail-template` — Authoring email templates: the `{{variable}}` grammar, conditional and repeating `{{#section}}` rules, escaping, and the required-vs-optional send contract
+- `/update-saasmail` — Rebase a fork onto `upstream/main` (links the upstream remote if needed)

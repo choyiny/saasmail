@@ -33,7 +33,8 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 
 - Describe what your PR does and why
 - Keep PRs focused — one feature or fix per PR
-- Include any relevant migration files if you changed the database schema (`yarn db:generate`)
+- Include any relevant migration files if you changed the database schema (`yarn db:generate`) or added a data-only migration (`yarn db:generate --custom --name=…`)
+- A maintainer will attach `major` / `minor` / `patch` so the label check can pass
 
 ## Code Style
 

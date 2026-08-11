@@ -38,7 +38,7 @@ one-shot backfill / `UPDATE` migration, generate a custom empty file
 through the CLI, then paste the SQL:
 
 ```
-yarn db:generate -- --custom --name=mark_blocked_senders_read
+yarn db:generate --custom --name=mark_blocked_senders_read
 # -> migrations/NNNN_mark_blocked_senders_read.sql (empty)
 # -> migrations/meta/NNNN_snapshot.json + journal entry
 # edit the .sql with your UPDATE/INSERT statements
