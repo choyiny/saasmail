@@ -2,7 +2,7 @@
 
 Self-hosted email server on Cloudflare Workers. See README.md for full documentation.
 
-Contributor and coding-agent conventions (format check, tests, drizzle migrations including data-only `--custom`): see **[AGENTS.md](./AGENTS.md)**.
+Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, drizzle migrations including data-only `--custom`): see **[AGENTS.md](./AGENTS.md)**.
 
 ## Development
 

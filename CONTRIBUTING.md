@@ -27,7 +27,7 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 8. Commit and push your branch
 9. Open a pull request against `main` and label it `major`, `minor`, or `patch` (required by CI)
 
-> Note: a `CLAUDE.md` at the repo root contains notes the maintainer uses with [Claude Code](https://claude.ai/claude-code). It's optional context — you don't need Claude Code to contribute.
+> Note: [AGENTS.md](AGENTS.md) holds contributor/CI notes used by coding agents (and humans). [CLAUDE.md](CLAUDE.md) is optional [Claude Code](https://claude.ai/claude-code) skill context — you don't need Claude Code to contribute.
 
 ## Pull Request Guidelines
 
