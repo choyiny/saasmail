@@ -463,10 +463,6 @@ describe("emails router", () => {
       expect(res.status).toBe(404);
     });
   });
-
-  // Note: PATCH /api/emails/bulk is unreachable because PATCH /{id} is
-  // registered first and "bulk" matches as an {id} param. Skipping tests
-  // for this endpoint as it's a known routing issue.
 });
 
 describe("reply stores generated message-id", () => {
@@ -695,6 +691,103 @@ describe("send stores generated message-id", () => {
         }),
       });
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("PATCH /api/emails/bulk", () => {
+    async function seedTwoUnread(recipient = "inbox@saasmail.test") {
+      await createTestPerson({ id: "p-bulk", unreadCount: 2, totalCount: 2 });
+      await createTestEmail({
+        id: "b1",
+        personId: "p-bulk",
+        recipient,
+        messageId: "b1@example.com",
+      });
+      await createTestEmail({
+        id: "b2",
+        personId: "p-bulk",
+        recipient,
+        messageId: "b2@example.com",
+      });
+    }
+
+    it("is reachable and not shadowed by PATCH /{id}", async () => {
+      const { apiKey } = await createTestUser();
+      await seedTwoUnread();
+
+      const res = await authFetch("/api/emails/bulk", {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ ids: ["b1", "b2"], isRead: true }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ success: true });
+
+      const rows = await getDb()
+        .select({ id: emails.id, isRead: emails.isRead })
+        .from(emails);
+      expect(rows.every((r) => r.isRead === 1)).toBe(true);
+
+      const person = await getDb()
+        .select({ unreadCount: people.unreadCount })
+        .from(people)
+        .where(eq(people.id, "p-bulk"));
+      expect(person[0].unreadCount).toBe(0);
+    });
+
+    it("skips emails in inboxes the caller may not access", async () => {
+      const { userId, apiKey } = await createTestUser({
+        id: "member-bulk",
+        role: "member",
+        email: "member@test.com",
+      });
+      await grantInbox(userId, "mine@saasmail.test");
+
+      await createTestPerson({ id: "p-bulk", unreadCount: 2, totalCount: 2 });
+      await createTestEmail({
+        id: "mine",
+        personId: "p-bulk",
+        recipient: "mine@saasmail.test",
+        messageId: "m@example.com",
+      });
+      await createTestEmail({
+        id: "theirs",
+        personId: "p-bulk",
+        recipient: "theirs@saasmail.test",
+        messageId: "t@example.com",
+      });
+
+      const res = await authFetch("/api/emails/bulk", {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ ids: ["mine", "theirs"], isRead: true }),
+      });
+      expect(res.status).toBe(200);
+
+      const rows = await getDb()
+        .select({ id: emails.id, isRead: emails.isRead })
+        .from(emails);
+      expect(rows.find((r) => r.id === "mine")!.isRead).toBe(1);
+      expect(rows.find((r) => r.id === "theirs")!.isRead).toBe(0);
+    });
+
+    it("still routes a single-email PATCH to the id handler", async () => {
+      const { apiKey } = await createTestUser();
+      await seedTwoUnread();
+
+      const res = await authFetch("/api/emails/b1", {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ isRead: true }),
+      });
+      expect(res.status).toBe(200);
+
+      const rows = await getDb()
+        .select({ id: emails.id, isRead: emails.isRead })
+        .from(emails);
+      expect(rows.find((r) => r.id === "b1")!.isRead).toBe(1);
+      expect(rows.find((r) => r.id === "b2")!.isRead).toBe(0);
     });
   });
 });
