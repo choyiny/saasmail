@@ -78,6 +78,92 @@ describe("blocklist router", () => {
     expect(r.status).toBe(400);
   });
 
+  it("POST marks matching unread mail as read (email + domain rules)", async () => {
+    const { apiKey } = await createTestUser();
+    const { createTestPerson, createTestEmail } = await import("./helpers");
+    await createTestPerson({
+      id: "p-email",
+      email: "spammer@evil.com",
+      unreadCount: 1,
+    });
+    await createTestPerson({
+      id: "p-domain",
+      email: "other@bad.com",
+      unreadCount: 1,
+    });
+    await createTestPerson({
+      id: "p-keep",
+      email: "friend@nice.com",
+      unreadCount: 1,
+    });
+    await createTestEmail({
+      id: "e-email",
+      personId: "p-email",
+      isRead: 0,
+      messageId: "m1@test.com",
+    });
+    await createTestEmail({
+      id: "e-domain",
+      personId: "p-domain",
+      isRead: 0,
+      messageId: "m2@test.com",
+    });
+    await createTestEmail({
+      id: "e-keep",
+      personId: "p-keep",
+      isRead: 0,
+      messageId: "m3@test.com",
+    });
+
+    const emailBlock = await authFetch("/api/blocklist", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ type: "email", value: "spammer@evil.com" }),
+    });
+    expect(emailBlock.status).toBe(201);
+
+    const domainBlock = await authFetch("/api/blocklist", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ type: "domain", value: "bad.com" }),
+    });
+    expect(domainBlock.status).toBe(201);
+
+    const db = getDb();
+    const { emails } = await import("../db/emails.schema");
+    const { people } = await import("../db/people.schema");
+    const { eq } = await import("drizzle-orm");
+
+    expect(
+      (await db.select().from(emails).where(eq(emails.id, "e-email")))[0]
+        .isRead,
+    ).toBe(1);
+    expect(
+      (await db.select().from(emails).where(eq(emails.id, "e-domain")))[0]
+        .isRead,
+    ).toBe(1);
+    expect(
+      (await db.select().from(emails).where(eq(emails.id, "e-keep")))[0].isRead,
+    ).toBe(0);
+
+    expect(
+      (await db.select().from(people).where(eq(people.id, "p-email")))[0]
+        .unreadCount,
+    ).toBe(0);
+    expect(
+      (await db.select().from(people).where(eq(people.id, "p-domain")))[0]
+        .unreadCount,
+    ).toBe(0);
+    expect(
+      (await db.select().from(people).where(eq(people.id, "p-keep")))[0]
+        .unreadCount,
+    ).toBe(1);
+
+    const stats = await authFetch("/api/stats", { apiKey });
+    const body = (await stats.json()) as { unreadCount: number };
+    expect(body.unreadCount).toBe(1);
+  });
+
   it("GET lists rules newest first; DELETE removes one", async () => {
     const { apiKey } = await createTestUser();
     await getDb().insert(blocklist).values({
