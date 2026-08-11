@@ -48,6 +48,12 @@ interface PersonDetailProps {
    * subject) so the drawer opens with the reply context applied.
    */
   onOpenCompose?: (prefill?: ComposePrefill) => void;
+  /**
+   * Called after the sender (or their whole domain) is blocked. The parent
+   * uses this to clear the current selection so the view falls back to
+   * "no mail selected" — the thread is now hidden from the inbox.
+   */
+  onBlock?: () => void;
 }
 
 function inboxOf(email: Email): string {
@@ -115,6 +121,7 @@ export default function PersonDetail({
   onEmailDelete,
   refreshKey,
   onOpenCompose,
+  onBlock,
 }: PersonDetailProps) {
   const navigate = useNavigate();
   const [emails, setEmails] = useState<Email[]>([]);
@@ -143,9 +150,31 @@ export default function PersonDetail({
     if (!value) return;
     try {
       await addBlock({ type, value });
-      navigate("/"); // thread is now hidden; return to the inbox
+      showToast({
+        kind: "success",
+        message: `Blocked ${value}`,
+        description:
+          type === "domain"
+            ? "Future mail from this domain is dropped and its threads are hidden."
+            : "Future mail from this address is dropped and its threads are hidden.",
+        durationMs: 5000,
+      });
+      // The thread is now hidden. Clear the parent's selection so the view
+      // falls back to "no mail selected"; fall back to a route change when
+      // the component is used standalone.
+      if (onBlock) onBlock();
+      else navigate("/");
     } catch {
-      // Most likely a self-block guard rejection; leave the user on the thread.
+      // Most likely a self-block guard rejection; leave the user on the
+      // thread, but tell them the block didn't go through.
+      showToast({
+        kind: "error",
+        message: "Couldn't block",
+        description:
+          type === "domain"
+            ? "This domain couldn't be blocked. It may be one of your own."
+            : "This address couldn't be blocked. It may be one of your own.",
+      });
     }
   }
 
