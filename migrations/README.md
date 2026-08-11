@@ -9,9 +9,11 @@ next change).
 
 ## Generating a migration
 
-The normal drizzle-kit workflow. **Do not hand-write migration SQL** —
-edit the schema and let the generator produce the file, so the
+The normal drizzle-kit workflow. **Do not hand-write migration SQL or
+journal/snapshot entries** — let the generator produce the files so the
 snapshot chain stays consistent.
+
+### Schema changes
 
 ```
 # 1. edit the schema in worker/src/db/*.schema.ts
@@ -27,6 +29,24 @@ dev branch resolves the local D1 file under `.wrangler/`. If you
 haven't started the dev server yet it errors with
 `D1 directory not found … Run 'wrangler dev' first` — run the dev
 server once (or the e2e setup) so the local D1 exists, then generate.
+
+### Data-only migrations (no schema change)
+
+Plain `yarn db:generate` diffs the schema and emits nothing when only
+data needs updating ("No schema changes, nothing to migrate"). For a
+one-shot backfill / `UPDATE` migration, generate a custom empty file
+through the CLI, then paste the SQL:
+
+```
+yarn db:generate --custom --name=mark_blocked_senders_read
+# -> migrations/NNNN_mark_blocked_senders_read.sql (empty)
+# -> migrations/meta/NNNN_snapshot.json + journal entry
+# edit the .sql with your UPDATE/INSERT statements
+yarn db:migrate:dev
+```
+
+Do not invent `NNNN_*.sql` + a `_journal.json` row by hand — that
+skips the snapshot and breaks later `drizzle-kit generate` runs.
 
 ## Apply path
 
