@@ -2,6 +2,8 @@
 
 Thanks for your interest in contributing to saasmail. Please also read the [Code of Conduct](CODE_OF_CONDUCT.md) — it applies in every project space.
 
+Coding-agent and CI conventions (Prettier, PR semver labels, drizzle `--custom` data migrations, local test prerequisites) live in **[AGENTS.md](AGENTS.md)** — same rules apply to human contributors.
+
 ## Licensing of contributions
 
 saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. By opening a pull request you agree that your contribution is licensed under the same Apache 2.0 license as the rest of the project, and that you have the right to license it.
@@ -17,12 +19,13 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 
 1. Create a branch from `main`: `git checkout -b my-feature`
 2. Make your changes
-3. Run tests: `yarn test`
-4. Run type checking: `yarn tsc --noEmit`
-5. If you changed the schema, generate a migration: `yarn db:generate`
-6. Add an entry under `## [Unreleased]` in `CHANGELOG.md` for any user-visible change
-7. Commit and push your branch
-8. Open a pull request against `main`
+3. Format: `yarn format` (CI runs `yarn format:check`)
+4. Run tests: `yarn test`
+5. Run type checking: `yarn tsc --noEmit`
+6. If you changed the schema, generate a migration: `yarn db:generate` (data-only backfills: see [AGENTS.md](AGENTS.md) / [migrations/README.md](migrations/README.md))
+7. Add an entry under `## [Unreleased]` in `CHANGELOG.md` for any user-visible change
+8. Commit and push your branch
+9. Open a pull request against `main` and label it `major`, `minor`, or `patch` (required by CI)
 
 > Note: a `CLAUDE.md` at the repo root contains notes the maintainer uses with [Claude Code](https://claude.ai/claude-code). It's optional context — you don't need Claude Code to contribute.
 
