@@ -1,9 +1,10 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { attachments } from "../db/attachments.schema";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { isInboxAllowed } from "../lib/inbox-permissions";
+import { sanitizeFilename } from "../lib/sanitize-filename";
 import type { Variables } from "../variables";
 
 export const attachmentsRouter = new OpenAPIHono<{
@@ -13,39 +14,40 @@ export const attachmentsRouter = new OpenAPIHono<{
 
 // The owning inbox is `emails.recipient` for inbound and
 // `sent_emails.from_address` for sent — the external `to_address` is nobody's
-// inbox. Null covers both "missing" and "not allowed" so both answer 404; a 403
-// would confirm the id exists.
+// inbox. A single query left-joins the owner from whichever table `kind`
+// selects; the join predicate carries the `kind` test so only one side ever
+// matches. Null covers both "message row gone" (orphaned, fails closed) and
+// "not allowed" so both answer 404; a 403 would confirm the id exists.
 async function findReadableAttachment(
   db: Variables["db"],
   allowed: NonNullable<Variables["allowedInboxes"]>,
   id: string,
 ) {
   const rows = await db
-    .select()
+    .select({
+      attachment: attachments,
+      sentInbox: sentEmails.fromAddress,
+      inboundInbox: emails.recipient,
+    })
     .from(attachments)
+    .leftJoin(
+      emails,
+      and(ne(attachments.kind, "sent"), eq(emails.id, attachments.emailId)),
+    )
+    .leftJoin(
+      sentEmails,
+      and(eq(attachments.kind, "sent"), eq(sentEmails.id, attachments.emailId)),
+    )
     .where(eq(attachments.id, id))
     .limit(1);
   if (rows.length === 0) return null;
-  const att = rows[0];
+  const { attachment, sentInbox, inboundInbox } = rows[0];
 
-  const owner =
-    att.kind === "sent"
-      ? await db
-          .select({ inbox: sentEmails.fromAddress })
-          .from(sentEmails)
-          .where(eq(sentEmails.id, att.emailId))
-          .limit(1)
-      : await db
-          .select({ inbox: emails.recipient })
-          .from(emails)
-          .where(eq(emails.id, att.emailId))
-          .limit(1);
+  const owner = attachment.kind === "sent" ? sentInbox : inboundInbox;
+  // Null owner = orphaned message row (or unset address). Fail closed.
+  if (owner === null || !isInboxAllowed(allowed, owner)) return null;
 
-  // Orphaned attachment (message row gone) fails closed.
-  if (owner.length === 0) return null;
-  if (!isInboxAllowed(allowed, owner[0].inbox)) return null;
-
-  return att;
+  return attachment;
 }
 
 const downloadRoute = createRoute({
@@ -78,10 +80,15 @@ attachmentsRouter.openapi(downloadRoute, async (c) => {
     return c.json({ error: "File not found in storage" }, 404);
   }
 
+  // Sanitize before interpolating into the header: a raw filename can carry
+  // quotes or CR/LF and split the response. `filename*` (RFC 5987) carries the
+  // full value for clients that honour it.
+  const safeFilename = sanitizeFilename(att.filename).replaceAll('"', "_");
+
   return new Response(object.body, {
     headers: {
       "Content-Type": att.contentType,
-      "Content-Disposition": `attachment; filename="${att.filename}"`,
+      "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`,
       "Content-Length": att.size.toString(),
       "Cache-Control": "private, max-age=31536000, immutable",
     },
