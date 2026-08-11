@@ -383,6 +383,14 @@ export default function InboxPage() {
     );
   }
 
+  // The open thread's sender (or their whole domain) was just blocked, so it
+  // no longer belongs in the inbox. Drop the selection back to "no mail
+  // selected" and refresh the list so the hidden thread disappears.
+  function handlePersonBlocked() {
+    setSelectedPerson(null);
+    refreshPeople();
+  }
+
   function handleEmailDelete(personId: string, wasUnread: boolean) {
     setItems((prev) =>
       prev.map((it) =>
@@ -553,6 +561,7 @@ export default function InboxPage() {
                   onEmailDelete={handleEmailDelete}
                   refreshKey={refreshKey}
                   onOpenCompose={onCompose}
+                  onBlock={handlePersonBlocked}
                 />
               </div>
             </div>
@@ -701,6 +710,7 @@ export default function InboxPage() {
                       onEmailDelete={handleEmailDelete}
                       refreshKey={refreshKey}
                       onOpenCompose={onCompose}
+                      onBlock={handlePersonBlocked}
                     />
                   </div>
                 </div>
