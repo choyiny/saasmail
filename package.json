@@ -74,7 +74,7 @@
     "hono-rate-limiter": "^0.5.3",
     "lucide-react": "^1.8.0",
     "mimetext": "^3.0.28",
-    "nanoid": "^5.1.5",
+    "nanoid": "^5.1.16",
     "postal-mime": "^2.4.1",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
