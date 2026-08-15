@@ -327,5 +327,33 @@ describe("people router", () => {
       }).then((r) => r.json());
       expect(asc.data[0].id).toBe("s1");
     });
+
+    it("hydrates group participants after pagination when many group threads exist", async () => {
+      // Prod bug: hydrating participants for EVERY group before pagination
+      // doubled a large IN list and exceeded D1's 100-param cap (~50+
+      // groups). Miniflare doesn't enforce the cap; this pins the
+      // page-only hydrate path still returns populated group rows.
+      const GROUP_COUNT = 55;
+      await createTestPerson({ id: "g-person", email: "member@test.com" });
+      for (let i = 0; i < GROUP_COUNT; i++) {
+        await createTestEmail({
+          id: `eg-${i}`,
+          personId: "g-person",
+          messageId: `group-${i}@example.com`,
+          conversationId: `c_bulk_${i}`,
+          cc: JSON.stringify([{ email: `cc${i}@example.com`, name: null }]),
+        });
+      }
+
+      const res = await authFetch("/api/people/grouped?limit=100", { apiKey });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const groups = body.data.filter(
+        (row: { type: string }) => row.type === "group",
+      );
+      expect(groups).toHaveLength(GROUP_COUNT);
+      expect(groups[0].participants.length).toBeGreaterThan(0);
+      expect(groups[0].ccParticipants.length).toBeGreaterThan(0);
+    });
   });
 });

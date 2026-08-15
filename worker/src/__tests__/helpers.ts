@@ -173,6 +173,8 @@ export async function createTestEmail(
     messageId?: string;
     isRead?: number;
     rawHeaders?: string;
+    conversationId?: string | null;
+    cc?: string | null;
   } = {},
 ) {
   const db = getDb();
@@ -187,6 +189,8 @@ export async function createTestEmail(
     rawHeaders: opts.rawHeaders ?? "{}",
     messageId: opts.messageId ?? "msg-1@example.com",
     isRead: opts.isRead ?? 0,
+    conversationId: opts.conversationId ?? null,
+    cc: opts.cc ?? null,
     receivedAt: now,
     createdAt: now,
   };

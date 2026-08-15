@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { CheckCheck, ShieldBan } from "lucide-react";
+import { ShieldBan } from "lucide-react";
 import {
   fetchPersonEmails,
   markEmailRead,
@@ -31,6 +31,7 @@ import ThreadInboxSection, {
   type ThreadInboxGroup,
 } from "@/components/ThreadInboxSection";
 import ChatInboxSection from "@/components/ChatInboxSection";
+import MarkAllReadButton from "@/components/MarkAllReadButton";
 import type { ComposePrefill } from "@/pages/ComposeModal";
 import { onEmailSent } from "@/lib/email-events";
 import { showToast } from "@/lib/toast";
@@ -47,6 +48,12 @@ interface PersonDetailProps {
    * subject) so the drawer opens with the reply context applied.
    */
   onOpenCompose?: (prefill?: ComposePrefill) => void;
+  /**
+   * Called after the sender (or their whole domain) is blocked. The parent
+   * uses this to clear the current selection so the view falls back to
+   * "no mail selected" — the thread is now hidden from the inbox.
+   */
+  onBlock?: () => void;
 }
 
 function inboxOf(email: Email): string {
@@ -114,6 +121,7 @@ export default function PersonDetail({
   onEmailDelete,
   refreshKey,
   onOpenCompose,
+  onBlock,
 }: PersonDetailProps) {
   const navigate = useNavigate();
   const [emails, setEmails] = useState<Email[]>([]);
@@ -142,9 +150,31 @@ export default function PersonDetail({
     if (!value) return;
     try {
       await addBlock({ type, value });
-      navigate("/"); // thread is now hidden; return to the inbox
+      showToast({
+        kind: "success",
+        message: `Blocked ${value}`,
+        description:
+          type === "domain"
+            ? "Future mail from this domain is dropped and its threads are hidden."
+            : "Future mail from this address is dropped and its threads are hidden.",
+        durationMs: 5000,
+      });
+      // The thread is now hidden. Clear the parent's selection so the view
+      // falls back to "no mail selected"; fall back to a route change when
+      // the component is used standalone.
+      if (onBlock) onBlock();
+      else navigate("/");
     } catch {
-      // Most likely a self-block guard rejection; leave the user on the thread.
+      // Most likely a self-block guard rejection; leave the user on the
+      // thread, but tell them the block didn't go through.
+      showToast({
+        kind: "error",
+        message: "Couldn't block",
+        description:
+          type === "domain"
+            ? "This domain couldn't be blocked. It may be one of your own."
+            : "This address couldn't be blocked. It may be one of your own.",
+      });
     }
   }
 
@@ -401,6 +431,13 @@ export default function PersonDetail({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            {activeGroup && (
+              <MarkAllReadButton
+                unreadCount={unreadIn(activeGroup)}
+                scopeLabel={activeGroup.inbox}
+                onMarkAllRead={() => handleMarkInboxRead(activeGroup.inbox)}
+              />
+            )}
             {enrollmentInfo?.enrollment ? (
               <SequenceStatus
                 personId={person.id}
@@ -499,23 +536,6 @@ export default function PersonDetail({
               );
             })}
           </div>
-        </div>
-      )}
-
-      {/* Per-inbox action row — visible when the active tab has unread emails */}
-      {activeGroup && unreadIn(activeGroup) > 0 && (
-        <div className="shrink-0 border-b border-border bg-bg-subtle/40 px-4 py-2">
-          <button
-            type="button"
-            onClick={() => handleMarkInboxRead(activeGroup.inbox)}
-            className="inline-flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-          >
-            <CheckCheck size={12} />
-            Mark all in {inboxLabel(activeGroup.inbox)} as read
-            <span className="ml-1 rounded-full bg-text-primary/[0.06] px-1.5 text-[10px] font-bold tabular-nums text-text-secondary">
-              {unreadIn(activeGroup)}
-            </span>
-          </button>
         </div>
       )}
 

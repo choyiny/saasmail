@@ -3,7 +3,7 @@ import { desc, eq, lt, and } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { blocklist } from "../db/blocklist.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
-import { domainOf } from "../lib/blocklist";
+import { domainOf, markBlockedSendersRead } from "../lib/blocklist";
 import { json200Response, json201Response } from "../lib/helpers";
 import { purgeBlockedMail } from "../lib/purge-blocked";
 import type { Variables } from "../variables";
@@ -110,7 +110,7 @@ const createRouteDef = createRoute({
   path: "/",
   tags: ["Blocklist"],
   description:
-    "Add a block rule. Idempotent on (type, value). Rejects rules that would block our own sending identities.",
+    "Add a block rule. Idempotent on (type, value). Rejects rules that would block our own sending identities. Marks matching unread mail as read so the inbox badge stays in sync with the hidden list.",
   request: {
     body: { content: { "application/json": { schema: CreateSchema } } },
   },
@@ -183,6 +183,8 @@ blocklistRouter.openapi(createRouteDef, async (c) => {
       .where(and(eq(blocklist.type, type), eq(blocklist.value, value)))
       .limit(1)
   )[0];
+
+  await markBlockedSendersRead(db, type, value);
 
   return c.json(toDTO(row), row.id === id ? 201 : 200);
 });
