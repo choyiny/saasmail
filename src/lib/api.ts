@@ -252,6 +252,42 @@ export async function fetchEmail(id: string): Promise<Email> {
   return apiFetch(`/api/emails/${id}`);
 }
 
+export interface SearchHit {
+  id: string;
+  type: "received" | "sent";
+  personId: string | null;
+  personEmail: string | null;
+  personName: string | null;
+  inbox: string;
+  subject: string | null;
+  snippet: string | null;
+  timestamp: number;
+  isRead: number | null;
+}
+export interface SearchResult {
+  hits: SearchHit[];
+  hasMore: boolean;
+  truncated: boolean;
+}
+export async function searchEmails(params: {
+  q: string;
+  inbox?: string;
+  personId?: string;
+  after?: number;
+  before?: number;
+  page?: number;
+  limit?: number;
+}): Promise<SearchResult> {
+  const qs = new URLSearchParams({ q: params.q });
+  if (params.inbox) qs.set("inbox", params.inbox);
+  if (params.personId) qs.set("personId", params.personId);
+  if (params.after !== undefined) qs.set("after", String(params.after));
+  if (params.before !== undefined) qs.set("before", String(params.before));
+  if (params.page) qs.set("page", String(params.page));
+  if (params.limit) qs.set("limit", String(params.limit));
+  return apiFetch(`/api/emails/search?${qs}`);
+}
+
 export async function markEmailRead(
   id: string,
   isRead: boolean,
