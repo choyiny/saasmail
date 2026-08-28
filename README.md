@@ -358,6 +358,69 @@ token expires. Banning a user has the same immediate effect.
 Any client can register itself (that is how MCP connectors work), so the list is
 also where you spot one you don't recognise.
 
+### WebMCP support (in-page AI agent access)
+
+Separate from the `/mcp` server above, saasmail also implements
+[WebMCP](https://github.com/webmachinelearning/webmcp) — a W3C proposal that
+lets a page register tools directly on `document.modelContext` /
+`navigator.modelContext` for an AI agent already embedded in the browser to
+discover and call. There is no server endpoint and no OAuth flow: the tools
+run client-side, in the same tab as the logged-in user, using their existing
+session cookie.
+
+**How it differs from `/mcp`:**
+
+|               | `/mcp` (remote)                      | WebMCP (in-page)                                                                                               |
+| ------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Runs          | Server, any MCP client, any location | In the open browser tab                                                                                        |
+| Auth          | OAuth 2.1, scoped token              | Existing browser session cookie                                                                                |
+| Access        | Whatever the token's scopes allow    | Whatever the logged-in user can do                                                                             |
+| Sends/deletes | Scope-gated, no extra confirmation   | Staged, then require human confirmation in the UI                                                              |
+| Effect        | Calls the HTTP API directly          | Reads via the same API client; actions drive the visible UI (navigation, the compose drawer, the enroll modal) |
+
+Both exist side by side — `/mcp` is for external agents connecting to your
+inbox from anywhere; WebMCP is for an agent already inside the page, acting as
+the signed-in user.
+
+**Trying it:** WebMCP is early and not yet in a browser by default. Two ways
+to test it today:
+
+- **Chrome 149+** — enable `chrome://flags/#enable-webmcp-testing`, then sign
+  in to saasmail and open a conversation with a page-aware agent.
+- **ChatGPT's in-app browser** — open your saasmail instance inside it while
+  signed in.
+
+If neither the native `document.modelContext` API nor `navigator.modelContext`
+is present, saasmail falls back to loading the
+[`@mcp-b/global`](https://www.npmjs.com/package/@mcp-b/global) polyfill so the
+same tools still register.
+
+**Safety model:**
+
+- **Session-scoped.** The agent can only do what the signed-in user's session
+  already permits — there is no separate credential or elevated access.
+- **Human-confirmed writes.** `reply_email`, `delete_email`, and other
+  mutating actions are staged and shown in a confirmation dialog; nothing
+  sends or deletes until a person clicks Confirm.
+- **Per-instance toggle.** Set the `app_settings` row with key
+  `webmcp_enabled` to the string `false` to stop the UI from registering any
+  WebMCP tools; it is exposed to the frontend as `webmcpEnabled` on
+  `GET /api/config` and defaults to `true` when unset.
+
+**Tool list (19 total: 11 read, 8 action).** Read tools return data through
+the same `/api` client the UI already uses. Action tools drive the real UI —
+they navigate, open the compose drawer pre-filled, open the enroll modal, or
+stage a send/reply/delete for confirmation — rather than calling a write
+endpoint directly.
+
+Read: `whoami`, `list_inboxes`, `list_conversations`, `list_contacts`,
+`get_contact`, `list_emails`, `read_email`, `search_emails`,
+`list_templates`, `get_template`, `list_sequences`.
+
+Action: `open_contact`, `compose_email`, `compose_from_template`,
+`reply_email`, `mark_read`, `mark_unread`, `delete_email`,
+`enroll_in_sequence`.
+
 ### Webhooks
 
 POST to an external URL whenever a **new inbound message** is received — useful for help-desk automation (post to a team chat, trigger triage, draft a reply via n8n / Make / etc.).

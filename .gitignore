@@ -6,6 +6,7 @@ wrangler.jsonc
 wrangler.demo.jsonc
 .DS_Store
 *.log
+*.tsbuildinfo
 .worktrees/
 
 # Playwright
