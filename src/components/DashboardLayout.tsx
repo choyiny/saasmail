@@ -7,10 +7,13 @@ import ComposeFab from "@/components/ComposeFab";
 import ComposeModal, { type ComposePrefill } from "@/pages/ComposeModal";
 import Toaster from "@/components/Toaster";
 import { useReducedAnimations } from "@/hooks/useReducedAnimations";
+import { useBranding } from "@/lib/branding";
 import { WebMcpBridgeProvider } from "@/webmcp/bridge";
+import { WebMcpTools } from "@/webmcp/registerTools";
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
+  const { webmcpEnabled } = useBranding();
   const [composeOpen, setComposeOpen] = useState(false);
   // Optional seed values for the compose drawer — populated when the user
   // opts into the "full compose" flow from inside a chat thread.
@@ -34,6 +37,7 @@ export default function DashboardLayout() {
       navigate={(path) => navigate(path)}
       openCompose={openCompose}
     >
+      {webmcpEnabled && <WebMcpTools enabled={true} />}
       <div className="relative flex min-h-screen flex-col bg-background pt-16">
         {/* Faded gradient backdrop. Animates by default; falls back to a
             static version on low-spec devices or when the user prefers

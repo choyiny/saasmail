@@ -26,6 +26,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useBranding } from "@/lib/branding";
+import { WebMcpStatusBadge } from "@/webmcp/WebMcpStatusBadge";
+import { WEBMCP_TOOL_COUNT } from "@/webmcp/registerTools";
 
 interface NavItem {
   label: string;
@@ -136,7 +138,9 @@ export default function TopNav() {
           </div>
 
           {/* Right cluster */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1.5">
+            <WebMcpStatusBadge toolCount={WEBMCP_TOOL_COUNT} />
+
             {isAdmin && (
               <span className="hidden items-center rounded-[6px] bg-rose-500/90 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white sm:inline-flex">
                 Admin
