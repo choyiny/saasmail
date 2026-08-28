@@ -13,6 +13,7 @@ import {
   listPersonEmails,
   setEmailRead,
 } from "../lib/queries/emails";
+import { searchEmails } from "../lib/queries/search";
 import type { Variables } from "../variables";
 
 export const emailsRouter = new OpenAPIHono<{
@@ -164,6 +165,52 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
     allowed,
   );
 
+  return c.json(result, 200);
+});
+
+// Full-text search across received + sent mail. MUST be registered above
+// GET /{id}: Hono matches in order, so /{id} would otherwise capture "search".
+const searchEmailsRoute = createRoute({
+  method: "get",
+  path: "/search",
+  tags: ["Emails"],
+  description:
+    "Full-text search across received and sent mail, newest first. Message-level hits with a body snippet; call GET /{id} for the full message.",
+  request: {
+    query: z.object({
+      q: z.string().min(1),
+      inbox: z.string().optional(),
+      personId: z.string().optional(),
+      after: z.coerce.number().int().optional(),
+      before: z.coerce.number().int().optional(),
+      page: z.coerce.number().int().min(1).optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+    }),
+  },
+  responses: {
+    ...json200Response(
+      z.object({
+        hits: z.array(z.any()),
+        hasMore: z.boolean(),
+        truncated: z.boolean(),
+      }),
+      "Search results",
+    ),
+  },
+});
+
+emailsRouter.openapi(searchEmailsRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const { q, inbox, personId, after, before, page, limit } =
+    c.req.valid("query");
+  const lim = limit ?? 50;
+  const pg = page ?? 1;
+  const result = await searchEmails(
+    db,
+    { q, inbox, personId, after, before, limit: lim, offset: (pg - 1) * lim },
+    allowed,
+  );
   return c.json(result, 200);
 });
 
