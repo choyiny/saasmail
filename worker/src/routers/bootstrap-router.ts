@@ -37,6 +37,10 @@ const ConfigSchema = z.object({
       'Instance display name from app settings. Defaults to "saasmail" when unset.',
     example: "saasmail",
   }),
+  webmcpEnabled: z.boolean().openapi({
+    description:
+      "Whether the web UI registers WebMCP tools for in-page AI agents. Defaults to true; set app_settings key 'webmcp_enabled' to 'false' to disable.",
+  }),
 });
 
 const configRoute = createRoute({
@@ -61,8 +65,17 @@ bootstrapRouter.openapi(configRoute, async (c) => {
     row.length > 0 && row[0].value && row[0].value.length > 0
       ? row[0].value
       : "saasmail";
+  const webmcpRow = await db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, "webmcp_enabled"))
+    .limit(1);
+  const webmcpEnabled = !(
+    webmcpRow.length > 0 && webmcpRow[0].value === "false"
+  );
   return c.json({
     passkeyRequired: !isDevEnvironment(c.env),
     brandName,
+    webmcpEnabled,
   });
 });
