@@ -32,7 +32,6 @@ describe("WebMcpTools", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(names).toContain("search_emails");
     expect(names).toContain("compose_email");
-    expect(names.length).toBeGreaterThanOrEqual(15);
     expect(names.length).toBe(WEBMCP_TOOL_COUNT);
     // No duplicate tool names.
     expect(new Set(names).size).toBe(names.length);

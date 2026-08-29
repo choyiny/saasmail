@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
 import { ok } from "../result";
 import { __setModelContextForTests } from "../runtime";
-import { useWebMcpTool } from "../useWebMcpTool";
+import { useWebMcpTools } from "../useWebMcpTool";
 
 afterEach(() => {
   cleanup();
@@ -10,16 +10,18 @@ afterEach(() => {
 });
 
 function Harness() {
-  useWebMcpTool({
-    name: "ping",
-    description: "d",
-    inputSchema: { type: "object", properties: {} },
-    execute: async () => ok("pong"),
-  });
+  useWebMcpTools([
+    {
+      name: "ping",
+      description: "d",
+      inputSchema: { type: "object", properties: {} },
+      execute: async () => ok("pong"),
+    },
+  ]);
   return null;
 }
 
-describe("useWebMcpTool", () => {
+describe("useWebMcpTools", () => {
   it("registers on mount and aborts on unmount", async () => {
     const aborts: AbortSignal[] = [];
     __setModelContextForTests({

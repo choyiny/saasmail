@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq } from "drizzle-orm";
+import { inArray } from "drizzle-orm";
 import { appSettings } from "../db/app-settings.schema";
 import { json200Response } from "../lib/helpers";
 import { isDevEnvironment } from "../lib/is-dev";
@@ -56,23 +56,17 @@ const configRoute = createRoute({
 
 bootstrapRouter.openapi(configRoute, async (c) => {
   const db = c.get("db");
-  const row = await db
-    .select({ value: appSettings.value })
+  // One round-trip for both settings this unauthenticated route reads on
+  // every app load.
+  const rows = await db
+    .select({ key: appSettings.key, value: appSettings.value })
     .from(appSettings)
-    .where(eq(appSettings.key, "brand_name"))
-    .limit(1);
+    .where(inArray(appSettings.key, ["brand_name", "webmcp_enabled"]));
+  const brandNameValue = rows.find((r) => r.key === "brand_name")?.value;
   const brandName =
-    row.length > 0 && row[0].value && row[0].value.length > 0
-      ? row[0].value
-      : "saasmail";
-  const webmcpRow = await db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, "webmcp_enabled"))
-    .limit(1);
-  const webmcpEnabled = !(
-    webmcpRow.length > 0 && webmcpRow[0].value === "false"
-  );
+    brandNameValue && brandNameValue.length > 0 ? brandNameValue : "saasmail";
+  const webmcpEnabled =
+    rows.find((r) => r.key === "webmcp_enabled")?.value !== "false";
   return c.json({
     passkeyRequired: !isDevEnvironment(c.env),
     brandName,

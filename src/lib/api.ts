@@ -252,6 +252,10 @@ export async function fetchEmail(id: string): Promise<Email> {
   return apiFetch(`/api/emails/${id}`);
 }
 
+// Mirrors the worker's SearchHit/SearchEmailsResult (worker/src/lib/queries/
+// search.ts). Kept as a local copy rather than imported through `@worker/*`
+// because that module's dependency chain pulls worker-only types into the
+// frontend typecheck.
 export interface SearchHit {
   id: string;
   type: "received" | "sent";

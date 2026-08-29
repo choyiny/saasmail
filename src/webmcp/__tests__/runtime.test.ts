@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { ok, okJson, fail } from "../result";
 import { registerTool, __setModelContextForTests } from "../runtime";
 

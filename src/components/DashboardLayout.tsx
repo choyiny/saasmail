@@ -33,11 +33,8 @@ export default function DashboardLayout() {
   }, []);
 
   return (
-    <WebMcpBridgeProvider
-      navigate={(path) => navigate(path)}
-      openCompose={openCompose}
-    >
-      {webmcpEnabled && <WebMcpTools enabled={true} />}
+    <WebMcpBridgeProvider navigate={navigate} openCompose={openCompose}>
+      {webmcpEnabled && <WebMcpTools />}
       <div className="relative flex min-h-screen flex-col bg-background pt-16">
         {/* Faded gradient backdrop. Animates by default; falls back to a
             static version on low-spec devices or when the user prefers
