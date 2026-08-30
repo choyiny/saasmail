@@ -61,10 +61,12 @@ MCP tool at the same tier, **including the admin tier** (behind `email:admin`). 
 complete mirror of the API, not a curated subset. _Rationale: agents shouldn't hit a capability
 cliff where they must fall back to raw HTTP._
 
-**P3 — WebMCP reaches functional + autonomous parity.** WebMCP exposes the same capability set and
-— per the target state — can send / reply / enroll / delete autonomously, matching MCP, rather
-than always staging behind a human confirmation. _Rationale: the user's decision is that all three
-surfaces converge equally. See R1 for the risk this accepts._
+**P3 — WebMCP reaches functional parity; autonomy is configurable per capability.** WebMCP exposes
+the same capability set as MCP. Autonomy is **off by default and opt-in per tier**: a user can
+enable autonomous send / reply / enroll, but destructive capabilities (delete / reassign / CRUD)
+and the admin tier stay confirm-gated even then. Read stays always-autonomous. _Rationale: full
+functional convergence without accepting R1's blast radius by default. Amended from blanket
+autonomy after weighing R1._
 
 **P4 — Credential unification.** An `sk_` API key is a valid MCP bearer token. A single credential
 authenticates against both `/api/*` and `/mcp`, carrying the same scope set on both. _Rationale:
@@ -122,22 +124,22 @@ otherwise; cells already ✅ need no work.
 
 ### Manage tier (`email:manage`)
 
-| Capability                          | API | MCP                 | WebMCP                        | Gap → target                          |
-| ----------------------------------- | --- | ------------------- | ----------------------------- | ------------------------------------- |
-| Mark read/unread (single)           | ✅  | ✅ `mark_read`      | ✅ `mark_read`/`mark_unread`  | —                                     |
-| Bulk mark emails                    | ✅  | ❌                  | ❌                            | MCP + WebMCP: bulk variant            |
-| Bulk mark people/conversations read | ✅  | ❌                  | ❌                            | MCP + WebMCP: bulk variant            |
-| Patch single email flags (archive)  | ✅  | 🔶 (read flag only) | 🔶                            | MCP + WebMCP: full flag patch         |
-| Delete email                        | ✅  | ✅ `delete_email`   | 🔶 `delete_email` (confirmed) | WebMCP: autonomous per P3             |
-| Reassign email → person             | ✅  | ❌                  | ❌                            | MCP + WebMCP: `reassign_email`        |
-| Delete contact                      | ✅  | ❌                  | ❌                            | MCP + WebMCP: `delete_person`         |
-| Template create/update/delete       | ✅  | ❌                  | ❌                            | MCP + WebMCP: template CRUD           |
-| Sequence create/update/delete       | ✅  | ❌                  | ❌                            | MCP + WebMCP: sequence CRUD           |
-| Cancel enrollment                   | ✅  | ❌                  | ❌                            | MCP + WebMCP: `cancel_enrollment`     |
-| Draft save/delete                   | ✅  | ❌                  | ❌                            | MCP + WebMCP: draft write/delete      |
-| Outbox retry / cancel               | ✅  | ❌                  | ❌                            | MCP + WebMCP: outbox actions          |
-| Notifications / web push            | ✅  | ❌                  | ❌                            | Decide: in-scope for agents? (see Q1) |
-| Self-service API-key mgmt           | ✅  | ❌                  | ❌                            | **Excluded from agents** — see Q2     |
+| Capability                          | API | MCP                 | WebMCP                        | Gap → target                      |
+| ----------------------------------- | --- | ------------------- | ----------------------------- | --------------------------------- |
+| Mark read/unread (single)           | ✅  | ✅ `mark_read`      | ✅ `mark_read`/`mark_unread`  | —                                 |
+| Bulk mark emails                    | ✅  | ❌                  | ❌                            | MCP + WebMCP: bulk variant        |
+| Bulk mark people/conversations read | ✅  | ❌                  | ❌                            | MCP + WebMCP: bulk variant        |
+| Patch single email flags (archive)  | ✅  | 🔶 (read flag only) | 🔶                            | MCP + WebMCP: full flag patch     |
+| Delete email                        | ✅  | ✅ `delete_email`   | 🔶 `delete_email` (confirmed) | WebMCP: autonomous per P3         |
+| Reassign email → person             | ✅  | ❌                  | ❌                            | MCP + WebMCP: `reassign_email`    |
+| Delete contact                      | ✅  | ❌                  | ❌                            | MCP + WebMCP: `delete_person`     |
+| Template create/update/delete       | ✅  | ❌                  | ❌                            | MCP + WebMCP: template CRUD       |
+| Sequence create/update/delete       | ✅  | ❌                  | ❌                            | MCP + WebMCP: sequence CRUD       |
+| Cancel enrollment                   | ✅  | ❌                  | ❌                            | MCP + WebMCP: `cancel_enrollment` |
+| Draft save/delete                   | ✅  | ❌                  | ❌                            | MCP + WebMCP: draft write/delete  |
+| Outbox retry / cancel               | ✅  | ❌                  | ❌                            | MCP + WebMCP: outbox actions      |
+| Notifications / web push            | ✅  | ❌                  | ❌                            | **Out of scope for agents** (D1)  |
+| Self-service API-key mgmt           | ✅  | ❌                  | ❌                            | **Excluded from agents** (D2)     |
 
 ### Admin tier (`email:admin`, admin role only)
 
@@ -169,11 +171,13 @@ It needs, in rough priority order:
 **WebMCP — the big lift is autonomy + the same management/admin breadth.** It already has the widest
 _read_ surface. It needs:
 
-1. **Autonomy (P3):** turn `compose_email`, `compose_from_template`, `reply_email`, `enroll_in_sequence`,
-   `delete_email` from staged/confirmed into autonomous, subject to R1's mitigations.
+1. **Configurable autonomy (P3):** let `compose_email`, `compose_from_template`, `reply_email`,
+   `enroll_in_sequence` run autonomously **when the user opts in per tier** (off by default);
+   `delete_email` and other destructive/admin actions stay confirm-gated regardless. Subject to
+   R1's remaining mitigations.
 2. **Attachments** on send + `get_attachment`.
-3. **Manage + admin tiers:** the same CRUD/bulk/admin breadth MCP needs, driven from the browser
-   session.
+3. **Manage tier** (browser session) — same CRUD/bulk breadth MCP needs. **Admin tier deferred**
+   (D3).
 
 **Direct API — the lift is authorization granularity, not features.** It has every capability. It
 needs P4/P5: scoped `sk_` keys, and those keys accepted as MCP bearer tokens.
@@ -209,12 +213,10 @@ Today the two pipelines are fully separate:
 **R1 — WebMCP autonomy × session-cookie auth = a prompt-injection blast radius.** An in-page agent
 that reads attacker-controlled email content _and_ can autonomously send/delete/administer, authed
 by the ambient session cookie, is a materially larger attack surface than today's confirm-gated
-design. This is an **accepted risk** per the convergence decision (P3). Suggested mitigations to
-carry into implementation: per-capability opt-in (autonomy off by default, enabled by explicit user
-setting per tier); keep destructive/admin tiers confirm-gated even when send is autonomous;
-require a recent user gesture / same-origin assertion before autonomous writes; rate-limit
-autonomous sends. **Recommendation:** revisit whether P3 should be softened to "configurable per
-capability" before the WebMCP autonomy round ships.
+design. **Resolved (P3 amended):** autonomy is off by default and opt-in per tier; destructive and
+admin capabilities stay confirm-gated on WebMCP regardless. Remaining mitigations to carry into the
+WebMCP round: require a recent user gesture / same-origin assertion before autonomous writes;
+rate-limit autonomous sends; surface a clear indicator when autonomy is enabled.
 
 **R2 — `sk_` key as MCP token bypasses the passkey gate.** See §6.3 — must be resolved explicitly,
 not inherited by accident.
@@ -224,18 +226,19 @@ scope means a leaked/injected agent can create users or edit webhooks. Mitigatio
 never granted by default; separate opt-in at key/token creation; consider keeping admin _mutations_
 confirm-gated on WebMCP even under P3.
 
-**Q1 — Are notifications / web-push in scope for agents at all?** They're SPA-oriented
-(subscription lifecycle for a browser). Proposed: **out of scope** for MCP; irrelevant to WebMCP.
-Leave on the direct API only. _Confirm._
+## 7a. Resolved decisions
 
-**Q2 — Self-service API-key management via an agent.** An agent minting or rotating its own
-credentials is a privilege-escalation footgun. Proposed: **excluded** from both MCP and WebMCP;
-key management stays session + direct-API only. _Confirm._
+**D1 (was Q1) — Notifications / web-push are out of scope for agents.** They're SPA-oriented
+(subscription lifecycle for a browser). Exposed on the direct API only; not mirrored to MCP,
+irrelevant to WebMCP.
 
-**Q3 — Does WebMCP need the admin tier at all?** Full convergence (P2/P3) says yes, but an
-in-browser agent performing instance administration is the highest-risk cell in the matrix.
-Proposed: admin tools land on **MCP first**, WebMCP admin deferred pending R1/R3 mitigations.
-_Confirm._
+**D2 (was Q2) — Self-service API-key management is excluded from both agent surfaces.** An agent
+minting or rotating its own credentials is a privilege-escalation footgun. Key management stays
+session + direct-API only.
+
+**D3 (was Q3) — WebMCP admin is deferred.** Admin tools land on **MCP first** (under `email:admin`).
+WebMCP admin is not built until the R1/R3 mitigations are in place; under P3, admin stays
+confirm-gated on WebMCP even after that.
 
 ## 8. Phased roadmap (follow-up rounds)
 
@@ -252,8 +255,9 @@ Each phase is its own spec → plan → implementation cycle.
 5. **MCP manage tier.** Template/sequence CRUD, bulk marks, reassign, delete contact, draft write,
    outbox actions, cancel enrollment.
 6. **MCP admin tier.** `email:admin` toolset, admin-role gated (R3).
-7. **WebMCP convergence.** Autonomy (P3, with R1 mitigations), then the manage/admin breadth —
-   sequenced last because it carries the most risk.
+7. **WebMCP convergence.** Configurable per-capability autonomy (P3, off by default, with R1
+   mitigations), then the manage-tier breadth. WebMCP admin deferred (D3); destructive/admin stay
+   confirm-gated. Sequenced last because it carries the most risk.
 
 ---
 
