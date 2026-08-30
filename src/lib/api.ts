@@ -475,6 +475,55 @@ export async function deleteTemplate(
   });
 }
 
+// --- Compose Drafts (autosave) ---
+
+/** An autosaved compose draft, keyed per user by `contextKey`. */
+export interface Draft {
+  id: string;
+  contextKey: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  cc: CcEntry[] | null;
+  subject: string | null;
+  bodyHtml: string | null;
+  bodyText: string | null;
+  replyToEmailId: string | null;
+  updatedAt: number;
+}
+
+export interface DraftInput {
+  contextKey: string;
+  fromAddress?: string;
+  to?: string;
+  cc?: CcEntry[];
+  subject?: string;
+  bodyHtml?: string;
+  bodyText?: string;
+  replyToEmailId?: string | null;
+}
+
+export async function fetchDraft(contextKey: string): Promise<Draft | null> {
+  const res = await apiFetch<{ draft: Draft | null }>(
+    `/api/drafts?contextKey=${encodeURIComponent(contextKey)}`,
+  );
+  return res.draft;
+}
+
+export async function saveDraft(data: DraftInput): Promise<Draft> {
+  const res = await apiFetch<{ draft: Draft }>("/api/drafts", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.draft;
+}
+
+export async function deleteDraft(contextKey: string): Promise<void> {
+  await apiFetch(`/api/drafts?contextKey=${encodeURIComponent(contextKey)}`, {
+    method: "DELETE",
+  });
+}
+
 // --- User Management Types ---
 
 export interface Invite {

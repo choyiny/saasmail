@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   X,
@@ -29,6 +29,7 @@ import {
   type CcEntry,
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
+import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { analyzeTemplateClient, chipLabel } from "@/lib/template-syntax";
@@ -81,6 +82,29 @@ export default function ReplyComposer({
   // Compact tray vs. full-viewport. Toggled by the maximize button.
   const [fullscreen, setFullscreen] = useState(false);
 
+  // Set once a saved reply draft has been restored, so the reply-all CC
+  // default below yields to the draft's own CC regardless of which async
+  // load resolves first.
+  const draftRestoredRef = useRef(false);
+
+  // Autosave the freeform reply so a half-written reply survives closing the
+  // composer, keyed to the email being replied to.
+  const bodyIsEmpty = !bodyHtml || bodyHtml === "<p></p>";
+  const { clear: clearDraft } = useDraftAutosave({
+    contextKey: `reply:${emailId}`,
+    enabled: true,
+    isEmpty: bodyIsEmpty,
+    restore: true,
+    values: { fromAddress, cc, bodyHtml, bodyText, replyToEmailId: emailId },
+    onRestore: (draft) => {
+      draftRestoredRef.current = true;
+      if (draft.bodyHtml) setBodyHtml(draft.bodyHtml);
+      if (draft.bodyText) setBodyText(draft.bodyText);
+      if (draft.cc) setCc(draft.cc);
+      if (draft.fromAddress) setFromAddress(draft.fromAddress);
+    },
+  });
+
   // Sync the signature trail to the active From inbox.
   useEffect(() => {
     if (!fromAddress) {
@@ -127,7 +151,7 @@ export default function ReplyComposer({
       .then(async (email) => {
         if (cancelled) return;
         setOriginalEmail(email);
-        if (email.cc && email.cc.length > 0) {
+        if (email.cc && email.cc.length > 0 && !draftRestoredRef.current) {
           // Drop our own inbox addresses from the suggested CC list — we
           // don't want to CC ourselves on a reply we're sending.
           const ours = new Set(recipients.map((r) => r.toLowerCase()));
@@ -251,6 +275,8 @@ export default function ReplyComposer({
         });
       }
       setFiles([]);
+      // The reply went out — discard its draft so it doesn't reappear.
+      clearDraft();
       // Notify the rest of the app — PersonDetail uses this to
       // auto-switch the active inbox tab when the user replied from a
       // different inbox than the one they were viewing.
