@@ -824,8 +824,6 @@ const GROUP_THREADS: GroupThread[] = [
 // Computed for the seed because we can't await crypto.subtle here in a
 // synchronous code path; node:crypto's createHash is the equivalent.
 // ---------------------------------------------------------------------------
-const INTERNAL_DOMAIN = "givefeedback.dev";
-
 function computeConversationIdSync(
   inbox: string,
   externals: string[],
