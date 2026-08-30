@@ -4,7 +4,7 @@ import { ok, okJson, fail } from "../result";
 
 export interface ActionDeps {
   bridge: WebMcpBridge;
-  fetchPerson: (id: string) => Promise<any>;
+  fetchPeople: (params: { personId?: string; limit?: number }) => Promise<any>;
   fetchEmail: (id: string) => Promise<any>;
   markEmailRead: (id: string, isRead: boolean) => Promise<void>;
   deleteEmail: (id: string) => Promise<any>;
@@ -26,11 +26,20 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         required: ["personId"],
       },
       execute: async (args) => {
-        const person = await deps.fetchPerson(args.personId);
-        if (!person?.recipient)
-          return fail("Contact not found or has no inbox.");
-        deps.bridge.navigate(`/inbox/${person.recipient}/${person.id}`);
-        return ok(`Opened ${person.email ?? person.id} in the inbox.`);
+        // GET /api/people/:id has no `recipient` — that inbox address is a
+        // per-(person,inbox) value only the list query computes. Resolve the
+        // contact's most-recent inbox pair the same way the inbox list does,
+        // then drive the router so the user watches the thread open.
+        const { data } = await deps.fetchPeople({
+          personId: args.personId,
+          limit: 1,
+        });
+        const row = data?.[0];
+        if (!row?.recipient) return fail("Contact not found or has no inbox.");
+        deps.bridge.navigate(
+          `/inbox/${encodeURIComponent(row.recipient)}/${encodeURIComponent(row.id)}`,
+        );
+        return ok(`Opened ${row.email ?? row.id} in the inbox.`);
       },
     },
     {
