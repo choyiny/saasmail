@@ -9,11 +9,13 @@ import {
 interface Branding {
   passkeyRequired: boolean;
   brandName: string;
+  webmcpEnabled: boolean;
 }
 
 const DEFAULT_BRANDING: Branding = {
   passkeyRequired: true,
   brandName: "saasmail",
+  webmcpEnabled: true,
 };
 
 interface BrandingContextValue extends Branding {
@@ -50,6 +52,10 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
           typeof b.brandName === "string" && b.brandName.length > 0
             ? b.brandName
             : DEFAULT_BRANDING.brandName,
+        webmcpEnabled:
+          typeof b.webmcpEnabled === "boolean"
+            ? b.webmcpEnabled
+            : DEFAULT_BRANDING.webmcpEnabled,
         loaded: true,
       });
     } catch {

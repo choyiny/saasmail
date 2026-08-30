@@ -20,6 +20,7 @@
     "vapid:generate": "tsx scripts/generate-vapid.ts",
     "test": "vitest run --config vitest.config.test.ts",
     "test:watch": "vitest --config vitest.config.test.ts",
+    "test:web": "vitest run --config vitest.config.web.ts",
     "prepare": "husky",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -47,6 +48,7 @@
     "@hono/mcp": "^0.3.1",
     "@hono/swagger-ui": "^0.6.1",
     "@hono/zod-openapi": "^1.3.0",
+    "@mcp-b/global": "^5.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opentelemetry/api": "^1.9.1",
     "@paper-design/shaders-react": "^0.0.76",
@@ -89,6 +91,8 @@
     "@cloudflare/workers-types": "^5.20260821.1",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.1.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^18.3.6",
     "@vitejs/plugin-react-swc": "^4.3.0",
@@ -97,6 +101,7 @@
     "autoprefixer": "^10.4.21",
     "drizzle-kit": "^0.31.1",
     "husky": "^9.1.7",
+    "jsdom": "^30.0.1",
     "lint-staged": "^16.4.0",
     "postcss": "^8.5.26",
     "prettier": "^3.8.3",
@@ -105,6 +110,7 @@
     "typescript": "^5.8.3",
     "vite": "^7.3.5",
     "vitest": "^4.1.10",
+    "webmcp-types": "^0.1.5",
     "wrangler": "^4.84.1"
   }
 }
