@@ -79,6 +79,8 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS outbox_emails (id TEXT PRIMARY KEY, sent_email_id TEXT NOT NULL, sequence_email_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, cc TEXT, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, headers TEXT, transactional INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, next_retry_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS outbox_status_retry_idx ON outbox_emails(status, next_retry_at)`,
     `CREATE INDEX IF NOT EXISTS outbox_from_idx ON outbox_emails(from_address)`,
+    `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, context_key TEXT NOT NULL, from_address TEXT, to_address TEXT, cc TEXT, subject TEXT, body_html TEXT, body_text TEXT, reply_to_email_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS drafts_user_context_idx ON drafts(user_id, context_key)`,
   ];
 
   for (const sql of statements) {
@@ -270,6 +272,7 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM drafts;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;
     DELETE FROM suppressions;
