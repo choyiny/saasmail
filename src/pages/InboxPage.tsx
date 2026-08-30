@@ -136,6 +136,7 @@ export default function InboxPage() {
     filters.recipient,
     filters.unread,
     filters.hasAttachment,
+    filters.drafts,
     sortSpec.key,
   ]);
 
@@ -148,6 +149,7 @@ export default function InboxPage() {
       recipient: filters.recipient,
       unread: filters.unread,
       hasAttachment: filters.hasAttachment,
+      drafts: filters.drafts,
       sort: sortSpec.key,
       direction: sortSpec.direction,
       page: peoplePage,
@@ -158,6 +160,7 @@ export default function InboxPage() {
       filters.recipient,
       filters.unread,
       filters.hasAttachment,
+      filters.drafts,
       sortSpec.key,
       sortSpec.direction,
       peoplePage,

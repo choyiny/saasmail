@@ -9,6 +9,7 @@ import {
   getDb,
 } from "./helpers";
 import { blocklist } from "../db/blocklist.schema";
+import { drafts } from "../db/drafts.schema";
 
 describe("people router", () => {
   let apiKey: string;
@@ -354,6 +355,99 @@ describe("people router", () => {
       expect(groups).toHaveLength(GROUP_COUNT);
       expect(groups[0].participants.length).toBeGreaterThan(0);
       expect(groups[0].ccParticipants.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("GET /api/people/grouped?drafts=1 — reply-draft filter", () => {
+    const replyDraft = (id: string, userId: string, emailId: string) => ({
+      id,
+      userId,
+      contextKey: `reply:${emailId}`,
+      replyToEmailId: emailId,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    it("shows only people with a reply draft", async () => {
+      await createTestPerson({ id: "p-draft", email: "d@test.com" });
+      await createTestEmail({
+        id: "e-draft",
+        personId: "p-draft",
+        messageId: "m-d@test.com",
+      });
+      await createTestPerson({ id: "p-nodraft", email: "n@test.com" });
+      await createTestEmail({
+        id: "e-nodraft",
+        personId: "p-nodraft",
+        messageId: "m-n@test.com",
+      });
+      await getDb()
+        .insert(drafts)
+        .values(replyDraft("dr1", "test-user-1", "e-draft"));
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect(res.status).toBe(200);
+      const ids = (await res.json()).data.map((r: { id: string }) => r.id);
+      expect(ids).toContain("p-draft");
+      expect(ids).not.toContain("p-nodraft");
+    });
+
+    it("ignores the new-message compose draft (not a reply)", async () => {
+      await createTestPerson({ id: "p1", email: "a@test.com" });
+      await createTestEmail({
+        id: "e1",
+        personId: "p1",
+        messageId: "m1@test.com",
+      });
+      await getDb().insert(drafts).values({
+        id: "dc",
+        userId: "test-user-1",
+        contextKey: "compose",
+        replyToEmailId: null,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect((await res.json()).data).toHaveLength(0);
+    });
+
+    it("does not surface another user's reply draft", async () => {
+      await createTestPerson({ id: "p1", email: "a@test.com" });
+      await createTestEmail({
+        id: "e1",
+        personId: "p1",
+        messageId: "m1@test.com",
+      });
+      await createTestUser({ id: "other-user", email: "other@test.com" });
+      await getDb()
+        .insert(drafts)
+        .values(replyDraft("dr-other", "other-user", "e1"));
+
+      // Authenticated as test-user-1 — the other user's draft must not leak.
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect((await res.json()).data).toHaveLength(0);
+    });
+
+    it("shows a group conversation with a reply draft", async () => {
+      await createTestPerson({ id: "pg", email: "g@test.com" });
+      await createTestEmail({
+        id: "eg",
+        personId: "pg",
+        conversationId: "conv1",
+        messageId: "mg@test.com",
+      });
+      await getDb()
+        .insert(drafts)
+        .values(replyDraft("drg", "test-user-1", "eg"));
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      const data = (await res.json()).data as Array<{
+        id: string;
+        type: string;
+      }>;
+      const group = data.find((r) => r.id === "conv1");
+      expect(group?.type).toBe("group");
     });
   });
 });
