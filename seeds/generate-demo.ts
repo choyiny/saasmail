@@ -1,11 +1,15 @@
 /**
- * Generate seeds/demo.sql with realistic demo data:
- *   - 6 inboxes (kept stable so admin display-name UI works)
- *   - 100 people
+ * Generate seeds/demo.sql with realistic demo data for givefeedback.dev —
+ * a SaaS that turns client feedback sessions into dev-ready tasks.
+ *
+ *   - 5 inboxes: onboarding@, projects@, marketing@ (automated senders),
+ *     support@ and mahmoud@ (human inboxes, each with a signature)
+ *   - 100 customer contacts (agencies, studios, product teams)
  *   - 600-900 inbound emails (varied length, varied subject, ~25% unread)
  *   - 80-150 sent replies
  *   - CC roster (~20% of emails) + 5 roster-change demo threads
  *   - Attachments on ~15% of inbound emails (real fake fixtures)
+ *   - Branded email templates + drip sequences that tell the product story
  *
  * Run:  npx tsx seeds/generate-demo.ts
  * Then: yarn db:seed:dev
@@ -48,16 +52,55 @@ function sqlEscape(s: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Inboxes
+// Inboxes — the five addresses givefeedback.dev sends and receives from.
+//
+//   onboarding@ · projects@ · marketing@  → automated / templated senders
+//   support@ · mahmoud@                   → human inboxes, each carries a
+//                                            personal signature.
+//
+// Signatures are authored WITHOUT inline styles on purpose: the product's
+// signature sanitizer strips `style` attributes on save, so plain tags are
+// what a real admin ends up with.
 // ---------------------------------------------------------------------------
-const INBOXES = [
-  { email: "support@example.com", display: "Support" },
-  { email: "sales@example.com", display: "Sales" },
-  { email: "hello@example.com", display: "General" },
-  { email: "billing@example.com", display: "Billing" },
-  { email: "newsletter@example.com", display: "Newsletter" },
-  { email: "notifications@example.com", display: "Notifications" },
+const SUPPORT_SIGNATURE =
+  "<p><strong>GiveFeedback Support</strong></p>" +
+  "<p>We usually reply within a few hours.<br/>" +
+  '<a href="https://givefeedback.dev/docs">Docs</a> &middot; ' +
+  '<a href="https://givefeedback.dev">givefeedback.dev</a></p>';
+
+const MAHMOUD_SIGNATURE =
+  "<p><strong>Mahmoud Halat</strong><br/>Founder, GiveFeedback</p>" +
+  '<p><a href="https://givefeedback.dev">givefeedback.dev</a> &middot; ' +
+  '<a href="https://spaceandstory.co">spaceandstory.co</a></p>';
+
+interface Inbox {
+  email: string;
+  display: string;
+  signature?: string;
+}
+
+const INBOXES: Inbox[] = [
+  { email: "onboarding@givefeedback.dev", display: "GiveFeedback Onboarding" },
+  { email: "projects@givefeedback.dev", display: "GiveFeedback Projects" },
+  { email: "marketing@givefeedback.dev", display: "GiveFeedback Updates" },
+  {
+    email: "support@givefeedback.dev",
+    display: "GiveFeedback Support",
+    signature: SUPPORT_SIGNATURE,
+  },
+  {
+    email: "mahmoud@givefeedback.dev",
+    display: "Mahmoud Halat",
+    signature: MAHMOUD_SIGNATURE,
+  },
 ];
+
+// Inboxes that receive inbound customer mail. onboarding@ is outbound-only —
+// it only sends the branded welcome / first-steps templates, so nobody
+// "emails onboarding@" and it's excluded from the inbound generator.
+const INBOUND_INBOXES = INBOXES.filter(
+  (i) => i.email !== "onboarding@givefeedback.dev",
+);
 
 // ---------------------------------------------------------------------------
 // Name + domain pools (stay short — total combos are still huge)
@@ -150,7 +193,6 @@ const LAST_NAMES = [
   "Chen",
   "Prince",
   "Novak",
-  "Halat",
   "Patel",
   "Tanaka",
   "Kowalski",
@@ -184,23 +226,25 @@ const LAST_NAMES = [
   "Mendez",
   "Sato",
 ];
+// Customers of givefeedback.dev — agencies, studios, and product teams who
+// embed the feedback widget on the sites they build for their clients.
 const DOMAINS = [
-  "acme.co",
-  "globex.io",
-  "initech.dev",
-  "hooli.com",
-  "piedpiper.ai",
-  "soylent.corp",
-  "dundermifflin.com",
-  "wayne.enterprises",
-  "northwind.co",
-  "stark.industries",
-  "umbrella.med",
-  "tyrell.tech",
-  "weyland.space",
-  "aperture.science",
-  "vandelay.imp",
-  "orbis.health",
+  "pixelcraft.studio",
+  "northlight.agency",
+  "brightfold.co",
+  "forgeworks.dev",
+  "oakhouse.design",
+  "tandemlabs.io",
+  "meridian.studio",
+  "driftwood.agency",
+  "cascadeapp.co",
+  "loomandlens.com",
+  "hearthside.dev",
+  "sablecreative.co",
+  "novaworks.io",
+  "quietwolf.studio",
+  "makersyard.com",
+  "verdant.design",
 ];
 
 // ---------------------------------------------------------------------------
@@ -210,25 +254,24 @@ const DOMAINS = [
 type CcEntry = { email: string; name?: string | null };
 
 const INTERNAL_TEAM: CcEntry[] = [
-  { email: "lin@example.com", name: "Lin Park" },
-  { email: "pavel@example.com", name: "Pavel Novak" },
-  { email: "maya@example.com", name: "Maya Iyer" },
-  { email: "diego@example.com", name: "Diego Cruz" },
-  { email: "ren@example.com", name: "Ren O'Brien" },
-  { email: "sam@example.com", name: "Sam Liu" },
+  { email: "mahmoud@givefeedback.dev", name: "Mahmoud Halat" },
+  { email: "support@givefeedback.dev", name: "GiveFeedback Support" },
+  { email: "nadia@givefeedback.dev", name: "Nadia Reyes" },
+  { email: "owen@givefeedback.dev", name: "Owen Walsh" },
+  { email: "priya@givefeedback.dev", name: "Priya Iyer" },
 ];
 
 const EXTERNAL_COLLABORATORS: CcEntry[] = [
-  { email: "carla.martinez@acme.co", name: "Carla Martinez" },
-  { email: "bob.schmidt@globex.io", name: "Bob Schmidt" },
-  { email: "rosa.garcia@initech.dev", name: "Rosa Garcia" },
-  { email: "henry.wayne@hooli.com", name: "Henry Wayne" },
-  { email: "kim.chen@piedpiper.ai", name: "Kim Chen" },
-  { email: "olivia.prince@stark.industries", name: "Olivia Prince" },
-  { email: "tariq.khan@legal.acme.co", name: "Tariq Khan" },
-  { email: "priya.singh@procurement.globex.io", name: "Priya Singh" },
-  { email: "marcus.cohen@northwind.co", name: "Marcus Cohen" },
-  { email: "yuki.sato@orbis.health", name: "Yuki Sato" },
+  { email: "carla.martinez@pixelcraft.studio", name: "Carla Martinez" },
+  { email: "bob.schmidt@northlight.agency", name: "Bob Schmidt" },
+  { email: "rosa.garcia@brightfold.co", name: "Rosa Garcia" },
+  { email: "henry.wayne@forgeworks.dev", name: "Henry Wayne" },
+  { email: "kim.chen@tandemlabs.io", name: "Kim Chen" },
+  { email: "olivia.prince@meridian.studio", name: "Olivia Prince" },
+  { email: "tariq.khan@oakhouse.design", name: "Tariq Khan" },
+  { email: "priya.singh@driftwood.agency", name: "Priya Singh" },
+  { email: "marcus.cohen@cascadeapp.co", name: "Marcus Cohen" },
+  { email: "yuki.sato@loomandlens.com", name: "Yuki Sato" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -255,579 +298,522 @@ type GroupThread = {
 };
 
 const GROUP_THREADS: GroupThread[] = [
-  // 1) Billing dispute — invoice line items
+  // 1) Support bug — Safari click capture (dev + PM + designer)
   {
-    inbox: "billing@example.com",
+    inbox: "support@givefeedback.dev",
     externals: [
-      { email: "elena.varga@acme.co", name: "Elena Varga" },
-      { email: "tomas.reiner@acme.co", name: "Tomas Reiner" },
-      { email: "fiona.boyle@legal.acme.co", name: "Fiona Boyle" },
+      { email: "elena.varga@pixelcraft.studio", name: "Elena Varga" },
+      { email: "tomas.reiner@pixelcraft.studio", name: "Tomas Reiner" },
+      { email: "fiona.boyle@pixelcraft.studio", name: "Fiona Boyle" },
     ],
-    internalCcs: ["pavel@example.com", "lin@example.com"],
-    subject: "September invoice — line item discrepancy",
+    internalCcs: ["mahmoud@givefeedback.dev", "nadia@givefeedback.dev"],
+    subject: "Clicks not captured in Safari replays",
     messages: [
       {
         from: 0,
-        text: "Hi team — our September invoice came in $1,840 above last month and we can't reconcile the overage line. Can someone walk us through how the seat-add prorations were calculated? Looping in Tomas from finance.",
+        text: "Our client records their feedback in Safari and the replays are missing every click — voice and screen are fine, but the cursor never lands anywhere. Chrome sessions look perfect. Looping in Tomas, who set up the embed.",
         daysAgo: 12,
       },
       {
         from: 1,
-        text: "Adding context from finance: we added 12 seats on Sep 9 and 6 more on Sep 22. Both moves should have prorated against the annual term, not been billed at full month.",
+        text: "Embed is the standard one-line tag in our root layout, nothing custom. It reproduces on Safari 17.0 and 17.1, both desktop and iPad. Happy to share a session ID.",
         daysAgo: 12,
       },
       {
         from: "us",
-        text: "Thanks both — pulling the breakdown now. Quick check: is your plan on the legacy annual rate or the Sep 1 refresh? That changes the proration formula.",
+        text: "Thanks both — this looks like Safari dropping pointer events when the recorder runs inside a cross-origin iframe. Pulling a fix now. Quick check: is the widget embedded directly on the page, or inside an iframe'd preview?",
         daysAgo: 11,
       },
       {
-        from: 0,
-        text: "Legacy annual, signed in March. Happy to forward the contract if helpful.",
+        from: 1,
+        text: "Directly on the page for production, but our client reviews inside a staging preview that is iframed. That would explain why our own tests passed.",
         daysAgo: 11,
       },
       {
         from: "us",
-        text: "Got it — confirmed the seat-adds were billed under the new formula by mistake. I'm issuing a credit of $1,290 to bring this in line with the legacy rate. Should appear on next month's invoice.",
+        text: "That's the one. We're shipping a patch that captures pointer events on the parent frame for Safari. Should land in tomorrow's widget release — no code change needed on your end, just a hard refresh.",
         daysAgo: 9,
       },
       {
         from: 2,
-        text: "Hi all — Fiona from Acme legal, just looped in. Before we close this out, can we get the credit memo in writing? Our auditors flag verbal credits.",
+        text: "Hi all — Fiona from the design side, just looped in. Once this is fixed, will the older sessions that missed clicks get them back, or only new recordings?",
         daysAgo: 9,
-        // Fiona joins late — roster expands.
         roster: [0, 1, 2],
       },
       {
         from: "us",
-        text: "Of course. Issuing the credit memo today; you'll get it as a PDF attachment from finance@. Sorry about the runaround.",
+        text: "Only new recordings, unfortunately — the click data was never captured for the old ones. Everything from the patched release forward will be complete.",
         daysAgo: 8,
         roster: [0, 1, 2],
       },
       {
         from: 0,
-        text: "Received and confirmed. Thanks for the quick turnaround — closing this out on our end.",
+        text: "Confirmed the new release captures clicks in the iframe'd preview now. Thanks for the quick turnaround — closing this on our side.",
         daysAgo: 7,
         roster: [0, 1, 2],
       },
     ],
   },
-  // 2) Legal review — DPA redlines
+  // 2) Sales — agency team rollout + white-label
   {
-    inbox: "sales@example.com",
+    inbox: "mahmoud@givefeedback.dev",
     externals: [
-      { email: "harriet.cole@hooli.com", name: "Harriet Cole" },
-      { email: "darius.weiss@hooli.com", name: "Darius Weiss" },
-      { email: "marina.flores@legal.acme.co", name: "Marina Flores" },
+      { email: "harriet.cole@northlight.agency", name: "Harriet Cole" },
+      { email: "darius.weiss@northlight.agency", name: "Darius Weiss" },
     ],
-    internalCcs: ["ren@example.com"],
-    subject: "DPA redlines for Hooli expansion",
+    internalCcs: ["nadia@givefeedback.dev"],
+    subject: "Rolling GiveFeedback out across our client sites",
     messages: [
       {
         from: 0,
-        text: "Sending over our redlines on the DPA for the expansion order. Most of the changes are in section 4 (sub-processors) and section 9 (audit rights). Marina from outside counsel is CC'd.",
+        text: "We run about 30 active client sites and want GiveFeedback on all of them. Two questions before we commit: is pricing per-project or per-seat, and can the widget be lightly white-labeled so it reads as ours to the client? Darius runs our ops.",
         daysAgo: 14,
       },
       {
         from: "us",
-        text: "Thanks Harriet — taking a look with our legal team today. First read: section 4 looks fine, section 9 we'll likely push back on the unannounced audit clause.",
+        text: "Great to hear it, Harriet. Pricing is per-project with unlimited viewers, so 30 sites is 30 projects regardless of how many of your people log in. White-label (your logo + accent on the widget) is on the Studio plan.",
         daysAgo: 14,
-      },
-      {
-        from: 2,
-        text: "Hi — Marina here. The unannounced audit clause is non-negotiable for our regulated customers, but we can scope it to a 30-day notice for non-regulated tenants. Would that work?",
-        daysAgo: 13,
-      },
-      {
-        from: "us",
-        text: "30-day notice works on our side. We'll mark up section 9 with that compromise and send it back tomorrow.",
-        daysAgo: 13,
       },
       {
         from: 1,
-        text: "Jumping in — Darius from procurement at Hooli. Once legal aligns, I'll need the final DPA in our vendor portal before we can countersign the order form. Just flagging the dependency.",
-        daysAgo: 12,
-        // Darius added — roster grows.
-        roster: [0, 1, 2],
+        text: "Ops question: when we hand a project off to a client at the end of an engagement, can we transfer ownership without losing the session history?",
+        daysAgo: 13,
       },
       {
         from: "us",
-        text: "Acknowledged — we'll upload directly to your portal once it's signed. Latest redline attached.",
-        daysAgo: 11,
-        roster: [0, 1, 2],
-      },
-      {
-        from: 2,
-        text: "Reviewed. One small edit on the sub-processor list (we're flagging Resend as a notification trigger only, not a primary processor). Otherwise good to sign.",
-        daysAgo: 9,
-        roster: [0, 1, 2],
-      },
-      {
-        from: "us",
-        text: "Edit accepted. Sending the clean version for signature now.",
-        daysAgo: 8,
-        roster: [0, 1, 2],
+        text: "Yes — projects can be transferred to another account and the full session + task history goes with them. We can also keep a read-only archive on your side if you want continuity.",
+        daysAgo: 13,
       },
       {
         from: 0,
-        text: "Signed and uploaded. Order form follows in a separate thread.",
-        daysAgo: 6,
-        roster: [0, 1, 2],
+        text: "That's exactly what we needed. Adding Darius to finalize — he'll set up the billing and the first ten projects this week.",
+        daysAgo: 11,
+        roster: [0, 1],
+      },
+      {
+        from: "us",
+        text: "Perfect. I'll send the Studio plan link and a short white-label setup guide. Ping me directly if anything's unclear during the first rollout.",
+        daysAgo: 11,
+        roster: [0, 1],
+      },
+      {
+        from: 1,
+        text: "First ten projects are live and the logo swap looks clean. We'll bring the rest over next sprint.",
+        daysAgo: 8,
+        roster: [0, 1],
       },
     ],
   },
-  // 3) Feature negotiation — SAML SSO scope
+  // 3) Support feature request — task export to Linear
   {
-    inbox: "sales@example.com",
+    inbox: "support@givefeedback.dev",
     externals: [
-      { email: "rajiv.kapur@piedpiper.ai", name: "Rajiv Kapur" },
-      { email: "sienna.holt@piedpiper.ai", name: "Sienna Holt" },
-      { email: "noor.haddad@piedpiper.ai", name: "Noor Haddad" },
+      { email: "rajiv.kapur@tandemlabs.io", name: "Rajiv Kapur" },
+      { email: "sienna.holt@tandemlabs.io", name: "Sienna Holt" },
+      { email: "noor.haddad@tandemlabs.io", name: "Noor Haddad" },
     ],
-    internalCcs: ["maya@example.com", "diego@example.com"],
-    subject: "SAML SSO requirements for Q1 rollout",
+    internalCcs: ["owen@givefeedback.dev"],
+    subject: "Push extracted tasks into Linear",
     messages: [
       {
         from: 0,
-        text: "We're targeting a Q1 rollout. Need to confirm SAML SSO covers SCIM provisioning, JIT user creation, and per-inbox group mapping. Sienna and Noor from our security team are CC'd.",
+        text: "The task extraction is genuinely great, but copy-pasting each one into Linear is where we lose the time we just saved. Any way to push a session's tasks straight into a Linear team? Sienna and Noor from engineering are CC'd.",
         daysAgo: 18,
       },
       {
         from: "us",
-        text: "All three are supported on Enterprise. SCIM via Okta/Azure, JIT is on by default, and group mapping is per-tenant configurable. Happy to walk through the admin UI on a call.",
+        text: "This is our most-requested integration and it's in build now. First version maps each extracted task to a Linear issue with the replay link, timestamp, and effort estimate in the description. Which fields matter most for your triage?",
         daysAgo: 18,
       },
       {
         from: 1,
-        text: "Quick clarification on JIT: when a user is deprovisioned upstream, how fast does access revoke on your side? We need < 5 minute SLA for SOC 2.",
+        text: "Effort estimate mapped to Linear's estimate points would be huge, and the replay link in the description is a must. If you can set the team and a default label, that covers 90% of our flow.",
         daysAgo: 17,
       },
       {
         from: "us",
-        text: "SCIM events propagate within 2 minutes typically, hard cap is 5 minutes by SLA. We can share the SOC 2 Type II report under NDA if helpful.",
+        text: "All three are in scope: team + default label are configurable per project, and we'll map effort to estimate points. Rolling out behind a flag next week — want early access?",
         daysAgo: 17,
       },
       {
         from: 2,
-        text: "Yes please on the SOC 2 report. Also — what's the disaster-recovery story for the SAML metadata itself? If your IdP-facing endpoint goes down, do we get cached metadata?",
+        text: "Noor here, I own our Linear workspace. Will this use a personal API token or a proper OAuth app? Security won't approve a shared personal token.",
         daysAgo: 16,
+        roster: [0, 1, 2],
       },
       {
         from: "us",
-        text: "Metadata is cached at the edge with a 24h TTL. If the origin is unreachable, in-flight sessions stay valid until natural expiry. Sending the SOC 2 report via secure share now.",
+        text: "OAuth app — you'll authorize GiveFeedback from Linear's integrations page, no tokens to paste. Scoped to issue creation only.",
         daysAgo: 15,
+        roster: [0, 1, 2],
       },
       {
         from: 0,
-        text: "Received. Looks good on our end. One more thing — can we get a sandbox tenant to test the SCIM bridge before we cutover?",
+        text: "That clears it with our security team. Sign us up for early access.",
         daysAgo: 13,
+        roster: [0, 1, 2],
       },
       {
         from: "us",
-        text: "Sandbox is provisioned: pp-sandbox.example.com. Credentials in the secure share. Ping us if you hit any issues.",
+        text: "You're on the early-access list — the flag is live on your account now. Let us know how the first sync goes.",
         daysAgo: 12,
-      },
-      {
-        from: 1,
-        text: "Tested SCIM — works. We're moving forward with the Q1 plan. Will send the signed order form tomorrow.",
-        daysAgo: 8,
+        roster: [0, 1, 2],
       },
     ],
   },
-  // 4) Procurement check — vendor security questionnaire
+  // 4) Partnership — Webflow marketplace app
   {
-    inbox: "sales@example.com",
+    inbox: "mahmoud@givefeedback.dev",
     externals: [
-      { email: "priya.singh@procurement.globex.io", name: "Priya Singh" },
-      { email: "kenji.yamada@globex.io", name: "Kenji Yamada" },
+      { email: "priya.singh@driftwood.agency", name: "Priya Singh" },
+      { email: "kenji.yamada@driftwood.agency", name: "Kenji Yamada" },
     ],
-    internalCcs: ["pavel@example.com"],
-    subject: "Vendor security questionnaire",
+    internalCcs: ["nadia@givefeedback.dev"],
+    subject: "Webflow marketplace integration",
     messages: [
       {
         from: 0,
-        text: "Hi — Priya from Globex procurement. Attaching our vendor security questionnaire (97 questions, sorry). Need it back by EOW to keep the renewal on track.",
-        daysAgo: 9,
+        text: "We ship a couple of Webflow apps and think GiveFeedback would be a natural marketplace listing — one-click install of the widget on any Webflow site. Would you be open to co-building it? Kenji is our lead dev on the Webflow side.",
+        daysAgo: 19,
       },
       {
         from: "us",
-        text: "Got it — most of these we can copy from our existing trust portal. Will turn around by Thursday.",
-        daysAgo: 9,
+        text: "Love this. A Webflow one-click install would remove the only friction our agency users hit. What does the integration surface look like on your end — a designer extension, a site-settings injection, or both?",
+        daysAgo: 18,
       },
       {
         from: 1,
-        text: "Adding our InfoSec lead Kenji to the thread. He'll review the responses before they go to legal.",
-        daysAgo: 8,
-        roster: [0, 1],
+        text: "Site-settings injection is the clean path: we drop the widget script into the custom-code head field and pass the project key. No per-page work for the user. We'd need a stable embed URL and a way to mint project keys via API.",
+        daysAgo: 18,
       },
       {
         from: "us",
-        text: "Welcome Kenji. Filled questionnaire attached. Highlights: SOC 2 Type II current, ISO 27001 in progress (cert expected Q2), pen test report from August available under NDA.",
-        daysAgo: 7,
-        roster: [0, 1],
-      },
-      {
-        from: 1,
-        text: "Reviewed. Two follow-ups: question 47 on encryption-at-rest needs the KMS provider name, and question 82 on incident response wants the on-call rotation size.",
-        daysAgo: 6,
-        roster: [0, 1],
-      },
-      {
-        from: "us",
-        text: "47: AWS KMS, customer-managed keys available on Enterprise. 82: 6-engineer on-call rotation, 24/7 coverage with < 15min P1 ack SLA.",
-        daysAgo: 6,
-        roster: [0, 1],
+        text: "We can expose a project-provisioning endpoint for you so the app creates a project and returns the key in one call. Embed URL is already stable. Want to scope a v1 on a call next week?",
+        daysAgo: 17,
       },
       {
         from: 0,
-        text: "All clear from procurement side. Renewal is good to go.",
-        daysAgo: 4,
+        text: "Yes — Tuesday or Wednesday works. If v1 lands well, we'd feature it in our next Webflow newsletter (~9k designers).",
+        daysAgo: 16,
+        roster: [0, 1],
+      },
+      {
+        from: "us",
+        text: "Wednesday it is. I'll bring our API docs and a sandbox key so Kenji can start wiring the provisioning call the same day.",
+        daysAgo: 16,
+        roster: [0, 1],
+      },
+      {
+        from: 1,
+        text: "Provisioning call works against the sandbox — got a project + key back on the first try. We'll have a rough install flow to demo by Friday.",
+        daysAgo: 13,
+        roster: [0, 1],
       },
     ],
   },
-  // 5) Outage post-mortem follow-up
+  // 5) Support bug — recordings truncated + retention
   {
-    inbox: "support@example.com",
+    inbox: "support@givefeedback.dev",
     externals: [
-      { email: "alec.briggs@northwind.co", name: "Alec Briggs" },
-      { email: "irina.popov@northwind.co", name: "Irina Popov" },
-      { email: "mateo.santos@northwind.co", name: "Mateo Santos" },
+      { email: "alec.briggs@cascadeapp.co", name: "Alec Briggs" },
+      { email: "irina.popov@cascadeapp.co", name: "Irina Popov" },
+      { email: "mateo.santos@cascadeapp.co", name: "Mateo Santos" },
     ],
-    internalCcs: ["sam@example.com"],
-    subject: "Follow-up on Tuesday's outage — RCA needed",
+    internalCcs: ["mahmoud@givefeedback.dev"],
+    subject: "Recordings cut off at three minutes",
     messages: [
       {
         from: 0,
-        text: "We got hit by Tuesday's 23-minute outage and lost about 4,000 inbound messages from a partner integration. Need a full RCA and a plan to prevent recurrence before our next exec review.",
+        text: "Our client's longer walkthroughs keep getting truncated around the three-minute mark — the transcript stops mid-sentence and the replay ends. It's happened on our two most active projects this week. We're losing the most detailed feedback.",
         daysAgo: 5,
       },
       {
         from: "us",
-        text: "Understood — sorry for the impact. RCA is being drafted now; expect it by Friday. Re: the lost messages: those should be in our retry queue, will confirm and replay them today.",
+        text: "Sorry about that — three minutes is the default per-session cap on the Starter plan, and it should warn the recorder before it hits, not cut silently. Two things: we're raising the cap to fifteen minutes on your plan today, and we're fixing the missing warning.",
         daysAgo: 5,
       },
       {
         from: 1,
-        text: "Thanks. Adding Mateo from our partner engineering team — he'll be the technical contact for the replay.",
+        text: "Thanks. Adding Mateo, who manages the projects — he'll confirm once the longer recordings come through.",
         daysAgo: 5,
         roster: [0, 1, 2],
       },
       {
         from: "us",
-        text: "Replay completed at 14:32 UTC. 3,841 messages restored, 159 were over the 7-day retry window and we're investigating those manually.",
+        text: "Cap is raised on your account now. The two truncated sessions can't be recovered past the cut, but everything recorded from here will run the full length.",
         daysAgo: 4,
         roster: [0, 1, 2],
       },
       {
         from: 2,
-        text: "Confirmed receipt of the 3,841. For the 159 — can you share which sender domains they came from? We can cross-reference against our partner logs.",
+        text: "Confirmed — just captured a nine-minute session end to end, transcript and replay both complete. One follow-up: how long are replays retained before the links expire?",
         daysAgo: 4,
         roster: [0, 1, 2],
       },
       {
         from: "us",
-        text: "Sent the breakdown via secure share. Most are from two partners; one partner's retry config was overly aggressive and exhausted before our backend recovered.",
+        text: "Replays are kept for 90 days on your plan, and you can export any session's video + tasks before then. We're adding a per-project retention setting next month for teams that need longer.",
         daysAgo: 3,
         roster: [0, 1, 2],
       },
       {
         from: 0,
-        text: "RCA looks thorough. Approving the incident as resolved on our side. Will share the summary with our exec team.",
+        text: "That works for us. Appreciate the fast fix — resolved on our end.",
         daysAgo: 2,
       },
     ],
   },
-  // 6) Onboarding kick-off (3 externals + 1 internal)
+  // 6) Support — studio getting the widget onto client sites (install help)
   {
-    inbox: "hello@example.com",
+    inbox: "support@givefeedback.dev",
     externals: [
-      { email: "jana.kowalski@stark.industries", name: "Jana Kowalski" },
-      { email: "ravi.menon@stark.industries", name: "Ravi Menon" },
-      { email: "lucia.fernandez@stark.industries", name: "Lucia Fernandez" },
+      { email: "jana.kowalski@meridian.studio", name: "Jana Kowalski" },
+      { email: "ravi.menon@meridian.studio", name: "Ravi Menon" },
+      { email: "lucia.fernandez@meridian.studio", name: "Lucia Fernandez" },
     ],
-    internalCcs: ["maya@example.com"],
-    subject: "Stark onboarding — kickoff next steps",
+    internalCcs: ["priya@givefeedback.dev"],
+    subject: "Getting the widget onto all our client sites",
     messages: [
       {
         from: 0,
-        text: "Excited to get started. Looping in Ravi (engineering lead) and Lucia (ops). Can we schedule a kickoff next week and get the migration runbook?",
+        text: "Just signed up and excited to roll this out. We build in a mix of Next.js and Webflow. Looping in Ravi (engineering) and Lucia (client ops) so we can get the widget live everywhere this week.",
         daysAgo: 11,
       },
       {
         from: "us",
-        text: "Welcome! Sent a calendar hold for Tuesday 10am PT. Runbook attached — it covers the three migration phases and the rollback path.",
+        text: "Welcome aboard! Quick map: Next.js sites get the one-line script tag in the root layout; Webflow sites get it in the site-wide custom-code head field. One project per site keeps sessions cleanly separated. Happy to review your first install.",
         daysAgo: 11,
       },
       {
         from: 1,
-        text: "Quick technical question — does the runbook assume single-region or are you moving us to the multi-region setup from day one?",
+        text: "For the Next.js App Router — root layout as a normal script tag, or do we need the next/script component with a strategy?",
         daysAgo: 10,
       },
       {
         from: "us",
-        text: "Single-region for phase 1 (US-East), multi-region added in phase 3 once we've validated the inbound flow. Splitting that out keeps the rollback simple.",
+        text: 'next/script with strategy="afterInteractive" in the root layout is ideal — it loads on every route without blocking render. Drop the project key as a data attribute and you\'re set.',
         daysAgo: 10,
       },
       {
         from: 2,
-        text: "From the ops side: who owns DNS during the cutover? We can either do it ourselves or hand off — depends on your usual process.",
+        text: "Client-ops side: we want clients leaving feedback but not poking around the dashboard. What's the cleanest way to bring a client in?",
         daysAgo: 9,
       },
       {
         from: "us",
-        text: "Either works. If you keep DNS, we'll provide the records and timing; if you hand off, we manage it via a temporary delegation. Most enterprise customers prefer to keep it.",
+        text: "Clients don't need an account at all — they just record on the site via the widget. For reviewing sessions, send them a per-session viewer link; it's read-only and doesn't consume a seat.",
         daysAgo: 9,
       },
       {
         from: 0,
-        text: "Let's keep DNS on our side. See you Tuesday.",
+        text: "That's simpler than we expected. First three sites are live and recording. Thanks for the hand-holding.",
         daysAgo: 8,
       },
     ],
   },
-  // 7) Feature request triage — chat-mode rollout
+  // 7) Support — tuning AI task extraction (multi-person feedback)
   {
-    inbox: "support@example.com",
+    inbox: "support@givefeedback.dev",
     externals: [
-      { email: "deepa.rao@umbrella.med", name: "Deepa Rao" },
-      { email: "hugo.lefevre@umbrella.med", name: "Hugo Lefevre" },
-      { email: "anika.osei@umbrella.med", name: "Anika Osei" },
-      { email: "petr.zelinka@umbrella.med", name: "Petr Zelinka" },
+      { email: "deepa.rao@oakhouse.design", name: "Deepa Rao" },
+      { email: "hugo.lefevre@oakhouse.design", name: "Hugo Lefevre" },
+      { email: "anika.osei@oakhouse.design", name: "Anika Osei" },
+      { email: "petr.zelinka@oakhouse.design", name: "Petr Zelinka" },
     ],
-    internalCcs: ["lin@example.com", "diego@example.com"],
-    subject: "Chat-mode UI for support inboxes — feedback",
+    internalCcs: ["nadia@givefeedback.dev", "owen@givefeedback.dev"],
+    subject: "Tuning task extraction for our sessions",
     messages: [
       {
         from: 0,
-        text: "We've been on the chat-mode beta for a week and have collated feedback from our 14-person support team. Top three asks: keyboard-only navigation, per-conversation sound toggles, and a way to surface roster changes more clearly.",
+        text: "We've run about 40 sessions and the task extraction is strong, but it under-splits: when a client asks for three related changes in one breath, it often lands as a single task. We'd rather have three granular tasks. Sharing team feedback below.",
         daysAgo: 16,
       },
       {
         from: 1,
-        text: "Adding to that — the avatar overlap at 5+ participants gets visually noisy. We'd love an option to collapse to 'X others' after the first three.",
+        text: 'Adding to that — it sometimes turns a passing comment ("oh and I like this color") into a task. A little more precision on what counts as a request would cut the noise.',
         daysAgo: 16,
       },
       {
         from: "us",
-        text: "Great feedback — keyboard nav is on the roadmap for next sprint, sound toggles we can ship behind a flag this week, and roster-change UI is shipping today actually (RosterDiffNotice component, will appear inline).",
+        text: "Really useful — both are on our radar. Granularity: we're adding a per-project setting for how aggressively to split multi-part requests. Precision: the next model pass ignores affirmations and only extracts actionable asks. Want to try the new extraction on a few past sessions?",
         daysAgo: 15,
       },
       {
         from: 2,
-        text: "Anika here, design lead. Curious what the roster-change UI looks like — is it a banner, a chip, or inline text? Happy to share our redlines if you want a second opinion.",
+        text: "Anika, design lead — yes please. Can we re-run extraction on an existing session without losing the tasks we've already triaged?",
         daysAgo: 15,
       },
       {
         from: "us",
-        text: "Inline pill above the message that triggered the change ('Joined: X. Left: Y'). Sending you a Loom of it now.",
+        text: "Re-running creates a fresh task set side-by-side so your triaged ones stay put — you keep whichever you prefer. Turned it on for your account; try it on a session and tell us if the split feels right.",
         daysAgo: 14,
       },
       {
         from: 3,
-        text: "Petr from engineering — when keyboard nav ships, can we get the keymap configurable? Half my team is on Vim bindings, half on default.",
+        text: "Petr from engineering — when the granularity setting ships, can it be set via API? We provision projects programmatically and don't want to click through each one.",
         daysAgo: 13,
         roster: [0, 1, 2, 3],
       },
       {
         from: "us",
-        text: "Configurable keymap is a yes — we'll ship default + Vim out of the box, with a JSON override for power users.",
+        text: "Yes — it'll be a field on the project-update endpoint, so you can set it at provision time. Shipping with the same release.",
         daysAgo: 13,
-        roster: [0, 1, 2, 3],
-      },
-      {
-        from: 2,
-        text: "Saw the Loom. The pill placement is great. One nit: the icon for 'left' reads a little aggressive — we'd suggest a softer chevron-out instead of an X.",
-        daysAgo: 12,
-        roster: [0, 1, 2, 3],
-      },
-      {
-        from: "us",
-        text: "Good call, swapping the icon. Should be live in tomorrow's deploy.",
-        daysAgo: 11,
         roster: [0, 1, 2, 3],
       },
       {
         from: 0,
-        text: "Thanks all. We'll keep funneling feedback as we expand the rollout to more reps.",
+        text: "Re-ran three sessions and the granular split is exactly right. The noise from affirmations is gone too. Great work — we'll keep sending notes as we scale up.",
         daysAgo: 9,
       },
     ],
   },
-  // 8) Procurement / RFP — multi-vendor evaluation
+  // 8) Sales — reseller terms across a joint agency eval
   {
-    inbox: "sales@example.com",
+    inbox: "mahmoud@givefeedback.dev",
     externals: [
-      { email: "priya.singh@procurement.globex.io", name: "Priya Singh" },
-      { email: "olu.adebayo@globex.io", name: "Olu Adebayo" },
-      { email: "tariq.khan@legal.acme.co", name: "Tariq Khan" },
+      { email: "priya.rendon@makersyard.com", name: "Priya Rendon" },
+      { email: "olu.adebayo@makersyard.com", name: "Olu Adebayo" },
+      { email: "tariq.khan@oakhouse.design", name: "Tariq Khan" },
     ],
-    internalCcs: ["pavel@example.com"],
-    subject: "RFP response — Globex / Acme joint deployment",
+    internalCcs: ["nadia@givefeedback.dev"],
+    subject: "Reseller terms for our retainer clients",
     messages: [
       {
         from: 0,
-        text: "Joint RFP for the Globex/Acme deployment. We're evaluating three vendors. Tariq from Acme legal is leading the contract review side; Olu is the technical evaluator on Globex's end.",
+        text: "We bundle a fixed toolset into every monthly retainer and want GiveFeedback in it. Looking for reseller terms — we'd own the client relationship and billing. Olu handles our tooling; Tariq at a partner studio is evaluating alongside us.",
         daysAgo: 21,
       },
       {
         from: "us",
-        text: "Thanks for including us. Will send our full RFP response by next Friday — let me know if there are any sections you'd like us to prioritize.",
+        text: "Happy to set this up. Reseller works two ways with us: you pay wholesale and bill your client directly, or we bill and pay you a referral share. For bundled retainers most agencies pick wholesale. What's the deciding factor for you?",
         daysAgo: 21,
       },
       {
         from: 1,
-        text: "Section 4 (architecture) and section 6 (data residency) are the deciding factors for us. Everything else we can read async.",
+        text: "Wholesale, so it's invisible in the retainer. Two things matter: a single monthly invoice across all client projects, and being able to add or remove projects mid-month without a support ticket each time.",
         daysAgo: 20,
       },
       {
         from: "us",
-        text: "Noted — we'll lead with those two. Quick question for residency: do you have a hard requirement for EU-only or is EU-primary with US-failover acceptable?",
+        text: "Both supported — one consolidated monthly invoice, and project add/remove is self-serve from the reseller dashboard with proration. Sending the wholesale rate card now.",
         daysAgo: 20,
       },
       {
         from: 2,
-        text: "From legal: EU-primary with US-failover is acceptable as long as the failover is documented and triggers an in-region notification. GDPR Art. 28(3) compliance is the bar.",
+        text: "Tariq here. If our studio joins the same reseller account later, can our projects be kept separate for our own client reporting?",
         daysAgo: 19,
+        roster: [0, 1, 2],
       },
       {
         from: "us",
-        text: "All set on Art. 28(3). RFP response delivered today. Sections 4 and 6 are the first 18 pages.",
+        text: "Yes — sub-accounts under one reseller keep projects and reporting separate while rolling up to a single invoice. That covers a multi-studio setup cleanly.",
+        daysAgo: 18,
+        roster: [0, 1, 2],
+      },
+      {
+        from: 0,
+        text: "Rate card looks good. We'll start with eight projects this month and grow from there. Sending the signed reseller agreement today.",
         daysAgo: 14,
       },
       {
-        from: 1,
-        text: "Reviewed section 4. The architecture diagram on page 11 has a discrepancy with the description on page 9 — can you clarify whether ingress is single or multi-tenant on the inbound side?",
-        daysAgo: 13,
-      },
-      {
         from: "us",
-        text: "Multi-tenant ingress with per-tenant routing — page 9 description is correct, the diagram label was stale. Updated diagram attached.",
+        text: "Received and countersigned — your reseller dashboard is provisioned. Add the eight projects whenever you're ready.",
         daysAgo: 12,
-      },
-      {
-        from: 0,
-        text: "We've narrowed it to two finalists; you're one of them. Final pitch slot is next week, Tuesday or Thursday.",
-        daysAgo: 7,
-      },
-      {
-        from: "us",
-        text: "Tuesday works. We'll bring our solutions architect and have a live demo of the multi-region setup.",
-        daysAgo: 7,
       },
     ],
   },
-  // 9) Partnership / co-marketing
+  // 9) Partnership — co-marketing webinar
   {
-    inbox: "hello@example.com",
+    inbox: "mahmoud@givefeedback.dev",
     externals: [
-      { email: "wren.callahan@piedpiper.ai", name: "Wren Callahan" },
-      { email: "soren.bakke@hooli.com", name: "Soren Bakke" },
+      { email: "wren.callahan@tandemlabs.io", name: "Wren Callahan" },
+      { email: "soren.bakke@forgeworks.dev", name: "Soren Bakke" },
     ],
-    internalCcs: ["maya@example.com", "ren@example.com"],
-    subject: "Co-marketing webinar — joint Q&A format",
+    internalCcs: ["nadia@givefeedback.dev", "priya@givefeedback.dev"],
+    subject: "Joint webinar — feedback ops for agencies",
     messages: [
       {
         from: 0,
-        text: "Wanted to float a co-marketing idea: a joint webinar between us, Hooli, and you on the topic of 'modern email infrastructure for AI-native teams.' Soren from Hooli is interested and CC'd.",
+        text: "Floating a co-marketing idea: a joint webinar on 'cutting client feedback rounds from days to hours' — us, GiveFeedback, and Soren's studio sharing real workflows. Soren's interested and CC'd.",
         daysAgo: 19,
       },
       {
         from: 1,
-        text: "Hooli's in if the format is panel + audience Q&A rather than alternating slides. Speakers are easier to recruit for that.",
+        text: "We're in if it's a panel with live audience Q&A rather than alternating slide decks — easier to keep candid and easier to recruit speakers for.",
         daysAgo: 18,
       },
       {
         from: "us",
-        text: "Love the panel format. Proposing 4 panelists (one per company plus a moderator), 30 minutes panel, 20 minutes Q&A, 10 minutes wrap. Mid-November target?",
+        text: "Panel format is perfect. Proposal: four panelists (one per company plus a moderator), 30 min discussion, 20 min Q&A. We'll bring anonymized before/after data on feedback-round times. Mid-November?",
         daysAgo: 18,
       },
       {
         from: 0,
-        text: "Mid-November works. Wren can moderate if that's helpful — I've MC'd two of these for AI conferences and it usually frees the company panelists to be more candid.",
+        text: "Mid-November works. Wren can moderate — I've MC'd a few of these and it frees the company panelists to be candid.",
         daysAgo: 17,
       },
       {
         from: "us",
-        text: "Sold. Drafting the run-of-show this week and will share for review. We'll also handle the registration page.",
+        text: "Sold. We'll draft the run-of-show and stand up the registration page with all three logos and per-company UTM tags so everyone can track their own signups.",
         daysAgo: 16,
       },
       {
         from: 1,
-        text: "Hooli will cover paid promotion in our newsletter (~80k subscribers). Can we get a co-branded landing page or are we sending traffic to a unified one?",
+        text: "We'll promote it to our list (~11k designers and agency owners). Unified landing page is fine as long as we each get our UTM.",
         daysAgo: 15,
+        roster: [0, 1],
       },
       {
         from: "us",
-        text: "Unified landing with all three logos and per-company UTM tags so we can each track signups. Fair?",
+        text: "Done — UTMs are set per company. Draft run-of-show is in your inbox for review. Looking forward to it.",
         daysAgo: 15,
-      },
-      {
-        from: 0,
-        text: "Fair. Looking forward to it.",
-        daysAgo: 14,
+        roster: [0, 1],
       },
     ],
   },
-  // 10) Migration / vendor consolidation
+  // 10) Projects — a studio's team working incoming feedback on a shared project
   {
-    inbox: "sales@example.com",
+    inbox: "projects@givefeedback.dev",
     externals: [
-      { email: "elena.varga@acme.co", name: "Elena Varga" },
-      { email: "yuki.sato@orbis.health", name: "Yuki Sato" },
-      { email: "bo.westwood@vandelay.imp", name: "Bo Westwood" },
+      { email: "yuki.sato@loomandlens.com", name: "Yuki Sato" },
+      { email: "bo.westwood@loomandlens.com", name: "Bo Westwood" },
+      { email: "clara.jung@loomandlens.com", name: "Clara Jung" },
     ],
-    internalCcs: ["sam@example.com"],
-    subject: "Consolidating three Acme business units onto one tenant",
+    internalCcs: ["owen@givefeedback.dev"],
+    subject: "Feedback rolling in on the Harbor redesign",
     messages: [
       {
         from: 0,
-        text: "We're consolidating Acme, Orbis, and Vandelay (recent acquisitions) onto a single tenant. Each has its own existing email setup — what does a phased migration look like?",
-        daysAgo: 24,
-      },
-      {
-        from: "us",
-        text: "Three options: (1) lift-and-shift each in turn, (2) parallel-run with gradual cutover, (3) net-new tenant with read-only archives. Most customers in your shape pick (2).",
-        daysAgo: 24,
+        text: "The Harbor redesign project got six new sessions overnight after we sent the client the staging link. Bo, can you extract tasks from the last three? I'll take the first three. Also flagging a question for GiveFeedback below.",
+        daysAgo: 8,
       },
       {
         from: 1,
-        text: "Yuki here from Orbis. Our compliance team needs the read-only archive to be HIPAA-eligible. Does option 2 preserve that?",
-        daysAgo: 23,
+        text: "On it. Two of mine had the client jumping between pages mid-sentence — the replay timeline makes it easy to follow, but is there a way to jump the transcript to a specific click?",
+        daysAgo: 8,
       },
       {
         from: "us",
-        text: "Yes — the archive lives on the same HIPAA-eligible tier as production. We sign a BAA covering both.",
-        daysAgo: 22,
+        text: "Yes — clicking any event on the replay timeline scrubs both the video and the transcript to that moment. There's also a keyboard step-through (left/right arrows) once a session is focused. That's usually faster for click-heavy sessions.",
+        daysAgo: 7,
       },
       {
         from: 2,
-        text: "Bo from Vandelay. Our setup is small (12 users) so I assume we go last? Our domain is also currently MX'd to a different provider — not sure how that affects sequencing.",
-        daysAgo: 21,
+        text: "Clara from the client-facing side, just joining. When we mark tasks done, does the client see status if we've shared the session link with them?",
+        daysAgo: 7,
+        roster: [0, 1, 2],
       },
       {
         from: "us",
-        text: "Vandelay last makes sense. The MX swap is independent of consolidation — we'll script the cutover so it's ~2 minutes of TTL-bounded propagation.",
-        daysAgo: 20,
+        text: "The read-only viewer link shows the session and its extracted tasks but not your internal status changes — clients see the feedback, not your task board. If you want to share progress, the project summary export is the cleaner artifact.",
+        daysAgo: 6,
+        roster: [0, 1, 2],
       },
       {
         from: 0,
-        text: "Phasing approved internally. Acme first (60 users) starting next month, Orbis 4 weeks later, Vandelay 4 weeks after that.",
-        daysAgo: 16,
-      },
-      {
-        from: "us",
-        text: "Locked in. Sending project plan + per-phase runbook. Kickoff call for Acme phase next Wednesday.",
-        daysAgo: 15,
-      },
-      {
-        from: 1,
-        text: "Confirmed for the Orbis phase. Will pre-stage our HIPAA addendum so it's signed before our cutover.",
-        daysAgo: 12,
-      },
-      {
-        from: 2,
-        text: "Vandelay confirmed for the final phase. I'll loop in our IT once we get within a month of cutover.",
-        daysAgo: 10,
+        text: "All six sessions are triaged and the tasks are in our sprint. The timeline-scrub tip saved us a ton of time — thanks. Muting this thread now that we're rolling.",
+        daysAgo: 5,
+        roster: [0, 1, 2],
       },
     ],
   },
@@ -838,7 +824,7 @@ const GROUP_THREADS: GroupThread[] = [
 // Computed for the seed because we can't await crypto.subtle here in a
 // synchronous code path; node:crypto's createHash is the equivalent.
 // ---------------------------------------------------------------------------
-const INTERNAL_DOMAIN = "example.com";
+const INTERNAL_DOMAIN = "givefeedback.dev";
 
 function computeConversationIdSync(
   inbox: string,
@@ -859,220 +845,191 @@ function computeConversationIdSync(
 // ---------------------------------------------------------------------------
 type Snippet = { subject: string; body: string };
 
+// support@ — bug reports, feature requests, and enhancement asks about the
+// widget, the recorder, task extraction, and the dashboard.
 const SUPPORT_SNIPPETS: Snippet[] = [
   {
-    subject: "Trouble logging in on mobile",
-    body: "I can't log into the iOS app after the latest update — it just hangs on the spinner. Desktop works fine. Tried reinstalling, no change.",
+    subject: "Widget isn't capturing clicks in Safari",
+    body: "Voice and screen record fine, but click events don't show up in the replay on Safari 17. Chrome is perfect. Anything we can toggle?",
   },
   {
-    subject: "Webhook deliveries failing intermittently",
-    body: "We're seeing 504s on about 3% of webhook deliveries to our /events endpoint. It's been happening for the past 48 hours. Sample request IDs attached.",
+    subject: "Feature request: push extracted tasks to Jira",
+    body: "The AI tasks are great but we live in Jira. Any way to send a session's tasks straight into a Jira project instead of copy-pasting?",
   },
   {
-    subject: "API rate limits unclear",
-    body: "What's the per-minute rate limit for the /messages endpoint on the Pro plan? The docs mention 60/s but our 429s suggest something lower.",
+    subject: "Recording cuts off after ~3 minutes",
+    body: "Longer client sessions get truncated around the three-minute mark. The transcript stops and the replay ends early. Repro on two projects.",
   },
   {
-    subject: "How do I rotate an API key without downtime?",
-    body: "Looking for the recommended way to rotate keys in production. Is there a grace-period overlap, or do I need to coordinate the swap myself?",
+    subject: "Can we self-host the widget script?",
+    body: "Our client's CSP blocks third-party scripts. Is there a self-hosted bundle or at least an SRI hash we can pin for app.givefeedback.dev/widget.js?",
   },
   {
-    subject: "Re: Trouble logging in on mobile",
-    body: "That worked — thank you! Force-quitting and reinstalling fixed it.",
+    subject: "AI missed half the tasks in a session",
+    body: "The transcript captured everything, but task extraction only pulled 2 of the 5 changes the client asked for. Session ID in the next message.",
   },
   {
-    subject: "Re: Webhook deliveries failing intermittently",
-    body: "Tried the retry flag — still seeing failures on the same three endpoints. Latest IDs in the next message.",
+    subject: "Re: Widget isn't capturing clicks in Safari",
+    body: "Still reproduces on Safari 17.1 after clearing the cache. Attached a screen recording of the missing clicks.",
   },
   {
-    subject: "Bug: timestamps off by one hour after DST",
-    body: "Since Sunday all our scheduled sends are firing an hour late. Looks like a TZ issue on your side. Account ID acme-7821.",
+    subject: "Feedback button clashes with our cookie banner",
+    body: "The widget sits under our cookie consent banner at the bottom-right. Can we move it or bump its z-index from the embed config?",
   },
   {
-    subject: "Export taking 30+ minutes",
-    body: "The CSV export for our last 90 days is timing out. Anything we can do about this? It used to take ~3 minutes.",
+    subject: "Transcription garbled for Spanish clients",
+    body: "Half our clients record in Spanish and the transcript comes back as broken English. Is there a language setting per project?",
   },
   {
-    subject: "Two-factor backup codes not working",
-    body: "I lost my phone and the backup codes I saved aren't being accepted. What's the recovery path?",
+    subject: "Enhancement: invite a client as a viewer",
+    body: "We'd love to share a single session replay with a client read-only, without giving them a full seat on the dashboard. Possible today?",
   },
   {
-    subject: "Outbound mail going to spam in Gmail",
-    body: "We set up DKIM and SPF as the docs suggested but our sends still land in spam at most Gmail addresses. DMARC is also passing.",
+    subject: "Replay links 404 after 30 days",
+    body: "Older session replays return a 404. Looks like a retention window — can we extend it, at least on the paid plan?",
   },
   {
-    subject: "Edge case in the threading logic",
-    body: "Replies from the same person to different inboxes are getting threaded together. Our customers think we're cross-routing emails internally.",
+    subject: 'Effort estimates always come back "M"',
+    body: "Every extracted task is tagged medium effort regardless of size. Is there a way to tune or turn off the estimate?",
   },
   {
-    subject: "Quick question on retention",
-    body: "How long are messages retained on the Free plan? Want to make sure we don't lose anything before upgrading.",
-  },
-];
-
-const SALES_SNIPPETS: Snippet[] = [
-  {
-    subject: "Enterprise pricing question",
-    body: "We're evaluating a few tools for our team of 50. Could you share enterprise pricing and whether SSO + audit logs are included?",
-  },
-  {
-    subject: "Demo request — multi-region rollout",
-    body: "Could we get a 30-min walkthrough? We're rolling out to teams in the EU and US and need to understand data residency options.",
-  },
-  {
-    subject: "RFP for procurement",
-    body: "Attached is our RFP. Looking for responses by end of month. Happy to clarify any sections — let me know.",
-  },
-  {
-    subject: "Quote follow-up",
-    body: "Thanks for the quote last week. I shared it internally; we have a few clarifying questions on the implementation timeline.",
-  },
-  {
-    subject: "Annual contract — need invoice in EUR",
-    body: "We're ready to sign on an annual plan but our finance team needs the invoice in EUR rather than USD. Is that supported?",
-  },
-  {
-    subject: "Considering a switch from Front",
-    body: "Hey — we're looking at moving off Front for our support team. Curious how migration goes; we have ~18 months of history.",
-  },
-  {
-    subject: "Discount for nonprofits?",
-    body: "We're a registered 501(c)(3). Is there any nonprofit discount available?",
-  },
-  {
-    subject: "How does seat counting work for shared inboxes?",
-    body: "If five reps share a support@ inbox, do we pay for one seat or five? The pricing page wasn't clear.",
-  },
-  {
-    subject: "Need a longer trial",
-    body: "The default 14-day trial is too short for our procurement cycle. Could we get an extension to 45 days?",
+    subject: "Enhancement: hotkey to start a recording",
+    body: "Our power users would love a keyboard shortcut to trigger the recorder instead of hunting for the button each time.",
   },
 ];
 
-const BILLING_SNIPPETS: Snippet[] = [
+// mahmoud@ — Mahmoud's inbox: sales inquiries, partnership pitches, and the
+// occasional investor / random note.
+const MAHMOUD_SNIPPETS: Snippet[] = [
   {
-    subject: "Invoice for September seems wrong",
-    body: "Our September invoice is $200 over the usual amount. Can you look into the line items?",
+    subject: "GiveFeedback for our agency (20 designers)",
+    body: "We run client work for ~30 sites and are evaluating GiveFeedback for all of them. Do you offer team pricing and any client-facing white-labeling?",
   },
   {
-    subject: "Switching from monthly to annual",
-    body: "Want to move our subscription to annual billing. Will the prorated credit just roll forward?",
+    subject: "Partnership — Webflow marketplace app?",
+    body: "We maintain a few Webflow apps and think GiveFeedback would be a natural listing. Open to co-building an integration?",
   },
   {
-    subject: "Update payment method",
-    body: "Old card expired and the auto-update didn't kick in. New card is in the portal — please re-run the failed charge when convenient.",
+    subject: "Podcast invite — the founder story",
+    body: "I host a small SaaS podcast and loved the widget. Would you come on to talk about going from Loom-chaos to structured feedback?",
   },
   {
-    subject: "VAT number for invoice",
-    body: "Could you add our VAT number (DE123456789) to upcoming invoices? Our finance team can't process them without it.",
+    subject: "Saw the Show HN — are you raising?",
+    body: "Congrats on the launch. I invest at pre-seed in dev-tools and would love 20 minutes if you're taking angel money.",
   },
   {
-    subject: "Refund request",
-    body: "We accidentally subscribed twice last month. Could one of the charges be refunded?",
+    subject: "Reselling GiveFeedback in our retainers",
+    body: "We bundle tools into monthly retainers for clients. Is there a reseller or referral arrangement we could set up?",
   },
   {
-    subject: "Receipts for 2025 tax filing",
-    body: "Need bulk-download of all our receipts from 2025 for tax filing. Is that exposed in the dashboard or do I have to email each time?",
-  },
-];
-
-const HELLO_SNIPPETS: Snippet[] = [
-  {
-    subject: "Quick intro",
-    body: "Hi! Just signed up — wanted to introduce ourselves. We're building a tools-for-creators app and are exploring email infrastructure.",
+    subject: "Integration idea: Figma comments → tasks",
+    body: "We live in Figma. A bridge that turns design comments into the same task format you extract from sessions would be huge. Worth exploring together?",
   },
   {
-    subject: "Partnership idea",
-    body: "We run a developer newsletter (~12k subs) and think there's a partnership opportunity. Open to chatting?",
+    subject: "Founding-agency discount?",
+    body: "We've been recommending GiveFeedback to every studio we know. Any chance of an early-adopter rate before we roll it out team-wide?",
   },
   {
-    subject: "Loving the product so far",
-    body: "Just wanted to say — the new threading view is a huge improvement. Saved us probably 40 minutes a day already.",
+    subject: "Quick question before we commit annually",
+    body: "We're ready to go annual but want to confirm session limits are per-project, not per-account. Can you clarify before we sign?",
   },
   {
-    subject: "Feature request: keyboard shortcut for archive",
-    body: "Would love a keyboard shortcut to archive a thread. Right now I have to click the menu every time.",
+    subject: "Guest post on modern client feedback",
+    body: "I write for a design ops newsletter. Would you co-author a piece on cutting feedback rounds from days to hours? Your data would carry it.",
   },
   {
-    subject: "Feedback after first week",
-    body: "We've been using it for a week. Two things slowing us down: the search is fuzzy in unhelpful ways, and there's no way to bulk-mark as read.",
+    subject: "Speaking slot at our design meetup?",
+    body: "We run a 200-person design meetup in Lisbon next month. Would you give a lightning talk on the feedback-to-tasks workflow?",
   },
 ];
 
-const NEWSLETTER_SNIPPETS: Snippet[] = [
+// projects@ — light inbound: replies to transactional feedback notifications.
+const PROJECTS_SNIPPETS: Snippet[] = [
   {
-    subject: "Weekly digest",
-    body: "Top three threads this week: Carla's webhook saga (resolved), Bob's enterprise quote (in progress), Alice's mobile bug (closed).",
+    subject: "Re: New feedback on your project",
+    body: "Got the notification — where do I turn this session into tasks? I see the replay but not the extract button.",
   },
   {
-    subject: "Product update — chat mode",
-    body: "We're rolling out chat-style rendering for support inboxes. If you want it on by default, ping us.",
+    subject: "Can I mute notifications for one project?",
+    body: "One of our busier projects is sending a lot of these. Is there a per-project notification toggle?",
   },
   {
-    subject: "Office hours Friday",
-    body: "Holding open office hours this Friday at 11am PT. Come ask anything — we'll be in the Slack #saasmail channel.",
+    subject: "Re: You got your first feedback 🎉",
+    body: "This is amazing. The replay plus the extracted tasks are exactly what we needed to skip the usual back-and-forth.",
   },
   {
-    subject: "Outage post-mortem",
-    body: "Yesterday's 23-minute outage was caused by a bad config push. Post-mortem here. Sorry for the trouble.",
+    subject: "Review link opened the wrong project",
+    body: "The 'Review session' button in the last email took me to a different project's session. Might be a mismatched link.",
+  },
+  {
+    subject: "Daily digest instead of per-session emails?",
+    body: "Could these be batched into one daily summary? We get several a day once a client gets going.",
   },
 ];
 
-const NOTIFICATIONS_SNIPPETS: Snippet[] = [
+// marketing@ — light inbound: replies to the monthly product update.
+const MARKETING_SNIPPETS: Snippet[] = [
   {
-    subject: "[CI] Build failed on main",
-    body: "Build #4521 failed: \"Cannot find module '@/lib/foo'\". Triggered by commit 8a3f2b9.",
+    subject: "Re: What's new this month — love the Jira export",
+    body: "Been waiting for this one. Wired it up in five minutes and our devs are thrilled. Thanks for shipping it.",
   },
   {
-    subject: "Domain verification successful",
-    body: "Your domain mail.acme.co is now verified. SPF, DKIM, and DMARC checks all passing.",
+    subject: "Unsubscribe please",
+    body: "Enjoy the product but I'm getting too much email. Please take me off the monthly updates.",
   },
   {
-    subject: "Daily summary — 14 unread",
-    body: "You have 14 unread messages across 4 inboxes. Oldest is 2 days old.",
+    subject: "When's the public API coming?",
+    body: "Saw the API teased at the bottom of the update. Any timeline? We'd like to pull sessions into our own dashboard.",
   },
   {
-    subject: "Webhook delivery quota at 80%",
-    body: "You've used 80% of your monthly webhook quota. Upgrade or wait until the cycle resets on the 1st.",
+    subject: "Re: Monthly update — small request",
+    body: "Could the changelog include a screenshot or two per feature? Hard to picture some of them from text alone.",
   },
   {
-    subject: "Login from new device",
-    body: "A new sign-in was detected from Chrome on macOS, San Francisco. If this wasn't you, rotate your password.",
-  },
-  {
-    subject: "Password expires in 7 days",
-    body: "Your account password is set to expire on Nov 12. Update it from settings to avoid being locked out.",
+    subject: "Best product update email I get",
+    body: "Just wanted to say these are actually worth reading. Short, specific, no fluff. Keep them coming.",
   },
 ];
 
 const INBOX_SNIPPETS: Record<string, Snippet[]> = {
-  "support@example.com": SUPPORT_SNIPPETS,
-  "sales@example.com": SALES_SNIPPETS,
-  "billing@example.com": BILLING_SNIPPETS,
-  "hello@example.com": HELLO_SNIPPETS,
-  "newsletter@example.com": NEWSLETTER_SNIPPETS,
-  "notifications@example.com": NOTIFICATIONS_SNIPPETS,
+  "support@givefeedback.dev": SUPPORT_SNIPPETS,
+  "mahmoud@givefeedback.dev": MAHMOUD_SNIPPETS,
+  "projects@givefeedback.dev": PROJECTS_SNIPPETS,
+  "marketing@givefeedback.dev": MARKETING_SNIPPETS,
 };
 
-// Padding text used to inflate "long" emails so we have a real range
-// of message lengths in the dataset (short / medium / long mix).
+// Extra sentences used to give "medium" and "long" emails a natural range of
+// lengths. inflateBody appends these WITHOUT repeating, so a body never
+// contains the same sentence twice — the pool is large enough to cover the
+// longest target on its own.
 const FILLER_LINES = [
-  "For context: we kicked off this initiative back in Q2 and have been iterating since.",
-  "Happy to jump on a call if it's easier than going back and forth in email.",
-  "I've also CC'd our team lead in case anyone else needs to weigh in.",
-  "Below is a more detailed breakdown of what we tried and the order we tried it in.",
-  "We can be flexible on timing — let us know what works on your end.",
-  "Just so you have the full picture, here's how this fits into our broader rollout plan.",
-  "I attached the relevant logs / screenshots / configs — let me know if you can't open them.",
-  "We're not blocked yet but it's becoming a recurring distraction during planning.",
-  "If it helps narrow things down, we can repro it deterministically on a fresh account too.",
-  "Open to suggestions on how to approach this differently if our framing is off.",
+  "For context, this has been on our radar for a couple of weeks now.",
+  "Happy to hop on a quick call if that's easier than going back and forth over email.",
+  "I've looped in a teammate in case they have more detail than I do.",
+  "Below is a little more detail on where we're coming from.",
+  "We're flexible on timing on our end, so just let us know what works for you.",
+  "Just so you have the full picture, here's how this fits into what we're building.",
+  "Happy to share more specifics or a quick example if that would help.",
+  "There's no real urgency on our side, but I wanted to get it in front of you.",
+  "Let me know the best way to take this forward from here.",
+  "Totally open to doing this differently if we're thinking about it the wrong way.",
+  "No huge rush, but it would help to have a rough sense of timing.",
+  "Let me know if you need anything else from our side.",
+  "A couple of people on our team have brought this up too, so it's not just me.",
+  "Thanks in advance — we really appreciate how responsive you've been.",
+  "For what it's worth, we've been genuinely impressed with the product so far.",
 ];
 
 function inflateBody(body: string, targetWords: number): string {
   const lines = [body];
-  while (lines.join(" ").split(/\s+/).length < targetWords) {
-    lines.push(pick(FILLER_LINES));
+  let words = body.split(/\s+/).filter(Boolean).length;
+  // Draw filler sentences without replacement so nothing repeats. Stop once
+  // we hit the target or run out of distinct filler.
+  const pool = [...FILLER_LINES];
+  while (words < targetWords && pool.length > 0) {
+    const line = pool.splice(Math.floor(rand() * pool.length), 1)[0];
+    lines.push(line);
+    words += line.split(/\s+/).filter(Boolean).length;
   }
   return lines.join("\n\n");
 }
@@ -1110,7 +1067,7 @@ function buildPeople(count: number): Person[] {
     }
     seen.add(email);
     const inboxCount = chance(0.5) ? 1 : chance(0.6) ? 2 : chance(0.7) ? 3 : 4;
-    const inboxes = pickN(INBOXES, inboxCount).map((i) => i.email);
+    const inboxes = pickN(INBOUND_INBOXES, inboxCount).map((i) => i.email);
     out.push({
       id: `p_${out.length.toString().padStart(3, "0")}`,
       email,
@@ -1256,16 +1213,21 @@ function buildEmails(people: Person[]): {
 
   for (const p of people) {
     for (const inbox of p.inboxes) {
-      // Heavy-tailed thread length: most are 1-3, some 4-8, a few 9-15.
+      // Thread length: most people send once or twice, some have a short
+      // back-and-forth, a few run longer. The hand-written GROUP_THREADS
+      // carry the genuinely long, coherent conversations.
       const r = rand();
       const threadLen =
-        r < 0.55 ? randInt(1, 3) : r < 0.9 ? randInt(4, 8) : randInt(9, 15);
-      const snippets = INBOX_SNIPPETS[inbox] ?? HELLO_SNIPPETS;
-      // Pick a base subject; replies reuse "Re: <subject>".
-      const base = pick(snippets);
-      const isAutomated =
-        inbox === "newsletter@example.com" ||
-        inbox === "notifications@example.com";
+        r < 0.6 ? randInt(1, 2) : r < 0.9 ? randInt(3, 5) : randInt(6, 9);
+      const snippets = INBOX_SNIPPETS[inbox] ?? SUPPORT_SNIPPETS;
+      // Give each message in the thread a DISTINCT snippet (shuffled, drawn
+      // without replacement) so a thread never repeats the same body. The
+      // first message sets the subject; replies reuse "Re: <subject>".
+      const ordered = pickN(snippets, snippets.length);
+      const base = ordered[0];
+      // marketing@ is a monthly blast: replies come in (kudos, unsubscribes)
+      // but we don't CC anyone, attach anything, or reply back from it.
+      const isAutomated = inbox === "marketing@givefeedback.dev";
       const threadIds: string[] = [];
 
       for (let i = 0; i < threadLen; i++) {
@@ -1277,17 +1239,20 @@ function buildEmails(people: Person[]): {
 
         const isFirst = i === 0;
         const subject = isFirst ? base.subject : `Re: ${base.subject}`;
-        // Body: pull a different snippet for follow-ups; vary length.
-        const snippet = isFirst ? base : pick(snippets);
-        // Length distribution: 30% short, 50% med, 20% long. Skew automated short.
+        // Distinct snippet per message (wraps only on unusually long threads).
+        const snippet = ordered[i % ordered.length];
+        // Length distribution: most messages are just the snippet (real
+        // support/sales mail is short), some get a sentence or two, a few run
+        // longer. Targets stay within the distinct-filler budget so bodies
+        // never repeat a sentence, and stay short enough to read naturally.
         const lengthRoll = rand();
         const targetWords = isAutomated
-          ? randInt(15, 40)
-          : lengthRoll < 0.3
-            ? randInt(20, 45)
-            : lengthRoll < 0.8
-              ? randInt(60, 140)
-              : randInt(180, 320);
+          ? randInt(12, 30)
+          : lengthRoll < 0.5
+            ? randInt(15, 35)
+            : lengthRoll < 0.9
+              ? randInt(45, 80)
+              : randInt(85, 125);
         const text = inflateBody(snippet.body, targetWords);
 
         // Read state: very recent emails skew unread.
@@ -1300,8 +1265,8 @@ function buildEmails(people: Person[]): {
             ? 1
             : 0;
 
-        // ~20% chance this email has CCs (skip automated newsletter/
-        // notifications inboxes — those are blast lists, not conversations).
+        // ~20% chance this email has CCs (skip the automated marketing@
+        // blast — those are broadcast replies, not conversations).
         const cc = !isAutomated && chance(0.2) ? pickCcRoster() : undefined;
 
         const emailId = `e_${eId.toString().padStart(4, "0")}`;
@@ -1598,10 +1563,40 @@ function buildGroupThreads(
 // ---------------------------------------------------------------------------
 // Email templates + sequences
 // ---------------------------------------------------------------------------
-// Demo templates the operator can pick from in the reply composer +
-// sequence builder. Body HTML stays minimal (no inline styles) so the
-// SettingsPage / templates list renders cleanly. Variables follow the
-// {{name}} convention the interpolate helper expects.
+// Branded email templates the operator picks from in the reply composer +
+// sequence builder. These carry the full GiveFeedback look (Inter, the lime
+// #BFFF00 accent, the footer) so the demo shows real transactional email, not
+// bare <p> tags. Variables follow the {{name}} convention the interpolate
+// helper expects. The little brand helpers below keep the markup DRY.
+// ---------------------------------------------------------------------------
+const BRAND_MARK =
+  '<p style="margin: 0 0 16px 0; font-size: 14px; font-weight: 800; letter-spacing: -0.3px; text-transform: uppercase; color: #0A0A0A;">✦ GIVEFEEDBACK</p>';
+
+const BRAND_BODY_OPEN = (padY: number) =>
+  `<div style="background-color: #F2F0ED; font-family: Inter, system-ui, sans-serif; font-size: 15px; line-height: 1.75; color: #0A0A0A; padding: ${padY}px 28px; text-align: left;">`;
+
+const BRAND_BODY_CLOSE = "</div>";
+
+const BRAND_PREHEADER = (text: string) =>
+  `<span style="display:none;max-height:0;overflow:hidden;">${text}</span>`;
+
+const BRAND_CTA = (href: string, label: string) =>
+  `<p style="margin: 0 0 28px 0; text-align: center;"><a rel="noopener noreferrer" href="${href}" target="_blank" style="color: #0A0A0A; background-color: #BFFF00; border-radius: 8px; display: inline-block; padding: 10px 24px; text-decoration: none; font-weight: 700; font-size: 14px;">${label}</a></p>`;
+
+const BRAND_MANAGE_NOTE =
+  '<p style="margin: 0; color: rgba(10,10,10,0.35); font-size: 12px; text-align: center;"><a href="https://app.givefeedback.dev/dashboard/settings/notifications" target="_blank" style="color: rgba(10,10,10,0.35); text-decoration: underline;">Manage notifications</a></p>';
+
+const BRAND_FOOTER =
+  '<div style="background-color: #E8E6E3; font-family: Inter, system-ui, sans-serif; font-size: 12px; color: rgba(10,10,10,0.35); padding: 14px 28px; text-align: center;">' +
+  '<p style="margin: 0;">© 2026 givefeedback.dev · <a rel="noopener noreferrer" href="https://givefeedback.dev" target="_blank" style="color: rgba(10,10,10,0.5); text-decoration: none;">givefeedback.dev</a></p>' +
+  "</div>";
+
+const BRAND_UNSUB_FOOTER =
+  '<div style="background-color: #E8E6E3; font-family: Inter, system-ui, sans-serif; font-size: 12px; color: rgba(10,10,10,0.35); padding: 14px 28px; text-align: center;">' +
+  '<p style="margin: 0 0 4px 0;"><a rel="noopener noreferrer" href="https://app.givefeedback.dev/unsubscribe" target="_blank" style="color: rgba(10,10,10,0.5); text-decoration: underline;">Unsubscribe</a> from product updates</p>' +
+  '<p style="margin: 0;">© 2026 givefeedback.dev · <a rel="noopener noreferrer" href="https://givefeedback.dev" target="_blank" style="color: rgba(10,10,10,0.5); text-decoration: none;">givefeedback.dev</a></p>' +
+  "</div>";
+
 interface TemplateSeed {
   slug: string;
   name: string;
@@ -1611,84 +1606,169 @@ interface TemplateSeed {
 }
 
 const TEMPLATES: TemplateSeed[] = [
-  // Outreach / sales
+  // onboarding@ — the signup welcome (verbatim brand HTML).
   {
-    slug: "intro-followup",
-    name: "Intro · Following up",
-    subject: "Following up on our chat",
+    slug: "signup-welcome",
+    name: "Onboarding · Welcome & first steps",
+    subject: "Welcome to GiveFeedback, {{name}}",
     bodyHtml:
-      "<p>Hi {{name}},</p>" +
-      "<p>Wanted to follow up on what we discussed and see if you had a chance to think it over.</p>" +
-      "<p>Happy to dive deeper into anything that caught your eye — or just answer questions.</p>" +
-      "<p>Cheers,<br/>The team</p>",
-    fromAddress: "sales@example.com",
+      BRAND_PREHEADER(
+        "Paste one script tag. Your clients record. AI extracts the tasks.",
+      ) +
+      BRAND_BODY_OPEN(40) +
+      BRAND_MARK +
+      `<p style="margin: 0 0 18px 0;">Hey {{name}},</p>` +
+      `<p style="margin: 0 0 18px 0;">Thanks for signing up. I'm Mahmoud, the founder of GiveFeedback.</p>` +
+      `<p style="margin: 0 0 18px 0;">I built this because I was tired of spending two hours every sprint translating vague client emails and Loom videos into dev tickets. Same scattered feedback on every project. So I built the tool I wished existed.</p>` +
+      `<p style="margin: 0 0 18px 0;">Here's how it works:</p>` +
+      `<table style="margin: 0 0 24px 0; border-spacing: 0; border-collapse: collapse;">` +
+      `<tr><td style="padding: 8px 12px 8px 0; vertical-align: top; color: #0A0A0A; font-weight: 700;">1.</td><td style="padding: 8px 0;"><strong>Add the widget</strong><span style="color: rgba(10,10,10,0.6);"> - paste one script tag onto your site. Works with React, Next.js, WordPress, anything.</span></td></tr>` +
+      `<tr><td style="padding: 8px 12px 8px 0; vertical-align: top; color: #0A0A0A; font-weight: 700;">2.</td><td style="padding: 8px 0;"><strong>Your client records feedback</strong><span style="color: rgba(10,10,10,0.6);"> - they talk and click right on your site. We capture voice, screen, and clicks together.</span></td></tr>` +
+      `<tr><td style="padding: 8px 12px 8px 0; vertical-align: top; color: #0A0A0A; font-weight: 700;">3.</td><td style="padding: 8px 0;"><strong>Get dev-ready tasks</strong><span style="color: rgba(10,10,10,0.6);"> - AI turns their session into structured tasks with replays, timestamps, and effort estimates.</span></td></tr>` +
+      `</table>` +
+      `<p style="margin: 0 0 18px 0;">Early teams are cutting feedback rounds from 5 days down to a few hours. That's the part I'm most proud of.</p>` +
+      `<p style="margin: 0 0 6px 0; text-align: center; color: rgba(10,10,10,0.5); font-size: 13px;">Grab your embed code. Takes about 60 seconds.</p>` +
+      BRAND_CTA(
+        "https://app.givefeedback.dev/dashboard",
+        "Go to your dashboard →",
+      ) +
+      `<p style="margin: 0 0 4px 0;">Mahmoud</p>` +
+      `<p style="margin: 0; color: rgba(10,10,10,0.4); font-size: 13px;">Founder, givefeedback.dev · <a rel="noopener noreferrer" href="https://spaceandstory.co" target="_blank" style="color: rgba(10,10,10,0.5); text-decoration: none;">spaceandstory.co</a></p>` +
+      BRAND_BODY_CLOSE +
+      BRAND_FOOTER,
+    fromAddress: "onboarding@givefeedback.dev",
   },
+  // onboarding@ — nudge toward the first captured session.
   {
-    slug: "re-engagement",
-    name: "Re-engagement · Long time no see",
-    subject: "Long time no see, {{name}}",
+    slug: "first-steps",
+    name: "Onboarding · Capture your first session",
+    subject: "One tag away from your first session, {{name}}",
     bodyHtml:
-      "<p>Hi {{name}},</p>" +
-      "<p>It's been a while! Things have moved a lot on our end and I thought you might be interested in what we've shipped recently.</p>" +
-      "<p>If now's a better time to chat, just hit reply.</p>",
-    fromAddress: "sales@example.com",
+      BRAND_PREHEADER(
+        "Add the widget, send your client the link, watch the tasks appear.",
+      ) +
+      BRAND_BODY_OPEN(32) +
+      BRAND_MARK +
+      `<p style="margin: 0 0 16px 0;">Hi {{name}},</p>` +
+      `<p style="margin: 0 0 18px 0;">You're set up — here's the fastest path to your first batch of dev-ready tasks:</p>` +
+      `<table style="margin: 0 0 24px 0; border-spacing: 0; border-collapse: collapse;">` +
+      `<tr><td style="padding: 8px 12px 8px 0; vertical-align: top; color: #0A0A0A; font-weight: 700;">1.</td><td style="padding: 8px 0;"><strong>Paste your embed tag</strong><span style="color: rgba(10,10,10,0.6);"> - one line in your site's &lt;head&gt;. It loads on every page automatically.</span></td></tr>` +
+      `<tr><td style="padding: 8px 12px 8px 0; vertical-align: top; color: #0A0A0A; font-weight: 700;">2.</td><td style="padding: 8px 0;"><strong>Send your client the link</strong><span style="color: rgba(10,10,10,0.6);"> - they record right on the site. No login, no download.</span></td></tr>` +
+      `<tr><td style="padding: 8px 12px 8px 0; vertical-align: top; color: #0A0A0A; font-weight: 700;">3.</td><td style="padding: 8px 0;"><strong>Open the session</strong><span style="color: rgba(10,10,10,0.6);"> - the AI has already turned it into tasks with replays and estimates.</span></td></tr>` +
+      `</table>` +
+      `<p style="margin: 0 0 18px 0;">Stuck on the install? Just reply — a real person (often me) reads every one.</p>` +
+      BRAND_CTA(
+        "https://app.givefeedback.dev/dashboard",
+        "Grab your embed code →",
+      ) +
+      `<p style="margin: 0 0 4px 0;">Mahmoud</p>` +
+      `<p style="margin: 0; color: rgba(10,10,10,0.4); font-size: 13px;">Founder, givefeedback.dev</p>` +
+      BRAND_BODY_CLOSE +
+      BRAND_FOOTER,
+    fromAddress: "onboarding@givefeedback.dev",
   },
+  // projects@ — the very first feedback notification (verbatim brand HTML, celebratory framing).
   {
-    slug: "pricing-info",
-    name: "Pricing · Plan options",
-    subject: "Pricing details for {{name}}",
+    slug: "first-feedback",
+    name: "Projects · First feedback 🎉",
+    subject: "You just got your first feedback on {{project}} 🎉",
     bodyHtml:
-      "<p>Hi {{name}},</p>" +
-      "<p>Putting together the plan options we discussed. Three tiers depending on volume — happy to walk through which makes sense for your team.</p>" +
-      "<p>Quick call this week?</p>",
-    fromAddress: "sales@example.com",
+      BRAND_PREHEADER(
+        "Your first {{session_type}} session on {{project}} is in.",
+      ) +
+      BRAND_BODY_OPEN(32) +
+      BRAND_MARK +
+      `<p style="margin: 0 0 16px 0;">🎉 Your very first feedback just landed on <strong>{{project}}</strong>. Here's what your client left as a {{session_type}} session.</p>` +
+      `<div style="border-left: 3px solid #BFFF00; padding-left: 14px; margin: 0 0 20px 0; color: rgba(10,10,10,0.75);">{{feedback_text}}{{transcript_preview}}</div>` +
+      `<p style="margin: 0 0 20px 0; color: rgba(10,10,10,0.6);">Open the session to watch the full recording and let AI extract the tasks.</p>` +
+      BRAND_CTA(
+        "https://app.givefeedback.dev/dashboard/projects/{{project_id}}/sessions/{{session_id}}",
+        "Review session →",
+      ) +
+      BRAND_MANAGE_NOTE +
+      BRAND_BODY_CLOSE +
+      BRAND_FOOTER,
+    fromAddress: "projects@givefeedback.dev",
   },
-  // Onboarding / customer success
+  // projects@ — every subsequent feedback notification (verbatim brand HTML).
   {
-    slug: "welcome-onboarding",
-    name: "Welcome · New customer",
-    subject: "Welcome to the team, {{name}}",
+    slug: "new-feedback",
+    name: "Projects · New feedback notification",
+    subject: "New {{session_type}} feedback on {{project}}",
     bodyHtml:
-      "<p>Hi {{name}},</p>" +
-      "<p>Welcome aboard! We're thrilled to have you using the platform.</p>" +
-      "<p>A few things to get you started:</p>" +
-      "<ul><li>Set up your first inbox under Settings</li>" +
-      "<li>Invite your team members</li>" +
-      "<li>Connect your domain so DKIM/SPF check out</li></ul>" +
-      "<p>Reply if anything trips you up.</p>",
-    fromAddress: "hello@example.com",
+      BRAND_PREHEADER("New {{session_type}} feedback on {{project}}") +
+      BRAND_BODY_OPEN(32) +
+      BRAND_MARK +
+      `<p style="margin: 0 0 16px 0;">Someone just left {{session_type}} feedback on <strong>{{project}}</strong>.</p>` +
+      `<div style="border-left: 3px solid #BFFF00; padding-left: 14px; margin: 0 0 20px 0; color: rgba(10,10,10,0.75);">{{feedback_text}}{{transcript_preview}}</div>` +
+      `<p style="margin: 0 0 20px 0; color: rgba(10,10,10,0.6);">Open the session to see the full recording and let AI extract the tasks.</p>` +
+      BRAND_CTA(
+        "https://app.givefeedback.dev/dashboard/projects/{{project_id}}/sessions/{{session_id}}",
+        "Review session →",
+      ) +
+      BRAND_MANAGE_NOTE +
+      BRAND_BODY_CLOSE +
+      BRAND_FOOTER,
+    fromAddress: "projects@givefeedback.dev",
   },
+  // projects@ — weekly summary of activity on a project.
   {
-    slug: "feature-launch",
-    name: "Product · New feature",
-    subject: "Just shipped: {{feature}}",
+    slug: "weekly-digest",
+    name: "Projects · Weekly digest",
+    subject: "Your week on {{project}}",
     bodyHtml:
-      "<p>Hi {{name}},</p>" +
-      "<p>Quick heads up — we just shipped {{feature}}. You'll see it in your dashboard now.</p>" +
-      "<p>Full details on the changelog. Reply if you hit any issues.</p>",
-    fromAddress: null, // global, admin-only
+      BRAND_PREHEADER(
+        "A quick recap of this week's sessions and tasks on {{project}}.",
+      ) +
+      BRAND_BODY_OPEN(32) +
+      BRAND_MARK +
+      `<p style="margin: 0 0 16px 0;">Hi {{name}},</p>` +
+      `<p style="margin: 0 0 18px 0;">Here's what happened on <strong>{{project}}</strong> this week — new sessions came in and the AI turned them into tasks waiting for you.</p>` +
+      `<p style="margin: 0 0 20px 0; color: rgba(10,10,10,0.6);">Open the project to review the replays and move the tasks into your sprint.</p>` +
+      BRAND_CTA(
+        "https://app.givefeedback.dev/dashboard",
+        "Open {{project}} →",
+      ) +
+      BRAND_MANAGE_NOTE +
+      BRAND_BODY_CLOSE +
+      BRAND_FOOTER,
+    fromAddress: "projects@givefeedback.dev",
   },
-  // Support
+  // marketing@ — the monthly product update.
+  {
+    slug: "monthly-update",
+    name: "Marketing · Monthly product update",
+    subject: "What's new at GiveFeedback: {{feature}}",
+    bodyHtml:
+      BRAND_PREHEADER("This month: {{feature}} — plus what's next.") +
+      BRAND_BODY_OPEN(32) +
+      BRAND_MARK +
+      `<p style="margin: 0 0 16px 0;">Hi {{name}},</p>` +
+      `<p style="margin: 0 0 18px 0;">Big one this month: <strong>{{feature}}</strong>. It's live in your dashboard now — no setup needed.</p>` +
+      `<p style="margin: 0 0 18px 0;">We ship based on what you tell us, so keep the requests coming. Every one is read by a human.</p>` +
+      BRAND_CTA("https://app.givefeedback.dev/dashboard", "See what's new →") +
+      `<p style="margin: 0 0 4px 0;">Mahmoud</p>` +
+      `<p style="margin: 0; color: rgba(10,10,10,0.4); font-size: 13px;">Founder, givefeedback.dev</p>` +
+      BRAND_BODY_CLOSE +
+      BRAND_UNSUB_FOOTER,
+    fromAddress: "marketing@givefeedback.dev",
+  },
+  // support@ — check-in after a ticket reply.
   {
     slug: "support-followup",
     name: "Support · Follow-up",
-    subject: "Following up on your support request",
+    subject: "Following up on your GiveFeedback ticket",
     bodyHtml:
-      "<p>Hi {{name}},</p>" +
-      "<p>Just checking in on the issue you flagged. Did our last reply resolve it on your end?</p>" +
-      "<p>If you're still stuck, ping back and we'll dig in further.</p>",
-    fromAddress: "support@example.com",
-  },
-  // Meetings
-  {
-    slug: "meeting-confirm",
-    name: "Meetings · Confirm",
-    subject: "Confirming our call on {{date}}",
-    bodyHtml:
-      "<p>Hi {{name}},</p>" +
-      "<p>Confirming our call on {{date}} at {{time}}. Calendar invite is on the way.</p>" +
-      "<p>If anything changes, let me know — happy to reschedule.</p>",
-    fromAddress: "hello@example.com",
+      BRAND_PREHEADER("Just checking the issue you flagged is fully sorted.") +
+      BRAND_BODY_OPEN(32) +
+      BRAND_MARK +
+      `<p style="margin: 0 0 16px 0;">Hi {{name}},</p>` +
+      `<p style="margin: 0 0 18px 0;">Circling back on the issue you flagged — did our last reply sort it out on your end?</p>` +
+      `<p style="margin: 0 0 18px 0;">If you're still stuck, just reply and we'll dig back in. If it's resolved, no need to do anything.</p>` +
+      `<p style="margin: 0;">Thanks for helping us make GiveFeedback better.</p>` +
+      BRAND_BODY_CLOSE +
+      BRAND_FOOTER,
+    fromAddress: "support@givefeedback.dev",
   },
 ];
 
@@ -1698,36 +1778,36 @@ interface SequenceSeed {
   steps: Array<{ order: number; templateSlug: string; delayHours: number }>;
 }
 
-// Three sequences cover the main use cases the UI exposes — a long
-// nurture, a short onboarding, and a 2-step reactivation. Together
-// they exercise multi-step rendering, mid-flight enrollment cancel,
-// and the "completed" branch.
+// Three sequences cover the use cases the UI exposes — a short onboarding,
+// a longer activation nurture, and a 2-step win-back. Together they exercise
+// multi-step rendering, mid-flight enrollment cancel, and the "completed"
+// branch.
 const SEQUENCES: SequenceSeed[] = [
   {
-    id: "seq_outreach_v1",
-    name: "Outreach · Cold lead nurture",
-    steps: [
-      { order: 1, templateSlug: "intro-followup", delayHours: 0 },
-      { order: 2, templateSlug: "re-engagement", delayHours: 72 }, // day 3
-      { order: 3, templateSlug: "feature-launch", delayHours: 168 }, // day 7
-      { order: 4, templateSlug: "meeting-confirm", delayHours: 336 }, // day 14
-    ],
-  },
-  {
     id: "seq_onboarding_v1",
-    name: "Onboarding · New customer welcome",
+    name: "Onboarding · New signup",
     steps: [
-      { order: 1, templateSlug: "welcome-onboarding", delayHours: 0 },
-      { order: 2, templateSlug: "feature-launch", delayHours: 48 }, // day 2
+      { order: 1, templateSlug: "signup-welcome", delayHours: 0 },
+      { order: 2, templateSlug: "first-steps", delayHours: 48 }, // day 2
       { order: 3, templateSlug: "support-followup", delayHours: 168 }, // day 7
     ],
   },
   {
-    id: "seq_reactivation_v1",
-    name: "Reactivation · Win-back",
+    id: "seq_activation_v1",
+    name: "Activation · Get to first feedback",
     steps: [
-      { order: 1, templateSlug: "re-engagement", delayHours: 0 },
-      { order: 2, templateSlug: "pricing-info", delayHours: 120 }, // day 5
+      { order: 1, templateSlug: "signup-welcome", delayHours: 0 },
+      { order: 2, templateSlug: "first-steps", delayHours: 72 }, // day 3
+      { order: 3, templateSlug: "monthly-update", delayHours: 168 }, // day 7
+      { order: 4, templateSlug: "support-followup", delayHours: 336 }, // day 14
+    ],
+  },
+  {
+    id: "seq_winback_v1",
+    name: "Win-back · Inactive projects",
+    steps: [
+      { order: 1, templateSlug: "monthly-update", delayHours: 0 },
+      { order: 2, templateSlug: "support-followup", delayHours: 120 }, // day 5
     ],
   },
 ];
@@ -1800,7 +1880,8 @@ function buildSequenceData(people: Person[]): {
       variables: {
         name: person.name,
         email: person.email,
-        feature: "improved keyboard shortcuts",
+        feature: "one-click task export to Linear & Jira",
+        project: "Client Portal Redesign",
         date: "Friday",
         time: "11:00 AM PT",
       },
@@ -1866,7 +1947,9 @@ function buildSequenceData(people: Person[]): {
   //    step 3 pending (due day 7).
   emit(
     SEQUENCES[1],
-    pickPersonWithInbox((p) => p.inboxes.includes("hello@example.com")),
+    pickPersonWithInbox((p) =>
+      p.inboxes.includes("onboarding@givefeedback.dev"),
+    ),
     "active",
     3 * 86400,
     null,
@@ -1936,6 +2019,147 @@ function buildSequenceData(people: Person[]): {
 }
 
 // ---------------------------------------------------------------------------
+// Template-driven sends — the automated inboxes (onboarding@, projects@,
+// marketing@) actually send their branded templates to customers, so the
+// "Sent" view shows real interpolated branded email, not generic acks.
+// In demo mode the sequence processor is skipped, so we materialize these
+// sends directly here rather than relying on enrollment processing.
+// ---------------------------------------------------------------------------
+const PROJECT_NAMES = [
+  "Harbor Redesign",
+  "Client Portal",
+  "Acme Marketing Site",
+  "Northwind Storefront",
+  "Orbit Dashboard",
+  "Wildflower Landing",
+  "Summit Booking Flow",
+  "Lumen Docs Site",
+];
+const SESSION_TYPES = ["voice", "screen", "voice + screen"];
+const FEEDBACK_QUOTES = [
+  "The checkout button disappears below the fold on mobile — took me a while to find it.",
+  "Love the new hero, but the contact form throws an error when I submit without a phone number.",
+  "Can we make the pricing table stack on tablet? It overflows sideways right now.",
+  "The nav is great on desktop, but the hamburger menu doesn't close after I pick a link.",
+  "Images on the case-study page are really slow to load — it felt laggy scrolling through.",
+  "Small thing: the footer links are the same color as the background in dark mode.",
+];
+const MARKETING_FEATURES = [
+  "one-click task export to Linear & Jira",
+  "Spanish and French transcription",
+  "15-minute recordings on every plan",
+  "shareable read-only session links",
+];
+
+function buildTemplateSends(people: Person[]): SentReply[] {
+  const sends: SentReply[] = [];
+  let idx = 0;
+  const nextId = () => `st_${(idx++).toString().padStart(3, "0")}`;
+  const DAY = 86400;
+
+  const tpl = (slug: string): TemplateSeed =>
+    TEMPLATES.find((t) => t.slug === slug)!;
+
+  const renderVars = (str: string, vars: Record<string, string>) =>
+    str.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? "");
+
+  function emit(
+    template: TemplateSeed,
+    person: Person,
+    vars: Record<string, string>,
+    offsetSec: number,
+  ) {
+    const html = renderVars(template.bodyHtml, vars);
+    sends.push({
+      id: nextId(),
+      personId: person.id,
+      // Automated templates always carry a fromAddress (one of the inboxes).
+      fromAddress: template.fromAddress!,
+      to: person.email,
+      subject: renderVars(template.subject, vars),
+      // sent_emails.body_html is inserted raw (not escaped at render time),
+      // so escape the interpolated HTML here.
+      bodyHtml: sqlEscape(html),
+      // No text version on purpose: with an empty text fallback the chat
+      // renderer shows the branded HTML instead of a stripped-text bubble.
+      bodyText: "",
+      inReplyTo: null,
+      sentOffsetSec: Math.max(Math.floor(offsetSec), 60),
+      cc: undefined,
+      conversationId: null,
+    });
+  }
+
+  function pickRecipients(count: number, inbox: string): Person[] {
+    const preferred = people.filter((p) => p.inboxes.includes(inbox));
+    const pool = preferred.length >= count ? preferred : people;
+    return pickN(pool, Math.min(count, pool.length));
+  }
+
+  // onboarding@ — welcome, then first-steps a couple days later.
+  for (const p of pickRecipients(20, "onboarding@givefeedback.dev")) {
+    const welcomeAt = Math.max(p.createdOffsetDays, 2) * DAY - randInt(0, DAY);
+    emit(tpl("signup-welcome"), p, { name: p.name }, welcomeAt);
+    emit(
+      tpl("first-steps"),
+      p,
+      { name: p.name },
+      Math.max(welcomeAt - 2 * DAY, DAY),
+    );
+  }
+
+  // projects@ — the celebratory first feedback, plus some later ones.
+  const projectPeople = pickRecipients(24, "projects@givefeedback.dev");
+  for (let i = 0; i < projectPeople.length; i++) {
+    const p = projectPeople[i];
+    const project = pick(PROJECT_NAMES);
+    const baseVars = {
+      name: p.name,
+      project,
+      project_id: `prj_${(1000 + i).toString(36)}`,
+      transcript_preview: "",
+    };
+    emit(
+      tpl("first-feedback"),
+      p,
+      {
+        ...baseVars,
+        session_type: pick(SESSION_TYPES),
+        feedback_text: pick(FEEDBACK_QUOTES),
+        session_id: `ses_${(2000 + i).toString(36)}a`,
+      },
+      randInt(20, 40) * DAY,
+    );
+    if (i % 2 === 0) {
+      emit(
+        tpl("new-feedback"),
+        p,
+        {
+          ...baseVars,
+          session_type: pick(SESSION_TYPES),
+          feedback_text: pick(FEEDBACK_QUOTES),
+          session_id: `ses_${(2000 + i).toString(36)}b`,
+        },
+        randInt(2, 15) * DAY,
+      );
+    }
+  }
+
+  // marketing@ — one monthly blast, same feature to everyone.
+  const feature = pick(MARKETING_FEATURES);
+  for (const p of pickRecipients(28, "marketing@givefeedback.dev")) {
+    emit(
+      tpl("monthly-update"),
+      p,
+      { name: p.name, feature },
+      randInt(3, 20) * DAY,
+    );
+  }
+
+  return sends;
+}
+
+// ---------------------------------------------------------------------------
 // Render SQL
 // ---------------------------------------------------------------------------
 interface RenderResult {
@@ -1975,6 +2199,28 @@ function renderSql(): RenderResult {
   for (const e of group.groupEmails) emails.push(e);
   for (const s of group.groupSent) sent.push(s);
 
+  // Automated inboxes actually send their branded templates to customers.
+  for (const s of buildTemplateSends(people)) sent.push(s);
+
+  // Unread hygiene: keep the unread count small (< 30) and confined to the
+  // most recent messages, so unread badges only show up on the first page
+  // and deeper history reads as fully triaged. Mark everything read, then
+  // re-open just the newest few inbound messages per inbox.
+  const PER_INBOX_UNREAD = 5;
+  for (const e of emails) e.isRead = 1;
+  const byInbox = new Map<string, Email[]>();
+  for (const e of emails) {
+    const list = byInbox.get(e.recipient) ?? [];
+    list.push(e);
+    byInbox.set(e.recipient, list);
+  }
+  for (const list of byInbox.values()) {
+    list
+      .sort((a, b) => a.receivedOffsetSec - b.receivedOffsetSec)
+      .slice(0, PER_INBOX_UNREAD)
+      .forEach((e) => (e.isRead = 0));
+  }
+
   // Sequence/enrollment data is built over the full person list so we
   // can pick people who match real inboxes — keeps the demo coherent.
   const seqData = buildSequenceData(allPeople);
@@ -2006,14 +2252,14 @@ function renderSql(): RenderResult {
   lines.push("DELETE FROM sender_identities;");
   lines.push("");
 
-  // Inboxes
+  // Inboxes — support@ and mahmoud@ carry a signature; the rest don't.
   lines.push(
-    "INSERT OR REPLACE INTO sender_identities (email, display_name, created_at, updated_at) VALUES",
+    "INSERT OR REPLACE INTO sender_identities (email, display_name, display_mode, signature_html, created_at, updated_at) VALUES",
   );
   lines.push(
     INBOXES.map(
       (i) =>
-        `  ('${i.email}', '${sqlEscape(i.display)}', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER))`,
+        `  ('${i.email}', '${sqlEscape(i.display)}', 'chat', ${i.signature ? `'${sqlEscape(i.signature)}'` : "NULL"}, CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER))`,
     ).join(",\n") + ";",
   );
   lines.push("");
@@ -2033,7 +2279,10 @@ function renderSql(): RenderResult {
   lines.push("");
 
   // Emails — chunk inserts so we don't blow past SQLite's statement limit.
-  const CHUNK = 50;
+  // Keep chunks small enough that a single multi-row INSERT stays well under
+  // remote D1's per-statement size cap — the branded template sends carry
+  // multi-KB HTML bodies, so 50 rows/statement overflows it.
+  const CHUNK = 20;
   for (let off = 0; off < emails.length; off += CHUNK) {
     const chunk = emails.slice(off, off + CHUNK);
     lines.push(
@@ -2043,7 +2292,7 @@ function renderSql(): RenderResult {
       chunk
         .map(
           (e) =>
-            `  ('${e.id}', '${e.personId}', '${e.recipient}', '${sqlEscape(e.subject)}', '${e.bodyHtml}', '${sqlEscape(e.bodyText)}', '{}', '<${e.id}@example.test>', 'pass', 'pass', 'pass', ${e.isRead}, (CAST(strftime('%s','now') AS INTEGER) - ${e.receivedOffsetSec}), (CAST(strftime('%s','now') AS INTEGER) - ${e.receivedOffsetSec}), ${e.cc ? ccToJson(e.cc) : "NULL"}, ${e.conversationId ? `'${e.conversationId}'` : "NULL"})`,
+            `  ('${e.id}', '${e.personId}', '${e.recipient}', '${sqlEscape(e.subject)}', '${e.bodyHtml}', '${sqlEscape(e.bodyText)}', '{}', '<${e.id}@givefeedback.dev>', 'pass', 'pass', 'pass', ${e.isRead}, (CAST(strftime('%s','now') AS INTEGER) - ${e.receivedOffsetSec}), (CAST(strftime('%s','now') AS INTEGER) - ${e.receivedOffsetSec}), ${e.cc ? ccToJson(e.cc) : "NULL"}, ${e.conversationId ? `'${e.conversationId}'` : "NULL"})`,
         )
         .join(",\n") + ";",
     );
