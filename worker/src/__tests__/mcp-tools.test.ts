@@ -10,6 +10,7 @@ import {
   getDb,
 } from "./helpers";
 import { sequences } from "../db/sequences.schema";
+import { emailTemplates } from "../db/email-templates.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { users } from "../db/auth.schema";
 import { emails } from "../db/emails.schema";
@@ -129,8 +130,12 @@ describe("MCP tools", () => {
           "delete_email",
           "enroll_sequence",
           "get_person",
+          "get_sequence",
+          "get_template",
           "list_emails",
           "list_people",
+          "list_sequences",
+          "list_templates",
           "mark_read",
           "read_email",
           "reply_email",
@@ -458,6 +463,104 @@ describe("MCP tools", () => {
         after: Math.floor(Date.now() / 1000) + 3600,
       });
       expect(out.data.hits).toEqual([]);
+    });
+  });
+
+  describe("list_templates / get_template", () => {
+    beforeEach(async () => {
+      // A global template (no fromAddress) any inbox may use...
+      await createTestTemplate({ slug: "welcome", subject: "Hi {{name}}" });
+      // ...and one bound to an inbox the member cannot see.
+      const now = Math.floor(Date.now() / 1000);
+      await getDb().insert(emailTemplates).values({
+        id: "tmpl-other-only",
+        slug: "other-only",
+        name: "Other only",
+        subject: "Secret",
+        bodyHtml: "<p>secret</p>",
+        fromAddress: OTHER,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+
+    it("lists global templates but hides another inbox's bound templates", async () => {
+      const out = await callTool(memberToken, "list_templates");
+      expect(out.isError, out.text).toBe(false);
+      const slugs = out.data.map((t: any) => t.slug).sort();
+      expect(slugs).toEqual(["welcome"]);
+    });
+
+    it("lets an admin see every template", async () => {
+      const out = await callTool(adminToken, "list_templates");
+      const slugs = out.data.map((t: any) => t.slug).sort();
+      expect(slugs).toEqual(["other-only", "welcome"]);
+    });
+
+    it("gets a global template by slug", async () => {
+      const out = await callTool(memberToken, "get_template", {
+        slug: "welcome",
+      });
+      expect(out.isError).toBe(false);
+      expect(out.data.subject).toBe("Hi {{name}}");
+    });
+
+    it("reports a template bound to another inbox as not found", async () => {
+      const out = await callTool(memberToken, "get_template", {
+        slug: "other-only",
+      });
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
+    });
+
+    it("requires the read scope", async () => {
+      const bare = await getAccessToken(ADMIN, "openid");
+      const out = await callTool(bare, "list_templates");
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("email:read");
+    });
+  });
+
+  describe("list_sequences / get_sequence", () => {
+    beforeEach(async () => {
+      await createTestTemplate({ slug: "step-1", subject: "One" });
+      const now = Math.floor(Date.now() / 1000);
+      await getDb()
+        .insert(sequences)
+        .values({
+          id: "seq-1",
+          name: "Onboarding",
+          steps: JSON.stringify([
+            { order: 1, templateSlug: "step-1", delayHours: 0 },
+          ]),
+          createdAt: now,
+          updatedAt: now,
+        });
+    });
+
+    it("lists sequences with parsed steps", async () => {
+      const out = await callTool(memberToken, "list_sequences");
+      expect(out.isError, out.text).toBe(false);
+      expect(out.data).toHaveLength(1);
+      expect(out.data[0].id).toBe("seq-1");
+      expect(out.data[0].steps[0].templateSlug).toBe("step-1");
+    });
+
+    it("gets a sequence by id with parsed steps", async () => {
+      const out = await callTool(memberToken, "get_sequence", {
+        sequenceId: "seq-1",
+      });
+      expect(out.isError).toBe(false);
+      expect(out.data.name).toBe("Onboarding");
+      expect(Array.isArray(out.data.steps)).toBe(true);
+    });
+
+    it("reports an unknown sequence as not found", async () => {
+      const out = await callTool(memberToken, "get_sequence", {
+        sequenceId: "nope",
+      });
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("Not found");
     });
   });
 

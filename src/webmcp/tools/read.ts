@@ -10,6 +10,7 @@ export interface ReadDeps {
   fetchTemplates: () => Promise<any>;
   fetchTemplate: (slug: string) => Promise<any>;
   fetchSequences: () => Promise<any>;
+  fetchSequence: (id: string) => Promise<any>;
   fetchStats: (recipient?: string) => Promise<any>;
   searchEmails: (p: { q: string; [k: string]: any }) => Promise<any>;
   getSession: () => Promise<any>;
@@ -193,6 +194,18 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
       description: "List drip sequences the user can enroll contacts into.",
       inputSchema: { type: "object", properties: {} },
       execute: async () => okJson(await deps.fetchSequences()),
+    },
+    {
+      name: "get_sequence",
+      description:
+        "Get one drip sequence by id, including its ordered steps (template slug and delay per step).",
+      inputSchema: {
+        type: "object",
+        properties: { sequenceId: { type: "string" } },
+        required: ["sequenceId"],
+      },
+      execute: async (args) =>
+        okJson(await deps.fetchSequence(args.sequenceId)),
     },
   ];
 }

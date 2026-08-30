@@ -1,7 +1,8 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq, inArray, isNull, or } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { assertInboxAllowed, isInboxAllowed } from "../lib/inbox-permissions";
+import { assertInboxAllowed } from "../lib/inbox-permissions";
+import { listTemplates, getTemplateBySlug } from "../lib/queries/templates";
 import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import { analyzeTemplate, TemplateParseError } from "../lib/interpolate";
@@ -131,25 +132,7 @@ const listTemplatesRoute = createRoute({
 emailTemplatesRouter.openapi(listTemplatesRoute, async (c) => {
   const db = c.get("db");
   const allowed = c.get("allowedInboxes")!;
-  let rows;
-  if (allowed.isAdmin) {
-    rows = await db.select().from(emailTemplates);
-  } else if (allowed.inboxes.length === 0) {
-    rows = await db
-      .select()
-      .from(emailTemplates)
-      .where(isNull(emailTemplates.fromAddress));
-  } else {
-    rows = await db
-      .select()
-      .from(emailTemplates)
-      .where(
-        or(
-          isNull(emailTemplates.fromAddress),
-          inArray(emailTemplates.fromAddress, allowed.inboxes),
-        ),
-      );
-  }
+  const rows = await listTemplates(db, allowed);
   return c.json(rows, 200);
 });
 
@@ -171,21 +154,12 @@ const getTemplateRoute = createRoute({
 emailTemplatesRouter.openapi(getTemplateRoute, async (c) => {
   const db = c.get("db");
   const { slug } = c.req.valid("param");
-  const rows = await db
-    .select()
-    .from(emailTemplates)
-    .where(eq(emailTemplates.slug, slug))
-    .limit(1);
-  if (rows.length === 0) {
+  const allowed = c.get("allowedInboxes")!;
+  const template = await getTemplateBySlug(db, slug, allowed);
+  if (!template) {
     return c.json({ error: "Template not found" }, 404);
   }
-  const allowed = c.get("allowedInboxes")!;
-  if (!allowed.isAdmin && rows[0].fromAddress !== null) {
-    if (!isInboxAllowed(allowed, rows[0].fromAddress)) {
-      return c.json({ error: "Template not found" }, 404);
-    }
-  }
-  return c.json(rows[0], 200);
+  return c.json(template, 200);
 });
 
 const updateTemplateRoute = createRoute({

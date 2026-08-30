@@ -11,6 +11,9 @@ function makeDeps(overrides: any = {}) {
     fetchTemplates: vi.fn().mockResolvedValue([]),
     fetchTemplate: vi.fn().mockResolvedValue({ slug: "welcome" }),
     fetchSequences: vi.fn().mockResolvedValue([]),
+    fetchSequence: vi
+      .fn()
+      .mockResolvedValue({ id: "seq-1", name: "Onboarding", steps: [] }),
     fetchStats: vi
       .fn()
       .mockResolvedValue({ recipients: ["a@x.com"], senderIdentities: [] }),
@@ -45,9 +48,21 @@ describe("read tools", () => {
       "list_templates",
       "get_template",
       "list_sequences",
+      "get_sequence",
     ]) {
       expect(byName(tools, n)).toBeTruthy();
     }
+  });
+
+  it("get_sequence reads one sequence by id", async () => {
+    const deps = makeDeps();
+    const tools = createReadTools(deps);
+    const res = await byName(tools, "get_sequence").execute(
+      { sequenceId: "seq-1" },
+      { signal: new AbortController().signal },
+    );
+    expect(deps.fetchSequence).toHaveBeenCalledWith("seq-1");
+    expect(res.content[0].text).toContain("Onboarding");
   });
 
   it("search_emails calls the api and returns JSON", async () => {

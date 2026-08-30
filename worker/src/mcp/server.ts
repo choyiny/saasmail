@@ -20,6 +20,8 @@ import {
 import { templateVariablesSchema } from "../lib/template-variables-schema";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { searchEmails } from "../lib/queries/search";
+import { listTemplates, getTemplateBySlug } from "../lib/queries/templates";
+import { listSequences, getSequenceById } from "../lib/queries/sequences";
 
 export interface McpUser {
   id: string;
@@ -277,6 +279,60 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           allowed,
         ),
       );
+    }),
+  );
+
+  server.registerTool(
+    "list_templates",
+    {
+      description:
+        "List the email templates you may use, with their slug, subject, and body. Call this to discover a valid slug before send_template — the slug is what send_template and sequence steps refer to.",
+      annotations: { readOnlyHint: true, title: "List Templates" },
+      inputSchema: {},
+    },
+    guard(ctx, SCOPE_READ, async () => ok(await listTemplates(db, allowed))),
+  );
+
+  server.registerTool(
+    "get_template",
+    {
+      description:
+        "Fetch one email template by slug, including its subject and HTML body so you can inspect the {{variables}} it expects before sending.",
+      annotations: { readOnlyHint: true, title: "Get Template" },
+      inputSchema: {
+        slug: z.string().describe("Template slug, from list_templates."),
+      },
+    },
+    guard(ctx, SCOPE_READ, async ({ slug }) => {
+      const template = await getTemplateBySlug(db, slug, allowed);
+      return template ? ok(template) : fail(NOT_FOUND);
+    }),
+  );
+
+  server.registerTool(
+    "list_sequences",
+    {
+      description:
+        "List the drip sequences available for enrollment, with their steps. Call this to discover a valid sequenceId before enroll_sequence.",
+      annotations: { readOnlyHint: true, title: "List Sequences" },
+      inputSchema: {},
+    },
+    guard(ctx, SCOPE_READ, async () => ok(await listSequences(db))),
+  );
+
+  server.registerTool(
+    "get_sequence",
+    {
+      description:
+        "Fetch one drip sequence by id, including its ordered steps (template slug and delay per step).",
+      annotations: { readOnlyHint: true, title: "Get Sequence" },
+      inputSchema: {
+        sequenceId: z.string().describe("Sequence id, from list_sequences."),
+      },
+    },
+    guard(ctx, SCOPE_READ, async ({ sequenceId }) => {
+      const sequence = await getSequenceById(db, sequenceId);
+      return sequence ? ok(sequence) : fail(NOT_FOUND);
     }),
   );
 

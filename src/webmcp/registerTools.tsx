@@ -11,6 +11,7 @@ import {
   fetchTemplates,
   fetchTemplate,
   fetchSequences,
+  fetchSequence,
   fetchStats,
   searchEmails,
   markEmailRead,
@@ -22,10 +23,10 @@ import { useWebMcpBridge } from "./bridge";
 import { createReadTools } from "./tools/read";
 import { createActionTools } from "./tools/actions";
 
-// 11 read tools + 8 action tools. Pinned by
+// 12 read tools + 8 action tools. Pinned by
 // src/webmcp/__tests__/registerTools.test.tsx so this can't silently drift
 // from the tool factories it's built from.
-export const WEBMCP_TOOL_COUNT = 19;
+export const WEBMCP_TOOL_COUNT = 20;
 
 /**
  * Registers every WebMCP read + action tool with the runtime for the
@@ -48,6 +49,7 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchTemplates,
       fetchTemplate,
       fetchSequences,
+      fetchSequence,
       fetchStats,
       searchEmails,
       getSession: () => authClient.getSession(),

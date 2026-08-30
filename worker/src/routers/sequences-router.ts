@@ -9,6 +9,7 @@ import { emailTemplates } from "../db/email-templates.schema";
 import { people } from "../db/people.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
+import { listSequences, getSequenceById } from "../lib/queries/sequences";
 import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
@@ -100,11 +101,7 @@ const listRoute = createRoute({
 
 sequencesRouter.openapi(listRoute, async (c) => {
   const db = c.get("db");
-  const rows = await db.select().from(sequences).orderBy(sequences.createdAt);
-  const result = rows.map((r) => ({
-    ...r,
-    steps: JSON.parse(r.steps),
-  }));
+  const result = await listSequences(db);
   return c.json(result, 200);
 });
 
@@ -125,17 +122,13 @@ const getRoute = createRoute({
 sequencesRouter.openapi(getRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
-  const rows = await db
-    .select()
-    .from(sequences)
-    .where(eq(sequences.id, id))
-    .limit(1);
+  const sequence = await getSequenceById(db, id);
 
-  if (rows.length === 0) {
+  if (!sequence) {
     return c.json({ error: "Sequence not found" }, 404);
   }
 
-  return c.json({ ...rows[0], steps: JSON.parse(rows[0].steps) }, 200);
+  return c.json(sequence, 200);
 });
 
 // --- CREATE sequence ---
