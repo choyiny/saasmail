@@ -8,7 +8,12 @@ export interface ActionDeps {
   fetchEmail: (id: string) => Promise<any>;
   markEmailRead: (id: string, isRead: boolean) => Promise<void>;
   deleteEmail: (id: string) => Promise<any>;
-  replyToEmail: (emailId: string, data: any) => Promise<any>;
+  saveDraft: (data: {
+    contextKey: string;
+    bodyHtml?: string;
+    fromAddress?: string;
+    replyToEmailId?: string | null;
+  }) => Promise<any>;
   fetchTemplate: (slug: string) => Promise<any>;
   renderTemplate: (tpl: string, vars: Record<string, unknown>) => string;
   invalidate: () => void;
@@ -112,7 +117,7 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
     {
       name: "reply_email",
       description:
-        "Draft a threaded reply to a received message. Shows the user a confirmation before sending.",
+        "Open the reply composer pre-filled with a draft reply to a received message. The user reviews it and clicks Send — this does NOT send.",
       inputSchema: {
         type: "object",
         properties: {
@@ -132,18 +137,27 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         if (!fromAddress) {
           return fail("Could not determine the sending inbox for this reply.");
         }
-        deps.bridge.stageForConfirmation({
-          title: "Send reply",
-          summary: `Reply to "${email.subject ?? "(no subject)"}" from ${fromAddress}.`,
-          run: async () => {
-            await deps.replyToEmail(args.emailId, {
-              bodyHtml: args.bodyHtml,
-              fromAddress,
-            });
-            deps.invalidate();
-          },
+        if (!email.personId) {
+          return fail("Could not resolve the conversation for this reply.");
+        }
+        // WebMCP never sends on its own. Seed the reply draft the composer
+        // restores on open, then navigate to the thread with a `#reply=` deep
+        // link so PersonDetail opens its existing reply composer on this
+        // message — the user reviews the draft and clicks Send.
+        await deps.saveDraft({
+          contextKey: `reply:${email.id}`,
+          bodyHtml: args.bodyHtml,
+          fromAddress,
+          replyToEmailId: email.id,
         });
-        return ok("Prepared a reply. The user must confirm before it sends.");
+        deps.bridge.navigate(
+          `/inbox/${encodeURIComponent(fromAddress)}/${encodeURIComponent(
+            email.personId,
+          )}#reply=${encodeURIComponent(email.id)}`,
+        );
+        return ok(
+          `Opened a reply draft to "${email.subject ?? "(no subject)"}" in the composer for the user to review and send.`,
+        );
       },
     },
     {

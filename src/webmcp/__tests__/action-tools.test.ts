@@ -21,13 +21,14 @@ function makeDeps(overrides: any = {}) {
       type: "received",
       recipient: "team@x.com",
       fromAddress: "bob@ext.com",
+      personId: "p1",
       subject: "Hello",
     }),
     markEmailRead: vi.fn().mockResolvedValue(undefined),
     deleteEmail: vi
       .fn()
       .mockResolvedValue({ success: true, attachmentsDeleted: 0 }),
-    replyToEmail: vi.fn().mockResolvedValue({ id: "r1", status: "sent" }),
+    saveDraft: vi.fn().mockResolvedValue({ contextKey: "reply:e1" }),
     fetchTemplate: vi.fn().mockResolvedValue({
       slug: "welcome",
       bodyHtml: "<p>Hi {{name}}</p>",
@@ -105,22 +106,43 @@ describe("action tools", () => {
     expect(deps.deleteEmail).toHaveBeenCalledWith("e1");
   });
 
-  it("reply_email stages a confirmation that calls replyToEmail on confirm", async () => {
+  it("reply_email seeds a draft and deep-links to the existing composer without sending", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
-    await t(tools, "reply_email").execute(
+    const res = await t(tools, "reply_email").execute(
       { emailId: "e1", bodyHtml: "<p>Thanks!</p>" },
       sig,
     );
-    const staged = deps.bridge.stageForConfirmation.mock.calls[0][0];
-    await staged.run();
-    expect(deps.replyToEmail).toHaveBeenCalledWith(
-      "e1",
+    // Draft-only: it writes the reply draft the composer restores...
+    expect(deps.saveDraft).toHaveBeenCalledWith(
       expect.objectContaining({
+        contextKey: "reply:e1",
         bodyHtml: "<p>Thanks!</p>",
         fromAddress: "team@x.com",
+        replyToEmailId: "e1",
       }),
     );
+    // ...then navigates to the thread with a `#reply=` deep link. No send,
+    // no confirmation dialog.
+    expect(deps.bridge.navigate).toHaveBeenCalledWith(
+      "/inbox/team%40x.com/p1#reply=e1",
+    );
+    expect(deps.bridge.stageForConfirmation).not.toHaveBeenCalled();
+    expect(res.content[0].text.toLowerCase()).toContain("review");
+  });
+
+  it("reply_email refuses to reply to a non-received message", async () => {
+    const deps = makeDeps({
+      fetchEmail: vi.fn().mockResolvedValue({ id: "s1", type: "sent" }),
+    });
+    const tools = createActionTools(deps as any);
+    const res = await t(tools, "reply_email").execute(
+      { emailId: "s1", bodyHtml: "<p>nope</p>" },
+      sig,
+    );
+    expect(deps.saveDraft).not.toHaveBeenCalled();
+    expect(deps.bridge.navigate).not.toHaveBeenCalled();
+    expect(res.isError).toBe(true);
   });
 
   it("enroll_in_sequence opens the enroll modal for the contact", async () => {
