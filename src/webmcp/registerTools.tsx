@@ -5,6 +5,7 @@ import { renderPreview } from "@/lib/template-syntax";
 import {
   fetchGroupedPeople,
   fetchPerson,
+  fetchPeople,
   fetchPersonEmails,
   fetchConversationEmails,
   fetchEmail,
@@ -54,7 +55,7 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
     });
     const actions = createActionTools({
       bridge,
-      fetchPerson,
+      fetchPeople,
       fetchEmail,
       markEmailRead,
       deleteEmail,

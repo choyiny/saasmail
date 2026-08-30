@@ -10,9 +10,12 @@ function makeDeps(overrides: any = {}) {
   };
   return {
     bridge,
-    fetchPerson: vi
-      .fn()
-      .mockResolvedValue({ id: "p1", recipient: "team@x.com" }),
+    // /api/people?personId=… returns per-(person,inbox) rows carrying a real
+    // recipient inbox — unlike GET /api/people/:id, which has none.
+    fetchPeople: vi.fn().mockResolvedValue({
+      data: [{ id: "p1", email: "bob@ext.com", recipient: "team@x.com" }],
+      total: 1,
+    }),
     fetchEmail: vi.fn().mockResolvedValue({
       id: "e1",
       type: "received",
@@ -39,11 +42,29 @@ const t = (tools: any[], n: string) => tools.find((x) => x.name === n)!;
 const sig = { signal: new AbortController().signal };
 
 describe("action tools", () => {
-  it("open_contact navigates to the person's inbox thread", async () => {
+  it("open_contact resolves the contact's inbox and navigates (URL-encoded)", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
     await t(tools, "open_contact").execute({ personId: "p1" }, sig);
-    expect(deps.bridge.navigate).toHaveBeenCalledWith("/inbox/team@x.com/p1");
+    expect(deps.fetchPeople).toHaveBeenCalledWith(
+      expect.objectContaining({ personId: "p1" }),
+    );
+    // recipient + personId are encoded — the "@" in the inbox must not sit raw
+    // in the path segment.
+    expect(deps.bridge.navigate).toHaveBeenCalledWith("/inbox/team%40x.com/p1");
+  });
+
+  it("open_contact fails cleanly when the contact has no visible inbox", async () => {
+    const deps = makeDeps({
+      fetchPeople: vi.fn().mockResolvedValue({ data: [], total: 0 }),
+    });
+    const tools = createActionTools(deps as any);
+    const res = await t(tools, "open_contact").execute(
+      { personId: "ghost" },
+      sig,
+    );
+    expect(deps.bridge.navigate).not.toHaveBeenCalled();
+    expect(res.content[0].text.toLowerCase()).toContain("not found");
   });
 
   it("compose_email opens the compose drawer pre-filled (no send)", async () => {
