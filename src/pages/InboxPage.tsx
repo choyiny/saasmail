@@ -15,6 +15,7 @@ import InboxToolbar, {
 } from "@/components/InboxToolbar";
 import PeopleTable from "@/components/PeopleTable";
 import SelectionBar from "@/components/SelectionBar";
+import AgentPlan from "@/components/AgentPlan";
 import {
   addBlock,
   defaultDirectionFor,
@@ -67,7 +68,20 @@ export default function InboxPage() {
   // Sequenced filters from `?drafts=1` / `?sequenced=1` so an external link —
   // or a WebMCP action that just saved a draft or enrolled a contact — lands
   // on the right pre-filtered view.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // The "Agent Plan" tab is URL-driven (`?view=agent-plan`) so the WebMCP
+  // `visualize_plan` tool can open it by navigation, just like the filters.
+  const agentPlanOpen = searchParams.get("view") === "agent-plan";
+  const toggleAgentPlan = () =>
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (next.get("view") === "agent-plan") next.delete("view");
+        else next.set("view", "agent-plan");
+        return next;
+      },
+      { replace: true },
+    );
   const draftsParam =
     searchParams.get("drafts") === "1" || searchParams.get("drafts") === "true";
   const sequencedParam =
@@ -504,6 +518,8 @@ export default function InboxPage() {
             onRefresh={refreshPeople}
             refreshing={refreshing}
             onCompose={onCompose}
+            agentPlanActive={agentPlanOpen}
+            onAgentPlanToggle={toggleAgentPlan}
           />
         </div>
       )}
@@ -539,7 +555,9 @@ export default function InboxPage() {
         )}
 
       <div className="-mx-4 flex h-[calc(100vh-7rem)] min-h-[420px] flex-col overflow-hidden rounded-none bg-card shadow-sm ring-0 sm:mx-0 sm:rounded-[8px] sm:ring-1 sm:ring-border">
-        {view === "table" ? (
+        {agentPlanOpen ? (
+          <AgentPlan />
+        ) : view === "table" ? (
           selectedConversation ? (
             // Table view + group open → full-width merged timeline.
             <div className="flex h-full min-h-0 flex-col">

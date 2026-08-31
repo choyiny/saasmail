@@ -35,6 +35,7 @@ function makeDeps(overrides: any = {}) {
     renderTemplate: vi.fn().mockReturnValue("<p>Hi Al</p>"),
     invalidate: vi.fn(),
     refreshInbox: vi.fn(),
+    showPlan: vi.fn(),
     ...overrides,
   };
 }
@@ -145,6 +146,31 @@ describe("action tools", () => {
     expect(deps.bridge.navigate).toHaveBeenCalledWith("/?sequenced=1");
     expect(deps.refreshInbox).toHaveBeenCalled();
     expect(res.isError).toBeFalsy();
+  });
+
+  it("visualize_plan publishes the plan and opens the Agent Plan tab", async () => {
+    const deps = makeDeps();
+    const tools = createActionTools(deps as any);
+    await t(tools, "visualize_plan").execute(
+      {
+        title: "Summarize unread",
+        steps: [
+          { label: "Read Ada", status: "done" },
+          { label: "Read Bob", status: "active" },
+        ],
+      },
+      sig,
+    );
+    expect(deps.showPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Summarize unread",
+        steps: [
+          { label: "Read Ada", status: "done", detail: undefined },
+          { label: "Read Bob", status: "active", detail: undefined },
+        ],
+      }),
+    );
+    expect(deps.bridge.navigate).toHaveBeenCalledWith("/?view=agent-plan");
   });
 
   it("enroll_in_sequence fails without a sequenceId", async () => {

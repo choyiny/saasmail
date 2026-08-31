@@ -55,6 +55,9 @@ interface InboxToolbarProps {
   refreshing?: boolean;
   /** Optional Compose button. Rendered to the right of the view toggle. */
   onCompose?: () => void;
+  /** "Agent Plan" tab — a WebMCP agent's live plan, beside the filters. */
+  agentPlanActive: boolean;
+  onAgentPlanToggle: () => void;
 }
 
 const SORT_OPTIONS: Array<{ value: InboxSort; label: string }> = [
@@ -85,6 +88,8 @@ export default function InboxToolbar({
   onRefresh,
   refreshing,
   onCompose,
+  agentPlanActive,
+  onAgentPlanToggle,
 }: InboxToolbarProps) {
   const [inboxOpen, setInboxOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -239,6 +244,11 @@ export default function InboxToolbar({
             sequenced: !filters.sequenced,
           })
         }
+      />
+      <ToolbarToggle
+        label="Agent Plan"
+        active={agentPlanActive}
+        onClick={onAgentPlanToggle}
       />
 
       {hasActiveFilters && (

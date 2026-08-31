@@ -1,5 +1,6 @@
 import type { WebMcpToolDescriptor } from "../types";
 import type { WebMcpBridge } from "../bridge";
+import type { AgentPlan } from "@/lib/agent-plan";
 import { ok, okJson, fail } from "../result";
 
 export interface ActionDeps {
@@ -26,6 +27,8 @@ export interface ActionDeps {
   invalidate: () => void;
   /** Force the inbox people-list to refetch (see lib/inbox-events). */
   refreshInbox: () => void;
+  /** Publish the agent's plan to the Agent Plan tab (see lib/agent-plan). */
+  showPlan: (plan: AgentPlan) => void;
 }
 
 export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
@@ -262,6 +265,63 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         deps.refreshInbox();
         return ok(
           `Enrolled ${row.email ?? args.personId} in the sequence. They're in the inbox Sequenced view now.`,
+        );
+      },
+    },
+    {
+      name: "visualize_plan",
+      description:
+        "Show the user the plan you're about to run (and update it as you go) on the inbox's Agent Plan tab. Call this early with all steps as status 'pending', then call it again — with the same steps — flipping each to 'active' then 'done'/'error'. Purely visual; it schedules nothing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: {
+            type: "string",
+            description: "Plan title, e.g. “Summarize all unread email”.",
+          },
+          steps: {
+            type: "array",
+            description: "The ordered steps, each with a status.",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                status: {
+                  type: "string",
+                  enum: ["pending", "active", "done", "error"],
+                  description: "Defaults to 'pending'.",
+                },
+                detail: {
+                  type: "string",
+                  description: "Optional note/result/error under the step.",
+                },
+              },
+              required: ["label"],
+            },
+          },
+        },
+        required: ["steps"],
+      },
+      describe: (args) => {
+        const steps = Array.isArray(args.steps) ? args.steps : [];
+        const done = steps.filter((s: any) => s?.status === "done").length;
+        return `Updating the plan (${done}/${steps.length})`;
+      },
+      execute: async (args) => {
+        const steps = Array.isArray(args.steps) ? args.steps : [];
+        deps.showPlan({
+          title: args.title,
+          steps: steps.map((s: any) => ({
+            label: String(s?.label ?? ""),
+            status: s?.status ?? "pending",
+            detail: s?.detail,
+          })),
+        });
+        // Surface the plan on its tab so the user watches it fill in.
+        deps.bridge.navigate("/?view=agent-plan");
+        const done = steps.filter((s: any) => s?.status === "done").length;
+        return ok(
+          `Plan shown on the Agent Plan tab — ${done}/${steps.length} step(s) done.`,
         );
       },
     },

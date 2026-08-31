@@ -19,6 +19,7 @@ import {
   enrollPerson,
 } from "@/lib/api";
 import { dispatchInboxRefresh } from "@/lib/inbox-events";
+import { dispatchAgentPlan } from "@/lib/agent-plan";
 import { useWebMcpTools } from "./useWebMcpTool";
 import { useWebMcpBridge } from "./bridge";
 import { createReadTools } from "./tools/read";
@@ -26,10 +27,10 @@ import { createActionTools } from "./tools/actions";
 import { withActivity } from "./activity";
 import { WebMcpActivityFeed } from "./WebMcpActivityFeed";
 
-// 11 read tools + 7 action tools. Pinned by
+// 12 read tools + 8 action tools. Pinned by
 // src/webmcp/__tests__/registerTools.test.tsx so this can't silently drift
 // from the tool factories it's built from.
-export const WEBMCP_TOOL_COUNT = 18;
+export const WEBMCP_TOOL_COUNT = 20;
 
 /**
  * Registers every WebMCP read + action tool with the runtime for the
@@ -68,6 +69,7 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       renderTemplate: (tpl, vars) => renderPreview(tpl, vars),
       invalidate,
       refreshInbox: dispatchInboxRefresh,
+      showPlan: dispatchAgentPlan,
     });
     return [...read, ...actions].map(withActivity);
   }, [bridge, qc]);

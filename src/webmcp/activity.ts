@@ -43,6 +43,8 @@ export function emitWebMcpActivity(activity: WebMcpActivity): void {
  * sensible without touching this map.
  */
 const TOOL_LABELS: Record<string, string> = {
+  get_playbook: "Reading the playbook",
+  visualize_plan: "Updating the plan",
   whoami: "Checking your account",
   list_inboxes: "Listing your inboxes",
   list_conversations: "Browsing your conversations",

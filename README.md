@@ -411,19 +411,22 @@ same tools still register.
   WebMCP tools; it is exposed to the frontend as `webmcpEnabled` on
   `GET /api/config` and defaults to `true` when unset.
 
-**Tool list (18 total: 11 read, 7 action).** Read tools return data through
+**Tool list (20 total: 12 read, 8 action).** Read tools return data through
 the same `/api` client the UI already uses. Action tools drive the real UI —
 they navigate, open the compose drawer pre-filled, save a reply draft into the
-inbox Drafts filter, or enroll a contact and switch to the Sequenced view —
-rather than calling a write
-endpoint directly.
+inbox Drafts filter, enroll a contact and switch to the Sequenced view, or
+render the agent's live plan on the Agent Plan tab — rather than calling a
+write endpoint directly. `get_playbook` is the entry point: it returns how to
+operate the inbox plus step-by-step plans for common workflows (summarize
+unread, reply to unread, enroll contacts by criteria).
 
-Read: `whoami`, `list_inboxes`, `list_conversations`, `list_contacts`,
-`get_contact`, `list_emails`, `read_email`, `search_emails`,
+Read: `get_playbook`, `whoami`, `list_inboxes`, `list_conversations`,
+`list_contacts`, `get_contact`, `list_emails`, `read_email`, `search_emails`,
 `list_templates`, `get_template`, `list_sequences`.
 
 Action: `open_contact`, `compose_email`, `compose_from_template`,
-`reply_email`, `mark_read`, `mark_unread`, `enroll_in_sequence`.
+`reply_email`, `mark_read`, `mark_unread`, `enroll_in_sequence`,
+`visualize_plan`.
 
 ### Webhooks
 
