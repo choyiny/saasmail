@@ -5,6 +5,7 @@ import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { drafts } from "../db/drafts.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { json200Response, escapeLike, escapeFts } from "../lib/helpers";
 import {
   getPersonScoped,
@@ -96,13 +97,12 @@ const listGroupedPeopleRoute = createRoute({
         .enum(["1", "true"])
         .optional()
         .openapi({ description: "Only people with unread emails" }),
-      hasAttachment: z
-        .enum(["1", "true"])
-        .optional()
-        .openapi({ description: "Only people with downloadable attachments" }),
       drafts: z.enum(["1", "true"]).optional().openapi({
         description:
           "Only conversations where the current user has a reply draft",
+      }),
+      sequenced: z.enum(["1", "true"]).optional().openapi({
+        description: "Only contacts currently enrolled in a sequence (active)",
       }),
       sort: z
         .enum(["recency", "unread", "inbox", "attachments"])
@@ -155,8 +155,8 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     q,
     recipient,
     unread,
-    hasAttachment,
     drafts: draftsOnly,
+    sequenced,
     sort,
     direction,
     page,
@@ -187,9 +187,9 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       sql`s.id IN (SELECT person_id FROM emails WHERE is_read = 0 AND conversation_id IS NULL)`,
     );
   }
-  if (hasAttachment) {
+  if (sequenced) {
     personConditions.push(
-      sql`s.id IN (SELECT e2.person_id FROM emails e2 JOIN ${attachments} a ON a.email_id = e2.id WHERE a.content_id IS NULL AND e2.conversation_id IS NULL)`,
+      sql`s.id IN (SELECT person_id FROM ${sequenceEnrollments} WHERE status = 'active')`,
     );
   }
   if (draftsOnly) {
@@ -313,8 +313,10 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
   if (unread) {
     groupConditions.push(sql`g.unreadCount > 0`);
   }
-  if (hasAttachment) {
-    groupConditions.push(sql`g.hasAttachment = 1`);
+  if (sequenced) {
+    // Only individual contacts are enrolled in sequences — never group
+    // conversations — so this filter excludes every group row.
+    groupConditions.push(sql`0`);
   }
   if (draftsOnly) {
     groupConditions.push(

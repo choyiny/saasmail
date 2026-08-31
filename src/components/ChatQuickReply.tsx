@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Maximize2 } from "lucide-react";
-import { replyToEmail, sendEmail, type CcEntry } from "@/lib/api";
+import {
+  replyToEmail,
+  sendEmail,
+  fetchDraft,
+  deleteDraft,
+  type CcEntry,
+} from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
 import AttachmentPicker from "@/components/AttachmentPicker";
 import AttachmentChips from "@/components/AttachmentChips";
@@ -48,6 +54,14 @@ function plainTextToHtml(text: string): string {
     .join("");
 }
 
+// Flatten a draft's HTML body to the plain text this textarea holds. Mirrors
+// the DOMParser approach used elsewhere for chat bubbles.
+function htmlToPlainText(html: string): string {
+  return (
+    new DOMParser().parseFromString(html, "text/html").body.textContent ?? ""
+  );
+}
+
 export default function ChatQuickReply({
   inboxAddress,
   latestReceivedEmailId,
@@ -61,6 +75,32 @@ export default function ChatQuickReply({
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  // Which reply target we've already restored a saved draft for, so we fetch
+  // once per email and never clobber text the user is typing.
+  const restoredForRef = useRef<string | null>(null);
+
+  // Surface a saved reply draft (e.g. one a WebMCP agent drafted, or a reply
+  // the user started in the full composer) so it's visible right here instead
+  // of only in the full editor.
+  useEffect(() => {
+    const id = latestReceivedEmailId;
+    if (!id || restoredForRef.current === id) return;
+    restoredForRef.current = id;
+    let cancelled = false;
+    fetchDraft(`reply:${id}`)
+      .then((draft) => {
+        if (cancelled || !draft) return;
+        const restored =
+          draft.bodyText ?? htmlToPlainText(draft.bodyHtml ?? "");
+        if (!restored.trim()) return;
+        // Don't overwrite anything the user has already started typing.
+        setText((cur) => (cur.trim().length > 0 ? cur : restored));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [latestReceivedEmailId]);
 
   const totalAttachmentBytes = files.reduce((s, f) => s + f.size, 0);
   const overCap = totalAttachmentBytes > ATTACHMENT_CAP_BYTES;
@@ -107,6 +147,12 @@ export default function ChatQuickReply({
             ? { files: files.map((file) => ({ file })) }
             : {}),
         });
+      }
+      // The reply went out — discard any saved draft for it so it doesn't
+      // reappear in this box (or the Drafts filter) next time.
+      if (latestReceivedEmailId) {
+        restoredForRef.current = latestReceivedEmailId;
+        deleteDraft(`reply:${latestReceivedEmailId}`).catch(() => {});
       }
       dispatchEmailSent({
         fromAddress: inboxAddress,

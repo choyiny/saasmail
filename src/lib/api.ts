@@ -189,8 +189,8 @@ export async function fetchGroupedPeople(params?: {
   q?: string;
   recipient?: string;
   unread?: boolean;
-  hasAttachment?: boolean;
   drafts?: boolean;
+  sequenced?: boolean;
   sort?: InboxSort;
   /** Optional explicit direction. Server applies the natural default if omitted. */
   direction?: InboxSortDirection;
@@ -201,8 +201,8 @@ export async function fetchGroupedPeople(params?: {
   if (params?.q) qs.set("q", params.q);
   if (params?.recipient) qs.set("recipient", params.recipient);
   if (params?.unread) qs.set("unread", "1");
-  if (params?.hasAttachment) qs.set("hasAttachment", "1");
   if (params?.drafts) qs.set("drafts", "1");
+  if (params?.sequenced) qs.set("sequenced", "1");
   if (params?.sort && params.sort !== "recency") qs.set("sort", params.sort);
   // Only send direction when it differs from the natural default —
   // keeps the URL stable for the common case and avoids cache-busting.

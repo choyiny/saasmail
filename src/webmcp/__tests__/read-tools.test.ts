@@ -34,6 +34,7 @@ describe("read tools", () => {
   it("exposes the expected read tools", () => {
     const tools = createReadTools(makeDeps());
     for (const n of [
+      "get_playbook",
       "whoami",
       "list_inboxes",
       "list_conversations",
@@ -48,6 +49,23 @@ describe("read tools", () => {
     ]) {
       expect(byName(tools, n)).toBeTruthy();
     }
+  });
+
+  it("get_playbook returns the intro, or a specific workflow", async () => {
+    const tools = createReadTools(makeDeps());
+    const sig = { signal: new AbortController().signal };
+    const intro = await byName(tools, "get_playbook").execute({}, sig);
+    expect(intro.content[0].text).toContain("WORKFLOWS");
+    const wf = await byName(tools, "get_playbook").execute(
+      { workflow: "reply_unread" },
+      sig,
+    );
+    expect(wf.content[0].text.toLowerCase()).toContain("draft");
+    const bad = await byName(tools, "get_playbook").execute(
+      { workflow: "nope" },
+      sig,
+    );
+    expect(bad.isError).toBe(true);
   });
 
   it("search_emails calls the api and returns JSON", async () => {

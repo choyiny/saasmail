@@ -10,6 +10,7 @@ import {
 } from "./helpers";
 import { blocklist } from "../db/blocklist.schema";
 import { drafts } from "../db/drafts.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 
 describe("people router", () => {
   let apiKey: string;
@@ -448,6 +449,76 @@ describe("people router", () => {
       }>;
       const group = data.find((r) => r.id === "conv1");
       expect(group?.type).toBe("group");
+    });
+  });
+
+  describe("GET /api/people/grouped?sequenced=1 — sequence filter", () => {
+    const enrollment = (id: string, personId: string, status = "active") => ({
+      id,
+      sequenceId: "seq1",
+      personId,
+      status,
+      fromAddress: "inbox@test.com",
+      enrolledAt: 1,
+    });
+
+    it("shows only contacts with an active enrollment", async () => {
+      await createTestPerson({ id: "p-seq", email: "s@test.com" });
+      await createTestEmail({
+        id: "e-seq",
+        personId: "p-seq",
+        messageId: "m-s@test.com",
+      });
+      await createTestPerson({ id: "p-noseq", email: "n@test.com" });
+      await createTestEmail({
+        id: "e-noseq",
+        personId: "p-noseq",
+        messageId: "m-n@test.com",
+      });
+      await getDb()
+        .insert(sequenceEnrollments)
+        .values(enrollment("en1", "p-seq"));
+
+      const res = await authFetch("/api/people/grouped?sequenced=1", {
+        apiKey,
+      });
+      expect(res.status).toBe(200);
+      const ids = (await res.json()).data.map((r: { id: string }) => r.id);
+      expect(ids).toContain("p-seq");
+      expect(ids).not.toContain("p-noseq");
+    });
+
+    it("ignores cancelled or completed enrollments", async () => {
+      await createTestPerson({ id: "p-done", email: "d@test.com" });
+      await createTestEmail({
+        id: "e-done",
+        personId: "p-done",
+        messageId: "m-d@test.com",
+      });
+      await getDb()
+        .insert(sequenceEnrollments)
+        .values(enrollment("en-done", "p-done", "completed"));
+
+      const res = await authFetch("/api/people/grouped?sequenced=1", {
+        apiKey,
+      });
+      expect((await res.json()).data).toHaveLength(0);
+    });
+
+    it("excludes group conversations (only contacts are sequenced)", async () => {
+      await createTestPerson({ id: "pg", email: "g@test.com" });
+      await createTestEmail({
+        id: "eg",
+        personId: "pg",
+        conversationId: "convS",
+        messageId: "mg@test.com",
+      });
+
+      const res = await authFetch("/api/people/grouped?sequenced=1", {
+        apiKey,
+      });
+      const data = (await res.json()).data as Array<{ type: string }>;
+      expect(data.some((r) => r.type === "group")).toBe(false);
     });
   });
 });

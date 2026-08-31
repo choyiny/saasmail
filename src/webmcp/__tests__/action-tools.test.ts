@@ -5,8 +5,6 @@ function makeDeps(overrides: any = {}) {
   const bridge = {
     navigate: vi.fn(),
     openCompose: vi.fn(),
-    openEnroll: vi.fn(),
-    stageForConfirmation: vi.fn(),
   };
   return {
     bridge,
@@ -21,13 +19,14 @@ function makeDeps(overrides: any = {}) {
       type: "received",
       recipient: "team@x.com",
       fromAddress: "bob@ext.com",
+      personId: "p1",
       subject: "Hello",
     }),
     markEmailRead: vi.fn().mockResolvedValue(undefined),
-    deleteEmail: vi
+    enrollPerson: vi
       .fn()
-      .mockResolvedValue({ success: true, attachmentsDeleted: 0 }),
-    replyToEmail: vi.fn().mockResolvedValue({ id: "r1", status: "sent" }),
+      .mockResolvedValue({ enrollment: {}, scheduledEmails: [] }),
+    saveDraft: vi.fn().mockResolvedValue({ contextKey: "reply:e1" }),
     fetchTemplate: vi.fn().mockResolvedValue({
       slug: "welcome",
       bodyHtml: "<p>Hi {{name}}</p>",
@@ -35,6 +34,8 @@ function makeDeps(overrides: any = {}) {
     }),
     renderTemplate: vi.fn().mockReturnValue("<p>Hi Al</p>"),
     invalidate: vi.fn(),
+    refreshInbox: vi.fn(),
+    showPlan: vi.fn(),
     ...overrides,
   };
 }
@@ -93,40 +94,93 @@ describe("action tools", () => {
     expect(deps.invalidate).toHaveBeenCalled();
   });
 
-  it("delete_email stages a confirmation instead of deleting", async () => {
+  it("reply_email saves a draft and switches to the Drafts filter without sending", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
-    await t(tools, "delete_email").execute({ emailId: "e1" }, sig);
-    expect(deps.bridge.stageForConfirmation).toHaveBeenCalledTimes(1);
-    expect(deps.deleteEmail).not.toHaveBeenCalled();
-    // running the staged action performs the delete
-    const staged = deps.bridge.stageForConfirmation.mock.calls[0][0];
-    await staged.run();
-    expect(deps.deleteEmail).toHaveBeenCalledWith("e1");
-  });
-
-  it("reply_email stages a confirmation that calls replyToEmail on confirm", async () => {
-    const deps = makeDeps();
-    const tools = createActionTools(deps as any);
-    await t(tools, "reply_email").execute(
+    const res = await t(tools, "reply_email").execute(
       { emailId: "e1", bodyHtml: "<p>Thanks!</p>" },
       sig,
     );
-    const staged = deps.bridge.stageForConfirmation.mock.calls[0][0];
-    await staged.run();
-    expect(deps.replyToEmail).toHaveBeenCalledWith(
-      "e1",
+    // Draft-only: it writes the reply draft...
+    expect(deps.saveDraft).toHaveBeenCalledWith(
       expect.objectContaining({
+        contextKey: "reply:e1",
         bodyHtml: "<p>Thanks!</p>",
         fromAddress: "team@x.com",
+        replyToEmailId: "e1",
       }),
     );
+    // ...then surfaces it in the inbox Drafts filter and refreshes. No send.
+    expect(deps.bridge.navigate).toHaveBeenCalledWith("/?drafts=1");
+    expect(deps.refreshInbox).toHaveBeenCalled();
+    expect(res.content[0].text.toLowerCase()).toContain("draft");
   });
 
-  it("enroll_in_sequence opens the enroll modal for the contact", async () => {
+  it("reply_email refuses to reply to a non-received message", async () => {
+    const deps = makeDeps({
+      fetchEmail: vi.fn().mockResolvedValue({ id: "s1", type: "sent" }),
+    });
+    const tools = createActionTools(deps as any);
+    const res = await t(tools, "reply_email").execute(
+      { emailId: "s1", bodyHtml: "<p>nope</p>" },
+      sig,
+    );
+    expect(deps.saveDraft).not.toHaveBeenCalled();
+    expect(deps.bridge.navigate).not.toHaveBeenCalled();
+    expect(res.isError).toBe(true);
+  });
+
+  it("enroll_in_sequence enrolls immediately, then shows the sequenced view", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
-    await t(tools, "enroll_in_sequence").execute({ personId: "p1" }, sig);
-    expect(deps.bridge.openEnroll).toHaveBeenCalledWith("p1");
+    const res = await t(tools, "enroll_in_sequence").execute(
+      { personId: "p1", sequenceId: "seq1" },
+      sig,
+    );
+    // Enrolls directly — no confirmation dialog. Defaults from to the
+    // contact's inbox (recipient) when not given.
+    expect(deps.enrollPerson).toHaveBeenCalledWith(
+      "seq1",
+      expect.objectContaining({ personId: "p1", fromAddress: "team@x.com" }),
+    );
+    expect(deps.bridge.navigate).toHaveBeenCalledWith("/?sequenced=1");
+    expect(deps.refreshInbox).toHaveBeenCalled();
+    expect(res.isError).toBeFalsy();
+  });
+
+  it("visualize_plan publishes the plan and opens the Agent Plan tab", async () => {
+    const deps = makeDeps();
+    const tools = createActionTools(deps as any);
+    await t(tools, "visualize_plan").execute(
+      {
+        title: "Summarize unread",
+        steps: [
+          { label: "Read Ada", status: "done" },
+          { label: "Read Bob", status: "active" },
+        ],
+      },
+      sig,
+    );
+    expect(deps.showPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Summarize unread",
+        steps: [
+          { label: "Read Ada", status: "done", detail: undefined },
+          { label: "Read Bob", status: "active", detail: undefined },
+        ],
+      }),
+    );
+    expect(deps.bridge.navigate).toHaveBeenCalledWith("/?view=agent-plan");
+  });
+
+  it("enroll_in_sequence fails without a sequenceId", async () => {
+    const deps = makeDeps();
+    const tools = createActionTools(deps as any);
+    const res = await t(tools, "enroll_in_sequence").execute(
+      { personId: "p1" },
+      sig,
+    );
+    expect(deps.enrollPerson).not.toHaveBeenCalled();
+    expect(res.isError).toBe(true);
   });
 });

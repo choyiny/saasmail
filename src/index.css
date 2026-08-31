@@ -334,6 +334,28 @@ body {
   pointer-events: none;
 }
 
+/* Entrance for WebMCP activity cards — a small slide-up + fade so a new
+   tool call announces itself without being jarring. Pure CSS to match the
+   tray/drawer animations above. */
+@keyframes webmcp-activity-in {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.webmcp-activity-enter {
+  animation: webmcp-activity-in 180ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .webmcp-activity-enter {
+    animation: none;
+  }
+}
+
 /* Smooth, refined scrollbars on overflow containers.
    Webkit + Firefox styling. Used by the inbox panes for independent,
    non-jarring scroll. */

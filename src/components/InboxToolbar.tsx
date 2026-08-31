@@ -11,6 +11,7 @@ import {
   PenSquare,
   ArrowUpDown,
   RefreshCw,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -22,9 +23,10 @@ import {
 export interface InboxFilters {
   recipient?: string;
   unread?: boolean;
-  hasAttachment?: boolean;
   /** Only conversations where you've started a reply draft. */
   drafts?: boolean;
+  /** Only contacts currently enrolled in a sequence. */
+  sequenced?: boolean;
 }
 
 export type InboxView = "list" | "table";
@@ -54,6 +56,9 @@ interface InboxToolbarProps {
   refreshing?: boolean;
   /** Optional Compose button. Rendered to the right of the view toggle. */
   onCompose?: () => void;
+  /** "Agent Plan" tab — a WebMCP agent's live plan, beside the filters. */
+  agentPlanActive: boolean;
+  onAgentPlanToggle: () => void;
 }
 
 const SORT_OPTIONS: Array<{ value: InboxSort; label: string }> = [
@@ -84,6 +89,8 @@ export default function InboxToolbar({
   onRefresh,
   refreshing,
   onCompose,
+  agentPlanActive,
+  onAgentPlanToggle,
 }: InboxToolbarProps) {
   const [inboxOpen, setInboxOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
@@ -115,8 +122,8 @@ export default function InboxToolbar({
   const hasActiveFilters =
     !!filters.recipient ||
     !!filters.unread ||
-    !!filters.hasAttachment ||
-    !!filters.drafts;
+    !!filters.drafts ||
+    !!filters.sequenced;
 
   return (
     <div className="flex flex-wrap items-center gap-1 rounded-[8px] bg-card p-1 ring-1 ring-border">
@@ -230,12 +237,12 @@ export default function InboxToolbar({
         onClick={() => onFiltersChange({ ...filters, drafts: !filters.drafts })}
       />
       <ToolbarToggle
-        label="Attachments"
-        active={!!filters.hasAttachment}
+        label="Sequenced"
+        active={!!filters.sequenced}
         onClick={() =>
           onFiltersChange({
             ...filters,
-            hasAttachment: !filters.hasAttachment,
+            sequenced: !filters.sequenced,
           })
         }
       />
@@ -247,8 +254,8 @@ export default function InboxToolbar({
             onFiltersChange({
               recipient: undefined,
               unread: false,
-              hasAttachment: false,
               drafts: false,
+              sequenced: false,
             })
           }
           className="inline-flex h-7 items-center gap-1 rounded-[5px] px-1.5 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
@@ -374,14 +381,20 @@ export default function InboxToolbar({
         <ViewToggleButton
           icon={LayoutList}
           label="List"
-          active={view === "list"}
+          active={!agentPlanActive && view === "list"}
           onClick={() => onViewChange("list")}
         />
         <ViewToggleButton
           icon={LayoutGrid}
           label="Table"
-          active={view === "table"}
+          active={!agentPlanActive && view === "table"}
           onClick={() => onViewChange("table")}
+        />
+        <ViewToggleButton
+          icon={Bot}
+          label="Agent"
+          active={agentPlanActive}
+          onClick={onAgentPlanToggle}
         />
       </div>
 

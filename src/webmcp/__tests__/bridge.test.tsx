@@ -1,11 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import {
-  render,
-  screen,
-  fireEvent,
-  cleanup,
-  waitFor,
-} from "@testing-library/react";
+import { render, screen, cleanup } from "@testing-library/react";
 import { WebMcpBridgeProvider, useWebMcpBridge } from "../bridge";
 
 afterEach(cleanup);
@@ -13,39 +7,29 @@ afterEach(cleanup);
 function Consumer({ onReady }: { onReady: (b: any) => void }) {
   const bridge = useWebMcpBridge();
   onReady(bridge);
-  return null;
+  return <div>child</div>;
 }
 
-describe("WebMcpBridgeProvider review dialog", () => {
-  it("stageForConfirmation shows a dialog and runs the action on confirm", async () => {
-    const run = vi.fn().mockResolvedValue(undefined);
+describe("WebMcpBridgeProvider", () => {
+  it("renders children and exposes the bridge surface", () => {
     let bridge: any;
     render(
       <WebMcpBridgeProvider navigate={vi.fn()} openCompose={vi.fn()}>
         <Consumer onReady={(b) => (bridge = b)} />
       </WebMcpBridgeProvider>,
     );
-    bridge.stageForConfirmation({
-      title: "Send reply",
-      summary: "To bob@x.com",
-      run,
-    });
-    expect(await screen.findByText("Send reply")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
-    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("child")).toBeTruthy();
+    // The bridge drives only the reused app surfaces — router navigation and
+    // the compose drawer. It renders no modal of its own.
+    expect(Object.keys(bridge).sort()).toEqual(["navigate", "openCompose"]);
   });
 
-  it("cancel does not run the action", async () => {
-    const run = vi.fn();
-    let bridge: any;
-    render(
-      <WebMcpBridgeProvider navigate={vi.fn()} openCompose={vi.fn()}>
-        <Consumer onReady={(b) => (bridge = b)} />
-      </WebMcpBridgeProvider>,
-    );
-    bridge.stageForConfirmation({ title: "Delete email", summary: "e1", run });
-    await screen.findByText("Delete email");
-    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
-    expect(run).not.toHaveBeenCalled();
+  it("throws when used outside the provider", () => {
+    function Orphan() {
+      useWebMcpBridge();
+      return null;
+    }
+    // React logs the error; assert the hook guard fires.
+    expect(() => render(<Orphan />)).toThrow(/WebMcpBridgeProvider/);
   });
 });
