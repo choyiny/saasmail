@@ -26,7 +26,7 @@ export default function AgentPlan() {
   const done = plan.steps.filter((s) => s.status === "done").length;
   const total = plan.steps.length;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  const active = plan.steps.some((s) => s.status === "active");
+  const activeStep = plan.steps.find((s) => s.status === "active") ?? null;
 
   return (
     <div className="smooth-scroll flex h-full min-h-0 flex-col overflow-y-auto bg-card">
@@ -38,7 +38,7 @@ export default function AgentPlan() {
           <h2 className="text-base font-semibold text-text-primary">
             {plan.title || "Agent Plan"}
           </h2>
-          {active && (
+          {activeStep && (
             <span className="ml-1 h-1.5 w-1.5 animate-pulse rounded-full bg-violet" />
           )}
         </div>
@@ -57,6 +57,20 @@ export default function AgentPlan() {
               style={{ width: `${pct}%` }}
             />
           </div>
+          {/* Current step — surfaces "who's being read right now" even when the
+              list runs long. */}
+          {activeStep && (
+            <div className="mt-2 flex items-center gap-2 text-[12px] text-text-secondary">
+              <Loader2
+                size={12}
+                className="shrink-0 animate-spin text-violet"
+              />
+              <span className="min-w-0 truncate">
+                <span className="text-text-tertiary">Now:</span>{" "}
+                {activeStep.label}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Steps */}
@@ -99,6 +113,17 @@ export default function AgentPlan() {
             </li>
           ))}
         </ol>
+
+        {plan.result && (
+          <div className="mt-5 rounded-[10px] bg-bg-subtle/60 p-4 ring-1 ring-border">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
+              Result
+            </p>
+            <p className="whitespace-pre-wrap break-words text-sm text-text-primary">
+              {plan.result}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

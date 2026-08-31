@@ -21,8 +21,8 @@ const PLAYBOOKS: Record<string, string> = {
 
 STEP 0 (required, do this before anything else): call visualize_plan with a "Find unread" step plus one "Summarize unread from <name>" step per contact you expect, all status "pending", then a final "Write summary" step. You may not know the contacts yet — start with { title: "Summarize unread", steps: [{ label: "Find unread mail", status: "active" }] } and expand the plan after step 1.
 1. list_conversations({ unread: true }) — the contacts/threads that have unread mail. Now flesh out the plan (one step per person) via visualize_plan.
-2. For each returned person: mark that step "active", list_emails({ personId }) and keep messages where isRead is false; read_email({ emailId }) for full bodies; then mark the step "done".
-3. Write a short per-person summary for the user and mark "Write summary" done.`,
+2. For each returned person: mark that step "active" (the Agent Plan tab surfaces the current recipient), list_emails({ personId }) and keep messages where isRead is false; read_email({ emailId }) for full bodies; then mark the step "done". Work through them all — don't stop at a handful.
+3. Write the summary and deliver it via the final visualize_plan call's \`result\` field, so it renders on the Agent Plan tab. Mark "Write summary" done.`,
   reply_unread: `DRAFT REPLIES TO UNREAD EMAIL
 
 STEP 0 (required, do this before anything else): call visualize_plan with a "Find unread" step (status "active") plus, once known, one "Draft reply to <name>" step per contact, all "pending".

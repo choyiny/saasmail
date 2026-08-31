@@ -20,6 +20,8 @@ export interface AgentPlan {
   /** Optional plan title, e.g. "Summarize all unread email". */
   title?: string;
   steps: AgentPlanStep[];
+  /** Optional final output shown at the end — e.g. the finished summary. */
+  result?: string;
 }
 
 export const AGENT_PLAN_EVENT = "saasmail:agent-plan";

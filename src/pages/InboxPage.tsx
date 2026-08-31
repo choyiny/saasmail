@@ -512,6 +512,9 @@ export default function InboxPage() {
               setView(v);
               setSelectedPerson(null);
               clearSelection();
+              // List/Table are peers of the Agent tab — switching to one leaves
+              // the Agent Plan view.
+              if (agentPlanOpen) toggleAgentPlan();
             }}
             sortSpec={sortSpec}
             onSortChange={setSortSpec}

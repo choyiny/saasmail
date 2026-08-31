@@ -11,6 +11,7 @@ import {
   PenSquare,
   ArrowUpDown,
   RefreshCw,
+  Bot,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -245,11 +246,6 @@ export default function InboxToolbar({
           })
         }
       />
-      <ToolbarToggle
-        label="Agent Plan"
-        active={agentPlanActive}
-        onClick={onAgentPlanToggle}
-      />
 
       {hasActiveFilters && (
         <button
@@ -385,14 +381,20 @@ export default function InboxToolbar({
         <ViewToggleButton
           icon={LayoutList}
           label="List"
-          active={view === "list"}
+          active={!agentPlanActive && view === "list"}
           onClick={() => onViewChange("list")}
         />
         <ViewToggleButton
           icon={LayoutGrid}
           label="Table"
-          active={view === "table"}
+          active={!agentPlanActive && view === "table"}
           onClick={() => onViewChange("table")}
+        />
+        <ViewToggleButton
+          icon={Bot}
+          label="Agent"
+          active={agentPlanActive}
+          onClick={onAgentPlanToggle}
         />
       </div>
 

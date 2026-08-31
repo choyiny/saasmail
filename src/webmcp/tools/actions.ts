@@ -299,6 +299,11 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
               required: ["label"],
             },
           },
+          result: {
+            type: "string",
+            description:
+              "Final output to show at the end once the work is done — e.g. the finished summary. Fill this in on your last update.",
+          },
         },
         required: ["steps"],
       },
@@ -316,12 +321,19 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
             status: s?.status ?? "pending",
             detail: s?.detail,
           })),
+          result: args.result,
         });
-        // Surface the plan on its tab so the user watches it fill in.
-        deps.bridge.navigate("/?view=agent-plan");
+        // Surface the plan on its tab so the user can watch it — but don't yank
+        // them away from the Drafts/Sequenced view a reply/enroll just focused.
+        const search =
+          typeof window !== "undefined" ? window.location.search : "";
+        const focused = /[?&](drafts|sequenced)=(1|true)\b/.test(search);
+        if (!focused) deps.bridge.navigate("/?view=agent-plan");
         const done = steps.filter((s: any) => s?.status === "done").length;
         return ok(
-          `Plan shown on the Agent Plan tab — ${done}/${steps.length} step(s) done.`,
+          `Plan updated — ${done}/${steps.length} step(s) done.${
+            focused ? "" : " Shown on the Agent Plan tab."
+          }`,
         );
       },
     },
