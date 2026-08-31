@@ -20,7 +20,12 @@ const DISMISS_MS: Record<Exclude<WebMcpActivityPhase, "running">, number> = {
   error: 8000,
 };
 
-type Item = WebMcpActivity & { settledAt?: number };
+type Item = WebMcpActivity & { updatedAt: number };
+
+// A card's group: either its shared header, or a singleton keyed by its id.
+function groupKeyOf(it: WebMcpActivity): string {
+  return it.group ? `g:${it.group}` : `one:${it.id}`;
+}
 
 function nowMs(): number {
   return typeof performance !== "undefined" ? performance.now() : 0;
@@ -49,8 +54,9 @@ export function WebMcpActivityFeed() {
       if (!a?.id) return;
       setItems((prev) => {
         const without = prev.filter((x) => x.id !== a.id);
-        const settledAt = a.phase === "running" ? undefined : nowMs();
-        return [...without, { ...a, settledAt }];
+        // Stamp every event so a new/updated item extends its whole group's
+        // on-screen time (see the sweep below).
+        return [...without, { ...a, updatedAt: nowMs() }];
       });
     }
     window.addEventListener(WEBMCP_ACTIVITY_EVENT, onActivity as EventListener);
@@ -61,20 +67,34 @@ export function WebMcpActivityFeed() {
       );
   }, []);
 
-  // Sweep settled items once their linger window elapses. Running items never
-  // expire on their own.
+  // Sweep whole groups once they go quiet. A group lingers while ANY of its
+  // items is still running; once all are settled, it stays until its most
+  // recent event is older than the linger window — so a new item extends the
+  // group, and the whole card drops at once rather than bullet-by-bullet.
   useEffect(() => {
     if (items.length === 0) return;
     const iv = setInterval(() => {
       setItems((prev) => {
         const t = nowMs();
-        const next = prev.filter(
-          (it) =>
-            it.settledAt == null ||
-            t - it.settledAt <
-              DISMISS_MS[it.phase === "error" ? "error" : "success"],
-        );
-        return next.length === prev.length ? prev : next;
+        const byKey = new Map<string, Item[]>();
+        for (const it of prev) {
+          const key = groupKeyOf(it);
+          const list = byKey.get(key);
+          if (list) list.push(it);
+          else byKey.set(key, [it]);
+        }
+        const drop = new Set<string>();
+        for (const group of byKey.values()) {
+          if (group.some((i) => i.phase === "running")) continue;
+          const lastEvent = Math.max(...group.map((i) => i.updatedAt));
+          const window = group.some((i) => i.phase === "error")
+            ? DISMISS_MS.error
+            : DISMISS_MS.success;
+          if (t - lastEvent > window) {
+            for (const i of group) drop.add(i.id);
+          }
+        }
+        return drop.size === 0 ? prev : prev.filter((x) => !drop.has(x.id));
       });
     }, 500);
     return () => clearInterval(iv);
@@ -92,7 +112,7 @@ export function WebMcpActivityFeed() {
   const order: string[] = [];
   const groups = new Map<string, Item[]>();
   for (const it of items) {
-    const key = it.group ? `g:${it.group}` : `one:${it.id}`;
+    const key = groupKeyOf(it);
     if (!groups.has(key)) {
       groups.set(key, []);
       order.push(key);
