@@ -22,9 +22,10 @@ import {
 export interface InboxFilters {
   recipient?: string;
   unread?: boolean;
-  hasAttachment?: boolean;
   /** Only conversations where you've started a reply draft. */
   drafts?: boolean;
+  /** Only contacts currently enrolled in a sequence. */
+  sequenced?: boolean;
 }
 
 export type InboxView = "list" | "table";
@@ -115,8 +116,8 @@ export default function InboxToolbar({
   const hasActiveFilters =
     !!filters.recipient ||
     !!filters.unread ||
-    !!filters.hasAttachment ||
-    !!filters.drafts;
+    !!filters.drafts ||
+    !!filters.sequenced;
 
   return (
     <div className="flex flex-wrap items-center gap-1 rounded-[8px] bg-card p-1 ring-1 ring-border">
@@ -230,12 +231,12 @@ export default function InboxToolbar({
         onClick={() => onFiltersChange({ ...filters, drafts: !filters.drafts })}
       />
       <ToolbarToggle
-        label="Attachments"
-        active={!!filters.hasAttachment}
+        label="Sequenced"
+        active={!!filters.sequenced}
         onClick={() =>
           onFiltersChange({
             ...filters,
-            hasAttachment: !filters.hasAttachment,
+            sequenced: !filters.sequenced,
           })
         }
       />
@@ -247,8 +248,8 @@ export default function InboxToolbar({
             onFiltersChange({
               recipient: undefined,
               unread: false,
-              hasAttachment: false,
               drafts: false,
+              sequenced: false,
             })
           }
           className="inline-flex h-7 items-center gap-1 rounded-[5px] px-1.5 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
