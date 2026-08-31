@@ -11,6 +11,7 @@ import {
   CheckCheck,
 } from "lucide-react";
 import type { Email } from "@/lib/api";
+import { fetchDraft } from "@/lib/api";
 import type { ThreadInboxGroup } from "@/components/ThreadInboxSection";
 import ChatQuickReply from "@/components/ChatQuickReply";
 import CcChips, { RosterDiffNotice } from "@/components/CcChips";
@@ -464,7 +465,7 @@ export default function ChatInboxSection({
   // carries the original CC roster + subject through (minus our own
   // inbox, which is "us" and would be redundant on the To/Cc lines).
   const handleOpenInCompose = onOpenCompose
-    ? () => {
+    ? async () => {
         const sender = replyTarget
           ? (senderResolver?.(replyTarget) ?? null)
           : null;
@@ -476,11 +477,23 @@ export default function ChatInboxSection({
           baseSubject && !/^re:\s/i.test(baseSubject)
             ? `Re: ${baseSubject}`
             : baseSubject;
+        // Carry a saved reply draft's body into the full editor so it's
+        // visible here too, not just in the inline quick-reply box.
+        let bodyHtml: string | undefined;
+        if (replyTarget) {
+          try {
+            const draft = await fetchDraft(`reply:${replyTarget.id}`);
+            if (draft?.bodyHtml) bodyHtml = draft.bodyHtml;
+          } catch {
+            // Best-effort — fall back to an empty body on failure.
+          }
+        }
         onOpenCompose({
           from: group.inbox,
           to,
           cc,
           subject,
+          ...(bodyHtml ? { bodyHtml } : {}),
         });
       }
     : undefined;
