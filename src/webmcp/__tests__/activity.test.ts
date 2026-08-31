@@ -48,6 +48,50 @@ describe("withActivity", () => {
     expect(cap.events[0].label).toBe(labelForTool("list_emails"));
   });
 
+  it("enriches the label from an async describe, updating the same card", async () => {
+    const cap = capture();
+    const rich = "Looking at the emails for Ada (ada@x.com)";
+    const wrapped = withActivity({
+      name: "list_emails",
+      description: "",
+      inputSchema: {},
+      describe: async () => rich,
+      execute: async () => ok("done"),
+    });
+    await wrapped.execute({ personId: "p1" }, sig);
+    cap.stop();
+
+    expect(cap.events.map((e) => e.phase)).toEqual([
+      "running",
+      "running",
+      "success",
+    ]);
+    // One invocation id across all three events.
+    expect(new Set(cap.events.map((e) => e.id)).size).toBe(1);
+    // Generic first, then the enriched label wins on the update and the settle.
+    expect(cap.events[0].label).toBe(labelForTool("list_emails"));
+    expect(cap.events[1].label).toBe(rich);
+    expect(cap.events[2].label).toBe(rich);
+  });
+
+  it("falls back to the generic label when describe rejects", async () => {
+    const cap = capture();
+    const wrapped = withActivity({
+      name: "list_emails",
+      description: "",
+      inputSchema: {},
+      describe: async () => {
+        throw new Error("no such person");
+      },
+      execute: async () => ok("done"),
+    });
+    await wrapped.execute({}, sig);
+    cap.stop();
+
+    expect(cap.events.map((e) => e.phase)).toEqual(["running", "success"]);
+    expect(cap.events[1].label).toBe(labelForTool("list_emails"));
+  });
+
   it("reports an isError result as an error phase with the detail text", async () => {
     const cap = capture();
     const wrapped = withActivity(tool("read_email", async () => fail("Nope")));

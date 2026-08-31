@@ -40,24 +40,23 @@ export function emitWebMcpActivity(activity: WebMcpActivity): void {
  */
 const TOOL_LABELS: Record<string, string> = {
   whoami: "Checking your account",
-  list_inboxes: "Listing inboxes",
-  list_conversations: "Listing conversations",
-  list_contacts: "Listing contacts",
-  get_contact: "Reading a contact",
-  list_emails: "Listing emails",
-  read_email: "Reading an email",
-  search_emails: "Searching emails",
+  list_inboxes: "Listing your inboxes",
+  list_conversations: "Browsing your conversations",
+  list_contacts: "Browsing your contacts",
+  get_contact: "Looking up a contact",
+  list_emails: "Looking at a contact's emails",
+  read_email: "Opening an email",
+  search_emails: "Searching your mail",
   list_templates: "Listing templates",
-  get_template: "Reading a template",
+  get_template: "Opening a template",
   list_sequences: "Listing sequences",
   open_contact: "Opening a contact",
-  compose_email: "Preparing a draft",
-  compose_from_template: "Preparing a draft",
+  compose_email: "Drafting an email",
+  compose_from_template: "Drafting from a template",
   reply_email: "Drafting a reply",
-  mark_read: "Marking as read",
-  mark_unread: "Marking as unread",
-  delete_email: "Preparing to delete",
-  enroll_in_sequence: "Opening enrollment",
+  mark_read: "Marking a message read",
+  mark_unread: "Marking a message unread",
+  enroll_in_sequence: "Enrolling a contact",
 };
 
 export function labelForTool(name: string): string {
@@ -86,11 +85,11 @@ let sequence = 0;
 export function withActivity(
   descriptor: WebMcpToolDescriptor,
 ): WebMcpToolDescriptor {
+  const tool = descriptor.name;
   return {
     ...descriptor,
     execute: async (args, opts) => {
-      const id = `${descriptor.name}-${++sequence}`;
-      const label = labelForTool(descriptor.name);
+      const id = `${tool}-${++sequence}`;
       const startedAt =
         typeof performance !== "undefined" ? performance.now() : 0;
       const elapsed = () =>
@@ -98,17 +97,29 @@ export function withActivity(
           ? Math.round(performance.now() - startedAt)
           : undefined;
 
-      emitWebMcpActivity({
-        id,
-        tool: descriptor.name,
-        label,
-        phase: "running",
-      });
+      // Start with the generic label so the card appears instantly...
+      let label = labelForTool(tool);
+      emitWebMcpActivity({ id, tool, label, phase: "running" });
+
+      // ...then enrich it from the call's args (which may resolve a contact
+      // name, etc.), updating the same card in place. Reused for the settled
+      // event so running and done read consistently.
+      const labelReady = Promise.resolve()
+        .then(() => descriptor.describe?.(args))
+        .then((rich) => {
+          if (rich && rich !== label) {
+            label = rich;
+            emitWebMcpActivity({ id, tool, label, phase: "running" });
+          }
+        })
+        .catch(() => {});
+
       try {
         const result = await descriptor.execute(args, opts);
+        await labelReady;
         emitWebMcpActivity({
           id,
-          tool: descriptor.name,
+          tool,
           label,
           phase: result?.isError ? "error" : "success",
           durationMs: elapsed(),
@@ -116,9 +127,10 @@ export function withActivity(
         });
         return result;
       } catch (err) {
+        await labelReady;
         emitWebMcpActivity({
           id,
-          tool: descriptor.name,
+          tool,
           label,
           phase: "error",
           detail: (err as Error)?.message,

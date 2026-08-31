@@ -19,6 +19,16 @@ export interface ActionDeps {
 }
 
 export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
+  // Resolve a contact into a human label like "Ada Lovelace (ada@x.com)" for
+  // the activity popup. Throws on failure so the caller falls back to the
+  // generic tool label.
+  const personLabel = async (personId: string): Promise<string> => {
+    const { data } = await deps.fetchPeople({ personId, limit: 1 });
+    const row = data?.[0];
+    if (!row) throw new Error("Contact not found.");
+    return row.name ? `${row.name} (${row.email})` : row.email;
+  };
+
   return [
     {
       name: "open_contact",
@@ -29,6 +39,7 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         properties: { personId: { type: "string" } },
         required: ["personId"],
       },
+      describe: async (args) => `Opening ${await personLabel(args.personId)}`,
       execute: async (args) => {
         // GET /api/people/:id has no `recipient` — that inbox address is a
         // per-(person,inbox) value only the list query computes. Resolve the
@@ -60,6 +71,8 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         },
         required: ["to"],
       },
+      describe: (args) =>
+        args.to ? `Drafting an email to ${args.to}` : "Drafting an email",
       execute: async (args) => {
         deps.bridge.openCompose({
           to: args.to,
@@ -90,6 +103,8 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         },
         required: ["slug", "to"],
       },
+      describe: (args) =>
+        `Drafting the “${args.slug}” template${args.to ? ` to ${args.to}` : ""}`,
       execute: async (args) => {
         const tpl = await deps.fetchTemplate(args.slug);
         if (!tpl) return fail(`Template "${args.slug}" not found.`);
@@ -189,6 +204,8 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         properties: { personId: { type: "string" } },
         required: ["personId"],
       },
+      describe: async (args) =>
+        `Enrolling ${await personLabel(args.personId)} in a sequence`,
       execute: async (args) => {
         deps.bridge.openEnroll(args.personId);
         return ok(

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, Check, AlertCircle, Bot } from "lucide-react";
+import { Loader2, Check, AlertCircle, Bot, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   WEBMCP_ACTIVITY_EVENT,
@@ -10,11 +10,12 @@ import {
 
 // At most this many cards at once — older ones drop off the top of the stack.
 const MAX_VISIBLE = 4;
-// How long a settled card lingers before it fades out. Errors stay longer so
-// the user can actually read what went wrong.
+// How long a settled card lingers before it fades out, once it finishes. At
+// least five seconds so there's always time to read it; errors stay longer.
+// (A card can always be dismissed sooner with its ✕ button.)
 const DISMISS_MS: Record<Exclude<WebMcpActivityPhase, "running">, number> = {
-  success: 2600,
-  error: 6000,
+  success: 5000,
+  error: 8000,
 };
 
 /**
@@ -69,6 +70,15 @@ export function WebMcpActivityFeed() {
     };
   }, []);
 
+  const dismiss = useCallback((id: string) => {
+    const t = timers.current.get(id);
+    if (t) {
+      clearTimeout(t);
+      timers.current.delete(id);
+    }
+    setItems((prev) => prev.filter((x) => x.id !== id));
+  }, []);
+
   if (items.length === 0) return null;
 
   const anyRunning = items.some((i) => i.phase === "running");
@@ -88,14 +98,20 @@ export function WebMcpActivityFeed() {
         )}
       </div>
       {items.map((a) => (
-        <ActivityCard key={a.id} activity={a} />
+        <ActivityCard key={a.id} activity={a} onDismiss={() => dismiss(a.id)} />
       ))}
     </div>,
     document.body,
   );
 }
 
-function ActivityCard({ activity }: { activity: WebMcpActivity }) {
+function ActivityCard({
+  activity,
+  onDismiss,
+}: {
+  activity: WebMcpActivity;
+  onDismiss: () => void;
+}) {
   const { phase, label, tool, detail, durationMs } = activity;
   return (
     <div
@@ -124,6 +140,14 @@ function ActivityCard({ activity }: { activity: WebMcpActivity }) {
           </p>
         )}
       </div>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-text-tertiary/70 transition-colors hover:bg-bg-muted hover:text-text-primary"
+      >
+        <X size={13} />
+      </button>
     </div>
   );
 }

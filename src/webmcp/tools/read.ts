@@ -16,6 +16,14 @@ export interface ReadDeps {
 }
 
 export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
+  // Resolve a contact into a human label like "Ada Lovelace (ada@x.com)" for
+  // the activity popup. Throws on failure so the caller falls back to the
+  // generic tool label.
+  const personLabel = async (personId: string): Promise<string> => {
+    const p = await deps.fetchPerson(personId);
+    return p?.name ? `${p.name} (${p.email})` : p.email;
+  };
+
   return [
     {
       name: "whoami",
@@ -64,6 +72,10 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
           limit: { type: "number", description: "Max rows (default 25)." },
         },
       },
+      describe: (args) =>
+        args.q
+          ? `Searching your conversations for “${args.q}”`
+          : "Browsing your conversations",
       execute: async (args) => {
         const res = await deps.fetchGroupedPeople({
           q: args.q,
@@ -83,6 +95,10 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
           limit: { type: "number", description: "Max results (default 25)." },
         },
       },
+      describe: (args) =>
+        args.q
+          ? `Searching contacts for “${args.q}”`
+          : "Browsing your contacts",
       execute: async (args) => {
         const res = await deps.fetchGroupedPeople({
           q: args.q,
@@ -99,6 +115,8 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
         properties: { personId: { type: "string" } },
         required: ["personId"],
       },
+      describe: async (args) =>
+        `Looking up ${await personLabel(args.personId)}`,
       execute: async (args) => okJson(await deps.fetchPerson(args.personId)),
     },
     {
@@ -116,6 +134,14 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
           },
           limit: { type: "number" },
         },
+      },
+      describe: async (args) => {
+        if (args.personId) {
+          return `Looking at the emails for ${await personLabel(args.personId)}`;
+        }
+        return args.conversationId
+          ? "Looking at a conversation's emails"
+          : "Listing emails";
       },
       execute: async (args) => {
         if (args.conversationId) {
@@ -160,6 +186,8 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
         },
         required: ["q"],
       },
+      describe: (args) =>
+        args.q ? `Searching your mail for “${args.q}”` : "Searching your mail",
       execute: async (args) => {
         if (!args.q || !String(args.q).trim()) return fail("q is required.");
         return okJson(
@@ -186,6 +214,10 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
         properties: { slug: { type: "string" } },
         required: ["slug"],
       },
+      describe: (args) =>
+        args.slug
+          ? `Opening the “${args.slug}” template`
+          : "Opening a template",
       execute: async (args) => okJson(await deps.fetchTemplate(args.slug)),
     },
     {
