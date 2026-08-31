@@ -73,13 +73,27 @@ export default function AgentPlan() {
           )}
         </div>
 
+        {/* Result — the finished output, kept at the top so it's the first
+            thing read once the work is done. */}
+        {plan.result && (
+          <div className="mt-4 rounded-[10px] bg-bg-subtle/60 p-4 ring-1 ring-border">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
+              Result
+            </p>
+            <p className="whitespace-pre-wrap break-words text-sm text-text-primary">
+              {plan.result}
+            </p>
+          </div>
+        )}
+
         {/* Steps */}
         <ol className="mt-5 space-y-1">
           {plan.steps.map((step, i) => (
             <li
               key={i}
               className={cn(
-                "flex items-start gap-3 rounded-[8px] px-3 py-2.5 ring-1 transition-colors",
+                "flex items-start gap-2.5 rounded-[8px] px-3 ring-1 transition-colors",
+                step.status === "done" ? "py-1" : "py-2.5",
                 step.status === "active"
                   ? "bg-violet/[0.04] ring-violet/30"
                   : "ring-transparent",
@@ -89,10 +103,10 @@ export default function AgentPlan() {
               <div className="min-w-0 flex-1">
                 <p
                   className={cn(
-                    "break-words text-sm",
+                    "break-words",
                     step.status === "done"
-                      ? "text-text-tertiary line-through decoration-text-tertiary/40"
-                      : "text-text-primary",
+                      ? "text-[13px] text-text-tertiary line-through decoration-text-tertiary/40"
+                      : "text-sm text-text-primary",
                   )}
                 >
                   {step.label}
@@ -113,17 +127,6 @@ export default function AgentPlan() {
             </li>
           ))}
         </ol>
-
-        {plan.result && (
-          <div className="mt-5 rounded-[10px] bg-bg-subtle/60 p-4 ring-1 ring-border">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
-              Result
-            </p>
-            <p className="whitespace-pre-wrap break-words text-sm text-text-primary">
-              {plan.result}
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -138,7 +141,7 @@ function StepIcon({ status }: { status: AgentPlanStepStatus }) {
   if (status === "done")
     return (
       <Check
-        size={16}
+        size={14}
         className={cn(base, "text-emerald-600 dark:text-emerald-400")}
       />
     );
