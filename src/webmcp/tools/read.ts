@@ -224,6 +224,15 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
         properties: { emailId: { type: "string" } },
         required: ["emailId"],
       },
+      group: "Opening emails",
+      subject: async (args) => {
+        const e = await deps.fetchEmail(args.emailId);
+        const subj = typeof e?.subject === "string" ? e.subject.trim() : "";
+        // The counterpart address: who it's from (received) or who it's to.
+        const who = e?.fromAddress || e?.recipient || "";
+        if (subj) return who ? `“${subj}” — ${who}` : `“${subj}”`;
+        return who || "an email";
+      },
       execute: async (args) => okJson(await deps.fetchEmail(args.emailId)),
     },
     {
