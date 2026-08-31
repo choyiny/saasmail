@@ -115,8 +115,8 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
         properties: { personId: { type: "string" } },
         required: ["personId"],
       },
-      describe: async (args) =>
-        `Looking up ${await personLabel(args.personId)}`,
+      group: "Looking up contacts",
+      subject: async (args) => personLabel(args.personId),
       execute: async (args) => okJson(await deps.fetchPerson(args.personId)),
     },
     {
@@ -135,13 +135,10 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
           limit: { type: "number" },
         },
       },
-      describe: async (args) => {
-        if (args.personId) {
-          return `Looking at the emails for ${await personLabel(args.personId)}`;
-        }
-        return args.conversationId
-          ? "Looking at a conversation's emails"
-          : "Listing emails";
+      group: "Reading emails",
+      subject: async (args) => {
+        if (args.personId) return personLabel(args.personId);
+        return args.conversationId ? "a conversation" : "the inbox";
       },
       execute: async (args) => {
         if (args.conversationId) {

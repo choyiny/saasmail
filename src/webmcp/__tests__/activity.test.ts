@@ -74,6 +74,32 @@ describe("withActivity", () => {
     expect(cap.events[2].label).toBe(rich);
   });
 
+  it("carries a group header from the first frame and fills the subject in", async () => {
+    const cap = capture();
+    const wrapped = withActivity({
+      name: "list_emails",
+      description: "",
+      inputSchema: {},
+      group: "Reading emails",
+      subject: async () => "Ada (ada@x.com)",
+      execute: async () => ok("done"),
+    });
+    await wrapped.execute({ personId: "p1" }, sig);
+    cap.stop();
+
+    expect(cap.events.map((e) => e.phase)).toEqual([
+      "running",
+      "running",
+      "success",
+    ]);
+    // Grouped from the start; the per-call subject resolves on the update.
+    expect(cap.events[0].group).toBe("Reading emails");
+    expect(cap.events[0].subject).toBeUndefined();
+    expect(cap.events[1].subject).toBe("Ada (ada@x.com)");
+    expect(cap.events[2].group).toBe("Reading emails");
+    expect(cap.events[2].subject).toBe("Ada (ada@x.com)");
+  });
+
   it("falls back to the generic label when describe rejects", async () => {
     const cap = capture();
     const wrapped = withActivity({

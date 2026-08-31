@@ -24,6 +24,10 @@ export interface WebMcpActivity {
   detail?: string;
   /** Wall-clock duration once the call finished, in ms. */
   durationMs?: number;
+  /** When set, calls sharing this header collapse into one grouped card. */
+  group?: string;
+  /** Per-call bullet text shown under a grouped card. */
+  subject?: string;
 }
 
 export function emitWebMcpActivity(activity: WebMcpActivity): void {
@@ -97,42 +101,57 @@ export function withActivity(
           ? Math.round(performance.now() - startedAt)
           : undefined;
 
-      // Start with the generic label so the card appears instantly...
-      let label = labelForTool(tool);
-      emitWebMcpActivity({ id, tool, label, phase: "running" });
+      // A grouped tool knows its header up front, so the card can group from
+      // the first frame; its per-call `subject` resolves just after. A plain
+      // tool uses a single (possibly async) `describe` label instead.
+      const group = descriptor.group;
+      let subject: string | undefined;
+      let label = group ?? labelForTool(tool);
+      const emit = (
+        phase: WebMcpActivityPhase,
+        extra?: Partial<WebMcpActivity>,
+      ) =>
+        emitWebMcpActivity({
+          id,
+          tool,
+          label,
+          phase,
+          group,
+          subject,
+          ...extra,
+        });
 
-      // ...then enrich it from the call's args (which may resolve a contact
-      // name, etc.), updating the same card in place. Reused for the settled
-      // event so running and done read consistently.
-      const labelReady = Promise.resolve()
-        .then(() => descriptor.describe?.(args))
-        .then((rich) => {
-          if (rich && rich !== label) {
-            label = rich;
-            emitWebMcpActivity({ id, tool, label, phase: "running" });
+      emit("running");
+
+      // Enrich in place: resolve the grouped subject, or the plain describe
+      // label. Reused for the settled event so running and done read the same.
+      const ready = Promise.resolve()
+        .then(async () => {
+          if (group && descriptor.subject) {
+            subject = await descriptor.subject(args);
+            label = subject ? `${group}: ${subject}` : group;
+            emit("running");
+          } else if (!group && descriptor.describe) {
+            const rich = await descriptor.describe(args);
+            if (rich && rich !== label) {
+              label = rich;
+              emit("running");
+            }
           }
         })
         .catch(() => {});
 
       try {
         const result = await descriptor.execute(args, opts);
-        await labelReady;
-        emitWebMcpActivity({
-          id,
-          tool,
-          label,
-          phase: result?.isError ? "error" : "success",
+        await ready;
+        emit(result?.isError ? "error" : "success", {
           durationMs: elapsed(),
           ...(result?.isError ? { detail: firstText(result) } : {}),
         });
         return result;
       } catch (err) {
-        await labelReady;
-        emitWebMcpActivity({
-          id,
-          tool,
-          label,
-          phase: "error",
+        await ready;
+        emit("error", {
           detail: (err as Error)?.message,
           durationMs: elapsed(),
         });
