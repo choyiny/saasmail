@@ -6,7 +6,6 @@ function makeDeps(overrides: any = {}) {
     navigate: vi.fn(),
     openCompose: vi.fn(),
     openEnroll: vi.fn(),
-    stageForConfirmation: vi.fn(),
   };
   return {
     bridge,
@@ -25,9 +24,6 @@ function makeDeps(overrides: any = {}) {
       subject: "Hello",
     }),
     markEmailRead: vi.fn().mockResolvedValue(undefined),
-    deleteEmail: vi
-      .fn()
-      .mockResolvedValue({ success: true, attachmentsDeleted: 0 }),
     saveDraft: vi.fn().mockResolvedValue({ contextKey: "reply:e1" }),
     fetchTemplate: vi.fn().mockResolvedValue({
       slug: "welcome",
@@ -94,26 +90,14 @@ describe("action tools", () => {
     expect(deps.invalidate).toHaveBeenCalled();
   });
 
-  it("delete_email stages a confirmation instead of deleting", async () => {
-    const deps = makeDeps();
-    const tools = createActionTools(deps as any);
-    await t(tools, "delete_email").execute({ emailId: "e1" }, sig);
-    expect(deps.bridge.stageForConfirmation).toHaveBeenCalledTimes(1);
-    expect(deps.deleteEmail).not.toHaveBeenCalled();
-    // running the staged action performs the delete
-    const staged = deps.bridge.stageForConfirmation.mock.calls[0][0];
-    await staged.run();
-    expect(deps.deleteEmail).toHaveBeenCalledWith("e1");
-  });
-
-  it("reply_email seeds a draft and deep-links to the existing composer without sending", async () => {
+  it("reply_email saves a draft and switches to the Drafts filter without sending", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
     const res = await t(tools, "reply_email").execute(
       { emailId: "e1", bodyHtml: "<p>Thanks!</p>" },
       sig,
     );
-    // Draft-only: it writes the reply draft the composer restores...
+    // Draft-only: it writes the reply draft...
     expect(deps.saveDraft).toHaveBeenCalledWith(
       expect.objectContaining({
         contextKey: "reply:e1",
@@ -122,13 +106,10 @@ describe("action tools", () => {
         replyToEmailId: "e1",
       }),
     );
-    // ...then navigates to the thread with a `#reply=` deep link. No send,
-    // no confirmation dialog.
-    expect(deps.bridge.navigate).toHaveBeenCalledWith(
-      "/inbox/team%40x.com/p1#reply=e1",
-    );
-    expect(deps.bridge.stageForConfirmation).not.toHaveBeenCalled();
-    expect(res.content[0].text.toLowerCase()).toContain("review");
+    // ...then surfaces it in the inbox Drafts filter and refreshes. No send.
+    expect(deps.bridge.navigate).toHaveBeenCalledWith("/?drafts=1");
+    expect(deps.invalidate).toHaveBeenCalled();
+    expect(res.content[0].text.toLowerCase()).toContain("draft");
   });
 
   it("reply_email refuses to reply to a non-received message", async () => {

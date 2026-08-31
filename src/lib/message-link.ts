@@ -25,22 +25,6 @@ export function readMessageHash(hash: string): string | null {
   }
 }
 
-/**
- * Reads a "open the reply composer" target from the URL hash. A WebMCP reply
- * draft lands as `…/inbox/<inbox>/<personId>#reply=<emailId>`; PersonDetail
- * uses this to auto-open its existing reply composer on the target message
- * (whose seeded draft the composer then restores).
- */
-export function readReplyHash(hash: string): string | null {
-  const m = hash.match(/^#reply=(.+)$/);
-  if (!m) return null;
-  try {
-    return decodeURIComponent(m[1]);
-  } catch {
-    return m[1];
-  }
-}
-
 export async function copyMessageLink(emailId: string): Promise<void> {
   const url = buildMessageUrl(emailId);
   try {

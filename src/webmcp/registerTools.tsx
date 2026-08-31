@@ -15,7 +15,6 @@ import {
   fetchStats,
   searchEmails,
   markEmailRead,
-  deleteEmail,
   saveDraft,
 } from "@/lib/api";
 import { useWebMcpTools } from "./useWebMcpTool";
@@ -25,10 +24,10 @@ import { createActionTools } from "./tools/actions";
 import { withActivity } from "./activity";
 import { WebMcpActivityFeed } from "./WebMcpActivityFeed";
 
-// 11 read tools + 8 action tools. Pinned by
+// 11 read tools + 7 action tools. Pinned by
 // src/webmcp/__tests__/registerTools.test.tsx so this can't silently drift
 // from the tool factories it's built from.
-export const WEBMCP_TOOL_COUNT = 19;
+export const WEBMCP_TOOL_COUNT = 18;
 
 /**
  * Registers every WebMCP read + action tool with the runtime for the
@@ -61,7 +60,6 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchPeople,
       fetchEmail,
       markEmailRead,
-      deleteEmail,
       saveDraft,
       fetchTemplate,
       renderTemplate: (tpl, vars) => renderPreview(tpl, vars),

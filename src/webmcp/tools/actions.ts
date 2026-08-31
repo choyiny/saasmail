@@ -7,7 +7,6 @@ export interface ActionDeps {
   fetchPeople: (params: { personId?: string; limit?: number }) => Promise<any>;
   fetchEmail: (id: string) => Promise<any>;
   markEmailRead: (id: string, isRead: boolean) => Promise<void>;
-  deleteEmail: (id: string) => Promise<any>;
   saveDraft: (data: {
     contextKey: string;
     bodyHtml?: string;
@@ -117,7 +116,7 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
     {
       name: "reply_email",
       description:
-        "Open the reply composer pre-filled with a draft reply to a received message. The user reviews it and clicks Send — this does NOT send.",
+        "Draft a reply to a received message. Saves the draft and shows it in the inbox's Drafts filter — the user opens it, reviews, and clicks Send. This does NOT send.",
       inputSchema: {
         type: "object",
         properties: {
@@ -137,26 +136,19 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         if (!fromAddress) {
           return fail("Could not determine the sending inbox for this reply.");
         }
-        if (!email.personId) {
-          return fail("Could not resolve the conversation for this reply.");
-        }
-        // WebMCP never sends on its own. Seed the reply draft the composer
-        // restores on open, then navigate to the thread with a `#reply=` deep
-        // link so PersonDetail opens its existing reply composer on this
-        // message — the user reviews the draft and clicks Send.
+        // WebMCP never sends on its own. Save the reply draft, then switch the
+        // inbox to its Drafts filter and refresh so the conversation shows up
+        // there for the user to open, review, and send.
         await deps.saveDraft({
           contextKey: `reply:${email.id}`,
           bodyHtml: args.bodyHtml,
           fromAddress,
           replyToEmailId: email.id,
         });
-        deps.bridge.navigate(
-          `/inbox/${encodeURIComponent(fromAddress)}/${encodeURIComponent(
-            email.personId,
-          )}#reply=${encodeURIComponent(email.id)}`,
-        );
+        deps.bridge.navigate("/?drafts=1");
+        deps.invalidate();
         return ok(
-          `Opened a reply draft to "${email.subject ?? "(no subject)"}" in the composer for the user to review and send.`,
+          `Drafted a reply to "${email.subject ?? "(no subject)"}". It's in the inbox Drafts filter for you to review and send.`,
         );
       },
     },
@@ -186,29 +178,6 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         await deps.markEmailRead(args.emailId, false);
         deps.invalidate();
         return okJson({ emailId: args.emailId, isRead: false });
-      },
-    },
-    {
-      name: "delete_email",
-      description:
-        "Delete an email. Shows the user a confirmation dialog first — it does NOT delete immediately.",
-      inputSchema: {
-        type: "object",
-        properties: { emailId: { type: "string" } },
-        required: ["emailId"],
-      },
-      execute: async (args) => {
-        deps.bridge.stageForConfirmation({
-          title: "Delete email",
-          summary: `Permanently delete email ${args.emailId} and its attachments.`,
-          run: async () => {
-            await deps.deleteEmail(args.emailId);
-            deps.invalidate();
-          },
-        });
-        return ok(
-          "Prepared a delete. The user must confirm before it happens.",
-        );
       },
     },
     {

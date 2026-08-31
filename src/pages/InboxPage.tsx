@@ -62,10 +62,23 @@ export default function InboxPage() {
     totalUnreadEmails: 0,
   });
   const [stats, setStats] = useState<Stats | null>(null);
-  const [filters, setFilters] = useState<InboxFilters>({});
-  // Deep-link support: seed search from `?q=` (or `?search=`) so an
-  // external admin link like `/?q=user@example.com` lands pre-filtered.
+  // Deep-link support: seed search from `?q=` (or `?search=`) and the Drafts
+  // filter from `?drafts=1` so an external link — or a WebMCP `reply_email`
+  // that just saved a draft — lands on the right pre-filtered view.
   const [searchParams] = useSearchParams();
+  const draftsParam =
+    searchParams.get("drafts") === "1" || searchParams.get("drafts") === "true";
+  const [filters, setFilters] = useState<InboxFilters>(() =>
+    draftsParam ? { drafts: true } : {},
+  );
+  // React to the param arriving after mount (agent navigates here while the
+  // inbox is already open). Only forces the filter on — leaves the user free
+  // to toggle it back off afterward.
+  useEffect(() => {
+    if (draftsParam) {
+      setFilters((f) => (f.drafts ? f : { ...f, drafts: true }));
+    }
+  }, [draftsParam]);
   const [search, setSearch] = useState(
     () => searchParams.get("q") ?? searchParams.get("search") ?? "",
   );

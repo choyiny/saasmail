@@ -21,11 +21,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  messageDomId,
-  readMessageHash,
-  readReplyHash,
-} from "@/lib/message-link";
+import { messageDomId, readMessageHash } from "@/lib/message-link";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
 import ReassignPersonModal from "@/components/ReassignPersonModal";
 import SequenceStatus from "@/components/SequenceStatus";
@@ -360,25 +356,6 @@ export default function PersonDetail({
       });
     });
   }, [emails, location.hash, inboxGroups, person.id]);
-
-  // Reply deep-link: if the URL has `#reply=<emailId>` for a message in this
-  // thread, switch to its inbox tab and open the existing reply composer on
-  // it. A WebMCP `reply_email` call seeds the reply draft, then navigates here
-  // so the composer restores that draft — the agent's work shows up in the
-  // same composer the user would open by hand. Fires once per (person, hash).
-  const lastReplyHashHandled = useRef<string | null>(null);
-  useEffect(() => {
-    if (emails.length === 0) return;
-    const targetEmailId = readReplyHash(location.hash);
-    if (!targetEmailId) return;
-    const key = `${person.id}:${targetEmailId}`;
-    if (lastReplyHashHandled.current === key) return;
-    const target = emails.find((e) => e.id === targetEmailId);
-    if (!target) return;
-    lastReplyHashHandled.current = key;
-    setActiveInbox(inboxOf(target));
-    setReplyToEmailId(target.id);
-  }, [emails, location.hash, person.id]);
 
   // Listen for the global "email sent" event so we can:
   //   1) Refetch emails immediately — already happens via the existing

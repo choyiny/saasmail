@@ -62,7 +62,7 @@ describe("withActivity", () => {
   it("emits an error phase and rethrows when execute throws", async () => {
     const cap = capture();
     const wrapped = withActivity(
-      tool("delete_email", async () => {
+      tool("mark_read", async () => {
         throw new Error("boom");
       }),
     );

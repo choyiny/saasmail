@@ -399,18 +399,22 @@ same tools still register.
 
 - **Session-scoped.** The agent can only do what the signed-in user's session
   already permits — there is no separate credential or elevated access.
-- **Human-confirmed writes.** `reply_email`, `delete_email`, and other
-  mutating actions are staged and shown in a confirmation dialog; nothing
-  sends or deletes until a person clicks Confirm.
+- **Never sends or deletes.** WebMCP is read + draft + navigate only. It has
+  no send or delete tool: `compose_email`, `compose_from_template`, and
+  `reply_email` produce drafts the signed-in user reviews and sends by hand —
+  the agent cannot dispatch or destroy mail on its own.
+- **Watchable.** A bottom-right activity popup surfaces each tool call as it
+  runs (running → done/error), so the agent's work is visible rather than
+  happening on an idle screen.
 - **Per-instance toggle.** Set the `app_settings` row with key
   `webmcp_enabled` to the string `false` to stop the UI from registering any
   WebMCP tools; it is exposed to the frontend as `webmcpEnabled` on
   `GET /api/config` and defaults to `true` when unset.
 
-**Tool list (19 total: 11 read, 8 action).** Read tools return data through
+**Tool list (18 total: 11 read, 7 action).** Read tools return data through
 the same `/api` client the UI already uses. Action tools drive the real UI —
-they navigate, open the compose drawer pre-filled, open the enroll modal, or
-stage a send/reply/delete for confirmation — rather than calling a write
+they navigate, open the compose drawer pre-filled, save a reply draft into the
+inbox Drafts filter, or open the enroll modal — rather than calling a write
 endpoint directly.
 
 Read: `whoami`, `list_inboxes`, `list_conversations`, `list_contacts`,
@@ -418,8 +422,7 @@ Read: `whoami`, `list_inboxes`, `list_conversations`, `list_contacts`,
 `list_templates`, `get_template`, `list_sequences`.
 
 Action: `open_contact`, `compose_email`, `compose_from_template`,
-`reply_email`, `mark_read`, `mark_unread`, `delete_email`,
-`enroll_in_sequence`.
+`reply_email`, `mark_read`, `mark_unread`, `enroll_in_sequence`.
 
 ### Webhooks
 
