@@ -3,9 +3,11 @@ import { ok, okJson, fail } from "../result";
 
 const PLAYBOOK_INTRO = `You are operating saasmail — a shared customer inbox — through its in-page WebMCP tools, as the signed-in user, in their browser.
 
+MANDATORY FIRST ACTION: before running ANY other tool for a task, call visualize_plan with every step you intend to take, each { label, status: "pending" }. Do not read, reply, or enroll until the plan is on screen — inference is slow, and the plan (on the "Agent Plan" tab) is how the user follows along. This is required, not optional.
+
 HOW TO WORK
 1. Pick a workflow below (or ask the user which).
-2. Call visualize_plan FIRST with every step you intend to run, each { label, status: "pending" }. Inference is slow, so this shows the user a live plan (on the "Agent Plan" tab) while you work.
+2. Call visualize_plan FIRST (see above) with all the steps as "pending".
 3. As you go, call visualize_plan again with the SAME steps, flipping each to "active" when you start it and "done" (or "error") when it finishes. Call it as often as you like — it just replaces the plan.
 4. WebMCP never sends or deletes on its own. Replies become drafts the user sends; enrollment is the only direct write.
 
@@ -17,25 +19,22 @@ WORKFLOWS (call get_playbook again with { workflow: "<name>" } for detail)
 const PLAYBOOKS: Record<string, string> = {
   summarize_unread: `SUMMARIZE ALL UNREAD EMAIL
 
-1. list_conversations({ unread: true }) — the contacts/threads that have unread mail.
-2. For each returned person: list_emails({ personId }) and keep messages where isRead is false; read_email({ emailId }) for full bodies you need.
-3. Write a short per-person summary for the user.
-
-Plan: one visualize_plan step per person ("Summarize unread from <name>"), then a final "Write summary" step.`,
+STEP 0 (required, do this before anything else): call visualize_plan with a "Find unread" step plus one "Summarize unread from <name>" step per contact you expect, all status "pending", then a final "Write summary" step. You may not know the contacts yet — start with { title: "Summarize unread", steps: [{ label: "Find unread mail", status: "active" }] } and expand the plan after step 1.
+1. list_conversations({ unread: true }) — the contacts/threads that have unread mail. Now flesh out the plan (one step per person) via visualize_plan.
+2. For each returned person: mark that step "active", list_emails({ personId }) and keep messages where isRead is false; read_email({ emailId }) for full bodies; then mark the step "done".
+3. Write a short per-person summary for the user and mark "Write summary" done.`,
   reply_unread: `DRAFT REPLIES TO UNREAD EMAIL
 
-1. list_conversations({ unread: true }) to find who has unread mail.
-2. For each: list_emails({ personId }) for the unread message(s); read_email for context.
-3. reply_email({ emailId, bodyHtml }) to draft a reply. This does NOT send — it saves a draft and opens the Drafts view for the user to review and send.
-
-Plan: one step per contact ("Draft reply to <name>"). Never claim a reply was sent — the user sends it.`,
+STEP 0 (required, do this before anything else): call visualize_plan with a "Find unread" step (status "active") plus, once known, one "Draft reply to <name>" step per contact, all "pending".
+1. list_conversations({ unread: true }) to find who has unread mail; expand the plan with a step per contact via visualize_plan.
+2. For each: mark its step "active", list_emails({ personId }) for the unread message(s), read_email for context.
+3. reply_email({ emailId, bodyHtml }) to draft a reply, then mark the step "done". This does NOT send — it saves a draft and opens the Drafts view for the user to review and send. Never claim a reply was sent — the user sends it.`,
   enroll_by_criteria: `ENROLL CONTACTS INTO A SEQUENCE BY CRITERIA
 
+STEP 0 (required, do this before anything else): call visualize_plan with "Find sequence", "Find matching contacts", then one "Enroll <name>" step per match — start with the first two "pending"/"active" and add the enroll steps once you know the matches.
 1. list_sequences() to find the target sequence and its id.
-2. list_contacts({ q }) / list_conversations() to find contacts matching the user's criterion (e.g. a domain, unread, recent).
-3. For each match: enroll_in_sequence({ personId, sequenceId }). Enrolls immediately (no confirmation) and schedules the drip; the contact lands in the Sequenced view.
-
-Plan: a "Find matching contacts" step, then one "Enroll <name>" step per contact.`,
+2. list_contacts({ q }) / list_conversations() to find contacts matching the user's criterion (e.g. a domain, unread, recent); expand the plan with one enroll step per match.
+3. For each match: mark its step "active", enroll_in_sequence({ personId, sequenceId }) — enrolls immediately (no confirmation) and schedules the drip; the contact lands in the Sequenced view — then mark "done".`,
 };
 
 export interface ReadDeps {
@@ -65,7 +64,7 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
     {
       name: "get_playbook",
       description:
-        "READ THIS FIRST. Returns how to operate saasmail via these tools plus step-by-step plans for common workflows (summarize unread, reply to unread, enroll contacts by criteria). Pass a `workflow` for its detailed steps. Then use visualize_plan to show the user your plan.",
+        "READ THIS FIRST, before any other tool. Returns how to operate saasmail plus step-by-step plans for common workflows (summarize unread, reply to unread, enroll contacts by criteria). Pass a `workflow` for its steps. It requires you to call visualize_plan with your intended steps BEFORE you read, reply, or enroll anything.",
       inputSchema: {
         type: "object",
         properties: {
