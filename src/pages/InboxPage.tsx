@@ -34,6 +34,7 @@ import {
 import ConversationDetail from "./ConversationDetail";
 import { useSession } from "@/lib/auth-client";
 import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
+import { onInboxRefresh } from "@/lib/inbox-events";
 import { useResizableSidebar } from "@/hooks/useResizableSidebar";
 import { cn } from "@/lib/utils";
 import { PushOptInBanner } from "@/components/PushOptInBanner";
@@ -62,14 +63,18 @@ export default function InboxPage() {
     totalUnreadEmails: 0,
   });
   const [stats, setStats] = useState<Stats | null>(null);
-  // Deep-link support: seed search from `?q=` (or `?search=`) and the Drafts
-  // filter from `?drafts=1` so an external link — or a WebMCP `reply_email`
-  // that just saved a draft — lands on the right pre-filtered view.
+  // Deep-link support: seed search from `?q=` (or `?search=`) and the Drafts /
+  // Sequenced filters from `?drafts=1` / `?sequenced=1` so an external link —
+  // or a WebMCP action that just saved a draft or enrolled a contact — lands
+  // on the right pre-filtered view.
   const [searchParams] = useSearchParams();
   const draftsParam =
     searchParams.get("drafts") === "1" || searchParams.get("drafts") === "true";
+  const sequencedParam =
+    searchParams.get("sequenced") === "1" ||
+    searchParams.get("sequenced") === "true";
   const [filters, setFilters] = useState<InboxFilters>(() =>
-    draftsParam ? { drafts: true } : {},
+    draftsParam ? { drafts: true } : sequencedParam ? { sequenced: true } : {},
   );
   // React to the param arriving after mount (agent navigates here while the
   // inbox is already open). Only forces the filter on — leaves the user free
@@ -79,6 +84,11 @@ export default function InboxPage() {
       setFilters((f) => (f.drafts ? f : { ...f, drafts: true }));
     }
   }, [draftsParam]);
+  useEffect(() => {
+    if (sequencedParam) {
+      setFilters((f) => (f.sequenced ? f : { ...f, sequenced: true }));
+    }
+  }, [sequencedParam]);
   const [search, setSearch] = useState(
     () => searchParams.get("q") ?? searchParams.get("search") ?? "",
   );
@@ -184,6 +194,12 @@ export default function InboxPage() {
   // (PeopleTable) and List view (PersonList sidebar) see the same data.
   // Previously the fetch lived inside PersonList, which meant Table view
   // showed an empty state because PersonList wasn't mounted.
+  // Bumped to force a refetch of the current query (e.g. a WebMCP action just
+  // saved a draft / enrolled a contact and we're already on that filter, so
+  // the query params didn't change on their own).
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  useEffect(() => onInboxRefresh(() => setRefreshNonce((n) => n + 1)), []);
+
   useEffect(() => {
     setPeopleLoading(true);
     const t = setTimeout(() => {
@@ -196,7 +212,8 @@ export default function InboxPage() {
         .finally(() => setPeopleLoading(false));
     }, 200);
     return () => clearTimeout(t);
-  }, [peopleQuery]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peopleQuery, refreshNonce]);
 
   // Manual refresh: re-fetch the current page immediately (no debounce) while
   // keeping the existing rows on screen. Returns the promise so the mobile

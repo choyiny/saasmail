@@ -16,6 +16,8 @@ export interface ActionDeps {
   fetchTemplate: (slug: string) => Promise<any>;
   renderTemplate: (tpl: string, vars: Record<string, unknown>) => string;
   invalidate: () => void;
+  /** Force the inbox people-list to refetch (see lib/inbox-events). */
+  refreshInbox: () => void;
 }
 
 export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
@@ -161,7 +163,7 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
           replyToEmailId: email.id,
         });
         deps.bridge.navigate("/?drafts=1");
-        deps.invalidate();
+        deps.refreshInbox();
         return ok(
           `Drafted a reply to "${email.subject ?? "(no subject)"}". It's in the inbox Drafts filter for you to review and send.`,
         );
@@ -207,6 +209,10 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
       describe: async (args) =>
         `Enrolling ${await personLabel(args.personId)} in a sequence`,
       execute: async (args) => {
+        // Switch the inbox to the Sequenced view behind the dialog so the
+        // contact lands there once the user confirms (the bridge refreshes
+        // the list on enroll).
+        deps.bridge.navigate("/?sequenced=1");
         deps.bridge.openEnroll(args.personId);
         return ok(
           "Opened the sequence enrollment dialog for the user to complete.",

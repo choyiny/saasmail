@@ -17,6 +17,7 @@ import {
   markEmailRead,
   saveDraft,
 } from "@/lib/api";
+import { dispatchInboxRefresh } from "@/lib/inbox-events";
 import { useWebMcpTools } from "./useWebMcpTool";
 import { useWebMcpBridge } from "./bridge";
 import { createReadTools } from "./tools/read";
@@ -64,6 +65,7 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchTemplate,
       renderTemplate: (tpl, vars) => renderPreview(tpl, vars),
       invalidate,
+      refreshInbox: dispatchInboxRefresh,
     });
     return [...read, ...actions].map(withActivity);
   }, [bridge, qc]);

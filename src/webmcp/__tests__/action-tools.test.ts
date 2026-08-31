@@ -32,6 +32,7 @@ function makeDeps(overrides: any = {}) {
     }),
     renderTemplate: vi.fn().mockReturnValue("<p>Hi Al</p>"),
     invalidate: vi.fn(),
+    refreshInbox: vi.fn(),
     ...overrides,
   };
 }
@@ -108,7 +109,7 @@ describe("action tools", () => {
     );
     // ...then surfaces it in the inbox Drafts filter and refreshes. No send.
     expect(deps.bridge.navigate).toHaveBeenCalledWith("/?drafts=1");
-    expect(deps.invalidate).toHaveBeenCalled();
+    expect(deps.refreshInbox).toHaveBeenCalled();
     expect(res.content[0].text.toLowerCase()).toContain("draft");
   });
 
@@ -126,10 +127,11 @@ describe("action tools", () => {
     expect(res.isError).toBe(true);
   });
 
-  it("enroll_in_sequence opens the enroll modal for the contact", async () => {
+  it("enroll_in_sequence switches to the sequenced view and opens the enroll modal", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
     await t(tools, "enroll_in_sequence").execute({ personId: "p1" }, sig);
+    expect(deps.bridge.navigate).toHaveBeenCalledWith("/?sequenced=1");
     expect(deps.bridge.openEnroll).toHaveBeenCalledWith("p1");
   });
 });

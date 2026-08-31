@@ -9,6 +9,7 @@ import {
 } from "react";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
 import { fetchPerson, fetchStats } from "@/lib/api";
+import { dispatchInboxRefresh } from "@/lib/inbox-events";
 
 export interface ComposeSeed {
   from?: string;
@@ -96,6 +97,13 @@ export function WebMcpBridgeProvider({
     setEnrollData(null);
   }, []);
 
+  // After the user completes enrollment, refresh the inbox list so the newly
+  // sequenced contact appears (the tool switched the view to `?sequenced=1`).
+  const onEnrolled = useCallback(() => {
+    dispatchInboxRefresh();
+    closeEnroll();
+  }, [closeEnroll]);
+
   return (
     <BridgeContext.Provider value={bridge}>
       {children}
@@ -109,7 +117,7 @@ export function WebMcpBridgeProvider({
             recipients={enrollData.recipients}
             open={true}
             onClose={closeEnroll}
-            onEnrolled={closeEnroll}
+            onEnrolled={onEnrolled}
           />
         )}
     </BridgeContext.Provider>
