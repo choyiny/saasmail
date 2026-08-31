@@ -19,13 +19,9 @@ describe("WebMcpBridgeProvider", () => {
       </WebMcpBridgeProvider>,
     );
     expect(screen.getByText("child")).toBeTruthy();
-    // The bridge drives only the reused app surfaces — navigate, the compose
-    // drawer, and the enroll modal. It renders no bespoke dialog of its own.
-    expect(Object.keys(bridge).sort()).toEqual([
-      "navigate",
-      "openCompose",
-      "openEnroll",
-    ]);
+    // The bridge drives only the reused app surfaces — router navigation and
+    // the compose drawer. It renders no modal of its own.
+    expect(Object.keys(bridge).sort()).toEqual(["navigate", "openCompose"]);
   });
 
   it("throws when used outside the provider", () => {

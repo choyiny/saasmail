@@ -370,13 +370,13 @@ session cookie.
 
 **How it differs from `/mcp`:**
 
-|               | `/mcp` (remote)                      | WebMCP (in-page)                                                                                               |
-| ------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Runs          | Server, any MCP client, any location | In the open browser tab                                                                                        |
-| Auth          | OAuth 2.1, scoped token              | Existing browser session cookie                                                                                |
-| Access        | Whatever the token's scopes allow    | Whatever the logged-in user can do                                                                             |
-| Sends/deletes | Scope-gated, no extra confirmation   | Staged, then require human confirmation in the UI                                                              |
-| Effect        | Calls the HTTP API directly          | Reads via the same API client; actions drive the visible UI (navigation, the compose drawer, the enroll modal) |
+|               | `/mcp` (remote)                      | WebMCP (in-page)                                                                                                   |
+| ------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Runs          | Server, any MCP client, any location | In the open browser tab                                                                                            |
+| Auth          | OAuth 2.1, scoped token              | Existing browser session cookie                                                                                    |
+| Access        | Whatever the token's scopes allow    | Whatever the logged-in user can do                                                                                 |
+| Sends/deletes | Scope-gated, no extra confirmation   | Staged, then require human confirmation in the UI                                                                  |
+| Effect        | Calls the HTTP API directly          | Reads via the same API client; actions drive the visible UI (navigation, the compose drawer, filtered inbox views) |
 
 Both exist side by side — `/mcp` is for external agents connecting to your
 inbox from anywhere; WebMCP is for an agent already inside the page, acting as
@@ -414,7 +414,8 @@ same tools still register.
 **Tool list (18 total: 11 read, 7 action).** Read tools return data through
 the same `/api` client the UI already uses. Action tools drive the real UI —
 they navigate, open the compose drawer pre-filled, save a reply draft into the
-inbox Drafts filter, or open the enroll modal — rather than calling a write
+inbox Drafts filter, or enroll a contact and switch to the Sequenced view —
+rather than calling a write
 endpoint directly.
 
 Read: `whoami`, `list_inboxes`, `list_conversations`, `list_contacts`,

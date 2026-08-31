@@ -16,6 +16,7 @@ import {
   searchEmails,
   markEmailRead,
   saveDraft,
+  enrollPerson,
 } from "@/lib/api";
 import { dispatchInboxRefresh } from "@/lib/inbox-events";
 import { useWebMcpTools } from "./useWebMcpTool";
@@ -61,6 +62,7 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchPeople,
       fetchEmail,
       markEmailRead,
+      enrollPerson,
       saveDraft,
       fetchTemplate,
       renderTemplate: (tpl, vars) => renderPreview(tpl, vars),

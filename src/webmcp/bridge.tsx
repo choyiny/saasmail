@@ -1,15 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-import EnrollSequenceModal from "@/components/EnrollSequenceModal";
-import { fetchPerson, fetchStats } from "@/lib/api";
-import { dispatchInboxRefresh } from "@/lib/inbox-events";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 
 export interface ComposeSeed {
   from?: string;
@@ -22,7 +11,6 @@ export interface ComposeSeed {
 export interface WebMcpBridge {
   navigate: (path: string) => void;
   openCompose: (seed: ComposeSeed) => void;
-  openEnroll: (personId: string) => void;
 }
 
 const BridgeContext = createContext<WebMcpBridge | null>(null);
@@ -34,16 +22,12 @@ export function useWebMcpBridge(): WebMcpBridge {
   return ctx;
 }
 
-/** Data the bridge resolves for the enroll modal once `openEnroll(personId)`
- * is called — EnrollSequenceModal requires personName/personEmail/recipients
- * that the bridge's callers don't have on hand. */
-interface EnrollData {
-  personId: string;
-  personName: string | null;
-  personEmail: string;
-  recipients: string[];
-}
-
+/**
+ * Provides the WebMcpBridge — the thin set of UI actions the tools drive
+ * through (router navigation and the compose drawer). Tools that mutate data
+ * (enroll, reply drafts) call the API directly and then refresh the view via
+ * lib/inbox-events, so the bridge renders no modal of its own.
+ */
 export function WebMcpBridgeProvider({
   navigate,
   openCompose,
@@ -53,73 +37,12 @@ export function WebMcpBridgeProvider({
   openCompose: (seed: ComposeSeed) => void;
   children: ReactNode;
 }) {
-  const [enrollPersonId, setEnrollPersonId] = useState<string | null>(null);
-  const [enrollData, setEnrollData] = useState<EnrollData | null>(null);
-
-  const openEnroll = useCallback((personId: string) => {
-    setEnrollData(null);
-    setEnrollPersonId(personId);
-  }, []);
-
   const bridge = useMemo<WebMcpBridge>(
-    () => ({ navigate, openCompose, openEnroll }),
-    [navigate, openCompose, openEnroll],
+    () => ({ navigate, openCompose }),
+    [navigate, openCompose],
   );
 
-  // Resolve the props EnrollSequenceModal actually requires whenever a
-  // personId is staged. Does not block any other bridge functionality.
-  useEffect(() => {
-    if (!enrollPersonId) return;
-    let cancelled = false;
-    Promise.all([fetchPerson(enrollPersonId), fetchStats()])
-      .then(([person, stats]) => {
-        if (cancelled) return;
-        setEnrollData({
-          personId: enrollPersonId,
-          personName: person.name,
-          personEmail: person.email,
-          recipients:
-            stats.recipients && stats.recipients.length > 0
-              ? stats.recipients
-              : [person.recipient],
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setEnrollPersonId(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enrollPersonId]);
-
-  const closeEnroll = useCallback(() => {
-    setEnrollPersonId(null);
-    setEnrollData(null);
-  }, []);
-
-  // After the user completes enrollment, refresh the inbox list so the newly
-  // sequenced contact appears (the tool switched the view to `?sequenced=1`).
-  const onEnrolled = useCallback(() => {
-    dispatchInboxRefresh();
-    closeEnroll();
-  }, [closeEnroll]);
-
   return (
-    <BridgeContext.Provider value={bridge}>
-      {children}
-      {enrollPersonId &&
-        enrollData &&
-        enrollData.personId === enrollPersonId && (
-          <EnrollSequenceModal
-            personId={enrollData.personId}
-            personName={enrollData.personName}
-            personEmail={enrollData.personEmail}
-            recipients={enrollData.recipients}
-            open={true}
-            onClose={closeEnroll}
-            onEnrolled={onEnrolled}
-          />
-        )}
-    </BridgeContext.Provider>
+    <BridgeContext.Provider value={bridge}>{children}</BridgeContext.Provider>
   );
 }

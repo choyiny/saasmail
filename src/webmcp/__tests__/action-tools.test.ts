@@ -5,7 +5,6 @@ function makeDeps(overrides: any = {}) {
   const bridge = {
     navigate: vi.fn(),
     openCompose: vi.fn(),
-    openEnroll: vi.fn(),
   };
   return {
     bridge,
@@ -24,6 +23,9 @@ function makeDeps(overrides: any = {}) {
       subject: "Hello",
     }),
     markEmailRead: vi.fn().mockResolvedValue(undefined),
+    enrollPerson: vi
+      .fn()
+      .mockResolvedValue({ enrollment: {}, scheduledEmails: [] }),
     saveDraft: vi.fn().mockResolvedValue({ contextKey: "reply:e1" }),
     fetchTemplate: vi.fn().mockResolvedValue({
       slug: "welcome",
@@ -127,11 +129,32 @@ describe("action tools", () => {
     expect(res.isError).toBe(true);
   });
 
-  it("enroll_in_sequence switches to the sequenced view and opens the enroll modal", async () => {
+  it("enroll_in_sequence enrolls immediately, then shows the sequenced view", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
-    await t(tools, "enroll_in_sequence").execute({ personId: "p1" }, sig);
+    const res = await t(tools, "enroll_in_sequence").execute(
+      { personId: "p1", sequenceId: "seq1" },
+      sig,
+    );
+    // Enrolls directly — no confirmation dialog. Defaults from to the
+    // contact's inbox (recipient) when not given.
+    expect(deps.enrollPerson).toHaveBeenCalledWith(
+      "seq1",
+      expect.objectContaining({ personId: "p1", fromAddress: "team@x.com" }),
+    );
     expect(deps.bridge.navigate).toHaveBeenCalledWith("/?sequenced=1");
-    expect(deps.bridge.openEnroll).toHaveBeenCalledWith("p1");
+    expect(deps.refreshInbox).toHaveBeenCalled();
+    expect(res.isError).toBeFalsy();
+  });
+
+  it("enroll_in_sequence fails without a sequenceId", async () => {
+    const deps = makeDeps();
+    const tools = createActionTools(deps as any);
+    const res = await t(tools, "enroll_in_sequence").execute(
+      { personId: "p1" },
+      sig,
+    );
+    expect(deps.enrollPerson).not.toHaveBeenCalled();
+    expect(res.isError).toBe(true);
   });
 });

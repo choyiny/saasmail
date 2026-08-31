@@ -7,6 +7,14 @@ export interface ActionDeps {
   fetchPeople: (params: { personId?: string; limit?: number }) => Promise<any>;
   fetchEmail: (id: string) => Promise<any>;
   markEmailRead: (id: string, isRead: boolean) => Promise<void>;
+  enrollPerson: (
+    sequenceId: string,
+    data: {
+      personId: string;
+      fromAddress: string;
+      variables?: Record<string, string>;
+    },
+  ) => Promise<any>;
   saveDraft: (data: {
     contextKey: string;
     bodyHtml?: string;
@@ -200,22 +208,60 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
     {
       name: "enroll_in_sequence",
       description:
-        "Open the enrollment dialog for a contact so the user can pick a sequence and confirm.",
+        "Enroll a contact in a drip sequence immediately (no confirmation). Requires the sequenceId — call list_sequences first to find one. Sends from the contact's inbox unless `from` is given.",
       inputSchema: {
         type: "object",
-        properties: { personId: { type: "string" } },
-        required: ["personId"],
+        properties: {
+          personId: { type: "string" },
+          sequenceId: {
+            type: "string",
+            description: "Sequence id, from list_sequences.",
+          },
+          from: {
+            type: "string",
+            description:
+              "Sender inbox address. Defaults to the contact's inbox.",
+          },
+          variables: {
+            type: "object",
+            description: "Values for the sequence templates' {{variables}}.",
+            additionalProperties: { type: "string" },
+          },
+        },
+        required: ["personId", "sequenceId"],
       },
       describe: async (args) =>
         `Enrolling ${await personLabel(args.personId)} in a sequence`,
       execute: async (args) => {
-        // Switch the inbox to the Sequenced view behind the dialog so the
-        // contact lands there once the user confirms (the bridge refreshes
-        // the list on enroll).
+        if (!args.sequenceId) {
+          return fail(
+            "sequenceId is required — call list_sequences to find one.",
+          );
+        }
+        const { data } = await deps.fetchPeople({
+          personId: args.personId,
+          limit: 1,
+        });
+        const row = data?.[0];
+        if (!row) return fail("Contact not found.");
+        const fromAddress = args.from ?? row.recipient;
+        if (!fromAddress) {
+          return fail("Could not determine a sending inbox — pass `from`.");
+        }
+        try {
+          await deps.enrollPerson(args.sequenceId, {
+            personId: args.personId,
+            fromAddress,
+            variables: args.variables ?? {},
+          });
+        } catch (e) {
+          return fail(`Could not enroll: ${(e as Error).message}`);
+        }
+        // Show the contact landing in the Sequenced view.
         deps.bridge.navigate("/?sequenced=1");
-        deps.bridge.openEnroll(args.personId);
+        deps.refreshInbox();
         return ok(
-          "Opened the sequence enrollment dialog for the user to complete.",
+          `Enrolled ${row.email ?? args.personId} in the sequence. They're in the inbox Sequenced view now.`,
         );
       },
     },
