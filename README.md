@@ -55,7 +55,11 @@ GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks 
 
 ## Demo Video
 
-https://github.com/user-attachments/assets/fe3a3811-1902-4b0b-8b94-f8c72f1afab4
+One person's mail across four inboxes, collapsed into a single timeline — filter by inbox and reply inline.
+
+<video src="https://github.com/choyiny/saasmail/raw/main/docs/saasmail-demo.mp4" controls muted loop playsinline width="100%">
+  <a href="https://github.com/choyiny/saasmail/raw/main/docs/saasmail-demo.mp4">Watch the saasmail demo</a>
+</video>
 
 ## Screenshots
 
