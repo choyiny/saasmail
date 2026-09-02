@@ -324,6 +324,18 @@ streamable HTTP as the transport. Clients configured by file usually want:
 
 `"streamable-http"` is accepted as a synonym for `"http"`.
 
+#### Naming the connection
+
+The server identifies itself with this instance's **brand name** (Settings →
+brand name, the `brand_name` app setting; defaults to `saasmail`), both in the
+MCP handshake and as `resource_name` in its OAuth discovery document. Set a
+distinct brand name on each instance and clients that name a connector from
+discovery will keep two saasmail deployments apart.
+
+Clients that ask _you_ for the name still win: the `saasmail` in
+`claude mcp add … saasmail …` and the key in the `mcpServers` block above are
+local labels. Change those too when you connect more than one instance.
+
 #### Prerequisites
 
 Two settings (see [Configuration](#devvars)) must be right, or the handshake

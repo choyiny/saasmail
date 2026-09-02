@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { inArray } from "drizzle-orm";
 import { appSettings } from "../db/app-settings.schema";
+import { resolveBrandName } from "../lib/brand-name";
 import { json200Response } from "../lib/helpers";
 import { isDevEnvironment } from "../lib/is-dev";
 import type { Variables } from "../variables";
@@ -62,9 +63,9 @@ bootstrapRouter.openapi(configRoute, async (c) => {
     .select({ key: appSettings.key, value: appSettings.value })
     .from(appSettings)
     .where(inArray(appSettings.key, ["brand_name", "webmcp_enabled"]));
-  const brandNameValue = rows.find((r) => r.key === "brand_name")?.value;
-  const brandName =
-    brandNameValue && brandNameValue.length > 0 ? brandNameValue : "saasmail";
+  const brandName = resolveBrandName(
+    rows.find((r) => r.key === "brand_name")?.value,
+  );
   const webmcpEnabled =
     rows.find((r) => r.key === "webmcp_enabled")?.value !== "false";
   return c.json({

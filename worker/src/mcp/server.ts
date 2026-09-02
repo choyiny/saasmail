@@ -35,6 +35,12 @@ export interface McpContext {
   allowed: AllowedInboxes;
   /** Scopes carried by the access token that authenticated this request. */
   scopes: string[];
+  /**
+   * Instance display name (the `brand_name` app setting), advertised as this
+   * server's identity. Every deployment used to report "saasmail", so an
+   * operator connected to two of them saw two identically named servers.
+   */
+  brandName: string;
 }
 
 /** A successful tool result: JSON, pretty-printed, as text content. */
@@ -105,7 +111,14 @@ const pagination = {
 };
 
 export function buildMcpServer(ctx: McpContext): McpServer {
-  const server = new McpServer({ name: "saasmail", version: "1.0.0" });
+  // `title` is what a spec-compliant client displays; `name` is the fallback
+  // for clients predating it. Both carry the brand name, since the point is
+  // that two instances are told apart wherever the client shows either one.
+  const server = new McpServer({
+    name: ctx.brandName,
+    title: ctx.brandName,
+    version: "1.0.0",
+  });
   const { db, allowed } = ctx;
 
   server.registerTool(
