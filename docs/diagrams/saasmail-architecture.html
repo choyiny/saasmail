@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How mail moves through saasmail</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #fcfcfc; /* --color-background */
+        --color-ink: #0f1729; /* --color-foreground */
+        --color-muted: #65758b; /* --color-text-secondary */
+        --color-accent: #7aa300; /* --color-primary (lime) */
+        --font-sans: "Inter", system-ui, sans-serif;
+        --font-serif: "Instrument Serif", serif;
+        --font-mono: "Geist Mono", ui-monospace, monospace;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+
+      .frame {
+        max-width: 1200px;
+        width: 100%;
+      }
+
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 1.5rem;
+      }
+
+      svg {
+        width: 100%;
+        min-width: 900px;
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Architecture · saasmail</p>
+      <h1>How mail moves through saasmail</h1>
+
+      <svg
+        viewBox="0 0 960 528"
+        xmlns="http://www.w3.org/2000/svg"
+        role="img"
+        aria-labelledby="saasmail-architecture-title saasmail-architecture-desc"
+      >
+        <title id="saasmail-architecture-title">
+          How mail moves through saasmail
+        </title>
+        <desc id="saasmail-architecture-desc">
+          Inbound customer email arrives through Cloudflare Email Routing into a
+          single saasmail Worker, which keeps mail and contacts in D1,
+          attachments in R2, and scheduled sequence steps in a Queue; replies
+          leave through one outbound provider — Cloudflare Email Sending,
+          Resend, Bavimail, or Postmark — and land back with the customer.
+        </desc>
+        <defs>
+          <marker
+            id="arrow"
+            markerWidth="8"
+            markerHeight="6"
+            refX="7"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 8 3, 0 6" fill="#65758b" />
+          </marker>
+          <marker
+            id="arrow-accent"
+            markerWidth="8"
+            markerHeight="6"
+            refX="7"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 8 3, 0 6" fill="#7aa300" />
+          </marker>
+          <marker
+            id="arrow-link"
+            markerWidth="8"
+            markerHeight="6"
+            refX="7"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 8 3, 0 6" fill="#7c5cfc" />
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#fcfcfc" />
+
+        <!-- ============ ZONE: storage (drawn before arrows and nodes) ============ -->
+        <rect
+          x="760"
+          y="88"
+          width="176"
+          height="296"
+          rx="8"
+          fill="rgba(15,23,41,0.02)"
+          stroke="rgba(15,23,41,0.10)"
+          stroke-width="0.8"
+        />
+        <rect x="812" y="92" width="72" height="12" rx="2" fill="#fcfcfc" />
+        <text
+          x="848"
+          y="101"
+          fill="rgba(15,23,41,0.40)"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.14em"
+        >
+          STORAGE
+        </text>
+
+        <!-- ============ ARROWS (before boxes: z-order puts lines behind nodes) ============ -->
+
+        <!-- 1. Customer -> Email Routing -->
+        <path
+          d="M 112,196 V 140 Q 112,132 120,132 H 232"
+          fill="none"
+          stroke="#65758b"
+          stroke-width="1.2"
+          marker-end="url(#arrow)"
+        />
+        <rect x="150" y="112" width="52" height="12" rx="2" fill="#fcfcfc" />
+        <text
+          x="176"
+          y="121"
+          fill="#718198"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.06em"
+        >
+          INBOUND
+        </text>
+
+        <!-- 2. Email Routing -> Worker (enters the top edge) -->
+        <path
+          d="M 432,132 H 552 Q 560,132 560,140 V 196"
+          fill="none"
+          stroke="#65758b"
+          stroke-width="1.2"
+          marker-end="url(#arrow)"
+        />
+        <rect x="470" y="112" width="48" height="12" rx="2" fill="#fcfcfc" />
+        <text
+          x="494"
+          y="121"
+          fill="#718198"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.06em"
+        >
+          DELIVER
+        </text>
+
+        <!-- 3. Worker -> stores (fanned attach points on the right edge) -->
+        <path
+          d="M 696,216 H 728 Q 736,216 736,208 V 160 Q 736,152 744,152 H 784"
+          fill="none"
+          stroke="#65758b"
+          stroke-width="1.2"
+          marker-end="url(#arrow)"
+        />
+        <path
+          d="M 696,236 H 784"
+          fill="none"
+          stroke="#65758b"
+          stroke-width="1.2"
+          marker-end="url(#arrow)"
+        />
+        <path
+          d="M 696,264 H 728 Q 736,264 736,272 V 312 Q 736,320 744,320 H 784"
+          fill="none"
+          stroke="#65758b"
+          stroke-width="1.2"
+          marker-end="url(#arrow)"
+        />
+
+        <!-- 4. Worker -> outbound provider -->
+        <path
+          d="M 616,284 V 352 Q 616,360 608,360 H 432"
+          fill="none"
+          stroke="#7c5cfc"
+          stroke-width="1.2"
+          marker-end="url(#arrow-link)"
+        />
+        <rect x="498" y="340" width="44" height="12" rx="2" fill="#fcfcfc" />
+        <text
+          x="520"
+          y="349"
+          fill="#7c5cfc"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.06em"
+        >
+          SEND
+        </text>
+
+        <!-- 5. Outbound provider -> Customer (enters the bottom edge) -->
+        <path
+          d="M 232,360 H 120 Q 112,360 112,352 V 268"
+          fill="none"
+          stroke="#7c5cfc"
+          stroke-width="1.2"
+          marker-end="url(#arrow-link)"
+        />
+        <rect x="144" y="340" width="60" height="12" rx="2" fill="#fcfcfc" />
+        <text
+          x="174"
+          y="349"
+          fill="#7c5cfc"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.06em"
+        >
+          OUTBOUND
+        </text>
+
+        <!-- ============ NODES ============ -->
+
+        <!-- Customer (input) -->
+        <rect x="40" y="196" width="144" height="72" rx="6" fill="#fcfcfc" />
+        <rect
+          x="40"
+          y="196"
+          width="144"
+          height="72"
+          rx="6"
+          fill="rgba(101,117,139,0.10)"
+          stroke="#718198"
+          stroke-width="1"
+        />
+        <rect
+          x="48"
+          y="204"
+          width="36"
+          height="12"
+          rx="2"
+          fill="transparent"
+          stroke="rgba(113,129,152,0.40)"
+          stroke-width="0.8"
+        />
+        <text
+          x="66"
+          y="213"
+          fill="rgba(113,129,152,0.90)"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.08em"
+        >
+          EMAIL
+        </text>
+        <text
+          x="112"
+          y="240"
+          fill="#0f1729"
+          font-size="12"
+          font-weight="600"
+          font-family="'Inter', sans-serif"
+          text-anchor="middle"
+        >
+          Customer
+        </text>
+
+        <!-- Cloudflare Email Routing (external) -->
+        <rect x="232" y="96" width="200" height="72" rx="6" fill="#fcfcfc" />
+        <rect
+          x="232"
+          y="96"
+          width="200"
+          height="72"
+          rx="6"
+          fill="rgba(15,23,41,0.03)"
+          stroke="rgba(15,23,41,0.30)"
+          stroke-width="1"
+        />
+        <rect
+          x="240"
+          y="104"
+          width="52"
+          height="12"
+          rx="2"
+          fill="transparent"
+          stroke="rgba(15,23,41,0.30)"
+          stroke-width="0.8"
+        />
+        <text
+          x="266"
+          y="113"
+          fill="rgba(15,23,41,0.70)"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.08em"
+        >
+          INBOUND
+        </text>
+        <text
+          x="332"
+          y="140"
+          fill="#0f1729"
+          font-size="12"
+          font-weight="600"
+          font-family="'Inter', sans-serif"
+          text-anchor="middle"
+        >
+          Cloudflare Email Routing
+        </text>
+        <text
+          x="332"
+          y="156"
+          fill="#65758b"
+          font-size="9"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+        >
+          MX · catch-all rule
+        </text>
+
+        <!-- saasmail Worker (FOCAL) -->
+        <rect x="496" y="196" width="200" height="88" rx="6" fill="#fcfcfc" />
+        <rect
+          x="496"
+          y="196"
+          width="200"
+          height="88"
+          rx="6"
+          fill="#f5fae5"
+          stroke="#7aa300"
+          stroke-width="1"
+        />
+        <rect
+          x="504"
+          y="204"
+          width="48"
+          height="12"
+          rx="2"
+          fill="transparent"
+          stroke="rgba(122,163,0,0.40)"
+          stroke-width="0.8"
+        />
+        <text
+          x="528"
+          y="213"
+          fill="#547000"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.08em"
+        >
+          WORKER
+        </text>
+        <text
+          x="596"
+          y="244"
+          fill="#0f1729"
+          font-size="12"
+          font-weight="600"
+          font-family="'Inter', sans-serif"
+          text-anchor="middle"
+        >
+          saasmail Worker
+        </text>
+        <text
+          x="596"
+          y="262"
+          fill="#547000"
+          font-size="9"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+        >
+          Hono · one deployment
+        </text>
+
+        <!-- Outbound provider (external) -->
+        <rect x="232" y="316" width="200" height="88" rx="6" fill="#fcfcfc" />
+        <rect
+          x="232"
+          y="316"
+          width="200"
+          height="88"
+          rx="6"
+          fill="rgba(15,23,41,0.03)"
+          stroke="rgba(15,23,41,0.30)"
+          stroke-width="1"
+        />
+        <rect
+          x="240"
+          y="324"
+          width="60"
+          height="12"
+          rx="2"
+          fill="transparent"
+          stroke="rgba(15,23,41,0.30)"
+          stroke-width="0.8"
+        />
+        <text
+          x="270"
+          y="333"
+          fill="rgba(15,23,41,0.70)"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.08em"
+        >
+          OUTBOUND
+        </text>
+        <text
+          x="332"
+          y="360"
+          fill="#0f1729"
+          font-size="12"
+          font-weight="600"
+          font-family="'Inter', sans-serif"
+          text-anchor="middle"
+        >
+          One outbound provider
+        </text>
+        <text
+          x="332"
+          y="376"
+          fill="#65758b"
+          font-size="9"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+        >
+          Email Sending · Resend
+        </text>
+        <text
+          x="332"
+          y="390"
+          fill="#65758b"
+          font-size="9"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+        >
+          Bavimail · Postmark
+        </text>
+
+        <!-- D1 (store) -->
+        <rect x="784" y="120" width="128" height="64" rx="6" fill="#fcfcfc" />
+        <rect
+          x="784"
+          y="120"
+          width="128"
+          height="64"
+          rx="6"
+          fill="rgba(15,23,41,0.05)"
+          stroke="#65758b"
+          stroke-width="1"
+        />
+        <rect
+          x="792"
+          y="128"
+          width="44"
+          height="12"
+          rx="2"
+          fill="transparent"
+          stroke="rgba(101,117,139,0.40)"
+          stroke-width="0.8"
+        />
+        <text
+          x="814"
+          y="137"
+          fill="rgba(101,117,139,0.90)"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.08em"
+        >
+          SQLITE
+        </text>
+        <text
+          x="848"
+          y="160"
+          fill="#0f1729"
+          font-size="12"
+          font-weight="600"
+          font-family="'Inter', sans-serif"
+          text-anchor="middle"
+        >
+          D1
+        </text>
+        <text
+          x="848"
+          y="176"
+          fill="#65758b"
+          font-size="9"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+        >
+          mail · contacts
+        </text>
+
+        <!-- R2 (store) -->
+        <rect x="784" y="204" width="128" height="64" rx="6" fill="#fcfcfc" />
+        <rect
+          x="784"
+          y="204"
+          width="128"
+          height="64"
+          rx="6"
+          fill="rgba(15,23,41,0.05)"
+          stroke="#65758b"
+          stroke-width="1"
+        />
+        <rect
+          x="792"
+          y="212"
+          width="48"
+          height="12"
+          rx="2"
+          fill="transparent"
+          stroke="rgba(101,117,139,0.40)"
+          stroke-width="0.8"
+        />
+        <text
+          x="816"
+          y="221"
+          fill="rgba(101,117,139,0.90)"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.08em"
+        >
+          OBJECTS
+        </text>
+        <text
+          x="848"
+          y="244"
+          fill="#0f1729"
+          font-size="12"
+          font-weight="600"
+          font-family="'Inter', sans-serif"
+          text-anchor="middle"
+        >
+          R2
+        </text>
+        <text
+          x="848"
+          y="260"
+          fill="#65758b"
+          font-size="9"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+        >
+          attachments
+        </text>
+
+        <!-- Queue (store) -->
+        <rect x="784" y="288" width="128" height="64" rx="6" fill="#fcfcfc" />
+        <rect
+          x="784"
+          y="288"
+          width="128"
+          height="64"
+          rx="6"
+          fill="rgba(15,23,41,0.05)"
+          stroke="#65758b"
+          stroke-width="1"
+        />
+        <rect
+          x="792"
+          y="296"
+          width="40"
+          height="12"
+          rx="2"
+          fill="transparent"
+          stroke="rgba(101,117,139,0.40)"
+          stroke-width="0.8"
+        />
+        <text
+          x="812"
+          y="305"
+          fill="rgba(101,117,139,0.90)"
+          font-size="7"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+          letter-spacing="0.08em"
+        >
+          ASYNC
+        </text>
+        <text
+          x="848"
+          y="328"
+          fill="#0f1729"
+          font-size="12"
+          font-weight="600"
+          font-family="'Inter', sans-serif"
+          text-anchor="middle"
+        >
+          Queue
+        </text>
+        <text
+          x="848"
+          y="344"
+          fill="#65758b"
+          font-size="9"
+          font-family="'Geist Mono', monospace"
+          text-anchor="middle"
+        >
+          sequence steps
+        </text>
+
+        <!-- ============ LEGEND (horizontal strip) ============ -->
+        <line
+          x1="40"
+          y1="440"
+          x2="920"
+          y2="440"
+          stroke="rgba(15,23,41,0.10)"
+          stroke-width="0.8"
+        />
+        <text
+          x="40"
+          y="460"
+          fill="#65758b"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          letter-spacing="0.14em"
+        >
+          LEGEND
+        </text>
+
+        <rect
+          x="40"
+          y="480"
+          width="12"
+          height="12"
+          rx="2"
+          fill="#f5fae5"
+          stroke="#7aa300"
+          stroke-width="1"
+        />
+        <text
+          x="60"
+          y="490"
+          fill="#65758b"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          letter-spacing="0.06em"
+        >
+          SAASMAIL WORKER
+        </text>
+
+        <rect
+          x="216"
+          y="480"
+          width="12"
+          height="12"
+          rx="2"
+          fill="rgba(15,23,41,0.03)"
+          stroke="rgba(15,23,41,0.30)"
+          stroke-width="1"
+        />
+        <text
+          x="236"
+          y="490"
+          fill="#65758b"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          letter-spacing="0.06em"
+        >
+          CLOUDFLARE / PROVIDER
+        </text>
+
+        <rect
+          x="440"
+          y="480"
+          width="12"
+          height="12"
+          rx="2"
+          fill="rgba(15,23,41,0.05)"
+          stroke="#65758b"
+          stroke-width="1"
+        />
+        <text
+          x="460"
+          y="490"
+          fill="#65758b"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          letter-spacing="0.06em"
+        >
+          STORAGE
+        </text>
+
+        <rect
+          x="588"
+          y="480"
+          width="12"
+          height="12"
+          rx="2"
+          fill="rgba(101,117,139,0.10)"
+          stroke="#718198"
+          stroke-width="1"
+        />
+        <text
+          x="608"
+          y="490"
+          fill="#65758b"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          letter-spacing="0.06em"
+        >
+          CUSTOMER
+        </text>
+
+        <line
+          x1="748"
+          y1="486"
+          x2="772"
+          y2="486"
+          stroke="#7c5cfc"
+          stroke-width="1.2"
+        />
+        <text
+          x="780"
+          y="490"
+          fill="#65758b"
+          font-size="8"
+          font-family="'Geist Mono', monospace"
+          letter-spacing="0.06em"
+        >
+          PROVIDER API
+        </text>
+      </svg>
+    </div>
+  </body>
+</html>

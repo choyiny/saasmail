@@ -1,6 +1,6 @@
 # saasmail
 
-Self-hosted email server on Cloudflare Workers. See README.md for full documentation.
+Self-hosted email server on Cloudflare Workers. README.md is the overview; full documentation lives in **[docs/](./docs/README.md)** (setup, configuration, architecture, and one page per feature).
 
 Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, drizzle migrations including data-only `--custom`): see **[AGENTS.md](./AGENTS.md)**.
 
