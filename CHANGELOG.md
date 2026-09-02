@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The remote MCP server identifies itself with the instance's brand name instead of the hardcoded string `saasmail`. It reports the `brand_name` app setting as `serverInfo.name` and `serverInfo.title` in the MCP handshake, and publishes it as RFC 9728 `resource_name` in `/.well-known/oauth-protected-resource`, so an operator connecting two saasmail deployments to the same client can tell them apart wherever the client names a connector from discovery. Unset brand name still reports `saasmail`. Clients that ask for a connection name themselves (`claude mcp add <name>`, the key in an `mcpServers` block) are unaffected — those labels are local.
+- **Docs split out of the README.** The 790-line README is now a 135-line overview — what saasmail is, quickstart, screenshots, cost, and a linked feature index — and the reference material moved into [`docs/`](docs/README.md) as 14 cross-linked pages with an index at `docs/README.md`: setup, email providers, configuration, updating, architecture, local development, inboxes, templates, sequences, suppressions, users and API keys, MCP, WebMCP, and webhooks. Every page carries a breadcrumb back to the index. Prose is unchanged apart from rewritten cross-links; nothing was dropped. Old deep links still work: every heading the README used to carry is redeclared as an anchor on the line that replaced it, so `README.md#template-syntax` lands on the Email templates entry and `README.md#local-development` on the documentation index.
+
 ### Security
 
 - Attachment reads are scoped to the caller's allowed inboxes. `GET /api/attachments/{id}` and `/{id}/inline` looked the attachment up by id alone, so any authenticated user could read any attachment in the deployment given only its id. Both routes now resolve the owning inbox through the attachment's message — `emails.recipient` for inbound, `sent_emails.from_address` for sent — and answer `404` when it is not allowed, so the response does not confirm the id exists.
@@ -19,10 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inbox list: hydrate group participants/CC after pagination so `GET /api/people/grouped` no longer 500s on mailboxes with 50+ group threads (D1's 100 bound-parameter cap). Stats still counted unread while the people list failed empty.
 - Blocklist: mark matching unread mail as read when a rule is created, so the nav unread badge cannot stick on senders the inbox list has hidden. Migration `0033` clears existing blocked unread counts.
 - README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).
-
-### Changed
-
-- The remote MCP server identifies itself with the instance's brand name instead of the hardcoded string `saasmail`. It reports the `brand_name` app setting as `serverInfo.name` and `serverInfo.title` in the MCP handshake, and publishes it as RFC 9728 `resource_name` in `/.well-known/oauth-protected-resource`, so an operator connecting two saasmail deployments to the same client can tell them apart wherever the client names a connector from discovery. Unset brand name still reports `saasmail`. Clients that ask for a connection name themselves (`claude mcp add <name>`, the key in an `mcpServers` block) are unaffected — those labels are local.
 
 ### Added
 

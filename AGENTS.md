@@ -1,15 +1,21 @@
 # Agent / contributor notes
 
-Conventions for coding agents (and humans) working in this repo. Product docs live in [`README.md`](./README.md); licensing and human contribution flow in [`CONTRIBUTING.md`](./CONTRIBUTING.md); Claude Code skills in [`CLAUDE.md`](./CLAUDE.md).
+Conventions for coding agents (and humans) working in this repo. Product docs live in [`docs/`](./docs/README.md); licensing and human contribution flow in [`CONTRIBUTING.md`](./CONTRIBUTING.md); Claude Code skills in [`CLAUDE.md`](./CLAUDE.md).
 
 ## Doc map
 
-| Doc                                                                      | Use for                                             |
-| ------------------------------------------------------------------------ | --------------------------------------------------- |
-| [`README.md`](./README.md)                                               | Setup, deploy, local dev, API overview              |
-| [`CONTRIBUTING.md`](./CONTRIBUTING.md)                                   | Fork/PR process, Apache 2.0, CoC                    |
-| [`migrations/README.md`](./migrations/README.md)                         | drizzle-kit generate / apply details                |
-| [`.github/pull_request_template.md`](./.github/pull_request_template.md) | PR checklist maintainers expect (not a CI enforcer) |
+| Doc                                                                      | Use for                                              |
+| ------------------------------------------------------------------------ | ---------------------------------------------------- |
+| [`README.md`](./README.md)                                               | Project overview, quickstart, feature index          |
+| [`docs/`](./docs/README.md)                                              | Setup, configuration, architecture, per-feature docs |
+| [`docs/development.md`](./docs/development.md)                           | Local dev commands, seeding, OpenAPI, E2E            |
+| [`CONTRIBUTING.md`](./CONTRIBUTING.md)                                   | Fork/PR process, Apache 2.0, CoC                     |
+| [`migrations/README.md`](./migrations/README.md)                         | drizzle-kit generate / apply details                 |
+| [`.github/pull_request_template.md`](./.github/pull_request_template.md) | PR checklist maintainers expect (not a CI enforcer)  |
+
+Docs pages are cross-linked and each carries a breadcrumb back to
+[`docs/README.md`](./docs/README.md) — add new product documentation as a page
+there and link it from the index rather than growing `README.md`.
 
 ## Tooling
 
@@ -17,7 +23,7 @@ Conventions for coding agents (and humans) working in this repo. Product docs li
 - **Format:** `yarn format` before push. Husky runs `lint-staged` → Prettier on staged `*.{js,jsx,ts,tsx,json,css,md,html}` at commit; CI runs full-tree `yarn format:check` (so husky alone is not enough if you skip staging a dirty file).
 - **Typecheck:** `yarn tsc --noEmit`
 - **Unit tests:** `yarn test` (invokes `vitest run --config vitest.config.test.ts` — bare `vitest run` hits the wrong pool config and fails to start).
-- **E2E:** `yarn test:e2e` (Playwright; **wipes local D1** — re-seed with `yarn db:seed:dev` afterward). Needs `DEMO_MODE=1` + `DISABLE_PASSKEY_GATE=true` in `.dev.vars`, and `http://localhost:8788` in `TRUSTED_ORIGINS` in `wrangler.jsonc` (see `.dev.vars.example` / `wrangler.jsonc.example` and README “End-to-end tests”).
+- **E2E:** `yarn test:e2e` (Playwright; **wipes local D1** — re-seed with `yarn db:seed:dev` afterward). Needs `DEMO_MODE=1` + `DISABLE_PASSKEY_GATE=true` in `.dev.vars`, and `http://localhost:8788` in `TRUSTED_ORIGINS` in `wrangler.jsonc` (see `.dev.vars.example` / `wrangler.jsonc.example` and [`docs/development.md`](./docs/development.md#end-to-end-tests)).
 
 ### Local `yarn test` prerequisites
 
@@ -53,7 +59,7 @@ From [`CONTRIBUTING.md`](./CONTRIBUTING.md) + the PR template:
 2. `yarn format` / `yarn tsc --noEmit` / `yarn test` (and `yarn test:e2e` if UI or HTTP surface changed).
 3. User-visible change → entry under `## [Unreleased]` in `CHANGELOG.md`.
 4. Schema or data migration → see below; include the generated files.
-5. Behavior/setup change → update `README.md` (or other docs) when relevant.
+5. Behavior/setup change → update the relevant page under [`docs/`](./docs/README.md) (and `README.md` if the overview or feature index changes).
 
 A maintainer will add the required semver label so the Check PR labels check goes green.
 

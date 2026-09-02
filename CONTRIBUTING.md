@@ -13,7 +13,7 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 1. Fork the repository
 2. Clone your fork: `git clone https://github.com/<your-username>/saasmail.git`
 3. Install dependencies: `yarn install`
-4. Follow the [Local Development](README.md#local-development) section in the README to set up your environment
+4. Follow [Local development](docs/development.md) to set up your environment
 
 ## Making Changes
 
