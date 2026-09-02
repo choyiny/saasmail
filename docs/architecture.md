@@ -2,10 +2,10 @@
 
 # Architecture
 
-```
-Inbound    customer ─▶ Cloudflare Email Routing ─▶ saasmail Worker ─▶ D1 · R2 · Queue
-Outbound   saasmail Worker ─▶ Email Sending / Resend / Bavimail / Postmark ─▶ customer
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/saasmail-architecture-dark.png">
+  <img alt="Inbound customer email arrives through Cloudflare Email Routing into a single saasmail Worker, which keeps mail and contacts in D1, attachments in R2, and scheduled sequence steps in a Queue; replies leave through one outbound provider - Cloudflare Email Sending, Resend, Bavimail, or Postmark - and land back with the customer." src="diagrams/saasmail-architecture.png">
+</picture>
 
 Everything runs inside a single Cloudflare Worker — no separate mail server to
 operate.
@@ -29,7 +29,10 @@ operate.
 | **ORM**             | Drizzle                                                                   |
 | **Auth**            | BetterAuth with passkey support                                           |
 
-## Diagram
+## Realtime, push, and queues
+
+The diagram above stops at the storage layer. This one adds the per-user Durable
+Object that fans notifications out to live tabs and devices:
 
 ```mermaid
 flowchart LR

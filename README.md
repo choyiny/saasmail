@@ -51,10 +51,10 @@ Full docs live in **[docs/](docs/README.md)**.
 
 ## Architecture at a glance
 
-```
-Inbound    customer ─▶ Cloudflare Email Routing ─▶ saasmail Worker ─▶ D1 · R2 · Queue
-Outbound   saasmail Worker ─▶ Email Sending / Resend / Bavimail / Postmark ─▶ customer
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/saasmail-architecture-dark.png">
+  <img alt="Inbound customer email arrives through Cloudflare Email Routing into a single saasmail Worker, which keeps mail and contacts in D1, attachments in R2, and scheduled sequence steps in a Queue; replies leave through one outbound provider - Cloudflare Email Sending, Resend, Bavimail, or Postmark - and land back with the customer." src="docs/diagrams/saasmail-architecture.png">
+</picture>
 
 Everything runs inside a single Cloudflare Worker — no separate mail server to operate. See [Architecture](docs/architecture.md) for the full diagram and the component-by-component breakdown.
 
