@@ -17,4 +17,8 @@ export * from "./app-settings.schema";
 export * from "./suppressions.schema";
 export * from "./blocklist.schema";
 export * from "./drafts.schema";
+export * from "./async-jobs.schema";
+export * from "./contacts.schema";
+export * from "./lists.schema";
+export * from "./list-members.schema";
 export * from "./schema";
