@@ -1,4 +1,4 @@
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import {
   oauthProviderAuthServerMetadata,
@@ -11,6 +11,7 @@ import { createAuth } from "../auth";
 import { OAUTH_SCOPES } from "../auth";
 import { parseScopes } from "../auth/scopes";
 import { users, passkeys, oauthClients } from "../db/auth.schema";
+import { readBrandName } from "../lib/brand-name";
 import { resolveAllowedInboxes } from "../lib/inbox-permissions";
 import { isDevEnvironment } from "../lib/is-dev";
 import { buildMcpServer } from "./server";
@@ -36,10 +37,14 @@ function baseUrlOf(env: CloudflareBindings): string {
  * a literal list — the previous implementation hardcoded them here and they
  * drifted from what the provider actually granted.
  */
-function protectedResourceMetadata(env: CloudflareBindings) {
+function protectedResourceMetadata(env: CloudflareBindings, brandName: string) {
   const baseURL = baseUrlOf(env);
   return {
     resource: mcpAudience(baseURL),
+    // RFC 9728's display name. Clients that pre-fill a connector name from
+    // discovery use this, so it is the instance's brand rather than "saasmail"
+    // — otherwise every deployment an operator adds arrives named the same.
+    resource_name: brandName,
     authorization_servers: [oauthIssuer(baseURL)],
     jwks_uri: oauthJwksUrl(baseURL),
     scopes_supported: OAUTH_SCOPES,
@@ -74,14 +79,15 @@ export function registerMcpRoutes(app: App) {
     oauthProviderOpenIdConfigMetadata(createAuth(c.env))(c.req.raw),
   );
 
+  const resourceMetadata = async (
+    c: Context<{ Bindings: CloudflareBindings; Variables: Variables }>,
+  ) =>
+    c.json(protectedResourceMetadata(c.env, await readBrandName(c.get("db"))));
+
   // `mcpHandler` derives this path from the audience's pathname. The bare path
   // is served too, since some clients probe it before the suffixed form.
-  app.get(PROTECTED_RESOURCE_METADATA_PATH, (c) =>
-    c.json(protectedResourceMetadata(c.env)),
-  );
-  app.get("/.well-known/oauth-protected-resource", (c) =>
-    c.json(protectedResourceMetadata(c.env)),
-  );
+  app.get(PROTECTED_RESOURCE_METADATA_PATH, resourceMetadata);
+  app.get("/.well-known/oauth-protected-resource", resourceMetadata);
 
   // --- MCP endpoint --------------------------------------------------------
   app.all(MCP_PATH, async (c) => {
@@ -164,7 +170,16 @@ export function registerMcpRoutes(app: App) {
     const allowed = await resolveAllowedInboxes(db, user);
     const scopes = parseScopes(jwt.scope ?? (jwt as { scp?: unknown }).scp);
 
-    const server = buildMcpServer({ db, env: c.env, user, allowed, scopes });
+    const server = buildMcpServer({
+      db,
+      env: c.env,
+      user,
+      allowed,
+      scopes,
+      // One extra primary-key lookup per MCP request, on a path that already
+      // reads the client, the user, and the passkey rows.
+      brandName: await readBrandName(db),
+    });
     const transport = new StreamableHTTPTransport();
     await server.connect(transport);
     return transport.handleRequest(c);

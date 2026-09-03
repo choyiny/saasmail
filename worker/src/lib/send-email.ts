@@ -12,7 +12,7 @@ import { computeConversationId, externalsOnly } from "./conversation-id";
 import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
-import { renderTemplate } from "./interpolate";
+import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
@@ -66,7 +66,7 @@ export type ReplyEmailPayload = {
   bodyText?: string;
   cc?: SendCcEntry[];
   templateSlug?: string;
-  variables?: Record<string, string>;
+  variables?: TemplateVariables;
   replyTo?: string;
 };
 
@@ -95,7 +95,8 @@ export type ReplyEmailFailure =
         | "EMAIL_NOT_FOUND"
         | "EMAIL_HAS_NO_PERSON"
         | "TEMPLATE_NOT_FOUND"
-        | "MISSING_BODY";
+        | "MISSING_BODY"
+        | "TEMPLATE_PARSE_ERROR";
       message: string;
     }
   | {
@@ -442,6 +443,13 @@ export async function replyToEmail(
 
     const rendered = renderTemplate(templateRows[0], variables ?? {});
     if (!rendered.ok) {
+      if (rendered.parseError) {
+        return {
+          ok: false,
+          code: "TEMPLATE_PARSE_ERROR",
+          message: rendered.parseError,
+        };
+      }
       return {
         ok: false,
         code: "MISSING_VARIABLES",

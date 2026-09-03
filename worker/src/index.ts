@@ -38,6 +38,7 @@ import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
+import { draftsRouter } from "./routers/drafts-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
@@ -242,6 +243,7 @@ app.route("/api/sequences", sequencesRouter);
 app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
+app.route("/api/drafts", draftsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
@@ -296,9 +298,27 @@ app.doc("/doc", {
   },
 });
 
+// Adds `Permissions-Policy: tools=(self)` to document (HTML) responses so the
+// browser enables the WebMCP API for in-page AI agents. Other assets (JS,
+// CSS, images, etc.) pass through untouched. Exported (rather than inlined in
+// the handler below) so it can be unit-tested directly — the `ASSETS` binding
+// doesn't serve real files in the vitest-pool-workers test environment (the
+// `dist/client` directory is empty there), so exercising this via an actual
+// `GET /` request isn't possible in tests.
+export function applyPermissionsPolicyToHtml(res: Response): Response {
+  const contentType = res.headers.get("Content-Type") ?? "";
+  if (contentType.includes("text/html")) {
+    const withHeader = new Response(res.body, res);
+    withHeader.headers.set("Permissions-Policy", "tools=(self)");
+    return withHeader;
+  }
+  return res;
+}
+
 // SPA fallback
 app.all("*", async (c) => {
-  return c.env.ASSETS.fetch(c.req.raw);
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  return applyPermissionsPolicyToHtml(res);
 });
 
 export default {

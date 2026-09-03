@@ -25,6 +25,7 @@ import {
   type SequenceStep,
   type EmailTemplate,
 } from "@/lib/api";
+import { analyzeTemplateClient } from "@/lib/template-syntax";
 import { cn } from "@/lib/utils";
 
 /** Round delay-hours into a friendlier string for the summary line. */
@@ -371,38 +372,69 @@ function ApiReferenceCard({
 }) {
   const [open, setOpen] = useState(false);
 
-  // Walk the templates referenced by the sequence's steps and gather
-  // every {{var}} they need. The enrollment endpoint validates that
-  // these are present in `variables` on the request body.
-  const { allVars, perTemplate } = useMemo(() => {
+  // Walk the templates referenced by the sequence's steps and gather the names
+  // a caller must supply. The enrollment endpoint validates these against
+  // `variables` on the request body.
+  //
+  // Analyzed with the shared analyzer, not a `{{(\w+)}}` scan. Once sections
+  // existed the regex was inverted from the real contract: it collected
+  // `{{price}}` from inside a `{{#items}}` body — which resolves per item and
+  // is never required — while missing `{{#items}}` itself, which is. The
+  // snippet below is meant to be copied and run, so it advertised names the
+  // endpoint ignores and omitted the one it rejects the request for.
+  const { allVars, perTemplate, sectionFields } = useMemo(() => {
     const usedSlugs = new Set(steps.map((s) => s.templateSlug).filter(Boolean));
     const usedTemplates = templates.filter((t) => usedSlugs.has(t.slug));
     const all = new Set<string>();
     const per: { slug: string; name: string; vars: string[] }[] = [];
-    const re = /\{\{(\w+)\}\}/g;
+    // Section name -> the names its body references, so the sample payload can
+    // show an array of objects instead of a string a section cannot use.
+    const sections = new Map<string, string[]>();
     for (const t of usedTemplates) {
-      const local = new Set<string>();
-      for (const src of [t.subject, t.bodyHtml]) {
-        let m: RegExpExecArray | null;
-        while ((m = re.exec(src)) !== null) {
-          local.add(m[1]);
-          all.add(m[1]);
-        }
+      let analysis;
+      try {
+        analysis = analyzeTemplateClient(t.subject, t.bodyHtml);
+      } catch {
+        // A template stored before write-time validation may not parse. Skip
+        // it rather than dropping the whole snippet.
+        continue;
       }
-      if (local.size > 0) {
-        per.push({
-          slug: t.slug,
-          name: t.name,
-          vars: Array.from(local),
-        });
+      for (const s of analysis.sections) {
+        if (!sections.has(s.name)) sections.set(s.name, s.variables);
+      }
+      for (const v of analysis.required) all.add(v);
+      if (analysis.required.length > 0) {
+        per.push({ slug: t.slug, name: t.name, vars: analysis.required });
       }
     }
-    return { allVars: Array.from(all), perTemplate: per };
+    return {
+      allVars: Array.from(all),
+      perTemplate: per,
+      sectionFields: sections,
+    };
   }, [steps, templates]);
 
   const varsObj =
     allVars.length > 0
-      ? Object.fromEntries(allVars.map((v) => [v, `<${v.toUpperCase()}>`]))
+      ? Object.fromEntries(
+          allVars.map((v) => {
+            const fields = sectionFields.get(v);
+            // A required section takes an ARRAY of items. Emitting a string
+            // here passes validation and then renders one row with every field
+            // blank — the enroll succeeds and the mail is silently wrong.
+            if (fields) {
+              return [
+                v,
+                [
+                  Object.fromEntries(
+                    fields.map((f) => [f, `<${f.toUpperCase()}>`]),
+                  ),
+                ],
+              ];
+            }
+            return [v, `<${v.toUpperCase()}>`];
+          }),
+        )
       : undefined;
 
   const endpoint = `${typeof window !== "undefined" ? window.location.origin : ""}/api/sequences/${sequenceId}/enroll`;

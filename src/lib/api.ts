@@ -189,7 +189,8 @@ export async function fetchGroupedPeople(params?: {
   q?: string;
   recipient?: string;
   unread?: boolean;
-  hasAttachment?: boolean;
+  drafts?: boolean;
+  sequenced?: boolean;
   sort?: InboxSort;
   /** Optional explicit direction. Server applies the natural default if omitted. */
   direction?: InboxSortDirection;
@@ -200,7 +201,8 @@ export async function fetchGroupedPeople(params?: {
   if (params?.q) qs.set("q", params.q);
   if (params?.recipient) qs.set("recipient", params.recipient);
   if (params?.unread) qs.set("unread", "1");
-  if (params?.hasAttachment) qs.set("hasAttachment", "1");
+  if (params?.drafts) qs.set("drafts", "1");
+  if (params?.sequenced) qs.set("sequenced", "1");
   if (params?.sort && params.sort !== "recency") qs.set("sort", params.sort);
   // Only send direction when it differs from the natural default —
   // keeps the URL stable for the common case and avoids cache-busting.
@@ -250,6 +252,46 @@ export async function fetchPersonEmails(
 
 export async function fetchEmail(id: string): Promise<Email> {
   return apiFetch(`/api/emails/${id}`);
+}
+
+// Mirrors the worker's SearchHit/SearchEmailsResult (worker/src/lib/queries/
+// search.ts). Kept as a local copy rather than imported through `@worker/*`
+// because that module's dependency chain pulls worker-only types into the
+// frontend typecheck.
+export interface SearchHit {
+  id: string;
+  type: "received" | "sent";
+  personId: string | null;
+  personEmail: string | null;
+  personName: string | null;
+  inbox: string;
+  subject: string | null;
+  snippet: string | null;
+  timestamp: number;
+  isRead: number | null;
+}
+export interface SearchResult {
+  hits: SearchHit[];
+  hasMore: boolean;
+  truncated: boolean;
+}
+export async function searchEmails(params: {
+  q: string;
+  inbox?: string;
+  personId?: string;
+  after?: number;
+  before?: number;
+  page?: number;
+  limit?: number;
+}): Promise<SearchResult> {
+  const qs = new URLSearchParams({ q: params.q });
+  if (params.inbox) qs.set("inbox", params.inbox);
+  if (params.personId) qs.set("personId", params.personId);
+  if (params.after !== undefined) qs.set("after", String(params.after));
+  if (params.before !== undefined) qs.set("before", String(params.before));
+  if (params.page) qs.set("page", String(params.page));
+  if (params.limit) qs.set("limit", String(params.limit));
+  return apiFetch(`/api/emails/search?${qs}`);
 }
 
 export async function markEmailRead(
@@ -431,6 +473,55 @@ export async function deleteTemplate(
   slug: string,
 ): Promise<{ success: boolean }> {
   return apiFetch(`/api/email-templates/${slug}`, {
+    method: "DELETE",
+  });
+}
+
+// --- Compose Drafts (autosave) ---
+
+/** An autosaved compose draft, keyed per user by `contextKey`. */
+export interface Draft {
+  id: string;
+  contextKey: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  cc: CcEntry[] | null;
+  subject: string | null;
+  bodyHtml: string | null;
+  bodyText: string | null;
+  replyToEmailId: string | null;
+  updatedAt: number;
+}
+
+export interface DraftInput {
+  contextKey: string;
+  fromAddress?: string;
+  to?: string;
+  cc?: CcEntry[];
+  subject?: string;
+  bodyHtml?: string;
+  bodyText?: string;
+  replyToEmailId?: string | null;
+}
+
+export async function fetchDraft(contextKey: string): Promise<Draft | null> {
+  const res = await apiFetch<{ draft: Draft | null }>(
+    `/api/drafts?contextKey=${encodeURIComponent(contextKey)}`,
+  );
+  return res.draft;
+}
+
+export async function saveDraft(data: DraftInput): Promise<Draft> {
+  const res = await apiFetch<{ draft: Draft }>("/api/drafts", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  return res.draft;
+}
+
+export async function deleteDraft(contextKey: string): Promise<void> {
+  await apiFetch(`/api/drafts?contextKey=${encodeURIComponent(contextKey)}`, {
     method: "DELETE",
   });
 }

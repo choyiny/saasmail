@@ -26,6 +26,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useBranding } from "@/lib/branding";
+import { WebMcpStatusBadge } from "@/webmcp/WebMcpStatusBadge";
+import { WEBMCP_TOOL_COUNT } from "@/webmcp/registerTools";
 
 interface NavItem {
   label: string;
@@ -44,7 +46,7 @@ const PRIMARY_NAV: NavItem[] = [
 
 export default function TopNav() {
   const { data: session } = useSession();
-  const { brandName } = useBranding();
+  const { brandName, webmcpEnabled } = useBranding();
   const navigate = useNavigate();
   const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
@@ -136,7 +138,11 @@ export default function TopNav() {
           </div>
 
           {/* Right cluster */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1.5">
+            {webmcpEnabled && (
+              <WebMcpStatusBadge toolCount={WEBMCP_TOOL_COUNT} />
+            )}
+
             {isAdmin && (
               <span className="hidden items-center rounded-[6px] bg-rose-500/90 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white sm:inline-flex">
                 Admin

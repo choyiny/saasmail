@@ -11,6 +11,10 @@ import { json200Response, json201Response } from "../lib/helpers";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
 import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
+import {
+  templateValueSchema,
+  templateVariablesSchema,
+} from "../lib/template-variables-schema";
 
 export const sequencesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -45,7 +49,7 @@ const EnrollSchema = z
     personId: z.string().optional(),
     personEmail: z.string().email().optional(),
     fromAddress: z.string().email(),
-    variables: z.record(z.string(), z.string()).optional().default({}),
+    variables: templateVariablesSchema.optional().default({}),
     skipSteps: z.array(z.number().int()).optional().default([]),
     delayOverrides: z
       .record(z.string(), z.number().int().min(0))
@@ -64,9 +68,9 @@ const EnrollmentSchema = z.object({
     description: "Sender identity used for all steps in this enrollment.",
   }),
   status: z.string(),
-  variables: z.record(z.string(), z.string()).openapi({
+  variables: z.record(z.string(), templateValueSchema).openapi({
     description:
-      "Template variables for this enrollment. API responses return a parsed object (stored as JSON in the database).",
+      "Template variables for this enrollment. API responses return a parsed object (stored as JSON in the database). Values may be nested arrays/objects for `{{#section}}` bodies.",
   }),
   enrolledAt: z.number(),
   cancelledAt: z.number().nullable(),

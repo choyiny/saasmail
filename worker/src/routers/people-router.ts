@@ -4,6 +4,8 @@ import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { drafts } from "../db/drafts.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { json200Response, escapeLike, escapeFts } from "../lib/helpers";
 import {
   getPersonScoped,
@@ -95,10 +97,13 @@ const listGroupedPeopleRoute = createRoute({
         .enum(["1", "true"])
         .optional()
         .openapi({ description: "Only people with unread emails" }),
-      hasAttachment: z
-        .enum(["1", "true"])
-        .optional()
-        .openapi({ description: "Only people with downloadable attachments" }),
+      drafts: z.enum(["1", "true"]).optional().openapi({
+        description:
+          "Only conversations where the current user has a reply draft",
+      }),
+      sequenced: z.enum(["1", "true"]).optional().openapi({
+        description: "Only contacts currently enrolled in a sequence (active)",
+      }),
       sort: z
         .enum(["recency", "unread", "inbox", "attachments"])
         .optional()
@@ -112,7 +117,9 @@ const listGroupedPeopleRoute = createRoute({
           "Sort direction. When omitted, defaults to the natural direction for the chosen sort key (recency/unread/attachments default to desc; inbox defaults to asc).",
       }),
       page: z.coerce.number().optional().default(1),
-      limit: z.coerce.number().optional().default(50),
+      // Cap at 100 so post-pagination group hydration stays under D1's
+      // 100 bound-parameter limit (one `IN (...)` of page ids).
+      limit: z.coerce.number().min(1).max(100).optional().default(50),
     }),
   },
   responses: {
@@ -143,8 +150,21 @@ const listGroupedPeopleRoute = createRoute({
 
 peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
   const db = c.get("db");
-  const { q, recipient, unread, hasAttachment, sort, direction, page, limit } =
-    c.req.valid("query");
+  const user = c.get("user");
+  const {
+    q,
+    recipient,
+    unread,
+    drafts: draftsOnly,
+    sequenced,
+    sort,
+    direction,
+    page,
+    limit,
+  } = c.req.valid("query");
+  // Scope the drafts filter to the signed-in user. Empty id matches no
+  // drafts, so the filter safely yields nothing if the user is somehow absent.
+  const draftsUserId = user?.id ?? "";
   const offset = (page - 1) * limit;
   // Resolve effective direction. Each sort key has a "natural" default
   // (recency/unread/attachments → desc, inbox → asc) so the UI can
@@ -167,9 +187,20 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       sql`s.id IN (SELECT person_id FROM emails WHERE is_read = 0 AND conversation_id IS NULL)`,
     );
   }
-  if (hasAttachment) {
+  if (sequenced) {
     personConditions.push(
-      sql`s.id IN (SELECT e2.person_id FROM emails e2 JOIN ${attachments} a ON a.email_id = e2.id WHERE a.content_id IS NULL AND e2.conversation_id IS NULL)`,
+      sql`s.id IN (SELECT person_id FROM ${sequenceEnrollments} WHERE status = 'active')`,
+    );
+  }
+  if (draftsOnly) {
+    personConditions.push(
+      sql`s.id IN (
+        SELECT e.person_id FROM emails e
+        JOIN ${drafts} d ON d.reply_to_email_id = e.id
+        WHERE d.user_id = ${draftsUserId}
+          AND d.context_key LIKE 'reply:%'
+          AND e.conversation_id IS NULL
+      )`,
     );
   }
   if (q) {
@@ -266,6 +297,9 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
 
   // ----- GROUP CONVERSATION ROWS (conversation_id IS NOT NULL) -----
   // Activity-style subquery scoped to the inbox set the user can see.
+  // Participants / CC are hydrated AFTER pagination — loading them for
+  // every group up front doubled a large `IN (...)` list and blew D1's
+  // 100-param cap once a mailbox had ~50+ group threads.
   const groupInboxScope = allowed.isAdmin
     ? sql``
     : allowed.inboxes.length === 0
@@ -279,8 +313,21 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
   if (unread) {
     groupConditions.push(sql`g.unreadCount > 0`);
   }
-  if (hasAttachment) {
-    groupConditions.push(sql`g.hasAttachment = 1`);
+  if (sequenced) {
+    // Only individual contacts are enrolled in sequences — never group
+    // conversations — so this filter excludes every group row.
+    groupConditions.push(sql`0`);
+  }
+  if (draftsOnly) {
+    groupConditions.push(
+      sql`g.conversation_id IN (
+        SELECT e.conversation_id FROM emails e
+        JOIN ${drafts} d ON d.reply_to_email_id = e.id
+        WHERE d.user_id = ${draftsUserId}
+          AND d.context_key LIKE 'reply:%'
+          AND e.conversation_id IS NOT NULL
+      )`,
+    );
   }
   if (q) {
     const pattern = `%${escapeLike(q)}%`;
@@ -359,124 +406,22 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     ORDER BY g.lastEmailAt DESC
   `);
 
-  // Resolve participants (senders/people who posted into the thread) and
-  // CC participants (raw email/name pairs from the cc JSON column) for each
-  // group row, in two follow-up queries — keeps SQL simpler than crafting
-  // a single mega-join.
-  let groupRows: Array<{
-    type: "group";
-    id: string;
-    inbox: string;
-    participants: Array<{ id: string; email: string; name: string | null }>;
-    ccParticipants: Array<{ email: string; name: string | null }>;
-    lastEmailAt: number;
-    unreadCount: number;
-    totalCount: number;
-    hasAttachment: number;
-  }> = [];
-  if (groupRowsRaw.length > 0) {
-    const ids = groupRowsRaw.map((r) => r.conversation_id);
-
-    // Participants — senders (from `emails`) + outbound senders (from
-    // `sent_emails` joined to `people` when person_id is set).
-    const participantRows = await db.all<{
-      conversation_id: string;
+  // Lightweight group rows — participants/CC filled in for the page only.
+  const groupRows = groupRowsRaw.map((r) => ({
+    type: "group" as const,
+    id: r.conversation_id,
+    inbox: r.inbox,
+    participants: [] as Array<{
       id: string;
       email: string;
       name: string | null;
-    }>(sql`
-      SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
-      FROM ${emails} e
-      JOIN ${people} s ON s.id = e.person_id
-      WHERE e.conversation_id IN ${ids}
-      UNION
-      SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
-      FROM ${sentEmails} se
-      JOIN ${people} s ON s.id = se.person_id
-      WHERE se.conversation_id IN ${ids} AND se.person_id IS NOT NULL
-    `);
-    const participantsByConv = new Map<
-      string,
-      Array<{ id: string; email: string; name: string | null }>
-    >();
-    for (const r of participantRows) {
-      const list = participantsByConv.get(r.conversation_id) ?? [];
-      // Dedupe by id (UNION at SQL level can still produce dupes across the
-      // two branches because the joins differ).
-      if (!list.some((p) => p.id === r.id)) {
-        list.push({ id: r.id, email: r.email, name: r.name });
-      }
-      participantsByConv.set(r.conversation_id, list);
-    }
-
-    // CC participants — pull `cc` JSON from both emails + sent_emails rows in
-    // each conversation, parse, dedupe by lowercased email. Skip parse errors.
-    const ccRows = await db.all<{
-      conversation_id: string;
-      cc: string | null;
-    }>(sql`
-      SELECT conversation_id, cc FROM ${emails}
-      WHERE conversation_id IN ${ids} AND cc IS NOT NULL
-      UNION ALL
-      SELECT conversation_id, cc FROM ${sentEmails}
-      WHERE conversation_id IN ${ids} AND cc IS NOT NULL
-    `);
-    const ccByConv = new Map<
-      string,
-      Map<string, { email: string; name: string | null }>
-    >();
-    for (const r of ccRows) {
-      if (!r.cc) continue;
-      let parsed: any;
-      try {
-        parsed = JSON.parse(r.cc);
-      } catch {
-        continue;
-      }
-      if (!Array.isArray(parsed)) continue;
-      let map = ccByConv.get(r.conversation_id);
-      if (!map) {
-        map = new Map();
-        ccByConv.set(r.conversation_id, map);
-      }
-      for (const entry of parsed) {
-        if (!entry || typeof entry.email !== "string") continue;
-        const key = entry.email.toLowerCase();
-        if (!map.has(key)) {
-          map.set(key, {
-            email: entry.email,
-            name: typeof entry.name === "string" ? entry.name : null,
-          });
-        }
-      }
-    }
-
-    // Sender-side exclusion: if a participant also appears in CC, drop the CC
-    // entry — they're already represented as a participant.
-    groupRows = groupRowsRaw.map((r) => {
-      const participants = participantsByConv.get(r.conversation_id) ?? [];
-      const senderEmails = new Set(
-        participants.map((p) => p.email.toLowerCase()),
-      );
-      const ccMap = ccByConv.get(r.conversation_id);
-      const ccParticipants = ccMap
-        ? Array.from(ccMap.values()).filter(
-            (cc) => !senderEmails.has(cc.email.toLowerCase()),
-          )
-        : [];
-      return {
-        type: "group" as const,
-        id: r.conversation_id,
-        inbox: r.inbox,
-        participants,
-        ccParticipants,
-        lastEmailAt: r.lastEmailAt,
-        unreadCount: r.unreadCount,
-        totalCount: r.totalCount,
-        hasAttachment: r.hasAttachment,
-      };
-    });
-  }
+    }>,
+    ccParticipants: [] as Array<{ email: string; name: string | null }>,
+    lastEmailAt: r.lastEmailAt,
+    unreadCount: r.unreadCount,
+    totalCount: r.totalCount,
+    hasAttachment: r.hasAttachment,
+  }));
 
   // Merge persons + groups, sort, paginate. Recency is the secondary
   // tiebreaker (most-recent first) for every sort except recency itself
@@ -531,6 +476,107 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     totalUnreadEmails += r.unreadCount;
   }
   const data = merged.slice(offset, offset + limit);
+
+  // Hydrate participants + CC only for group rows on this page.
+  // Limit is capped at 100; each follow-up binds the page ids once (split
+  // queries, not a UNION of two identical IN lists).
+  const pageGroupIds = data
+    .filter((r): r is Extract<Row, { type: "group" }> => r.type === "group")
+    .map((r) => r.id);
+  if (pageGroupIds.length > 0) {
+    const fromInboxParticipants = await db.all<{
+      conversation_id: string;
+      id: string;
+      email: string;
+      name: string | null;
+    }>(sql`
+      SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
+      FROM ${emails} e
+      JOIN ${people} s ON s.id = e.person_id
+      WHERE e.conversation_id IN ${pageGroupIds}
+    `);
+    const fromSentParticipants = await db.all<{
+      conversation_id: string;
+      id: string;
+      email: string;
+      name: string | null;
+    }>(sql`
+      SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
+      FROM ${sentEmails} se
+      JOIN ${people} s ON s.id = se.person_id
+      WHERE se.conversation_id IN ${pageGroupIds} AND se.person_id IS NOT NULL
+    `);
+    const participantsByConv = new Map<
+      string,
+      Array<{ id: string; email: string; name: string | null }>
+    >();
+    for (const r of [...fromInboxParticipants, ...fromSentParticipants]) {
+      const list = participantsByConv.get(r.conversation_id) ?? [];
+      if (!list.some((p) => p.id === r.id)) {
+        list.push({ id: r.id, email: r.email, name: r.name });
+      }
+      participantsByConv.set(r.conversation_id, list);
+    }
+
+    const fromInboxCc = await db.all<{
+      conversation_id: string;
+      cc: string | null;
+    }>(sql`
+      SELECT conversation_id, cc FROM ${emails}
+      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+    `);
+    const fromSentCc = await db.all<{
+      conversation_id: string;
+      cc: string | null;
+    }>(sql`
+      SELECT conversation_id, cc FROM ${sentEmails}
+      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+    `);
+    const ccByConv = new Map<
+      string,
+      Map<string, { email: string; name: string | null }>
+    >();
+    for (const r of [...fromInboxCc, ...fromSentCc]) {
+      if (!r.cc) continue;
+      let parsed: any;
+      try {
+        parsed = JSON.parse(r.cc);
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(parsed)) continue;
+      let map = ccByConv.get(r.conversation_id);
+      if (!map) {
+        map = new Map();
+        ccByConv.set(r.conversation_id, map);
+      }
+      for (const entry of parsed) {
+        if (!entry || typeof entry.email !== "string") continue;
+        const key = entry.email.toLowerCase();
+        if (!map.has(key)) {
+          map.set(key, {
+            email: entry.email,
+            name: typeof entry.name === "string" ? entry.name : null,
+          });
+        }
+      }
+    }
+
+    for (const row of data) {
+      if (row.type !== "group") continue;
+      const participants = participantsByConv.get(row.id) ?? [];
+      const senderEmails = new Set(
+        participants.map((p) => p.email.toLowerCase()),
+      );
+      const ccMap = ccByConv.get(row.id);
+      row.participants = participants;
+      row.ccParticipants = ccMap
+        ? Array.from(ccMap.values()).filter(
+            (cc) => !senderEmails.has(cc.email.toLowerCase()),
+          )
+        : [];
+    }
+  }
 
   return c.json(
     {

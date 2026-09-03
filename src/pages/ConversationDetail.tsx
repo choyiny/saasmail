@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Users, CheckCheck } from "lucide-react";
+import { Users } from "lucide-react";
+import MarkAllReadButton from "@/components/MarkAllReadButton";
 import {
   fetchConversationEmails,
   markEmailRead,
@@ -189,10 +190,11 @@ export default function ConversationDetail({
               {conversation.participants.length} participants
             </span>
           </div>
-          {totalUnread > 0 && (
-            <button
-              type="button"
-              onClick={() => {
+          <div className="flex shrink-0 items-center gap-2">
+            <MarkAllReadButton
+              unreadCount={totalUnread}
+              scopeLabel={conversation.inbox}
+              onMarkAllRead={() => {
                 // Mark every unread received email read sequentially.
                 for (const e of data.emails) {
                   if (e.type === "received" && e.isRead === 0) {
@@ -200,12 +202,8 @@ export default function ConversationDetail({
                   }
                 }
               }}
-              className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-card px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-            >
-              <CheckCheck size={12} />
-              Mark all read
-            </button>
-          )}
+            />
+          </div>
         </div>
       </div>
 

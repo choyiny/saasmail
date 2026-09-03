@@ -7,7 +7,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
-import { renderTemplate } from "./interpolate";
+import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
 
@@ -17,7 +17,7 @@ export type SendTemplateParams = {
   slug: string;
   to: string;
   fromAddress: string;
-  variables: Record<string, string>;
+  variables: TemplateVariables;
   allowed: AllowedInboxes;
 };
 
@@ -32,6 +32,7 @@ export type SendTemplateSuccess = {
 
 export type SendTemplateFailure =
   | { ok: false; code: "TEMPLATE_NOT_FOUND"; message: string }
+  | { ok: false; code: "TEMPLATE_PARSE_ERROR"; message: string }
   | {
       ok: false;
       code: "MISSING_VARIABLES";
@@ -80,6 +81,13 @@ export async function sendTemplate(
 
   const rendered = renderTemplate(rows[0], variables);
   if (!rendered.ok) {
+    if (rendered.parseError) {
+      return {
+        ok: false,
+        code: "TEMPLATE_PARSE_ERROR",
+        message: rendered.parseError,
+      };
+    }
     return {
       ok: false,
       code: "MISSING_VARIABLES",

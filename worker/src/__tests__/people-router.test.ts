@@ -9,6 +9,8 @@ import {
   getDb,
 } from "./helpers";
 import { blocklist } from "../db/blocklist.schema";
+import { drafts } from "../db/drafts.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 
 describe("people router", () => {
   let apiKey: string;
@@ -326,6 +328,197 @@ describe("people router", () => {
         apiKey,
       }).then((r) => r.json());
       expect(asc.data[0].id).toBe("s1");
+    });
+
+    it("hydrates group participants after pagination when many group threads exist", async () => {
+      // Prod bug: hydrating participants for EVERY group before pagination
+      // doubled a large IN list and exceeded D1's 100-param cap (~50+
+      // groups). Miniflare doesn't enforce the cap; this pins the
+      // page-only hydrate path still returns populated group rows.
+      const GROUP_COUNT = 55;
+      await createTestPerson({ id: "g-person", email: "member@test.com" });
+      for (let i = 0; i < GROUP_COUNT; i++) {
+        await createTestEmail({
+          id: `eg-${i}`,
+          personId: "g-person",
+          messageId: `group-${i}@example.com`,
+          conversationId: `c_bulk_${i}`,
+          cc: JSON.stringify([{ email: `cc${i}@example.com`, name: null }]),
+        });
+      }
+
+      const res = await authFetch("/api/people/grouped?limit=100", { apiKey });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const groups = body.data.filter(
+        (row: { type: string }) => row.type === "group",
+      );
+      expect(groups).toHaveLength(GROUP_COUNT);
+      expect(groups[0].participants.length).toBeGreaterThan(0);
+      expect(groups[0].ccParticipants.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("GET /api/people/grouped?drafts=1 — reply-draft filter", () => {
+    const replyDraft = (id: string, userId: string, emailId: string) => ({
+      id,
+      userId,
+      contextKey: `reply:${emailId}`,
+      replyToEmailId: emailId,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    it("shows only people with a reply draft", async () => {
+      await createTestPerson({ id: "p-draft", email: "d@test.com" });
+      await createTestEmail({
+        id: "e-draft",
+        personId: "p-draft",
+        messageId: "m-d@test.com",
+      });
+      await createTestPerson({ id: "p-nodraft", email: "n@test.com" });
+      await createTestEmail({
+        id: "e-nodraft",
+        personId: "p-nodraft",
+        messageId: "m-n@test.com",
+      });
+      await getDb()
+        .insert(drafts)
+        .values(replyDraft("dr1", "test-user-1", "e-draft"));
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect(res.status).toBe(200);
+      const ids = (await res.json()).data.map((r: { id: string }) => r.id);
+      expect(ids).toContain("p-draft");
+      expect(ids).not.toContain("p-nodraft");
+    });
+
+    it("ignores the new-message compose draft (not a reply)", async () => {
+      await createTestPerson({ id: "p1", email: "a@test.com" });
+      await createTestEmail({
+        id: "e1",
+        personId: "p1",
+        messageId: "m1@test.com",
+      });
+      await getDb().insert(drafts).values({
+        id: "dc",
+        userId: "test-user-1",
+        contextKey: "compose",
+        replyToEmailId: null,
+        createdAt: 1,
+        updatedAt: 1,
+      });
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect((await res.json()).data).toHaveLength(0);
+    });
+
+    it("does not surface another user's reply draft", async () => {
+      await createTestPerson({ id: "p1", email: "a@test.com" });
+      await createTestEmail({
+        id: "e1",
+        personId: "p1",
+        messageId: "m1@test.com",
+      });
+      await createTestUser({ id: "other-user", email: "other@test.com" });
+      await getDb()
+        .insert(drafts)
+        .values(replyDraft("dr-other", "other-user", "e1"));
+
+      // Authenticated as test-user-1 — the other user's draft must not leak.
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect((await res.json()).data).toHaveLength(0);
+    });
+
+    it("shows a group conversation with a reply draft", async () => {
+      await createTestPerson({ id: "pg", email: "g@test.com" });
+      await createTestEmail({
+        id: "eg",
+        personId: "pg",
+        conversationId: "conv1",
+        messageId: "mg@test.com",
+      });
+      await getDb()
+        .insert(drafts)
+        .values(replyDraft("drg", "test-user-1", "eg"));
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      const data = (await res.json()).data as Array<{
+        id: string;
+        type: string;
+      }>;
+      const group = data.find((r) => r.id === "conv1");
+      expect(group?.type).toBe("group");
+    });
+  });
+
+  describe("GET /api/people/grouped?sequenced=1 — sequence filter", () => {
+    const enrollment = (id: string, personId: string, status = "active") => ({
+      id,
+      sequenceId: "seq1",
+      personId,
+      status,
+      fromAddress: "inbox@test.com",
+      enrolledAt: 1,
+    });
+
+    it("shows only contacts with an active enrollment", async () => {
+      await createTestPerson({ id: "p-seq", email: "s@test.com" });
+      await createTestEmail({
+        id: "e-seq",
+        personId: "p-seq",
+        messageId: "m-s@test.com",
+      });
+      await createTestPerson({ id: "p-noseq", email: "n@test.com" });
+      await createTestEmail({
+        id: "e-noseq",
+        personId: "p-noseq",
+        messageId: "m-n@test.com",
+      });
+      await getDb()
+        .insert(sequenceEnrollments)
+        .values(enrollment("en1", "p-seq"));
+
+      const res = await authFetch("/api/people/grouped?sequenced=1", {
+        apiKey,
+      });
+      expect(res.status).toBe(200);
+      const ids = (await res.json()).data.map((r: { id: string }) => r.id);
+      expect(ids).toContain("p-seq");
+      expect(ids).not.toContain("p-noseq");
+    });
+
+    it("ignores cancelled or completed enrollments", async () => {
+      await createTestPerson({ id: "p-done", email: "d@test.com" });
+      await createTestEmail({
+        id: "e-done",
+        personId: "p-done",
+        messageId: "m-d@test.com",
+      });
+      await getDb()
+        .insert(sequenceEnrollments)
+        .values(enrollment("en-done", "p-done", "completed"));
+
+      const res = await authFetch("/api/people/grouped?sequenced=1", {
+        apiKey,
+      });
+      expect((await res.json()).data).toHaveLength(0);
+    });
+
+    it("excludes group conversations (only contacts are sequenced)", async () => {
+      await createTestPerson({ id: "pg", email: "g@test.com" });
+      await createTestEmail({
+        id: "eg",
+        personId: "pg",
+        conversationId: "convS",
+        messageId: "mg@test.com",
+      });
+
+      const res = await authFetch("/api/people/grouped?sequenced=1", {
+        apiKey,
+      });
+      const data = (await res.json()).data as Array<{ type: string }>;
+      expect(data.some((r) => r.type === "group")).toBe(false);
     });
   });
 });

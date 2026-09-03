@@ -7,12 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The remote MCP server identifies itself with the instance's brand name instead of the hardcoded string `saasmail`. It reports the `brand_name` app setting as `serverInfo.name` and `serverInfo.title` in the MCP handshake, and publishes it as RFC 9728 `resource_name` in `/.well-known/oauth-protected-resource`, so an operator connecting two saasmail deployments to the same client can tell them apart wherever the client names a connector from discovery. Unset brand name still reports `saasmail`. Clients that ask for a connection name themselves (`claude mcp add <name>`, the key in an `mcpServers` block) are unaffected — those labels are local.
+- **Docs split out of the README.** The 790-line README is now a 135-line overview — what saasmail is, quickstart, screenshots, cost, and a linked feature index — and the reference material moved into [`docs/`](docs/README.md) as 14 cross-linked pages with an index at `docs/README.md`: setup, email providers, configuration, updating, architecture, local development, inboxes, templates, sequences, suppressions, users and API keys, MCP, WebMCP, and webhooks. Every page carries a breadcrumb back to the index. Prose is unchanged apart from rewritten cross-links; nothing was dropped. Old deep links still work: every heading the README used to carry is redeclared as an anchor on the line that replaced it, so `README.md#template-syntax` lands on the Email templates entry and `README.md#local-development` on the documentation index.
+- The README's ASCII architecture sketch is now a rendered diagram, in light and dark variants selected with `prefers-color-scheme`. It is generated rather than hand-drawn: self-contained HTML sources live in `docs/diagrams/`, skinned with the product's own design tokens from `src/index.css` (lime primary, violet for external provider calls), and exported to PNG at 2×.
+
+### Security
+
+- Attachment reads are scoped to the caller's allowed inboxes. `GET /api/attachments/{id}` and `/{id}/inline` looked the attachment up by id alone, so any authenticated user could read any attachment in the deployment given only its id. Both routes now resolve the owning inbox through the attachment's message — `emails.recipient` for inbound, `sent_emails.from_address` for sent — and answer `404` when it is not allowed, so the response does not confirm the id exists.
+- Inline attachments are served with `Cache-Control: private` instead of `public`, so shared caches in front of the worker cannot store authenticated mailbox content and hand it to a different caller.
+- Attachment downloads sanitize the filename before interpolating it into `Content-Disposition` and add an RFC 5987 `filename*` field, so a stored filename carrying quotes or CR/LF can no longer inject headers or split the response.
+
 ### Fixed
 
+- `PATCH /api/emails/bulk` works. It was registered after `PATCH /api/emails/{id}`, and Hono matches in registration order, so the request bound `id: "bulk"`, was answered by the single-email handler, and returned `404` without marking anything — the bulk handler was unreachable dead code. Registering it before the parameterised route makes it live; it applies the same inbox scoping it always contained, silently skipping ids the caller may not access.
+- Inbox list: hydrate group participants/CC after pagination so `GET /api/people/grouped` no longer 500s on mailboxes with 50+ group threads (D1's 100 bound-parameter cap). Stats still counted unread while the people list failed empty.
+- Blocklist: mark matching unread mail as read when a rule is created, so the nav unread badge cannot stick on senders the inbox list has hidden. Migration `0033` clears existing blocked unread counts.
 - README: correct OpenAPI doc URLs (`/doc` and `/swagger-ui`, not `/api/doc`) and OpenAPI version (3.0).
 
 ### Added
 
+- **WebMCP support.** The web app now registers 20 WebMCP tools (`document.modelContext`) so a browser AI agent — ChatGPT's in-app browser, or Chrome 149+ with `chrome://flags/#enable-webmcp-testing` — can operate saasmail from inside the logged-in page using the session cookie. Read tools (search, list, and read mail/contacts/templates/sequences) return data; action tools drive the visible UI — navigating to a contact, opening the compose drawer pre-filled, drafting a reply into the inbox **Drafts** filter, enrolling a contact in a sequence and switching to the **Sequenced** filter. `get_playbook` briefs the agent on how to run common workflows (summarize unread, reply to unread, enroll by criteria), and `visualize_plan` renders its live step-by-step plan on a new **Agent Plan** inbox tab so the user can watch progress during long inference. **WebMCP never sends or deletes:** compose and reply produce drafts the signed-in user reviews and sends by hand. A bottom-right **activity popup** surfaces each tool call as it runs (running → done/error) so the agent's work is never invisible. This complements, and differs from, the existing remote `/mcp` server (OAuth 2.1, for external agents): WebMCP is in-page, session-scoped, and can only do what the signed-in user can. Turn it off per instance with the `webmcp_enabled` app setting. Adds `GET /api/emails/search` and a `Permissions-Policy: tools=(self)` header on the app HTML.
 - **Per-inbox forwarding.** Admins can set an optional destination address per inbox on the **Inboxes** page (alongside display name, signature, mode, and members). Every message the inbox receives is re-sent to that address through the configured outbound provider. This exists because Cloudflare Email Routing's own forwarding rules relay from shared IPs that Outlook/Hotmail blocklist (`550 5.7.1 … S3150`), so those forwards bounce; re-sending leaves from different IPs and is DKIM-signed for your own domain. Copies are sent from the inbox address with the original sender in `Reply-To`. Off by default. Migration `0031`.
 - OpenAPI email responses: document `attachments` on `EmailSchema`, clarify `replyTo` is only populated on `GET /api/emails/{id}` for received messages.
 - OpenAPI `/doc`: register `SendEmailSchema`, `CcEntry`, and `ReplyEmailSchema` under `components.schemas` (including `transactional` and reply payload fields).
@@ -22,6 +38,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OpenAPI bootstrap: add unauthenticated `GET /api/health` and `GET /api/config` to the generated spec.
 - OpenAPI notifications: convert `notifications-router` to zod-openapi; document config, WebSocket stream, push subscribe/unsubscribe, and subscription management routes.
 - New outbound email provider: **Postmark**. Set `POSTMARK_API_KEY` (your Postmark server API token) as a secret to send through Postmark. Runtime precedence is Bavimail > Postmark > Resend > Cloudflare Email Sending.
+- Mustache-style sections in templates: `{{#items}}…{{/items}}` renders
+  conditionally and iterates arrays, `{{^items}}…{{/items}}` inverts, and
+  `{{.}}` refers to the current item. (#112)
+- `{{key?}}` marks a variable optional — it renders empty instead of failing
+  the send, so a template can add a variable before every caller supplies it. (#227)
+- `{{key|nl2br}}` converts newlines to `<br>` after escaping, for multi-line
+  values such as message bodies and address blocks. (#227)
+- Malformed templates now fail with a `400` carrying the parse diagnostic
+  (internally `TEMPLATE_PARSE_ERROR`) instead of rendering something
+  half-formed. Unbalanced or mismatched section tags (`{{#items}}` with no
+  `{{/items}}`, `{{/other}}` closing the wrong section) and unknown filters
+  are parse errors. This is a new failure mode on
+  `POST /api/email-templates/{slug}/send`,
+  `GET /api/email-templates/{slug}/variables`, and
+  `POST /api/send/reply/{id}` — those routes could not return 400 for this
+  reason before. A sequence step whose template does not parse is marked
+  `failed` rather than retried forever. (#112)
+- Template `variables` payloads may nest objects and arrays up to 32 levels
+  deep; deeper is rejected with `400` naming the limit. Zod's recursive descent
+  through the self-referencing value schema has no bound of its own, so a
+  payload of a few KB but thousands of levels deep overflowed the stack — a
+  `RangeError`, which is not a `ZodError` and so surfaced as an unhandled 500.
+  The guard applies on every send path, including the MCP tools. (#227)
+- Templates are validated when they are written. `POST` and `PUT
+/api/email-templates` reject a template whose tags do not parse, with the
+  diagnostic naming the offending tag. Previously a broken template stored
+  cleanly and failed much later — on every send, on `/variables`, and by
+  marking sequence steps `failed` terminally, with a worker log as the only
+  trace. `PUT` validates the template as it will exist after the merge, since
+  editing only the subject can still unbalance a section across the pair.
+  (#227)
+- The template editor understands the full grammar. Detected variables are
+  grouped into Required / Optional / Sections with each chip showing the tag as
+  written (`{{^promo}}`, `{{#promo?}}`, `{{name?}}`), the live preview
+  substitutes sample values so a section renders as repeated content, and a
+  "Syntax & styling" card documents the tag table, escaping, and multi-line
+  values. The editor now renders through the worker's own renderer rather than
+  a copy, so the preview and the chips cannot disagree with what a send does.
+  (#112)
+- The sequence editor's enroll snippet and the template list's variable badge
+  use the same analyzer. Both previously scanned for `{{name}}` with a regex
+  that, for a section template, collected the per-item names the endpoint
+  ignores and omitted the section name it rejects the request for — so the
+  snippet was copy-pasteable into a `400`. The snippet now shows a section as
+  an array of its own fields. (#112)
+- Section nesting is capped at 64 levels; deeper templates are rejected as a
+  parse error rather than overflowing the renderer's stack. (#112)
+- Total section expansion is capped at 20,000 body renders per template, as
+  `TEMPLATE_RENDER_ERROR` (a parse error to every caller). The 64-level cap
+  bounds how deep a template nests and the variables cap bounds the payload,
+  but neither bounds their product: a section nested inside itself cannot
+  resolve the inner name against the item frame, so it falls back to the same
+  top-level array and iterates it again, making work grow as N^depth from a
+  few hundred bytes of template. A 20-element array nested 8 deep asks for
+  2.6e10 renders. (#112)
+
+### Changed
+
+- **Behavior change:** a template variable used inside a section that creates
+  no per-item scope is now validated, and a send that omits it fails with
+  `400` instead of substituting nothing. A section only scopes its body when
+  its value is an array or an object; an inverted `{{^key}}` section, and a
+  `{{#key}}` section given a boolean, render against the top level, so names
+  in those bodies are ordinary top-level lookups. Previously they were treated
+  as per-item and blanked, so `{{^has_orders}}Hi {{first_name}}{{/has_orders}}`
+  mailed "Hi ," and reported success. Names inside an _iterating_ section still
+  render empty when absent, since items legitimately differ in which optional
+  fields they carry. These names do not appear in
+  `GET /api/email-templates/{slug}/variables`, which is a static analysis and
+  cannot know what value a section will receive — the check happens at send
+  time. Sequence sends are unaffected; they have no failure channel and keep
+  rendering as before. (#112)
+- **Behavior change:** a variable used in scalar position that receives an
+  object or an array is rejected with `400` rather than rendering as an empty
+  string. Before the payload schema widened this was unrepresentable; now it
+  parses cleanly and mails a blank. Names used as sections are unaffected, so
+  boolean conditional sections keep working. (#112)
+
+- **BREAKING:** Template variables are now HTML-escaped by default. `{{name}}`
+  escapes its value; use `{{{name}}}` to pass pre-rendered HTML through
+  unescaped. Templates that intentionally rendered HTML from a variable must
+  switch those tags to the triple-brace form. Affects both the templates API
+  and sequence sends. Escaping applies to the HTML body; the subject line is
+  a plain-text header and is substituted as-is, as it always was. (#227)
+- **BREAKING:** Templates containing three or more consecutive braces now
+  parse differently, because `{{{key}}}` means raw output. Previously
+  `{{{name}}}` rendered as `{` + the value + `}`; it is now an unescaped
+  substitution. Templates that only use `{{key}}` and ordinary text are
+  unaffected. (#112)
+- `GET /api/email-templates/{slug}/variables` returns three lists. `variables`
+  keeps its name, its `string[]` type, and its meaning — the names a caller
+  must supply or the send is rejected — so existing integrations are
+  unaffected. Alongside it, `optional` carries names that render empty when
+  absent (`{{key?}}` tags and inverted sections), and `sections` carries each
+  section's name, whether it is inverted, and the names its body references.
+  Section-body names stay out of `variables`: they resolve against the current
+  item at render time, so listing them would suggest a contract that does not
+  exist. (#112, #227)
 
 ## [0.10.0] - 2026-06-23
 

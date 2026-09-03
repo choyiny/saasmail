@@ -4,18 +4,31 @@ import { Plus, FileText, Pencil, Trash2, Hash } from "lucide-react";
 import { fetchTemplates, deleteTemplate } from "@/lib/api";
 import type { EmailTemplate } from "@/lib/api";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
+import { analyzeTemplateClient } from "@/lib/template-syntax";
 
-/** Count {{varName}} tokens in subject + body — shown as a small badge
- *  on each template row so the list hints at template complexity at a
- *  glance without opening the editor. */
+/**
+ * Count the top-level names a caller can supply — shown as a small badge on
+ * each row so the list hints at template complexity without opening the editor.
+ *
+ * Counted with the shared analyzer rather than a `{{(\w+)}}` scan. The regex
+ * was wrong in both directions once sections existed: it counted `{{price}}`
+ * inside a `{{#items}}` body, which resolves per item and is not something a
+ * caller passes, and it missed `{{#items}}` itself, which is required. A
+ * template whose only tags live inside a loop showed a confident, entirely
+ * wrong number.
+ *
+ * Required and optional together, since the badge is about how much a template
+ * asks of its caller, not strictly about what would fail a send. A template
+ * stored before write-time validation existed may not parse; it counts as 0
+ * rather than breaking the list.
+ */
 function countVariables(t: EmailTemplate): number {
-  const re = /\{\{(\w+)\}\}/g;
-  const seen = new Set<string>();
-  for (const src of [t.subject, t.bodyHtml]) {
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(src)) !== null) seen.add(m[1]);
+  try {
+    const analysis = analyzeTemplateClient(t.subject, t.bodyHtml);
+    return new Set([...analysis.required, ...analysis.optional]).size;
+  } catch {
+    return 0;
   }
-  return seen.size;
 }
 
 export default function TemplatesPage() {

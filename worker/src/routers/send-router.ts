@@ -11,6 +11,7 @@ import {
   replyNotFoundResponse,
   replyValidationErrorResponse,
 } from "../lib/openapi-send-errors";
+import { templateVariablesSchema } from "../lib/template-variables-schema";
 
 export const sendRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -207,8 +208,9 @@ export const ReplyEmailSchema = z
       description:
         "Optional template slug to render as the reply body instead of bodyHtml/bodyText.",
     }),
-    variables: z.record(z.string(), z.string()).optional().openapi({
-      description: "Template variables when templateSlug is set.",
+    variables: templateVariablesSchema.optional().openapi({
+      description:
+        "Template variables when templateSlug is set. Values may be nested arrays/objects for `{{#section}}` bodies.",
     }),
     replyTo: z.string().email().optional().openapi({
       description: "Override Reply-To header for this reply.",
@@ -294,7 +296,10 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
         400,
       );
     }
-    if (result.code === "MISSING_BODY") {
+    if (
+      result.code === "MISSING_BODY" ||
+      result.code === "TEMPLATE_PARSE_ERROR"
+    ) {
       return c.json({ error: result.message }, 400);
     }
     return c.json({ error: result.message }, 404);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   X,
@@ -29,8 +29,10 @@ import {
   type CcEntry,
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
+import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
+import { analyzeTemplateClient, chipLabel } from "@/lib/template-syntax";
 import { cn } from "@/lib/utils";
 
 const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
@@ -52,18 +54,6 @@ interface ReplyComposerProps {
 }
 
 type Tab = "freeform" | "template";
-
-function extractVariables(subject: string, bodyHtml: string): string[] {
-  const vars = new Set<string>();
-  const regex = /\{\{(\w+)\}\}/g;
-  for (const src of [subject, bodyHtml]) {
-    let m: RegExpExecArray | null;
-    while ((m = regex.exec(src)) !== null) {
-      vars.add(m[1]);
-    }
-  }
-  return Array.from(vars);
-}
 
 export default function ReplyComposer({
   emailId,
@@ -91,6 +81,29 @@ export default function ReplyComposer({
   const totalAttachmentBytes = files.reduce((s, f) => s + f.size, 0);
   // Compact tray vs. full-viewport. Toggled by the maximize button.
   const [fullscreen, setFullscreen] = useState(false);
+
+  // Set once a saved reply draft has been restored, so the reply-all CC
+  // default below yields to the draft's own CC regardless of which async
+  // load resolves first.
+  const draftRestoredRef = useRef(false);
+
+  // Autosave the freeform reply so a half-written reply survives closing the
+  // composer, keyed to the email being replied to.
+  const bodyIsEmpty = !bodyHtml || bodyHtml === "<p></p>";
+  const { clear: clearDraft } = useDraftAutosave({
+    contextKey: `reply:${emailId}`,
+    enabled: true,
+    isEmpty: bodyIsEmpty,
+    restore: true,
+    values: { fromAddress, cc, bodyHtml, bodyText, replyToEmailId: emailId },
+    onRestore: (draft) => {
+      draftRestoredRef.current = true;
+      if (draft.bodyHtml) setBodyHtml(draft.bodyHtml);
+      if (draft.bodyText) setBodyText(draft.bodyText);
+      if (draft.cc) setCc(draft.cc);
+      if (draft.fromAddress) setFromAddress(draft.fromAddress);
+    },
+  });
 
   // Sync the signature trail to the active From inbox.
   useEffect(() => {
@@ -138,7 +151,7 @@ export default function ReplyComposer({
       .then(async (email) => {
         if (cancelled) return;
         setOriginalEmail(email);
-        if (email.cc && email.cc.length > 0) {
+        if (email.cc && email.cc.length > 0 && !draftRestoredRef.current) {
           // Drop our own inbox addresses from the suggested CC list — we
           // don't want to CC ourselves on a reply we're sending.
           const ours = new Set(recipients.map((r) => r.toLowerCase()));
@@ -175,13 +188,31 @@ export default function ReplyComposer({
   const selectedTemplate =
     templates.find((t) => t.slug === selectedSlug) ?? null;
 
-  const requiredVars = useMemo(() => {
-    if (!selectedTemplate) return [];
-    return extractVariables(
-      selectedTemplate.subject,
-      selectedTemplate.bodyHtml,
-    );
+  // Only top-level names, same contract the send API validates — names
+  // scoped inside a {{#section}} resolve per item, not from this form, so
+  // they're deliberately excluded (see src/lib/template-syntax.ts).
+  const templateAnalysis = useMemo(() => {
+    if (!selectedTemplate) return null;
+    try {
+      return analyzeTemplateClient(
+        selectedTemplate.subject,
+        selectedTemplate.bodyHtml,
+      );
+    } catch {
+      // A stored template shouldn't fail to parse, but if one somehow does,
+      // fall back to no prompts rather than crashing the composer.
+      return null;
+    }
   }, [selectedTemplate]);
+  const requiredVars = templateAnalysis?.required ?? [];
+  // A required name that's actually a section (e.g. {{#items}}) needs an
+  // array of objects, not the plain string this form's inputs collect — used
+  // below to warn that such a template can't be filled in from here. The
+  // chip text itself comes from the shared `chipLabel`.
+  const sectionVarNames = useMemo(
+    () => new Set((templateAnalysis?.sections ?? []).map((s) => s.name)),
+    [templateAnalysis],
+  );
 
   useEffect(() => {
     if (!selectedTemplate) return;
@@ -244,6 +275,8 @@ export default function ReplyComposer({
         });
       }
       setFiles([]);
+      // The reply went out — discard its draft so it doesn't reappear.
+      clearDraft();
       // Notify the rest of the app — PersonDetail uses this to
       // auto-switch the active inbox tab when the user replied from a
       // different inbox than the one they were viewing.
@@ -467,7 +500,9 @@ export default function ReplyComposer({
                                   className="grid grid-cols-[120px_1fr] items-center gap-3"
                                 >
                                   <label className="truncate font-mono text-xs text-text-tertiary">
-                                    {`{{${v}}}`}
+                                    {templateAnalysis
+                                      ? chipLabel(v, templateAnalysis)
+                                      : `{{${v}}}`}
                                   </label>
                                   <input
                                     value={templateVars[v] ?? ""}
@@ -482,6 +517,15 @@ export default function ReplyComposer({
                                 </div>
                               ))}
                             </div>
+                            {[...sectionVarNames].some((n) =>
+                              requiredVars.includes(n),
+                            ) && (
+                              <p className="mt-2 text-[11px] font-light text-text-tertiary">
+                                Section variables (#) need an array of objects —
+                                this form can only send plain text, so send
+                                those via the API instead.
+                              </p>
+                            )}
                           </div>
                         )}
                       </>

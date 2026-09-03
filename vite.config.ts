@@ -13,6 +13,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // The template engine is shared with the editor's live preview.
+      // `worker/src/lib/interpolate.ts` imports nothing and touches no
+      // Cloudflare globals, so it bundles for the browser as-is — the
+      // alternative is a second copy of the grammar to keep in sync.
+      "@worker": path.resolve(__dirname, "./worker/src"),
     },
     // Force a single React instance — prevents the "Invalid hook call" error
     // when lazy-loading @paper-design/shaders-react which can otherwise be

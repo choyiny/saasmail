@@ -1,7 +1,9 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { schema } from "../db/schema";
 import { blocklist } from "../db/blocklist.schema";
+import { emails } from "../db/emails.schema";
+import { people } from "../db/people.schema";
 
 export type Database = DrizzleD1Database<typeof schema>;
 
@@ -28,4 +30,57 @@ export async function isBlocked(db: Database, email: string): Promise<boolean> {
     columns: { id: true },
   });
   return !!row;
+}
+
+/**
+ * Mark every unread received email from senders matching a block rule as read,
+ * and recompute `people.unread_count`. Keeps the nav unread badge honest once
+ * the people list has hidden those senders — without teaching `/api/stats` about
+ * the blocklist.
+ */
+export async function markBlockedSendersRead(
+  db: Database,
+  type: "email" | "domain",
+  value: string,
+): Promise<{ emailsMarked: number; peopleTouched: number }> {
+  const personMatch =
+    type === "email"
+      ? sql`p.email = ${value}`
+      : sql`lower(substr(p.email, instr(p.email, '@') + 1)) = ${value}`;
+
+  const unread = await db.all<{ id: string; person_id: string }>(sql`
+    SELECT e.id, e.person_id
+    FROM ${emails} e
+    JOIN ${people} p ON p.id = e.person_id
+    WHERE e.is_read = 0 AND ${personMatch}
+  `);
+  if (unread.length === 0) {
+    return { emailsMarked: 0, peopleTouched: 0 };
+  }
+
+  const emailIds = unread.map((r) => r.id);
+  const personIds = Array.from(new Set(unread.map((r) => r.person_id)));
+
+  // Chunk updates in case a domain block hits a large mailbox (D1 100-param cap).
+  const CHUNK = 90;
+  for (let i = 0; i < emailIds.length; i += CHUNK) {
+    const chunk = emailIds.slice(i, i + CHUNK);
+    await db
+      .update(emails)
+      .set({ isRead: 1 })
+      .where(sql`${emails.id} IN ${chunk}`);
+  }
+
+  for (const pid of personIds) {
+    const [row] = await db.all<{ count: number }>(sql`
+      SELECT COUNT(*) AS count FROM ${emails}
+      WHERE person_id = ${pid} AND is_read = 0
+    `);
+    await db
+      .update(people)
+      .set({ unreadCount: row?.count ?? 0 })
+      .where(eq(people.id, pid));
+  }
+
+  return { emailsMarked: emailIds.length, peopleTouched: personIds.length };
 }
