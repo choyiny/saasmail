@@ -21,6 +21,8 @@ import { asyncJobs } from "./async-jobs.schema";
 import { contacts } from "./contacts.schema";
 import { lists } from "./lists.schema";
 import { listMembers } from "./list-members.schema";
+import { subscribeForms } from "./subscribe-forms.schema";
+import { subscribeAttempts } from "./subscribe-attempts.schema";
 
 export const schema = {
   ...authSchema,
@@ -46,4 +48,6 @@ export const schema = {
   contacts,
   lists,
   listMembers,
+  subscribeForms,
+  subscribeAttempts,
 } as const;

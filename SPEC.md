@@ -780,6 +780,7 @@ The header URL uses a v2 token, passed through `sendWithSuppressionCheck`'s new 
    - On outbox outcome `failed`: classify using the same transient/permanent distinction the outbox/sender already compute (`worker/src/lib/email-sender/classify.ts`) — transient-but-exhausted → `campaign_recipients.status = 'retryable_failed'` (admin can `POST /retry`); non-transient → `campaign_recipients.status = 'permanent_failed'` (never retried, automatically or manually)
    - **Crash reconciliation:** if the caller crashes after `sendViaOutbox` confirms provider success but before the bookkeeping above completes, the row is left `bookkeeping_pending`. The existing hourly `processOutbox()`/`attemptOutboxRow()` sweep must detect `bookkeeping_pending` rows with a non-null `campaignRecipientId` and **re-run only the bookkeeping steps** (never re-call the provider) using the already-confirmed result — this is what makes crash recovery self-healing instead of ambiguous-delivery.
    - **Completion check (replaces the racy counter-equality check; corrected for split failure states):** after every terminal write, run one conditional update per outcome:
+
      ```sql
      -- clean completion: no permanent failures
      UPDATE campaigns SET status = 'sent', sent_at = ?
@@ -805,7 +806,9 @@ The header URL uses a v2 token, passed through `sendWithSuppressionCheck`'s new 
          SELECT 1 FROM campaign_recipients WHERE campaign_id = ? AND status = 'permanent_failed'
        );
      ```
+
      `queued`/`processing`/`retrying`/`retryable_failed`/`unknown` all block completion (still "in flight" or awaiting manual action). This is safe under concurrent execution — only one writer can flip `status` away from `'sending'` — and does not depend on mutable counters ever reaching an exact equality.
+
 4. **Hourly Cron trigger** (`0 * * * *`, already wired in `index.ts` → `scheduled()`, which runs `handleScheduled` then `processOutbox`): add a campaign pass that, in order:
    - Fires `scheduled` campaigns where `scheduledAt <= now` (see scheduling SLA below)
    - Moves `scheduled` campaigns more than 24h overdue to `overdue` (never fires them automatically, never silently drops them)

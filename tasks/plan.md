@@ -92,12 +92,28 @@ config tension did not materialise: `wrangler.jsonc.ci` declares the same `datab
 (`saasmail-db`) as `.example`, so one config serves tests _and_ migrations. `yarn db:generate`
 verified working (clean "no schema changes" run), which confirms the spec's corrected workflow.
 
-**R7 — Local test runs need `--maxWorkers=4`. (found in slice 0)**
-Bare `yarn test` fails ~21 files with 5s timeouts on an untouched tree: 18 cores and no worker cap
-means the Cloudflare pool starts a `workerd` per file and they starve each other. Failures are
-nondeterministic and every file passes in isolation. `yarn test --maxWorkers=4` is green
-(80/80, 788 passed) and faster. **Do not "fix" this by editing the committed vitest config** — it
-is machine-specific and CI does not exhibit it. Every checkpoint below assumes the flag.
+**R7 — The local test suite is flaky under parallelism. (found in slice 0, revised in slice C)**
+Bare `yarn test` fails ~21 files with 5s timeouts on this 18-core machine: the Cloudflare pool
+starts a `workerd` per file with no cap and they starve each other. `--maxWorkers=4` is the working
+default, but it is **not a complete fix** — a single unrelated file (`emails-router`) failed once at
+that setting and then passed 4/4 in isolation and on two consecutive full runs. **Never conclude
+from one red run that a change broke something**: re-run the file alone, then the full suite, before
+believing it. Do not "fix" this by editing the committed vitest config; it is machine-specific and
+CI does not exhibit it.
+
+**R8 — `yarn tsc --noEmit` does not typecheck the worker at all. (found in slice C)**
+The root `tsconfig.json` sets `"files": []` and references only `tsconfig.app.json`, whose
+`include` is `["src"]` — the frontend. Worker code is covered only by `worker/tsconfig.json`, which
+no documented command runs. This is how a genuine bug (two undefined identifiers in `index.ts`'s
+cron wiring) passed a "clean" typecheck; only a test that actually executed the path caught it.
+
+Mitigation while working here: run `npx tsc -p worker/tsconfig.json --noEmit` as well, and compare
+against the baseline rather than expecting zero. That config reports pre-existing errors repo-wide —
+`CloudflareBindings` unresolved in 12 files, a `BufferSource` variance in `unsubscribe-token.ts`,
+and zod-openapi multi-status handler-type friction in **every** router (sequences 9, emails 7,
+suppressions 3). Judge new code by whether it adds error _kinds_, not by a zero count.
+
+Worth raising with the maintainers as a repo issue, but out of scope for this feature.
 
 **R5 — Migration numbers drift.** The plan assumes `0035+`. Re-read
 `migrations/meta/_journal.json` immediately before each `yarn db:generate`.
@@ -112,7 +128,8 @@ Between every slice, all of:
 
 ```bash
 yarn tsc --noEmit
-yarn test --maxWorkers=4     # see R7 — the flag is required locally
+yarn test --maxWorkers=4     # see R7 — required locally, and still occasionally flaky
+npx tsc -p worker/tsconfig.json --noEmit   # see R8 — `yarn tsc` skips worker/ entirely
 yarn format:check
 ```
 

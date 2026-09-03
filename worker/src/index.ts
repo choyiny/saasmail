@@ -32,6 +32,7 @@ import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { processOutbox } from "./lib/outbox";
+import { runSubscribeAttemptPurge } from "./lib/subscribe-abuse";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -40,6 +41,8 @@ import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
 import { listsRouter } from "./routers/lists-router";
+import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
+import { publicSubscribeRouter } from "./routers/public-subscribe-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
@@ -247,6 +250,13 @@ app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
 app.route("/api/lists", listsRouter);
 
+// Subscribe forms are admin-only per the Authorization Matrix: a form is a
+// public write surface onto a list, so creating one is a higher bar than
+// editing the list itself.
+app.use("/api/subscribe-forms", requireAdmin);
+app.use("/api/subscribe-forms/*", requireAdmin);
+app.route("/api/subscribe-forms", subscribeFormsRouter);
+
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
@@ -279,6 +289,11 @@ app.route("/api/unsubscribe", unsubscribeRouter);
 // RFC 8058 one-click POSTs from mail clients like Fastmail / Gmail / Apple Mail.
 // GET requests don't match the router and fall through to the SPA assets handler.
 app.route("/unsubscribe", unsubscribeRouter);
+
+// Public subscribe endpoints — no auth at all. Mounted outside `/api` so the
+// session/passkey/inbox middleware (scoped to `/api/*`) never applies, matching
+// the `/unsubscribe` precedent above.
+app.route("/subscribe", publicSubscribeRouter);
 
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);
@@ -334,7 +349,14 @@ export default {
     ctx.waitUntil(
       handleScheduled(env)
         .catch((err) => console.error("[cron] sequence dispatch failed:", err))
-        .then(() => processOutbox(env)),
+        .then(() => processOutbox(env))
+        // Newsletter retention sweep. Chained after the delivery work and
+        // separately caught so a cleanup failure can never stop mail going out.
+        .then(() =>
+          runSubscribeAttemptPurge(env).catch((err) =>
+            console.error("[cron] subscribe-attempt purge failed:", err),
+          ),
+        ),
     );
   },
   async queue(

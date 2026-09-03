@@ -35,17 +35,17 @@ exist yet.
   - The `.ci` config worked for both (same `database_name: saasmail-db`), so plan R4's config
     tension did not materialise — `.ci` covers tests _and_ migrations. Leave it in place.
 
-- [ ] **0.4 Decide the branching base** — _blocking, needs a human answer_
-  - Acceptance: either the spec PR is merged to `main` and slices branch from `main`, or we agree
-    slice branches cut from `spec/newsletter-revalidation`
-  - Verify: n/a — a decision, recorded here
-  - Files: none
+- [x] **0.4 Branching base — decided**
+  - `origin` is the fork `mrkpatchaa/saasmail`; there is no `upstream` remote and no certainty the
+    spec PR is ever taken upstream, so blocking on a merge was not viable. Slice branches are cut
+    from `spec/newsletter-revalidation` and the spec travels with the code. Current branch:
+    `feat/newsletter-lists`. Rebase later if upstream ever lands the spec.
 
 ---
 
-## Slice A — Lists + members CRUD + export
+## Slice A — Lists + members CRUD + export ✅ complete (481b4ad)
 
-- [ ] **A.1 `async_jobs` + `contacts` schemas and migration**
+- [x] **A.1 `async_jobs` + `contacts` schemas and migration**
   - Acceptance: both tables defined per spec §Database Schema and re-exported from `schema.ts`;
     migration generated, **not** hand-written
   - Verify: `yarn db:generate` then `yarn db:migrate:dev` against fresh D1; `yarn tsc --noEmit`
@@ -53,20 +53,20 @@ exist yet.
     `worker/src/db/schema.ts`, `migrations/00XX_*.sql` + its `meta/` snapshot & journal entry
   - Note: re-read `migrations/meta/_journal.json` for the next free `idx` first (plan R5)
 
-- [ ] **A.2 `lists` + `list_members` schemas and migration**
+- [x] **A.2 `lists` + `list_members` schemas and migration**
   - Acceptance: tables per spec, including `unique(listId, contactId)` and the consent-provenance
     columns; `importJobId` FK resolves to `async_jobs`
   - Verify: `yarn db:generate` → `yarn db:migrate:dev`; `yarn tsc --noEmit`
   - Files: `worker/src/db/lists.schema.ts`, `worker/src/db/list-members.schema.ts`,
     `worker/src/db/schema.ts`, `migrations/00XX_*.sql` + snapshot/journal
 
-- [ ] **A.3 `findPersonIdByEmail` read-only helper (TDD)**
+- [x] **A.3 `findPersonIdByEmail` read-only helper (TDD)**
   - Acceptance: returns an existing person's id; returns `null` for an unknown address **and
     writes no `people` row** (spec Decision 23)
   - Verify: `yarn test worker/src/__tests__/find-person.test.ts` — write the failing test first
   - Files: `worker/src/lib/find-person.ts`, `worker/src/__tests__/find-person.test.ts`
 
-- [ ] **A.4 `lists-router` — list CRUD**
+- [x] **A.4 `lists-router` — list CRUD**
   - Acceptance: GET/POST/GET:id/PATCH/DELETE per spec §1, with the archive-vs-hard-delete rule
     (archive when campaign history exists, hard-delete when none); Zod OpenAPI schemas so `/doc`
     stays accurate; admin + inbox-scoped member auth per the Authorization Matrix
@@ -74,7 +74,7 @@ exist yet.
   - Files: `worker/src/routers/lists-router.ts`, `worker/src/index.ts`,
     `worker/src/__tests__/lists-router.test.ts`
 
-- [ ] **A.5 Member endpoints — add, list, unsubscribe**
+- [x] **A.5 Member endpoints — add, list, unsubscribe**
   - Acceptance: add creates a `contacts` row (never a `people` row); remove is a **status change**
     to `unsubscribed`, never a row delete; list is paginated and status-filterable; the 10,000-member
     cap is enforced on add
@@ -82,14 +82,17 @@ exist yet.
     across member adds
   - Files: `worker/src/routers/lists-router.ts`, `worker/src/__tests__/lists-router.test.ts`
 
-- [ ] **A.6 CSV export — streamed and formula-injection-safe**
+- [x] **A.6 CSV export — streamed and formula-injection-safe**
   - Acceptance: streams rather than buffering; any cell beginning `=`, `+`, `-`, `@` is prefixed
     with `'`; honours `?status=`
   - Verify: unit test on the escaping helper + an integration test on the route
   - Files: `worker/src/routers/lists-router.ts`, `worker/src/lib/csv.ts`,
     `worker/src/__tests__/csv.test.ts`
 
-- [ ] **A.7 Checkpoint** — `yarn tsc --noEmit && yarn test && yarn format:check`
+- [x] **A.7 Checkpoint** — tsc clean, `yarn test --maxWorkers=4` 83 files / 824 passed / 0 failed,
+      prettier clean. Two harness gotchas found: `applyMigrations` is a hardcoded DDL list (not a
+      reader of `migrations/`) and `cleanDb` a hardcoded DELETE list, so **every new table must be
+      added to both** or it will not exist in tests and will leak rows between them.
 
 ---
 
@@ -132,12 +135,53 @@ exist yet.
 
 ---
 
-## Slice C — Subscribe forms _(stub — expand when reached)_
+## Slice C — Subscribe forms
 
-Schemas (`subscribe_forms`, `subscribe_attempts`) → `subscribe-token.ts` (own domain key, 48h
-`exp`) → admin CRUD router → public `POST /subscribe/:form_id` + `GET /subscribe/confirm/:token`
-→ abuse controls (honeypot, 4KB body cap, rate limits, fail-closed origin check, generic errors)
-→ ingestion-side control-character stripping on `contacts.name`.
+- [ ] **C.1 `subscribe_forms` + `subscribe_attempts` schemas and migration**
+  - Acceptance: tables per spec §Database Schema; `subscribe_attempts` stores `emailHash`
+    (SHA-256 of the lowercased address), never the raw address, since it is a high-write ledger
+  - Verify: `yarn db:generate` → `yarn db:migrate:dev`; add both to `applyMigrations` **and**
+    `cleanDb` in `__tests__/helpers.ts`
+  - Files: 2 schema files, `db/index.ts`, `db/schema.ts`, `__tests__/helpers.ts`, migration
+
+- [ ] **C.2 `subscribe-token.ts` — HMAC confirm tokens (TDD)**
+  - Acceptance: signs `{v, formId, contactId, exp}` with a key derived for the _subscribe-confirm_
+    domain; round-trips; rejects a tampered signature, a wrong key, a malformed token, and an
+    expired one; a token signed for another domain fails verification here
+  - Verify: unit tests written first
+  - Files: `lib/subscribe-token.ts`, `__tests__/subscribe-token.test.ts`
+  - Note: domain separation is shared with the unsubscribe/tracking tokens — decide the key
+    derivation helper here since this is the first of the four domains to land.
+
+- [ ] **C.3 Admin CRUD for forms**
+  - Acceptance: `/api/subscribe-forms` list/create/read/update/delete, admin-only per the
+    Authorization Matrix; `GET /:id` returns the embed snippet
+  - Verify: integration tests including a member being refused
+  - Files: `routers/subscribe-forms-router.ts`, `index.ts`, tests
+
+- [ ] **C.4 Public `POST /subscribe/:form_id` + `GET /subscribe/confirm/:token`**
+  - Acceptance: mounts **outside** `/api` (session middleware is scoped to `/api/*`); single and
+    double opt-in flows; idempotent re-submit; 422 on invalid email; confirm is idempotent and
+    410s on an expired token
+  - Verify: integration tests for both flows
+  - Files: `routers/public-subscribe-router.ts`, `index.ts`, tests
+
+- [ ] **C.5 Abuse controls**
+  - Acceptance: honeypot `_hp` returns 200 without writing; 4 KB body cap → 413; 10
+    submissions/IP/hour and 2 confirmation resends per (form, emailHash)/hour via
+    `subscribe_attempts`; `allowedOrigins` fails **closed** (missing Origin is a non-match);
+    all rejections share one generic message; the 10,000-member cap is enforced here too
+  - Verify: integration tests per control, including one proving the attempts ledger catches a
+    repeat submission against an _existing_ pending membership (which a `list_members` count cannot)
+  - Files: `routers/public-subscribe-router.ts`, `lib/subscribe-abuse.ts`, tests
+
+- [ ] **C.6 Confirmation email**
+  - Acceptance: sends via the existing send path using `confirmationTemplateSlug`, falling back to
+    a built-in default HTML constant so double opt-in works with no template setup
+  - Verify: integration test asserting a send was attempted with the confirm URL in the body
+  - Files: `lib/subscribe-confirmation.ts`, `routers/public-subscribe-router.ts`, tests
+
+- [ ] **C.7 Checkpoint** — tsc, `yarn test --maxWorkers=4`, format
 
 ## Slice D — Campaign core _(stub — expand when reached)_
 

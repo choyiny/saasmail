@@ -253,6 +253,13 @@
       "when": 1788472722151,
       "tag": "0035_newsletter_lists_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788473701799,
+      "tag": "0036_newsletter_subscribe_forms",
+      "breakpoints": true
     }
   ]
 }

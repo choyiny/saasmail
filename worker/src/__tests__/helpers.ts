@@ -95,6 +95,12 @@ export async function applyMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS list_members_list_contact_unique ON list_members(list_id, contact_id)`,
     `CREATE INDEX IF NOT EXISTS list_members_list_status_id_idx ON list_members(list_id, status, id)`,
     `CREATE INDEX IF NOT EXISTS list_members_email_idx ON list_members(email)`,
+    `CREATE TABLE IF NOT EXISTS subscribe_forms (id TEXT PRIMARY KEY, list_id TEXT NOT NULL, name TEXT NOT NULL, show_name_field INTEGER NOT NULL DEFAULT 1, name_required INTEGER NOT NULL DEFAULT 0, success_message TEXT NOT NULL DEFAULT 'Thanks for subscribing!', redirect_url TEXT, allowed_origins TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_forms_list_idx ON subscribe_forms(list_id)`,
+    `CREATE TABLE IF NOT EXISTS subscribe_attempts (id TEXT PRIMARY KEY, form_id TEXT NOT NULL, email_hash TEXT NOT NULL, ip TEXT NOT NULL, attempt_type TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_attempts_form_email_idx ON subscribe_attempts(form_id, email_hash, created_at)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_attempts_ip_idx ON subscribe_attempts(ip, created_at)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_attempts_created_idx ON subscribe_attempts(created_at)`,
   ];
 
   for (const sql of statements) {
@@ -286,6 +292,8 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM subscribe_attempts;
+    DELETE FROM subscribe_forms;
     DELETE FROM list_members;
     DELETE FROM lists;
     DELETE FROM contacts;
