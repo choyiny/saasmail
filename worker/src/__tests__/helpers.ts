@@ -81,6 +81,20 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS outbox_from_idx ON outbox_emails(from_address)`,
     `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, context_key TEXT NOT NULL, from_address TEXT, to_address TEXT, cc TEXT, subject TEXT, body_html TEXT, body_text TEXT, reply_to_email_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS drafts_user_context_idx ON drafts(user_id, context_key)`,
+    // Newsletter module (migration 0035).
+    `CREATE TABLE IF NOT EXISTS async_jobs (id TEXT PRIMARY KEY, job_type TEXT NOT NULL, ref_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'running', cursor TEXT, storage_key TEXT, total_rows INTEGER, processed_rows INTEGER NOT NULL DEFAULT 0, imported_count INTEGER NOT NULL DEFAULT 0, skipped_count INTEGER NOT NULL DEFAULT 0, error_summary TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS async_jobs_ref_idx ON async_jobs(job_type, ref_id)`,
+    `CREATE INDEX IF NOT EXISTS async_jobs_status_idx ON async_jobs(status)`,
+    `CREATE TABLE IF NOT EXISTS contacts (id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT, person_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_unique ON contacts(email)`,
+    `CREATE INDEX IF NOT EXISTS contacts_person_id_idx ON contacts(person_id)`,
+    `CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, from_address TEXT NOT NULL, double_opt_in INTEGER NOT NULL DEFAULT 0, confirmation_template_slug TEXT, archived_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS lists_from_address_idx ON lists(from_address)`,
+    `CREATE INDEX IF NOT EXISTS lists_archived_at_idx ON lists(archived_at)`,
+    `CREATE TABLE IF NOT EXISTS list_members (id TEXT PRIMARY KEY, list_id TEXT NOT NULL, contact_id TEXT NOT NULL, email TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', source TEXT NOT NULL, form_id TEXT, submitted_ip TEXT, consent_source TEXT NOT NULL, consent_at INTEGER, import_job_id TEXT, subscribed_at INTEGER, confirmed_at INTEGER, unsubscribed_at INTEGER, unsubscribe_reason TEXT, created_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS list_members_list_contact_unique ON list_members(list_id, contact_id)`,
+    `CREATE INDEX IF NOT EXISTS list_members_list_status_id_idx ON list_members(list_id, status, id)`,
+    `CREATE INDEX IF NOT EXISTS list_members_email_idx ON list_members(email)`,
   ];
 
   for (const sql of statements) {
@@ -272,6 +286,10 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM list_members;
+    DELETE FROM lists;
+    DELETE FROM contacts;
+    DELETE FROM async_jobs;
     DELETE FROM drafts;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;
