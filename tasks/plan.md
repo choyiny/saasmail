@@ -92,14 +92,26 @@ config tension did not materialise: `wrangler.jsonc.ci` declares the same `datab
 (`saasmail-db`) as `.example`, so one config serves tests _and_ migrations. `yarn db:generate`
 verified working (clean "no schema changes" run), which confirms the spec's corrected workflow.
 
-**R7 — The local test suite is flaky under parallelism. (found in slice 0, revised in slice C)**
-Bare `yarn test` fails ~21 files with 5s timeouts on this 18-core machine: the Cloudflare pool
-starts a `workerd` per file with no cap and they starve each other. `--maxWorkers=4` is the working
-default, but it is **not a complete fix** — a single unrelated file (`emails-router`) failed once at
-that setting and then passed 4/4 in isolation and on two consecutive full runs. **Never conclude
-from one red run that a change broke something**: re-run the file alone, then the full suite, before
-believing it. Do not "fix" this by editing the committed vitest config; it is machine-specific and
-CI does not exhibit it.
+**R7 — The local test suite is flaky under parallelism, and the safe cap shrinks as the
+suite grows. (found in slice 0, revised twice)**
+The Cloudflare pool starts a `workerd` per test file with no cap; on this 18-core machine they
+starve each other and borderline tests blow the 5s default timeout. The threshold moves with suite
+size:
+
+| Files              | Safe setting                                  |
+| ------------------ | --------------------------------------------- |
+| 80 (baseline)      | `--maxWorkers=4`                              |
+| 87 (after slice B) | `--maxWorkers=2` — 4 now fails intermittently |
+
+**Use `yarn test --maxWorkers=2`.** Expect to lower it again as the suite grows.
+
+This is contention, not slowness: `list-import.test.ts` runs its 27 tests in 942ms alone. And it is
+machine-specific — do not "fix" it by editing the committed vitest config.
+
+**Never conclude from one red run that a change broke something.** This cost real time twice: a red
+`emails-router` plus a single-sample `git stash` comparison looked like conclusive proof of a
+regression, and it was noise — the same file then passed 4/4 in isolation and on every full run at a
+correct worker count. Re-run the file alone, then the full suite twice, before believing a failure.
 
 **R8 — `yarn tsc --noEmit` does not typecheck the worker at all. (found in slice C)**
 The root `tsconfig.json` sets `"files": []` and references only `tsconfig.app.json`, whose
@@ -128,7 +140,7 @@ Between every slice, all of:
 
 ```bash
 yarn tsc --noEmit
-yarn test --maxWorkers=4     # see R7 — required locally, and still occasionally flaky
+yarn test --maxWorkers=2     # see R7 — required locally; lower it further as the suite grows
 npx tsc -p worker/tsconfig.json --noEmit   # see R8 — `yarn tsc` skips worker/ entirely
 yarn format:check
 ```

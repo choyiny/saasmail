@@ -29,10 +29,10 @@ import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
-import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
-import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { handleScheduled } from "./lib/sequence-processor";
+import { handleQueueBatch } from "./lib/queue-router";
 import { processOutbox } from "./lib/outbox";
-import { runSubscribeAttemptPurge } from "./lib/subscribe-abuse";
+import { runNewsletterMaintenance } from "./lib/newsletter-cron";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -352,17 +352,10 @@ export default {
         .then(() => processOutbox(env))
         // Newsletter retention sweep. Chained after the delivery work and
         // separately caught so a cleanup failure can never stop mail going out.
-        .then(() =>
-          runSubscribeAttemptPurge(env).catch((err) =>
-            console.error("[cron] subscribe-attempt purge failed:", err),
-          ),
-        ),
+        .then(() => runNewsletterMaintenance(env)),
     );
   },
-  async queue(
-    batch: MessageBatch<SequenceEmailMessage>,
-    env: CloudflareBindings,
-  ) {
+  async queue(batch: MessageBatch<unknown>, env: CloudflareBindings) {
     await handleQueueBatch(batch, env);
   },
 };

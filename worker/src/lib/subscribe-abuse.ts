@@ -1,7 +1,5 @@
 import { and, eq, gte, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
 import { nanoid } from "nanoid";
 import { subscribeAttempts } from "../db/subscribe-attempts.schema";
 
@@ -140,18 +138,4 @@ export async function purgeExpiredAttempts(
     .where(
       sql`${subscribeAttempts.createdAt} < ${now - ATTEMPT_RETENTION_SECONDS}`,
     );
-}
-
-/**
- * Cron entry point. Takes `env` and builds its own client, matching
- * `processOutbox(env)` / `handleScheduled(env)` so `index.ts` does not need to
- * know how a db client is constructed.
- */
-export async function runSubscribeAttemptPurge(
-  env: CloudflareBindings,
-): Promise<void> {
-  await purgeExpiredAttempts(
-    drizzle(env.DB, { schema }),
-    Math.floor(Date.now() / 1000),
-  );
 }

@@ -23,8 +23,8 @@ import {
   ATTEMPT_RETENTION_SECONDS,
   isOriginAllowed,
   purgeExpiredAttempts,
-  runSubscribeAttemptPurge,
 } from "../lib/subscribe-abuse";
+import { runNewsletterMaintenance } from "../lib/newsletter-cron";
 import { env } from "cloudflare:workers";
 
 beforeAll(applyMigrations);
@@ -511,7 +511,7 @@ describe("attempt retention", () => {
       "stale",
       Math.floor(Date.now() / 1000) - ATTEMPT_RETENTION_SECONDS - 60,
     );
-    await runSubscribeAttemptPurge(env as unknown as CloudflareBindings);
+    await runNewsletterMaintenance(env as unknown as CloudflareBindings);
     expect(await getDb().select().from(subscribeAttempts)).toHaveLength(0);
   });
 });

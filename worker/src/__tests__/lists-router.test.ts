@@ -12,6 +12,9 @@ import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
 import { contacts } from "../db/contacts.schema";
 import { people } from "../db/people.schema";
+import { asyncJobs } from "../db/async-jobs.schema";
+import { env } from "cloudflare:workers";
+import { sourceKey } from "../lib/list-import";
 
 beforeAll(applyMigrations);
 beforeEach(cleanDb);
@@ -462,5 +465,102 @@ describe("member export", () => {
       )
     ).text();
     expect(text.trim().split("\r\n")).toHaveLength(1); // header only
+  });
+});
+
+describe("CSV import endpoints", () => {
+  function upload(apiKey: string, listId: string, csv: string) {
+    return authFetch(`/api/lists/${listId}/members/import`, {
+      apiKey,
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: csv,
+    });
+  }
+
+  it("stores the upload, creates a job and returns 202 without parsing inline", async () => {
+    const apiKey = await adminKey();
+    const { body: list } = await createList(apiKey);
+
+    const res = await upload(apiKey, list.id, "email\na@example.com\n");
+    expect(res.status).toBe(202);
+    const { jobId } = await res.json<any>();
+
+    // The R2 object exists...
+    const stored = await env.R2.get(sourceKey(jobId));
+    expect(stored).not.toBeNull();
+
+    // ...and the job is queued but untouched — a 10k import must not run inside
+    // the request that accepted it.
+    const jobs = await getDb().select().from(asyncJobs);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].status).toBe("running");
+    expect(jobs[0].cursor).toBeNull();
+    expect(jobs[0].refId).toBe(list.id);
+    expect(await getDb().select().from(listMembers)).toHaveLength(0);
+  });
+
+  it("reports progress and errors on the status endpoint", async () => {
+    const apiKey = await adminKey();
+    const { body: list } = await createList(apiKey);
+    const { jobId } = await (
+      await upload(apiKey, list.id, "email\na@example.com\n")
+    ).json<any>();
+
+    const res = await authFetch(
+      `/api/lists/${list.id}/members/import/${jobId}`,
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body).toMatchObject({
+      jobId,
+      status: "running",
+      importedCount: 0,
+      errors: [],
+    });
+  });
+
+  it("cancels a running job", async () => {
+    const apiKey = await adminKey();
+    const { body: list } = await createList(apiKey);
+    const { jobId } = await (
+      await upload(apiKey, list.id, "email\na@example.com\n")
+    ).json<any>();
+
+    const res = await authFetch(
+      `/api/lists/${list.id}/members/import/${jobId}`,
+      { apiKey, method: "DELETE" },
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).status).toBe("cancelled");
+  });
+
+  it("refuses an import into an archived list", async () => {
+    const apiKey = await adminKey();
+    const { body: list } = await createList(apiKey);
+    await getDb()
+      .update(lists)
+      .set({ archivedAt: Math.floor(Date.now() / 1000) })
+      .where(eq(lists.id, list.id));
+
+    const res = await upload(apiKey, list.id, "email\na@example.com\n");
+    expect(res.status).toBe(409);
+  });
+
+  it("404s for a job belonging to another list", async () => {
+    const apiKey = await adminKey();
+    const { body: listA } = await createList(apiKey);
+    const { body: listB } = await createList(apiKey, { name: "Other" });
+    const { jobId } = await (
+      await upload(apiKey, listA.id, "email\na@example.com\n")
+    ).json<any>();
+
+    // The job id is real, but it is not this list's job.
+    const res = await authFetch(
+      `/api/lists/${listB.id}/members/import/${jobId}`,
+      { apiKey },
+    );
+    expect(res.status).toBe(404);
   });
 });

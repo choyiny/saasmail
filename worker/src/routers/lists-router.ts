@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import { lists } from "../db/lists.schema";
 import { listMembers } from "../db/list-members.schema";
 import { contacts } from "../db/contacts.schema";
+import { asyncJobs } from "../db/async-jobs.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import {
   assertInboxAllowed,
@@ -12,6 +13,11 @@ import {
 } from "../lib/inbox-permissions";
 import { findOrCreateContact, sanitizeContactName } from "../lib/contacts";
 import { csvRow } from "../lib/csv";
+import {
+  MAX_IMPORT_BYTES,
+  sourceKey,
+  type ListImportMessage,
+} from "../lib/list-import";
 import type { Variables } from "../variables";
 
 export const listsRouter = new OpenAPIHono<{
@@ -804,4 +810,196 @@ listsRouter.openapi(exportRoute, async (c) => {
       "Cache-Control": "no-store",
     },
   });
+});
+
+// --- Import: POST /:id/members/import ---
+
+const ImportJobSchema = z.object({
+  jobId: z.string(),
+  status: z.enum(["running", "completed", "failed", "cancelled"]),
+  totalRows: z.number().nullable(),
+  processedRows: z.number(),
+  importedCount: z.number(),
+  skippedCount: z.number(),
+  errors: z.array(z.object({ row: z.number(), reason: z.string() })),
+});
+
+const startImportRoute = createRoute({
+  method: "post",
+  path: "/{id}/members/import",
+  tags: ["Lists"],
+  description:
+    "Start an async CSV import. The body is the raw CSV. Returns 202 immediately — the file is stored and parsed by a background job, because a 10,000-row import cannot finish inside one request.",
+  request: {
+    params: z.object({ id: z.string() }),
+    body: { content: { "text/csv": { schema: z.string() } }, required: true },
+  },
+  responses: {
+    202: {
+      description: "Import accepted",
+      content: {
+        "application/json": { schema: z.object({ jobId: z.string() }) },
+      },
+    },
+    404: {
+      description: "Not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    409: {
+      description: "List is archived",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    413: {
+      description: "File too large",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+listsRouter.openapi(startImportRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const { id } = c.req.valid("param");
+
+  const list = await loadListForCaller(db, allowed, id);
+  if (!list) return c.json({ error: "List not found" }, 404);
+  if (list.archivedAt !== null) {
+    return c.json({ error: "List is archived" }, 409);
+  }
+
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength > MAX_IMPORT_BYTES) {
+    return c.json({ error: "CSV exceeds the 10MB limit" }, 413);
+  }
+
+  const jobId = nanoid();
+  const ts = now();
+
+  // Store first, then create the job row: a job row pointing at an object that
+  // does not exist would be a job that can only ever fail.
+  await c.env.R2.put(sourceKey(jobId), body);
+
+  await db.insert(asyncJobs).values({
+    id: jobId,
+    jobType: "list_import",
+    refId: id,
+    status: "running",
+    cursor: null,
+    storageKey: sourceKey(jobId),
+    totalRows: null,
+    processedRows: 0,
+    importedCount: 0,
+    skippedCount: 0,
+    errorSummary: null,
+    createdAt: ts,
+    updatedAt: ts,
+  });
+
+  const message: ListImportMessage = { type: "list_import", jobId };
+  await c.env.EMAIL_QUEUE.send(message);
+
+  return c.json({ jobId }, 202);
+});
+
+// --- Import status: GET /:id/members/import/:jobId ---
+
+function serializeJob(job: typeof asyncJobs.$inferSelect) {
+  return {
+    jobId: job.id,
+    status: job.status,
+    totalRows: job.totalRows,
+    processedRows: job.processedRows,
+    importedCount: job.importedCount,
+    skippedCount: job.skippedCount,
+    errors: job.errorSummary
+      ? (JSON.parse(job.errorSummary) as Array<{ row: number; reason: string }>)
+      : [],
+  };
+}
+
+async function loadJobForList(
+  db: Variables["db"],
+  listId: string,
+  jobId: string,
+) {
+  const rows = await db
+    .select()
+    .from(asyncJobs)
+    .where(
+      and(
+        eq(asyncJobs.id, jobId),
+        eq(asyncJobs.refId, listId),
+        eq(asyncJobs.jobType, "list_import"),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+const importStatusRoute = createRoute({
+  method: "get",
+  path: "/{id}/members/import/{jobId}",
+  tags: ["Lists"],
+  description: "Poll an import job's progress and result.",
+  request: { params: z.object({ id: z.string(), jobId: z.string() }) },
+  responses: {
+    ...json200Response(ImportJobSchema, "Import job"),
+    404: {
+      description: "Not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+listsRouter.openapi(importStatusRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const { id, jobId } = c.req.valid("param");
+
+  const list = await loadListForCaller(db, allowed, id);
+  if (!list) return c.json({ error: "List not found" }, 404);
+
+  const job = await loadJobForList(db, id, jobId);
+  if (!job) return c.json({ error: "Import job not found" }, 404);
+  return c.json(serializeJob(job));
+});
+
+// --- Cancel: DELETE /:id/members/import/:jobId ---
+
+const cancelImportRoute = createRoute({
+  method: "delete",
+  path: "/{id}/members/import/{jobId}",
+  tags: ["Lists"],
+  description:
+    "Cancel a running import. Rows already imported are kept — an import is not a transaction, and rolling back would delete memberships that may already have been mailed.",
+  request: { params: z.object({ id: z.string(), jobId: z.string() }) },
+  responses: {
+    ...json200Response(ImportJobSchema, "Cancelled job"),
+    404: {
+      description: "Not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+listsRouter.openapi(cancelImportRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const { id, jobId } = c.req.valid("param");
+
+  const list = await loadListForCaller(db, allowed, id);
+  if (!list) return c.json({ error: "List not found" }, 404);
+
+  const job = await loadJobForList(db, id, jobId);
+  if (!job) return c.json({ error: "Import job not found" }, 404);
+
+  if (job.status === "running") {
+    await db
+      .update(asyncJobs)
+      .set({ status: "cancelled", updatedAt: now() })
+      .where(eq(asyncJobs.id, jobId));
+  }
+
+  const updated = await loadJobForList(db, id, jobId);
+  return c.json(serializeJob(updated!));
 });
