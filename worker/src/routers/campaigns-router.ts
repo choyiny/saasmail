@@ -478,6 +478,20 @@ export async function beginCampaignSend(
     };
   }
 
+  // Every campaign email carries a signed per-list unsubscribe link, so an
+  // unset secret is not a degraded send — it is no send at all. Checked here
+  // rather than left to fail per recipient: the signing happens *after* the
+  // recipient is claimed, and a claimed recipient is not re-claimable, so the
+  // crash strands the whole campaign in `sending` until the stall sweep runs
+  // 24 hours later. Found exactly that way on a real deployment.
+  if (!env.UNSUBSCRIBE_SECRET) {
+    return {
+      status: 422,
+      error:
+        "UNSUBSCRIBE_SECRET is not set. Campaign mail must carry a signed unsubscribe link; set it with `wrangler secret put UNSUBSCRIBE_SECRET` before sending.",
+    };
+  }
+
   const capacity = await providerCapacityError(
     db,
     env,

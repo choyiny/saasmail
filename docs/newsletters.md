@@ -91,6 +91,20 @@ The **text part is not link-rewritten**. Opaque redirect URLs in plain text read
 
 A recipient-facing tracking disclosure is not included by default; check what your jurisdiction requires before enabling tracked sends.
 
+## Before you send
+
+`UNSUBSCRIBE_SECRET` must be set on the worker. Every campaign email carries a
+signed per-list unsubscribe link, so without it a send is refused with `422`
+rather than started — the signing happens after a recipient is claimed, and a
+claimed recipient is not re-claimable, so failing late would strand the campaign
+in `sending` until the 24-hour stall sweep.
+
+```
+wrangler secret put UNSUBSCRIBE_SECRET   # openssl rand -hex 32
+```
+
+An instance deployed before the unsubscribe feature existed will not have it.
+
 ## Privacy and retention
 
 | Data                       | Window                                            |

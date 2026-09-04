@@ -1014,3 +1014,66 @@ describe("provider daily send limit", () => {
     ).toBeNull();
   });
 });
+
+describe("unsubscribe secret preflight", () => {
+  /**
+   * Regression guard from a real deployment. With no `UNSUBSCRIBE_SECRET`,
+   * signing threw *after* `claimRecipient` had already moved the row to
+   * `processing` — which is not a claimable state, so the queue retry found
+   * nothing to do and the campaign sat in `sending` until the 24-hour stall
+   * sweep. The send must refuse up front instead.
+   */
+  it("refuses to start a send when the secret is missing", async () => {
+    await seedListAndTemplate(2);
+    const t = ts();
+    await getDb().insert(campaigns).values({
+      id: "camp-nosecret",
+      name: "No secret",
+      subject: "S",
+      templateSlug: "weekly",
+      fromAddress: FROM,
+      listId: LIST,
+      status: "draft",
+      createdAt: t,
+      updatedAt: t,
+    });
+
+    const failure = await beginCampaignSend(
+      getDb(),
+      { ...cfEnv(), UNSUBSCRIBE_SECRET: "" } as CloudflareBindings,
+      "camp-nosecret",
+    );
+
+    expect(failure).not.toBeNull();
+    expect(failure!.status).toBe(422);
+    expect(failure!.error).toMatch(/UNSUBSCRIBE_SECRET/);
+
+    // Nothing started: no recipients stranded, campaign still editable.
+    const c = (
+      await getDb()
+        .select()
+        .from(campaigns)
+        .where(eq(campaigns.id, "camp-nosecret"))
+    )[0];
+    expect(c.status).toBe("draft");
+    expect(await getDb().select().from(campaignRecipients)).toHaveLength(0);
+  });
+
+  it("proceeds when the secret is present", async () => {
+    await seedListAndTemplate(2);
+    const t = ts();
+    await getDb().insert(campaigns).values({
+      id: "camp-secret",
+      name: "Has secret",
+      subject: "S",
+      templateSlug: "weekly",
+      fromAddress: FROM,
+      listId: LIST,
+      status: "draft",
+      createdAt: t,
+      updatedAt: t,
+    });
+
+    expect(await beginCampaignSend(getDb(), cfEnv(), "camp-secret")).toBeNull();
+  });
+});
