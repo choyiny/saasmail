@@ -226,26 +226,26 @@ backfill" that did not exist.
       point is indistinguishable from one that was never written, and the
       worker typecheck does not cover that call path
 
-## Slice G — Frontend
+## Slice G — Frontend ✅ complete
 
-- [ ] **G.1 ListsPage + ListDetailPage + ListMembersTable** (import job progress)
-- [ ] **G.2 SubscribeFormsPage + SubscribeFormBuilderPage + FormSnippet**
-- [ ] **G.3 CampaignsPage + CampaignDetailPage + CampaignStatsCard**
+- [x] **G.1 ListsPage + ListDetailPage + ListMembersTable** (import job progress)
+- [x] **G.2 SubscribeFormsPage + SubscribeFormBuilderPage + FormSnippet**
+- [x] **G.3 CampaignsPage + CampaignDetailPage + CampaignStatsCard**
       (targeted vs delivered; overdue/stalled/completed_with_failures banners;
       24h chart; links table; "~opens"/"~clicks" labels per the accuracy caveat)
-- [ ] **G.4 Sidebar nav links**
-- [ ] **G.5 PersonDetail — list memberships section + campaign badge in timeline**
-- [ ] **G.6 Admin contact export/erasure UI** (backed by slice J)
-- [ ] **G.7 e2e tests**
+- [x] **G.4 Sidebar nav links**
+- [x] **G.5 PersonDetail — list memberships section + campaign badge in timeline**
+- [x] **G.6 Admin contact export/erasure UI** (backed by slice J)
+- [x] **G.7 e2e tests**
 
 `ListsPage`, `ListDetailPage`, `ListMembersTable`, `SubscribeFormsPage`,
 `SubscribeFormBuilderPage`, `FormSnippet`, `CampaignsPage`, `CampaignDetailPage`,
 `CampaignStatsCard`, sidebar nav, PersonDetail list-memberships section. Imperative
 `useState`/`useEffect` + `fetch`, matching `AdminUsersPage` — no `useQuery`.
 
-## Slice H — WebMCP read tools
+## Slice H — WebMCP read tools ✅ complete
 
-- [ ] **H.1** `list_newsletter_lists`, `get_newsletter_list`, `list_campaigns`,
+- [x] **H.1** `list_newsletter_lists`, `get_newsletter_list`, `list_campaigns`,
       `get_campaign_stats` — read only (Decision 27: no action tools in v1)
 
 Extend `createReadTools` in `src/webmcp/tools/read.ts`: `list_newsletter_lists`,
@@ -254,10 +254,10 @@ Decision 27).
 
 ## Slice I — Docs and release
 
-- [ ] **I.1** `docs/newsletters.md`, linked from `docs/README.md`
-- [ ] **I.2** `CHANGELOG.md` `## [Unreleased]` entry
-- [ ] **I.3** `PROVIDER_DAILY_SEND_LIMIT` in `wrangler.jsonc.example`
-- [ ] **I.4** PR semver label
+- [x] **I.1** `docs/newsletters.md`, linked from `docs/README.md`
+- [x] **I.2** `CHANGELOG.md` `## [Unreleased]` entry
+- [x] **I.3** `PROVIDER_DAILY_SEND_LIMIT` in `wrangler.jsonc.example`
+- [ ] **I.4** PR semver label — applied by a maintainer when the PR is opened (AGENTS.md); nothing to do in the branch
 
 `docs/newsletters.md` linked from `docs/README.md`; `CHANGELOG.md` `## [Unreleased]` entry;
 `PROVIDER_DAILY_SEND_LIMIT` documented in `wrangler.jsonc.example`; request a semver label.

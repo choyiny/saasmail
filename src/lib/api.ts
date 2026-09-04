@@ -74,6 +74,8 @@ export interface Email {
   attachments?: Attachment[];
   /** Inbound Reply-To address, surfaced by the single-email endpoint. */
   replyTo?: string | null;
+  /** Set when this was a campaign send rather than mail someone wrote. */
+  campaignId?: string | null;
 }
 
 export type InboxDisplayMode = "thread" | "chat";
@@ -1010,4 +1012,409 @@ export async function cancelOutboxItem(
   id: string,
 ): Promise<{ deleted: boolean }> {
   return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
+}
+
+// --- Newsletters: lists, members, subscribe forms, campaigns -----------------
+
+export interface SubscriberList {
+  id: string;
+  name: string;
+  description: string | null;
+  fromAddress: string;
+  doubleOptIn: boolean;
+  confirmationTemplateSlug: string | null;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type MemberStatus = "pending" | "subscribed" | "unsubscribed";
+
+export interface ListMember {
+  id: string;
+  listId: string;
+  contactId: string;
+  email: string;
+  name: string | null;
+  status: MemberStatus;
+  source: "form" | "api" | "import";
+  consentSource: "form" | "api" | "import";
+  consentAt: number | null;
+  subscribedAt: number | null;
+  confirmedAt: number | null;
+  unsubscribedAt: number | null;
+  createdAt: number;
+}
+
+export interface ImportJob {
+  jobId: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  totalRows: number | null;
+  processedRows: number;
+  importedCount: number;
+  skippedCount: number;
+  errors: Array<{ row: number; reason: string }>;
+}
+
+export interface SubscribeForm {
+  id: string;
+  listId: string;
+  name: string;
+  showNameField: boolean;
+  nameRequired: boolean;
+  successMessage: string;
+  redirectUrl: string | null;
+  allowedOrigins: string | null;
+  /**
+   * Copy-paste markup, built server-side. It carries the honeypot field the
+   * public subscribe endpoint checks by name, so it must never be rebuilt on
+   * the client. Present on create and on the single-form read.
+   */
+  embedSnippet?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type CampaignStatus =
+  | "draft"
+  | "scheduled"
+  | "overdue"
+  | "preparing"
+  | "sending"
+  | "sent"
+  | "completed_with_failures"
+  | "cancelled"
+  | "stalled";
+
+export interface Campaign {
+  id: string;
+  name: string;
+  subject: string;
+  templateSlug: string;
+  fromAddress: string;
+  listId: string;
+  status: CampaignStatus;
+  scheduledAt: number | null;
+  sentAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CampaignStats {
+  targeted: number;
+  delivered: number;
+  suppressed: number;
+  retryableFailed: number;
+  permanentFailed: number;
+  unsubscribes: number;
+  /** Approximate — see the tracking caveat in docs/newsletters.md. */
+  uniqueOpeners: number;
+  /** Approximate, and identical to "unique clickers" by schema construction. */
+  uniqueClicks: number;
+}
+
+export type CampaignDetail = Campaign & { stats: CampaignStats };
+
+export interface CampaignTimeseriesPoint {
+  hour: number;
+  opens: number;
+  clicks: number;
+}
+
+export interface CampaignLinkStat {
+  url: string;
+  clicks: number;
+  clickRate: number;
+}
+
+export async function fetchLists(params?: {
+  includeArchived?: boolean;
+}): Promise<{ items: SubscriberList[]; nextCursor: string | null }> {
+  const qs = params?.includeArchived ? "?includeArchived=true" : "";
+  return apiFetch(`/api/lists${qs}`);
+}
+
+export async function fetchList(id: string): Promise<SubscriberList> {
+  return apiFetch(`/api/lists/${id}`);
+}
+
+export async function createList(body: {
+  name: string;
+  description?: string | null;
+  fromAddress: string;
+  doubleOptIn?: boolean;
+  confirmationTemplateSlug?: string | null;
+}): Promise<SubscriberList> {
+  return apiFetch("/api/lists", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateList(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string | null;
+    fromAddress: string;
+    doubleOptIn: boolean;
+    confirmationTemplateSlug: string | null;
+  }>,
+): Promise<SubscriberList> {
+  return apiFetch(`/api/lists/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Archives instead of deleting once the list has campaign history. */
+export async function deleteList(id: string): Promise<void> {
+  await apiFetch(`/api/lists/${id}`, { method: "DELETE" });
+}
+
+export async function fetchListMembers(
+  id: string,
+  params?: { status?: MemberStatus; cursor?: string; limit?: number },
+): Promise<{ items: ListMember[]; nextCursor: string | null }> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.cursor) qs.set("cursor", params.cursor);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  return apiFetch(`/api/lists/${id}/members?${qs}`);
+}
+
+export async function addListMember(
+  id: string,
+  body: { email: string; name?: string | null },
+): Promise<ListMember> {
+  return apiFetch(`/api/lists/${id}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Sets `status = 'unsubscribed'`; the consent record is never deleted. */
+export async function unsubscribeListMember(
+  id: string,
+  memberId: string,
+): Promise<void> {
+  await apiFetch(`/api/lists/${id}/members/${memberId}`, { method: "DELETE" });
+}
+
+export function listMembersExportUrl(id: string): string {
+  return `/api/lists/${id}/members/export`;
+}
+
+export async function startListImport(
+  id: string,
+  file: File,
+): Promise<{ jobId: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/lists/${id}/members/import`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchImportJob(
+  id: string,
+  jobId: string,
+): Promise<ImportJob> {
+  return apiFetch(`/api/lists/${id}/members/import/${jobId}`);
+}
+
+export async function cancelImportJob(
+  id: string,
+  jobId: string,
+): Promise<void> {
+  await apiFetch(`/api/lists/${id}/members/import/${jobId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchSubscribeForms(): Promise<{
+  items: SubscribeForm[];
+}> {
+  return apiFetch("/api/subscribe-forms");
+}
+
+export async function fetchSubscribeForm(id: string): Promise<SubscribeForm> {
+  return apiFetch(`/api/subscribe-forms/${id}`);
+}
+
+export async function createSubscribeForm(body: {
+  listId: string;
+  name: string;
+  showNameField?: boolean;
+  nameRequired?: boolean;
+  successMessage?: string;
+  redirectUrl?: string | null;
+  allowedOrigins?: string | null;
+}): Promise<SubscribeForm> {
+  return apiFetch("/api/subscribe-forms", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateSubscribeForm(
+  id: string,
+  body: Partial<{
+    name: string;
+    showNameField: boolean;
+    nameRequired: boolean;
+    successMessage: string;
+    redirectUrl: string | null;
+    allowedOrigins: string | null;
+  }>,
+): Promise<SubscribeForm> {
+  return apiFetch(`/api/subscribe-forms/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSubscribeForm(id: string): Promise<void> {
+  await apiFetch(`/api/subscribe-forms/${id}`, { method: "DELETE" });
+}
+
+export async function fetchCampaigns(): Promise<{
+  items: Campaign[];
+  nextCursor: string | null;
+}> {
+  return apiFetch("/api/campaigns");
+}
+
+export async function fetchCampaign(id: string): Promise<CampaignDetail> {
+  return apiFetch(`/api/campaigns/${id}`);
+}
+
+export async function createCampaign(body: {
+  name: string;
+  subject: string;
+  templateSlug: string;
+  listId: string;
+}): Promise<Campaign> {
+  return apiFetch("/api/campaigns", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateCampaign(
+  id: string,
+  body: Partial<{
+    name: string;
+    subject: string;
+    templateSlug: string;
+    listId: string;
+  }>,
+): Promise<Campaign> {
+  return apiFetch(`/api/campaigns/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  await apiFetch(`/api/campaigns/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Campaign actions. Each answers 409 when the campaign's current status does
+ * not permit it — the state machine is enforced server-side, and the UI only
+ * mirrors it.
+ */
+async function campaignAction<T>(
+  id: string,
+  action: string,
+  body?: unknown,
+): Promise<T> {
+  return apiFetch(`/api/campaigns/${id}/${action}`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+export const sendCampaign = (id: string) =>
+  campaignAction<{ status: string }>(id, "send");
+export const scheduleCampaign = (id: string, scheduledAt: number) =>
+  campaignAction<{ status: string }>(id, "schedule", { scheduledAt });
+export const cancelCampaign = (id: string) =>
+  campaignAction<{ status: string }>(id, "cancel");
+export const retryCampaign = (id: string) =>
+  campaignAction<{ requeued: number }>(id, "retry");
+export const testSendCampaign = (id: string) =>
+  campaignAction<{ sent: boolean }>(id, "test-send");
+
+export async function fetchCampaignPreview(
+  id: string,
+): Promise<{ subject: string; html: string }> {
+  return apiFetch(`/api/campaigns/${id}/preview`);
+}
+
+export async function fetchCampaignTimeseries(
+  id: string,
+): Promise<{ data: CampaignTimeseriesPoint[] }> {
+  return apiFetch(`/api/campaigns/${id}/stats/timeseries`);
+}
+
+export async function fetchCampaignLinks(
+  id: string,
+): Promise<{ data: CampaignLinkStat[] }> {
+  return apiFetch(`/api/campaigns/${id}/links`);
+}
+
+export interface ContactExport {
+  email: string;
+  contact: { id: string; name: string | null; createdAt: number } | null;
+  memberships: Array<ListMember & { listName: string | null }>;
+  events: Array<{
+    id: string;
+    campaignId: string;
+    eventType: "open" | "click";
+    occurredAt: number;
+  }>;
+}
+
+export async function exportContact(email: string): Promise<ContactExport> {
+  return apiFetch(`/api/contacts/${encodeURIComponent(email)}/export`);
+}
+
+export async function eraseContact(email: string): Promise<{
+  contacts: number;
+  memberships: number;
+  events: number;
+  recipients: number;
+  attempts: number;
+}> {
+  return apiFetch(`/api/contacts/${encodeURIComponent(email)}/erase`, {
+    method: "POST",
+  });
+}
+
+export interface ListMembershipSummary {
+  listId: string;
+  listName: string;
+  status: MemberStatus;
+  subscribedAt: number | null;
+  unsubscribedAt: number | null;
+}
+
+export async function fetchListMemberships(
+  email: string,
+): Promise<{ items: ListMembershipSummary[] }> {
+  return apiFetch(`/api/lists/memberships?email=${encodeURIComponent(email)}`);
 }

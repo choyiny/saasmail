@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { messageDomId, readMessageHash } from "@/lib/message-link";
 import EnrollSequenceModal from "@/components/EnrollSequenceModal";
+import PersonListMemberships from "@/components/PersonListMemberships";
 import ReassignPersonModal from "@/components/ReassignPersonModal";
 import SequenceStatus from "@/components/SequenceStatus";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
@@ -431,6 +432,7 @@ export default function PersonDetail({
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
+            <PersonListMemberships email={person.email} />
             {activeGroup && (
               <MarkAllReadButton
                 unreadCount={unreadIn(activeGroup)}

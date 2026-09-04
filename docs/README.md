@@ -27,7 +27,7 @@ Everything that used to live in one very long README. Start at
 | [Suppressions and unsubscribe](suppressions.md) | The suppression list, RFC 8058 one-click, and the `transactional` flag       |
 | [Users and API keys](users-and-api-keys.md)     | Invites, roles, passkeys, and `sk_…` keys                                    |
 | [MCP server](mcp.md)                            | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation   |
-| [WebMCP](webmcp.md)                             | In-page agent access, the safety model, and the 20 tools                     |
+| [WebMCP](webmcp.md)                             | In-page agent access, the safety model, and the 24 tools                     |
 | [Webhooks](webhooks.md)                         | `message.received`, the payload, and signature verification                  |
 
 ## Elsewhere in the repo

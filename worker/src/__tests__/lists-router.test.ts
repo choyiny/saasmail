@@ -628,3 +628,85 @@ describe("CSV import endpoints", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("GET /api/lists/memberships", () => {
+  it("returns every list an address belongs to, with status", async () => {
+    const apiKey = await adminKey();
+    const { body: a } = await createList(apiKey, { name: "Weekly" });
+    const { body: b } = await createList(apiKey, { name: "Monthly" });
+
+    await authFetch(`/api/lists/${a.id}/members`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ email: "reader@example.com" }),
+    });
+    await authFetch(`/api/lists/${b.id}/members`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ email: "reader@example.com" }),
+    });
+
+    const res = await authFetch(
+      "/api/lists/memberships?email=reader@example.com",
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+    const { items } = await res.json<any>();
+    expect(items).toHaveLength(2);
+    expect(items.map((i: any) => i.listName).sort()).toEqual([
+      "Monthly",
+      "Weekly",
+    ]);
+  });
+
+  it("matches case-insensitively and returns nothing for a stranger", async () => {
+    const apiKey = await adminKey();
+    const { body: list } = await createList(apiKey, { name: "Weekly" });
+    await authFetch(`/api/lists/${list.id}/members`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ email: "reader@example.com" }),
+    });
+
+    const hit = await authFetch(
+      "/api/lists/memberships?email=READER@Example.com",
+      { apiKey },
+    );
+    expect((await hit.json<any>()).items).toHaveLength(1);
+
+    const miss = await authFetch(
+      "/api/lists/memberships?email=nobody@example.com",
+      { apiKey },
+    );
+    expect((await miss.json<any>()).items).toHaveLength(0);
+  });
+
+  it("is not swallowed by the /{id} route", async () => {
+    const apiKey = await adminKey();
+    // Registration order is the only thing keeping these apart.
+    const res = await authFetch(
+      "/api/lists/memberships?email=reader@example.com",
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
+describe("list create accepts a cleared description", () => {
+  it("takes an explicit null the way update does", async () => {
+    const apiKey = await adminKey();
+    // A UI that renders an empty text field naturally sends null. Accepting it
+    // on update but not on create is the kind of asymmetry callers trip over.
+    const res = await authFetch("/api/lists", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        name: "Weekly",
+        fromAddress: FROM,
+        description: null,
+      }),
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json<any>()).description).toBeNull();
+  });
+});

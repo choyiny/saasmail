@@ -65,7 +65,10 @@ const ListsResponseSchema = z.object({
 
 const CreateListSchema = z.object({
   name: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
+  // Nullable as well as optional, matching UpdateListSchema: a client that
+  // renders an empty text field naturally sends `null`, and rejecting that
+  // while accepting it on update is an inconsistency callers trip over.
+  description: z.string().max(2000).nullable().optional(),
   fromAddress: z.string().email(),
   doubleOptIn: z.boolean().optional(),
   confirmationTemplateSlug: z.string().max(200).nullable().optional(),
@@ -295,6 +298,63 @@ listsRouter.openapi(createListRoute, async (c) => {
   };
   await db.insert(lists).values(row);
   return c.json(serializeList(row as typeof lists.$inferSelect), 201);
+});
+
+// --- GET /memberships?email= ---
+//
+// Registered before `/{id}`: Hono matches in registration order, so the
+// parameterised route would otherwise swallow this path and look for a list
+// with the id "memberships".
+
+const membershipsRoute = createRoute({
+  method: "get",
+  path: "/memberships",
+  tags: ["Lists"],
+  description:
+    "Which lists an address belongs to, and with what status. Scoped to the caller's allowed inboxes like every other list read.",
+  request: { query: z.object({ email: z.string() }) },
+  responses: {
+    ...json200Response(
+      z.object({
+        items: z.array(
+          z.object({
+            listId: z.string(),
+            listName: z.string(),
+            status: z.enum(["pending", "subscribed", "unsubscribed"]),
+            subscribedAt: z.number().nullable(),
+            unsubscribedAt: z.number().nullable(),
+          }),
+        ),
+      }),
+      "Memberships",
+    ),
+  },
+});
+
+listsRouter.openapi(membershipsRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const email = c.req.valid("query").email.trim().toLowerCase();
+
+  const rows = await db
+    .select({
+      listId: lists.id,
+      listName: lists.name,
+      status: listMembers.status,
+      subscribedAt: listMembers.subscribedAt,
+      unsubscribedAt: listMembers.unsubscribedAt,
+    })
+    .from(listMembers)
+    .innerJoin(lists, eq(lists.id, listMembers.listId))
+    .where(
+      and(
+        eq(sql`lower(${listMembers.email})`, email),
+        inboxFilter(allowed, lists.fromAddress),
+      ),
+    )
+    .orderBy(desc(listMembers.createdAt));
+
+  return c.json({ items: rows });
 });
 
 // --- GET /:id ---
