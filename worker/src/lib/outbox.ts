@@ -58,6 +58,12 @@ export interface OutboxSendParams {
   headers?: Record<string, string>;
   attachments?: SendEmailAttachment[];
   transactional?: boolean;
+  /**
+   * Caller-minted unsubscribe URL (campaigns use a per-list v2 token). Passed
+   * straight through; the retry path recovers it from the stored
+   * `List-Unsubscribe` header instead, so both attempts carry the same link.
+   */
+  unsubscribeContext?: { url: string };
 }
 
 export interface OutboxSendResult {
@@ -96,6 +102,7 @@ export async function sendViaOutbox(
     headers,
     attachments,
     transactional,
+    unsubscribeContext,
   } = params;
   const now = Math.floor(Date.now() / 1000);
   const outboxId = nanoid();
@@ -145,6 +152,7 @@ export async function sendViaOutbox(
       headers,
       attachments,
       transactional,
+      unsubscribeContext,
     });
   } catch (err) {
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));

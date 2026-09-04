@@ -7,6 +7,12 @@ import {
   type SequenceEmailMessage,
 } from "./sequence-processor";
 import { runListImportPage, type ListImportMessage } from "./list-import";
+import {
+  runCampaignFanOutPage,
+  sendCampaignRecipient,
+  type CampaignFanOutMessage,
+  type CampaignSendMessage,
+} from "./campaign-sender";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -18,9 +24,18 @@ import { runListImportPage, type ListImportMessage } from "./list-import";
  * predates this union and its producer enqueued a bare `{ sequenceEmailId }`.
  * See `classifyQueueMessage`.
  */
-export type QueueMessageBody = SequenceEmailMessage | ListImportMessage;
+export type QueueMessageBody =
+  | SequenceEmailMessage
+  | ListImportMessage
+  | CampaignFanOutMessage
+  | CampaignSendMessage;
 
-export type QueueMessageKind = "sequence_email" | "list_import" | "unknown";
+export type QueueMessageKind =
+  | "sequence_email"
+  | "list_import"
+  | "campaign_fan_out"
+  | "campaign_send"
+  | "unknown";
 
 /**
  * Decide what a message is.
@@ -46,6 +61,17 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
   }
   if (b.type === "list_import") {
     return typeof b.jobId === "string" ? "list_import" : "unknown";
+  }
+  if (b.type === "campaign_fan_out") {
+    return typeof b.campaignId === "string" && typeof b.jobId === "string"
+      ? "campaign_fan_out"
+      : "unknown";
+  }
+  if (b.type === "campaign_send") {
+    return typeof b.campaignId === "string" &&
+      typeof b.campaignRecipientId === "string"
+      ? "campaign_send"
+      : "unknown";
   }
   return "unknown";
 }
@@ -89,9 +115,15 @@ export async function handleQueueBatch(
       if (kind === "sequence_email") {
         const body = msg.body as SequenceEmailMessage;
         await processSequenceEmail(db, sender, env, body.sequenceEmailId);
-      } else {
+      } else if (kind === "list_import") {
         const body = msg.body as ListImportMessage;
         await runListImportPage(db, env, body.jobId);
+      } else if (kind === "campaign_fan_out") {
+        const body = msg.body as CampaignFanOutMessage;
+        await runCampaignFanOutPage(db, env, body.campaignId, body.jobId);
+      } else {
+        const body = msg.body as CampaignSendMessage;
+        await sendCampaignRecipient(db, env, sender, body.campaignRecipientId);
       }
       msg.ack();
     } catch (err) {

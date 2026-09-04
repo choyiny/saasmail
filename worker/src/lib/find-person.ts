@@ -1,8 +1,9 @@
 import { eq, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { people } from "../db/people.schema";
 
-type Db = ReturnType<typeof drizzle>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Db = DrizzleD1Database<any>;
 
 /**
  * Resolve an email address to an existing `people.id`, or `null`.
