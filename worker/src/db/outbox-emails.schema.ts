@@ -19,6 +19,12 @@ export const outboxEmails = sqliteTable(
     sentEmailId: text("sent_email_id").notNull(),
     /** Set for sequence-step sends so retries can resolve the step too. */
     sequenceEmailId: text("sequence_email_id"),
+    /**
+     * Set for campaign sends so a crash between provider success and the
+     * campaign's own bookkeeping can be reconciled rather than re-sent.
+     * Mirrors `sequenceEmailId`; null for sequence and transactional mail.
+     */
+    campaignRecipientId: text("campaign_recipient_id"),
     /** Bare lowercase inbox address — the inbox-scoping key. */
     fromAddress: text("from_address").notNull(),
     toAddress: text("to_address").notNull(),
@@ -35,7 +41,15 @@ export const outboxEmails = sqliteTable(
     /** JSON object. Includes the original Message-ID so every retry reuses it. */
     headers: text("headers"),
     transactional: integer("transactional").notNull().default(0),
-    /** pending (awaiting retry) | failed (terminal, kept for the tab). */
+    /**
+     * pending (awaiting retry) | failed (terminal, kept for the tab) |
+     * bookkeeping_pending (campaign only: the provider ACCEPTED the message and
+     * the row is being held until the caller's own bookkeeping completes).
+     *
+     * A `bookkeeping_pending` row must never be re-sent — the message is
+     * already delivered. The retry processor resolves it by re-running only the
+     * bookkeeping, which is why the status exists at all.
+     */
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),

@@ -4,10 +4,18 @@ import { Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Footer from "@/components/Footer";
 
+/**
+ * `scope` mirrors the API: a v1 token suppresses the address everywhere, a v2
+ * token removes one list membership. The wording has to follow, or someone who
+ * left one newsletter is told they'll never hear from us again.
+ */
+type Scope = "global" | "list";
+
 type State =
   | { kind: "loading" }
-  | { kind: "suppressed"; email: string }
-  | { kind: "subscribed"; email: string }
+  | { kind: "suppressed"; email: string; scope: Scope }
+  | { kind: "subscribed"; email: string; scope: Scope }
+  | { kind: "undoExpired"; email: string }
   | { kind: "error" };
 
 /**
@@ -37,9 +45,13 @@ export default function UnsubscribePage() {
     fetch(url, { method: "POST" })
       .then(async (r) => {
         if (!r.ok) throw new Error("invalid");
-        const body = (await r.json()) as { email: string; status: string };
+        const body = (await r.json()) as { email: string; scope: Scope };
         if (cancelled) return;
-        setState({ kind: "suppressed", email: body.email });
+        setState({
+          kind: "suppressed",
+          email: body.email,
+          scope: body.scope ?? "global",
+        });
       })
       .catch(() => {
         if (cancelled) return;
@@ -56,11 +68,25 @@ export default function UnsubscribePage() {
     try {
       const url = `/api/unsubscribe/undo?token=${encodeURIComponent(token)}`;
       const r = await fetch(url, { method: "POST" });
+      // 410 means the re-subscribe window has closed — a distinct outcome from
+      // a failed request, and the only one where retrying can't help.
+      if (r.status === 410) {
+        setState((prev) =>
+          prev.kind === "suppressed"
+            ? { kind: "undoExpired", email: prev.email }
+            : prev,
+        );
+        return;
+      }
       if (!r.ok) return;
-      const body = (await r.json()) as { email: string; status: string };
-      setState({ kind: "subscribed", email: body.email });
+      const body = (await r.json()) as { email: string; scope: Scope };
+      setState({
+        kind: "subscribed",
+        email: body.email,
+        scope: body.scope ?? "global",
+      });
     } catch {
-      // v1: leave the page in `suppressed` so the user can retry.
+      // Leave the page in `suppressed` so the user can retry.
     } finally {
       setUndoLoading(false);
     }
@@ -114,7 +140,9 @@ export default function UnsubscribePage() {
                 <span className="font-medium text-text-primary">
                   {state.email}
                 </span>{" "}
-                won't receive any more emails from us.
+                {state.scope === "list"
+                  ? "has been removed from this mailing list."
+                  : "won't receive any more emails from us."}
               </p>
               <div className="mt-6">
                 <Button
@@ -142,7 +170,24 @@ export default function UnsubscribePage() {
                 <span className="font-medium text-text-primary">
                   {state.email}
                 </span>{" "}
-                will continue to receive emails.
+                {state.scope === "list"
+                  ? "is back on this mailing list."
+                  : "will continue to receive emails."}
+              </p>
+            </>
+          )}
+
+          {state.kind === "undoExpired" && (
+            <>
+              <h1 className="text-2xl font-extrabold tracking-tight text-text-primary">
+                Re-subscribe window has closed
+              </h1>
+              <p className="mt-3 break-all text-sm text-text-secondary">
+                <span className="font-medium text-text-primary">
+                  {state.email}
+                </span>{" "}
+                unsubscribed too long ago for one-click undo. You can sign up
+                again through the sender's subscribe form.
               </p>
             </>
           )}

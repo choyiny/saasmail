@@ -17,6 +17,17 @@ import { suppressions } from "./suppressions.schema";
 import { blocklist } from "./blocklist.schema";
 import { outboxEmails } from "./outbox-emails.schema";
 import { drafts } from "./drafts.schema";
+import { asyncJobs } from "./async-jobs.schema";
+import { contacts } from "./contacts.schema";
+import { lists } from "./lists.schema";
+import { listMembers } from "./list-members.schema";
+import { subscribeForms } from "./subscribe-forms.schema";
+import { subscribeAttempts } from "./subscribe-attempts.schema";
+import { campaigns } from "./campaigns.schema";
+import { campaignRecipients } from "./campaign-recipients.schema";
+import { campaignLinks } from "./campaign-links.schema";
+import { campaignEvents } from "./campaign-events.schema";
+import { campaignUnsubscribeAttributions } from "./campaign-unsubscribe-attributions.schema";
 
 export const schema = {
   ...authSchema,
@@ -38,4 +49,15 @@ export const schema = {
   blocklist,
   outboxEmails,
   drafts,
+  asyncJobs,
+  contacts,
+  lists,
+  listMembers,
+  subscribeForms,
+  subscribeAttempts,
+  campaigns,
+  campaignRecipients,
+  campaignLinks,
+  campaignEvents,
+  campaignUnsubscribeAttributions,
 } as const;

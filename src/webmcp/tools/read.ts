@@ -49,6 +49,10 @@ export interface ReadDeps {
   fetchStats: (recipient?: string) => Promise<any>;
   searchEmails: (p: { q: string; [k: string]: any }) => Promise<any>;
   getSession: () => Promise<any>;
+  fetchLists: (p?: any) => Promise<any>;
+  fetchList: (id: string) => Promise<any>;
+  fetchCampaigns: () => Promise<any>;
+  fetchCampaign: (id: string) => Promise<any>;
 }
 
 export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
@@ -290,6 +294,71 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
       description: "List drip sequences the user can enroll contacts into.",
       inputSchema: { type: "object", properties: {} },
       execute: async () => okJson(await deps.fetchSequences()),
+    },
+    // --- Newsletters: read only ---------------------------------------------
+    //
+    // There are deliberately no newsletter *action* tools. Sending is
+    // irreversible and reaches thousands of strangers at once; an agent that
+    // can trigger a blast is precisely the capability that should stay behind
+    // a human click. These four let an agent report on newsletters, not run
+    // them.
+    {
+      name: "list_newsletter_lists",
+      description:
+        "List the newsletter subscriber lists. Read-only: WebMCP cannot create lists, add members, or send campaigns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          includeArchived: {
+            type: "boolean",
+            description:
+              "Include lists that were archived because they have campaign history.",
+          },
+        },
+      },
+      execute: async (args: any) =>
+        okJson(
+          await deps.fetchLists({ includeArchived: !!args?.includeArchived }),
+        ),
+    },
+    {
+      name: "get_newsletter_list",
+      description:
+        "Get one subscriber list with its member counts by status (subscribed, pending, unsubscribed).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          listId: { type: "string", description: "The list's id." },
+        },
+        required: ["listId"],
+      },
+      execute: async (args: any) => {
+        if (!args?.listId) return fail("listId is required");
+        return okJson(await deps.fetchList(args.listId));
+      },
+    },
+    {
+      name: "list_campaigns",
+      description:
+        "List newsletter campaigns, newest first, with their current status (draft, scheduled, sending, sent, completed_with_failures, stalled, cancelled).",
+      inputSchema: { type: "object", properties: {} },
+      execute: async () => okJson(await deps.fetchCampaigns()),
+    },
+    {
+      name: "get_campaign_stats",
+      description:
+        "Get one campaign's live stats: targeted, delivered, suppressed, failures, unsubscribes, and approximate unique opens and clicks. Opens and clicks are best-effort — Apple Mail Privacy Protection pre-fetches tracking pixels and some proxies pre-fetch links, so both over-count. Report them as approximate.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          campaignId: { type: "string", description: "The campaign's id." },
+        },
+        required: ["campaignId"],
+      },
+      execute: async (args: any) => {
+        if (!args?.campaignId) return fail("campaignId is required");
+        return okJson(await deps.fetchCampaign(args.campaignId));
+      },
     },
   ];
 }

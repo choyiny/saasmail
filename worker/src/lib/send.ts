@@ -29,6 +29,19 @@ export interface SendInput {
   headers?: Record<string, string>;
   attachments?: SendEmailParams["attachments"];
   transactional?: boolean;
+  /**
+   * An unsubscribe URL the caller has already minted.
+   *
+   * Campaign sends need a v2 (per-list) token, but this helper otherwise mints
+   * its own v1 (global) one. Supplying it here makes the same URL appear in the
+   * body placeholder, the footer fallback and both `List-Unsubscribe` headers,
+   * so a subscriber's link means the same thing everywhere.
+   *
+   * Only honoured for a single-recipient send: with several recipients each
+   * needs their own token, and reusing one would let a recipient unsubscribe
+   * somebody else.
+   */
+  unsubscribeContext?: { url: string };
 }
 
 export interface SendOutput {
@@ -46,6 +59,22 @@ export interface SendOutput {
 }
 
 const UNSUB_PLACEHOLDER = /\{\{unsubscribe_url\}\}/g;
+
+/**
+ * Pull the URL back out of a stored `List-Unsubscribe: <url>` header.
+ *
+ * The outbox persists the wire headers so a retry reproduces the original
+ * message; this is what lets the retry reuse the same unsubscribe link rather
+ * than minting a new one, the same way it reuses the original Message-ID.
+ */
+function readListUnsubscribeHeader(
+  headers: Record<string, string> | undefined,
+): string | null {
+  const raw = headers?.["List-Unsubscribe"];
+  if (!raw) return null;
+  const match = raw.match(/^<(.+)>$/);
+  return match ? match[1] : null;
+}
 
 function buildUnsubscribeUrl(baseUrl: string, token: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/unsubscribe?token=${encodeURIComponent(
@@ -85,6 +114,7 @@ export async function sendWithSuppressionCheck(
     headers,
     attachments,
     transactional,
+    unsubscribeContext,
   } = input;
 
   // Partition recipients into delivered vs suppressed. Transactional sends
@@ -151,10 +181,23 @@ export async function sendWithSuppressionCheck(
       ...deliveredCc.map((c) => ({ email: c.email, cc: c })),
     ];
 
+    // A caller-supplied URL is only safe when there is exactly one recipient;
+    // see `unsubscribeContext`. On an outbox retry the URL also arrives via the
+    // stored `List-Unsubscribe` header, which is how a campaign's v2 link
+    // survives a retry instead of silently reverting to a freshly minted v1.
+    const singleRecipient = allDelivered.length === 1;
+    const providedUnsubUrl = singleRecipient
+      ? (unsubscribeContext?.url ?? readListUnsubscribeHeader(headers))
+      : null;
+
     const results = await Promise.all(
       allDelivered.map(async (recipient) => {
-        const token = await signToken(recipient.email, env.UNSUBSCRIBE_SECRET);
-        const url = buildUnsubscribeUrl(env.BASE_URL, token);
+        const url =
+          providedUnsubUrl ??
+          buildUnsubscribeUrl(
+            env.BASE_URL,
+            await signToken(recipient.email, env.UNSUBSCRIBE_SECRET),
+          );
 
         let recipientHtml = html;
         let recipientText = text;

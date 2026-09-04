@@ -22,6 +22,14 @@ export const TEST_IDS = {
   sequenceStepRow: "sequence-step-row",
   enrollmentRow: "enrollment-row",
 
+  // Newsletters
+  listRow: "list-row",
+  memberRow: "member-row",
+  formRow: "form-row",
+  campaignRow: "campaign-row",
+  campaignStatus: "campaign-status",
+  campaignSend: "campaign-send",
+
   // Templates
   templateRow: "template-row",
 

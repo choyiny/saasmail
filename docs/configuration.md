@@ -28,6 +28,11 @@ To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used a
 
 Local development secrets. Created from `.dev.vars.example`. This file is gitignored.
 
+- `vars.PROVIDER_DAILY_SEND_LIMIT` — optional. Refuses to start a newsletter
+  campaign that would push the sending identity past this many messages in 24
+  hours. Unset by default, in which case the check is skipped entirely. Set it
+  to your provider's real daily quota so an oversized blast is refused up front
+  rather than discovered half-delivered.
 - `BAVIMAIL_API_KEY` — Bavimail API bearer token (required for Bavimail, must be paired with `BAVIMAIL_ALIAS_ID`)
 - `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
 - `POSTMARK_API_KEY` — Postmark server API token (if using Postmark)
