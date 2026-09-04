@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
 import {
   applyMigrations,
   authFetch,

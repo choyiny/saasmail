@@ -25,6 +25,26 @@ const DECODE: Record<string, string> = {
   "&nbsp;": " ",
 };
 
+/**
+ * Apply a removal until the string stops changing.
+ *
+ * One pass is not enough: deleting `<script>` from `<scr<script>ipt>` *creates*
+ * `<script>`. This output is a text/plain part rather than markup, so the
+ * consequence is garbled text rather than injection — but a stripper that can
+ * be walked backwards is not worth keeping, and the next caller may have a
+ * sink this one does not. Bounded so no input can spin here; each pass strictly
+ * shortens the string, so the bound is never reached in practice.
+ */
+function stripUntilStable(input: string, pattern: RegExp): string {
+  let out = input;
+  for (let i = 0; i < 10; i++) {
+    const next = out.replace(pattern, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
 function decodeEntities(s: string): string {
   return s
     .replace(/&(?:amp|lt|gt|quot|#39|apos|nbsp);/g, (m) => DECODE[m] ?? m)
@@ -39,15 +59,18 @@ export function htmlToText(html: string): string {
 
   // Drop anything whose content is not prose. Done first so their contents
   // cannot leak into the output as stray CSS or JS.
-  text = text.replace(/<(script|style|head|template)\b[\s\S]*?<\/\1>/gi, "");
-  text = text.replace(/<!--[\s\S]*?-->/g, "");
+  text = stripUntilStable(
+    text,
+    /<(script|style|head|template)\b[\s\S]*?<\/\1>/gi,
+  );
+  text = stripUntilStable(text, /<!--[\s\S]*?-->/g);
 
   // A link becomes "label (href)" so the destination survives — the whole point
   // of a text part is that it is readable without rendering.
   text = text.replace(
     /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi,
     (_full, href: string, label: string) => {
-      const cleanLabel = label.replace(/<[^>]+>/g, "").trim();
+      const cleanLabel = stripUntilStable(label, /<[^>]+>/g).trim();
       if (cleanLabel === "") return href;
       // Don't duplicate when the label already *is* the URL.
       return cleanLabel === href ? href : `${cleanLabel} (${href})`;
@@ -58,7 +81,7 @@ export function htmlToText(html: string): string {
   text = text.replace(/<hr\s*\/?>/gi, "\n---\n");
   text = text.replace(BLOCK_TAGS, "\n");
   // Anything left is inline markup with no textual meaning.
-  text = text.replace(/<[^>]+>/g, "");
+  text = stripUntilStable(text, /<[^>]+>/g);
 
   text = decodeEntities(text);
 

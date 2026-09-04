@@ -324,13 +324,39 @@ describe("v2 re-subscribe undo", () => {
     expect((await member()).status).toBe("unsubscribed");
   });
 
-  it("still allows undo at the last second of the window", async () => {
-    const edge = ts() - RESUBSCRIBE_UNDO_WINDOW_SECONDS;
-    await seed({ memberStatus: "unsubscribed", unsubscribedAt: edge });
+  /**
+   * Driven through the library with an explicit `now` rather than over HTTP.
+   * The boundary is exact, so reading the clock twice — once to seed
+   * `unsubscribedAt`, once inside the handler — makes the result depend on
+   * whether the two land in the same second. That passed locally and failed on
+   * a slower CI runner.
+   */
+  it("allows undo at the last second of the window", async () => {
+    const at = 1_000_000;
+    await seed({ memberStatus: "unsubscribed", unsubscribedAt: at });
 
-    const r = await post("/api/unsubscribe/undo", await v2Token());
-    expect(r.status).toBe(200);
+    const outcome = await undoListUnsubscribe(
+      getDb(),
+      { listId: LIST, campaignId: CAMPAIGN, contactId: CONTACT },
+      { now: at + RESUBSCRIBE_UNDO_WINDOW_SECONDS },
+    );
+
+    expect(outcome.error).toBeNull();
     expect((await member()).status).toBe("subscribed");
+  });
+
+  it("refuses one second past the window", async () => {
+    const at = 1_000_000;
+    await seed({ memberStatus: "unsubscribed", unsubscribedAt: at });
+
+    const outcome = await undoListUnsubscribe(
+      getDb(),
+      { listId: LIST, campaignId: CAMPAIGN, contactId: CONTACT },
+      { now: at + RESUBSCRIBE_UNDO_WINDOW_SECONDS + 1 },
+    );
+
+    expect(outcome.error).toBe("window_closed");
+    expect((await member()).status).toBe("unsubscribed");
   });
 
   it("treats a missing unsubscribedAt as out of window rather than open forever", async () => {

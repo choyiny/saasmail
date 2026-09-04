@@ -136,6 +136,26 @@ async function seed(opts: { members?: number; status?: string } = {}) {
 
 const cfEnv = () => env as unknown as CloudflareBindings;
 
+describe("htmlToText nested-tag bypass", () => {
+  /**
+   * A single-pass strip can be walked backwards: removing `<script>` from
+   * `<scr<script>ipt>` produces `<script>`. This output is a text/plain part,
+   * so the consequence is garbled text rather than injection — but the
+   * stripper should still not be reversible.
+   */
+  it("strips tags that reassemble themselves", () => {
+    expect(htmlToText("<scr<script>ipt>alert(1)</script>")).not.toContain(
+      "<script",
+    );
+    expect(htmlToText("<<div>div>hello<</div>/div>")).not.toContain("<div");
+    expect(htmlToText("<!<!-- -->-- hidden -->visible")).toContain("visible");
+  });
+
+  it("still reads ordinary markup", () => {
+    expect(htmlToText("<p>One</p><p>Two</p>")).toBe("One\n\nTwo");
+  });
+});
+
 describe("htmlToText", () => {
   it("keeps link destinations, which is the point of a text part", () => {
     expect(htmlToText('<p>Read <a href="https://x.com/a">this</a></p>')).toBe(
