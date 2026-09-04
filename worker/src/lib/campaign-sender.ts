@@ -3,6 +3,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { asyncJobs } from "../db/async-jobs.schema";
 import { campaigns } from "../db/campaigns.schema";
+import { campaignUnsubscribeAttributions } from "../db/campaign-unsubscribe-attributions.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { contacts } from "../db/contacts.schema";
 import { emailTemplates } from "../db/email-templates.schema";
@@ -682,6 +683,15 @@ export async function refreshCampaignStats(
     .where(eq(campaignRecipients.campaignId, campaignId))
     .groupBy(campaignRecipients.status);
 
+  // Unsubscribes live in their own ledger rather than the recipient rows, so
+  // they need a second count. Both are `COUNT(*)` derivations: this cache is
+  // only ever recomputed from the ledgers, never incremented in place, which
+  // is why a replayed or crashed pass can't drift it.
+  const unsubRows = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(campaignUnsubscribeAttributions)
+    .where(eq(campaignUnsubscribeAttributions.campaignId, campaignId));
+
   const by = (s: string) => Number(rows.find((r) => r.status === s)?.n ?? 0);
   await db
     .update(campaigns)
@@ -690,6 +700,7 @@ export async function refreshCampaignStats(
       statsSuppressed: by("suppressed"),
       statsRetryableFailed: by("retryable_failed"),
       statsPermanentFailed: by("permanent_failed"),
+      statsUnsubscribes: Number(unsubRows[0]?.n ?? 0),
       updatedAt: Math.floor(Date.now() / 1000),
     })
     .where(eq(campaigns.id, campaignId));
