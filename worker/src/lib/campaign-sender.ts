@@ -3,6 +3,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { asyncJobs } from "../db/async-jobs.schema";
 import { campaigns } from "../db/campaigns.schema";
+import { campaignEvents } from "../db/campaign-events.schema";
 import { campaignUnsubscribeAttributions } from "../db/campaign-unsubscribe-attributions.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { contacts } from "../db/contacts.schema";
@@ -14,6 +15,10 @@ import { outboxEmails } from "../db/outbox-emails.schema";
 import type { EmailSender } from "./email-sender";
 import { findPersonIdByEmail } from "./find-person";
 import { formatFromAddress } from "./format-from-address";
+import {
+  applyRecipientTracking,
+  rewriteCampaignLinks,
+} from "./campaign-tracking";
 import { htmlToText } from "./html-to-text";
 import { interpolate } from "./interpolate";
 import { generateMessageId } from "./message-id";
@@ -82,10 +87,24 @@ export async function snapshotCampaign(
   const template = templates[0];
   if (!template) return `Template ${campaign.templateSlug} not found`;
 
-  // Rendered against list-level context only; per-recipient reserved variables
-  // are substituted later, per send, against this frozen HTML.
-  const html = template.bodyHtml;
   const subject = campaign.subject;
+
+  // The text part is derived from the *unrewritten* HTML, deliberately: click
+  // tracking is an HTML-part feature, and a plain-text body full of opaque
+  // redirect URLs reads as phishing to filters and humans alike.
+  const text = campaign.textBodyOverride ?? htmlToText(template.bodyHtml);
+
+  // Link rewriting happens once here rather than per recipient. What lands in
+  // the snapshot is an opaque marker per link; the send path swaps in each
+  // recipient's signed URL. Running before interpolation is also what protects
+  // `{{unsubscribe_url}}` — it is still a placeholder at this point and is
+  // recognised structurally instead of by matching a URL after the fact.
+  const html = await rewriteCampaignLinks(
+    db,
+    campaignId,
+    template.bodyHtml,
+    now,
+  );
 
   await db
     .update(campaigns)
@@ -93,7 +112,7 @@ export async function snapshotCampaign(
       contentSnapshotAt: now,
       subjectSnapshot: subject,
       htmlSnapshot: html,
-      textSnapshot: campaign.textBodyOverride ?? htmlToText(html),
+      textSnapshot: text,
       fromAddressSnapshot: campaign.fromAddress,
       templateRevision: `${template.id}@${template.updatedAt}`,
       updatedAt: now,
@@ -369,7 +388,11 @@ export async function sendCampaignRecipient(
   };
 
   // Rendered from the frozen snapshot, never the mutable template.
-  const html = interpolate(campaign.htmlSnapshot ?? "", vars);
+  const html = await applyRecipientTracking(
+    env,
+    interpolate(campaign.htmlSnapshot ?? "", vars),
+    { campaignId: campaign.id, contactId: recipient.contactId },
+  );
   const text = campaign.textSnapshot
     ? interpolate(campaign.textSnapshot, vars, { escape: false })
     : undefined;
@@ -692,6 +715,14 @@ export async function refreshCampaignStats(
     .from(campaignUnsubscribeAttributions)
     .where(eq(campaignUnsubscribeAttributions.campaignId, campaignId));
 
+  const eventRows = await db
+    .select({ eventType: campaignEvents.eventType, n: sql<number>`count(*)` })
+    .from(campaignEvents)
+    .where(eq(campaignEvents.campaignId, campaignId))
+    .groupBy(campaignEvents.eventType);
+  const events = (t: string) =>
+    Number(eventRows.find((r) => r.eventType === t)?.n ?? 0);
+
   const by = (s: string) => Number(rows.find((r) => r.status === s)?.n ?? 0);
   await db
     .update(campaigns)
@@ -701,6 +732,8 @@ export async function refreshCampaignStats(
       statsRetryableFailed: by("retryable_failed"),
       statsPermanentFailed: by("permanent_failed"),
       statsUnsubscribes: Number(unsubRows[0]?.n ?? 0),
+      statsUniqueOpeners: events("open"),
+      statsUniqueClicks: events("click"),
       updatedAt: Math.floor(Date.now() / 1000),
     })
     .where(eq(campaigns.id, campaignId));

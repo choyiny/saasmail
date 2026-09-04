@@ -9,6 +9,8 @@ import {
   getDb,
 } from "./helpers";
 import { asyncJobs } from "../db/async-jobs.schema";
+import { campaignEvents } from "../db/campaign-events.schema";
+import { campaignLinks } from "../db/campaign-links.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { campaigns } from "../db/campaigns.schema";
 import { campaignUnsubscribeAttributions } from "../db/campaign-unsubscribe-attributions.schema";
@@ -669,5 +671,225 @@ describe("hourly campaign pass", () => {
       await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
     )[0];
     expect(c.statsDelivered).toBe(1);
+  });
+});
+
+describe("campaign engagement endpoints", () => {
+  const CAMPAIGN = "camp-stats";
+
+  async function seedStatsCampaign(sentAt = ts()) {
+    await getDb().insert(campaigns).values({
+      id: CAMPAIGN,
+      name: "Stats",
+      subject: "S",
+      templateSlug: "weekly",
+      fromAddress: FROM,
+      listId: LIST,
+      status: "sent",
+      sentAt,
+      createdAt: sentAt,
+      updatedAt: sentAt,
+    });
+  }
+
+  async function seedRecipient(contactId: string, status = "sent") {
+    await getDb()
+      .insert(campaignRecipients)
+      .values({
+        id: `cr-${contactId}`,
+        campaignId: CAMPAIGN,
+        contactId,
+        email: `${contactId}@example.com`,
+        status: status as never,
+        idempotencyKey: `${CAMPAIGN}:${contactId}`,
+        attempts: 1,
+        queuedAt: ts(),
+      });
+  }
+
+  async function seedLink(id: string, url: string) {
+    await getDb()
+      .insert(campaignLinks)
+      .values({ id, campaignId: CAMPAIGN, url, createdAt: ts() });
+  }
+
+  async function seedEvent(
+    id: string,
+    contactId: string,
+    eventType: "open" | "click",
+    occurredAt: number,
+    campaignLinkId: string | null = null,
+  ) {
+    await getDb()
+      .insert(campaignEvents)
+      .values({
+        id,
+        campaignId: CAMPAIGN,
+        contactId,
+        email: `${contactId}@example.com`,
+        eventType,
+        campaignLinkId,
+        occurredAt,
+      });
+  }
+
+  it("reports unique opens and clicks in the detail stats", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    await seedStatsCampaign();
+    await seedRecipient("c-0");
+    await seedLink("l-1", "https://example.com/a");
+    await seedEvent("e-1", "c-0", "open", ts());
+    await seedEvent("e-2", "c-0", "click", ts(), "l-1");
+
+    const res = await authFetch(`/api/campaigns/${CAMPAIGN}`, { apiKey });
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.stats.uniqueOpeners).toBe(1);
+    expect(body.stats.uniqueClicks).toBe(1);
+    expect(body.stats.delivered).toBe(1);
+  });
+
+  it("returns 24 zero-filled hourly buckets anchored to send time", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    const sentAt = Math.floor(ts() / 3600) * 3600;
+    await seedStatsCampaign(sentAt);
+    await seedRecipient("c-0");
+    await seedEvent("e-1", "c-0", "open", sentAt + 60);
+    await seedEvent("e-2", "c-1", "open", sentAt + 2 * 3600 + 5);
+    await seedEvent("e-3", "c-0", "click", sentAt + 2 * 3600 + 9, "l-1");
+
+    const res = await authFetch(`/api/campaigns/${CAMPAIGN}/stats/timeseries`, {
+      apiKey,
+    });
+    expect(res.status).toBe(200);
+    const { data } = await res.json<any>();
+
+    expect(data).toHaveLength(24);
+    expect(data[0]).toEqual({ hour: sentAt, opens: 1, clicks: 0 });
+    // The quiet hour is present with zeros rather than skipped — otherwise the
+    // chart's x-axis silently compresses and misreports the curve.
+    expect(data[1]).toEqual({ hour: sentAt + 3600, opens: 0, clicks: 0 });
+    expect(data[2]).toEqual({
+      hour: sentAt + 2 * 3600,
+      opens: 1,
+      clicks: 1,
+    });
+  });
+
+  it("excludes events outside the 24-hour window", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    const sentAt = Math.floor(ts() / 3600) * 3600;
+    await seedStatsCampaign(sentAt);
+    await seedEvent("e-late", "c-0", "open", sentAt + 25 * 3600);
+    await seedEvent("e-early", "c-1", "open", sentAt - 3600);
+
+    const res = await authFetch(`/api/campaigns/${CAMPAIGN}/stats/timeseries`, {
+      apiKey,
+    });
+    const { data } = await res.json<any>();
+    expect(data.every((d: any) => d.opens === 0 && d.clicks === 0)).toBe(true);
+  });
+
+  it("returns per-link clicks sorted desc with rate over delivered", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    await seedStatsCampaign();
+    for (const c of ["c-0", "c-1", "c-2", "c-3"]) await seedRecipient(c);
+    await seedLink("l-1", "https://example.com/popular");
+    await seedLink("l-2", "https://example.com/quiet");
+
+    await seedEvent("e-1", "c-0", "click", ts(), "l-1");
+    await seedEvent("e-2", "c-1", "click", ts(), "l-1");
+    await seedEvent("e-3", "c-2", "click", ts(), "l-2");
+
+    const res = await authFetch(`/api/campaigns/${CAMPAIGN}/links`, { apiKey });
+    expect(res.status).toBe(200);
+    const { data } = await res.json<any>();
+
+    expect(data).toHaveLength(2);
+    expect(data[0]).toEqual({
+      url: "https://example.com/popular",
+      clicks: 2,
+      clickRate: 0.5,
+    });
+    expect(data[1].clicks).toBe(1);
+  });
+
+  it("includes links nobody clicked, so a dead link is not a missing one", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    await seedStatsCampaign();
+    await seedRecipient("c-0");
+    await seedLink("l-1", "https://example.com/ignored");
+
+    const { data } = await (
+      await authFetch(`/api/campaigns/${CAMPAIGN}/links`, { apiKey })
+    ).json<any>();
+    expect(data).toEqual([
+      { url: "https://example.com/ignored", clicks: 0, clickRate: 0 },
+    ]);
+  });
+
+  it("reports a zero click rate rather than dividing by zero", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    await seedStatsCampaign();
+    await seedLink("l-1", "https://example.com/a");
+    await seedEvent("e-1", "c-0", "click", ts(), "l-1");
+
+    const { data } = await (
+      await authFetch(`/api/campaigns/${CAMPAIGN}/links`, { apiKey })
+    ).json<any>();
+    expect(data[0].clicks).toBe(1);
+    expect(data[0].clickRate).toBe(0);
+  });
+
+  it("404s both endpoints for an unknown campaign", async () => {
+    const apiKey = await adminKey();
+    for (const path of ["/stats/timeseries", "/links"]) {
+      const res = await authFetch(`/api/campaigns/nope${path}`, { apiKey });
+      expect(res.status).toBe(404);
+    }
+  });
+});
+
+describe("preview and test-send show real destinations", () => {
+  const LINKED_BODY =
+    '<p><a href="https://example.com/read">Read</a></p>' +
+    "<p>{{unsubscribe_url}}</p>";
+
+  async function snapshottedCampaign(apiKey: string) {
+    await seedListAndTemplate(1);
+    await getDb()
+      .update(emailTemplates)
+      .set({ bodyHtml: LINKED_BODY })
+      .where(eq(emailTemplates.id, "tpl-1"));
+    const { body } = await createCampaign(apiKey);
+    await authFetch(`/api/campaigns/${body.id}/send`, {
+      apiKey,
+      method: "POST",
+    });
+    return body.id as string;
+  }
+
+  it("preview resolves click markers back to the destination", async () => {
+    const apiKey = await adminKey();
+    const id = await snapshottedCampaign(apiKey);
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, id))
+    )[0];
+    // The snapshot really does hold a marker — otherwise this test proves
+    // nothing about the resolution.
+    expect(c.htmlSnapshot).toContain("click.invalid");
+
+    const res = await authFetch(`/api/campaigns/${id}/preview`, { apiKey });
+    expect(res.status).toBe(200);
+    const body = await res.json<any>();
+    expect(body.html).toContain("https://example.com/read");
+    expect(body.html).not.toContain("click.invalid");
   });
 });

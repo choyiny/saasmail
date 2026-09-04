@@ -37,6 +37,7 @@ import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
+import { publicTrackRouter } from "./routers/public-track-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
@@ -296,6 +297,12 @@ app.route("/unsubscribe", unsubscribeRouter);
 // session/passkey/inbox middleware (scoped to `/api/*`) never applies, matching
 // the `/unsubscribe` precedent above.
 app.route("/subscribe", publicSubscribeRouter);
+
+// Open pixel and click redirect. Must be reachable by anyone holding a valid
+// token — the requests come from mail clients and image proxies, which carry
+// no session — so this is mounted outside `/api` alongside the other public
+// token-authenticated routes.
+app.route("/track", publicTrackRouter);
 
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);

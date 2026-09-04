@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { applyMigrations, cleanDb, getDb } from "./helpers";
 import { asyncJobs } from "../db/async-jobs.schema";
+import { campaignLinks } from "../db/campaign-links.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { campaigns } from "../db/campaigns.schema";
 import { contacts } from "../db/contacts.schema";
@@ -639,5 +640,82 @@ describe("checkCampaignCompletion", () => {
     )[0];
     expect(c.statsDelivered).toBe(1);
     expect(c.statsPermanentFailed).toBe(1);
+  });
+});
+
+describe("tracking in a real campaign send", () => {
+  const TRACKED_BODY =
+    "<p>Hello {{subscriber_name}}</p>" +
+    '<p><a href="https://example.com/read">Read it</a></p>' +
+    '<p><a href="https://example.com/read">Again</a></p>' +
+    '<p><a href="mailto:hi@saasmail.test">Mail us</a></p>' +
+    '<p><a href="{{unsubscribe_url}}">Unsubscribe</a></p>';
+
+  async function sendTracked(members = 1) {
+    await seed({ members });
+    await getDb()
+      .update(emailTemplates)
+      .set({ bodyHtml: TRACKED_BODY })
+      .where(eq(emailTemplates.id, "tpl-1"));
+    await snapshotCampaign(getDb(), CAMPAIGN, now());
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+
+    const recipients = await getDb().select().from(campaignRecipients);
+    const sender = fakeSender(OK);
+    for (const r of recipients) {
+      await sendCampaignRecipient(getDb(), cfEnv(), sender, r.id);
+    }
+    return sender;
+  }
+
+  it("replaces destinations with per-recipient redirects and adds a pixel", async () => {
+    const sender = await sendTracked();
+    const html = sender.calls[0].html!;
+
+    expect(html).toContain("/track/open/");
+    expect(html).toContain("/track/click/");
+    // The destination itself never reaches the reader's HTML.
+    expect(html).not.toContain("https://example.com/read");
+    expect(html).not.toContain("click.invalid");
+  });
+
+  it("stores one link row for a URL used twice", async () => {
+    await sendTracked();
+    const links = await getDb().select().from(campaignLinks);
+    expect(links).toHaveLength(1);
+    expect(links[0].url).toBe("https://example.com/read");
+  });
+
+  it("leaves the unsubscribe link and non-http schemes alone", async () => {
+    const sender = await sendTracked();
+    const html = sender.calls[0].html!;
+
+    const header = sender.calls[0].headers?.["List-Unsubscribe"]!;
+    const unsubUrl = header.slice(1, -1);
+    // The unsubscribe link must stay an unsubscribe link — routing it through
+    // click tracking would put a redirect between a reader and their opt-out.
+    expect(html).toContain(`href="${unsubUrl}"`);
+    expect(html).toContain('href="mailto:hi@saasmail.test"');
+  });
+
+  it("keeps real URLs in the text part", async () => {
+    const sender = await sendTracked();
+    const text = sender.calls[0].text!;
+
+    // Opaque redirect URLs in plain text read as phishing and cost more
+    // deliverability than the attribution is worth.
+    expect(text).toContain("https://example.com/read");
+    expect(text).not.toContain("/track/click/");
+    expect(text).not.toContain("/track/open/");
+  });
+
+  it("gives each recipient their own pixel", async () => {
+    const sender = await sendTracked(2);
+    expect(sender.calls).toHaveLength(2);
+
+    const pixel = (html: string) =>
+      html.match(/\/track\/open\/([^"]+)/)?.[1] ?? "";
+    expect(pixel(sender.calls[0].html!)).not.toBe("");
+    expect(pixel(sender.calls[0].html!)).not.toBe(pixel(sender.calls[1].html!));
   });
 });

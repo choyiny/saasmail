@@ -1,9 +1,11 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { asyncJobs } from "../db/async-jobs.schema";
 import { campaigns } from "../db/campaigns.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
+import { campaignEvents } from "../db/campaign-events.schema";
+import { campaignLinks } from "../db/campaign-links.schema";
 import { campaignUnsubscribeAttributions } from "../db/campaign-unsubscribe-attributions.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { listMembers } from "../db/list-members.schema";
@@ -21,6 +23,7 @@ import {
   type CampaignFanOutMessage,
   type CampaignSendMessage,
 } from "../lib/campaign-sender";
+import { resolveMarkersToDestinations } from "../lib/campaign-tracking";
 import { canPerform, type CampaignAction } from "../lib/campaign-states";
 import { createEmailSender } from "../lib/email-sender";
 import { formatFromAddress } from "../lib/format-from-address";
@@ -58,6 +61,13 @@ const StatsSchema = z.object({
   retryableFailed: z.number(),
   permanentFailed: z.number(),
   unsubscribes: z.number(),
+  /**
+   * Approximate by nature — Apple Mail Privacy Protection pre-fetches every
+   * pixel and some proxies pre-fetch links, so both over-count. The UI labels
+   * them "~opens" / "~clicks" rather than pretending otherwise.
+   */
+  uniqueOpeners: z.number(),
+  uniqueClicks: z.number(),
 });
 
 const CampaignDetailSchema = CampaignSchema.extend({ stats: StatsSchema });
@@ -148,6 +158,17 @@ async function liveStats(
     .from(campaignUnsubscribeAttributions)
     .where(eq(campaignUnsubscribeAttributions.campaignId, campaign.id));
 
+  // One row per contact per campaign for opens, and per contact per link for
+  // clicks — the partial unique indexes guarantee it — so counting rows *is*
+  // counting unique people, with no DISTINCT needed for opens.
+  const byType = await db
+    .select({ eventType: campaignEvents.eventType, n: sql<number>`count(*)` })
+    .from(campaignEvents)
+    .where(eq(campaignEvents.campaignId, campaign.id))
+    .groupBy(campaignEvents.eventType);
+  const events = (t: string) =>
+    Number(byType.find((r) => r.eventType === t)?.n ?? 0);
+
   return {
     targeted: campaign.statsTargeted,
     delivered: count("sent"),
@@ -155,7 +176,16 @@ async function liveStats(
     retryableFailed: count("retryable_failed"),
     permanentFailed: count("permanent_failed"),
     unsubscribes: Number(unsub[0]?.n ?? 0),
+    uniqueOpeners: events("open"),
+    uniqueClicks: events("click"),
   };
+}
+
+/** Where the 24-hour chart starts: when the campaign actually went out. */
+function statsAnchor(campaign: typeof campaigns.$inferSelect): number {
+  const anchor =
+    campaign.sentAt ?? campaign.contentSnapshotAt ?? campaign.createdAt;
+  return Math.floor(anchor / 3600) * 3600;
 }
 
 // --- GET / ---
@@ -788,8 +818,10 @@ campaignsRouter.openapi(previewRoute, async (c) => {
     .limit(1);
   // A sent campaign previews its frozen copy; a draft previews the live
   // template, which is what the operator is still editing.
-  const html = campaign.htmlSnapshot ?? templates[0]?.bodyHtml;
-  if (html === undefined) return c.json({ error: "Template not found" }, 404);
+  const snapshot = campaign.htmlSnapshot ?? templates[0]?.bodyHtml;
+  if (snapshot === undefined)
+    return c.json({ error: "Template not found" }, 404);
+  const html = await resolveMarkersToDestinations(db, campaign.id, snapshot);
 
   const vars = {
     unsubscribe_url: `${c.env.BASE_URL.replace(/\/+$/, "")}/unsubscribe?token=preview`,
@@ -851,8 +883,10 @@ campaignsRouter.openapi(testSendRoute, async (c) => {
     .from(emailTemplates)
     .where(eq(emailTemplates.slug, campaign.templateSlug))
     .limit(1);
-  const html = campaign.htmlSnapshot ?? templates[0]?.bodyHtml;
-  if (html === undefined) return c.json({ error: "Template not found" }, 404);
+  const snapshot = campaign.htmlSnapshot ?? templates[0]?.bodyHtml;
+  if (snapshot === undefined)
+    return c.json({ error: "Template not found" }, 404);
+  const html = await resolveMarkersToDestinations(db, campaign.id, snapshot);
 
   // A real per-list token, so the tester can verify the actual unsubscribe
   // behaviour rather than a placeholder.
@@ -883,4 +917,144 @@ campaignsRouter.openapi(testSendRoute, async (c) => {
   // No campaign_recipients row, no stats change: a test must never look like
   // delivery in the numbers.
   return c.json({ sent: result.delivered.length > 0 });
+});
+
+// --- GET /:id/stats/timeseries ---
+
+const timeseriesRoute = createRoute({
+  method: "get",
+  path: "/{id}/stats/timeseries",
+  tags: ["Campaigns"],
+  description:
+    "24 hourly buckets of opens and clicks anchored to send time, computed live from the event ledger. Empty hours are included with zero counts.",
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    ...json200Response(
+      z.object({
+        data: z.array(
+          z.object({
+            hour: z.number(),
+            opens: z.number(),
+            clicks: z.number(),
+          }),
+        ),
+      }),
+      "Hourly engagement",
+    ),
+    404: {
+      description: "Not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+campaignsRouter.openapi(timeseriesRoute, async (c) => {
+  const db = c.get("db");
+  const { id } = c.req.valid("param");
+  const campaign = await loadForCaller(db, c.get("allowedInboxes")!, id);
+  if (!campaign) return c.json({ error: "Campaign not found" }, 404);
+
+  const start = statsAnchor(campaign);
+  const end = start + 24 * 3600;
+
+  // Bucketed in SQL rather than by reading every event: a 10,000-member
+  // campaign can produce far more event rows than a chart needs.
+  const rows = await db
+    .select({
+      hour: sql<number>`(${campaignEvents.occurredAt} / 3600) * 3600`,
+      eventType: campaignEvents.eventType,
+      n: sql<number>`count(*)`,
+    })
+    .from(campaignEvents)
+    .where(
+      and(
+        eq(campaignEvents.campaignId, campaign.id),
+        gte(campaignEvents.occurredAt, start),
+        lt(campaignEvents.occurredAt, end),
+      ),
+    )
+    .groupBy(sql`1`, campaignEvents.eventType);
+
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    counts.set(`${Number(r.hour)}:${r.eventType}`, Number(r.n));
+  }
+
+  // Zero-filled, so the chart has a continuous x-axis instead of collapsing
+  // quiet hours and misrepresenting the shape of the curve.
+  const data = Array.from({ length: 24 }, (_, i) => {
+    const hour = start + i * 3600;
+    return {
+      hour,
+      opens: counts.get(`${hour}:open`) ?? 0,
+      clicks: counts.get(`${hour}:click`) ?? 0,
+    };
+  });
+
+  return c.json({ data });
+});
+
+// --- GET /:id/links ---
+
+const linksRoute = createRoute({
+  method: "get",
+  path: "/{id}/links",
+  tags: ["Campaigns"],
+  description:
+    "Per-URL click counts for the campaign, sorted by clicks descending. Links with no clicks are included, so a dead link is distinguishable from a missing one.",
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    ...json200Response(
+      z.object({
+        data: z.array(
+          z.object({
+            url: z.string(),
+            clicks: z.number(),
+            clickRate: z.number(),
+          }),
+        ),
+      }),
+      "Per-link clicks",
+    ),
+    404: {
+      description: "Not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+campaignsRouter.openapi(linksRoute, async (c) => {
+  const db = c.get("db");
+  const { id } = c.req.valid("param");
+  const campaign = await loadForCaller(db, c.get("allowedInboxes")!, id);
+  if (!campaign) return c.json({ error: "Campaign not found" }, 404);
+
+  const rows = await db
+    .select({
+      url: campaignLinks.url,
+      clicks: sql<number>`count(${campaignEvents.id})`,
+    })
+    .from(campaignLinks)
+    .leftJoin(
+      campaignEvents,
+      and(
+        eq(campaignEvents.campaignLinkId, campaignLinks.id),
+        eq(campaignEvents.eventType, "click"),
+      ),
+    )
+    .where(eq(campaignLinks.campaignId, campaign.id))
+    .groupBy(campaignLinks.id)
+    .orderBy(desc(sql`count(${campaignEvents.id})`));
+
+  // Rate is against delivered, not targeted: targeted includes suppressed and
+  // failed recipients, who never had the chance to click.
+  const delivered = (await liveStats(db, campaign)).delivered;
+
+  return c.json({
+    data: rows.map((r) => ({
+      url: r.url,
+      clicks: Number(r.clicks),
+      clickRate: delivered > 0 ? Number(r.clicks) / delivered : 0,
+    })),
+  });
 });
