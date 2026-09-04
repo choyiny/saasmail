@@ -64,14 +64,14 @@ export async function snapshotCampaign(
   db: Db,
   campaignId: string,
   now: number,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<string | null> {
   const rows = await db
     .select()
     .from(campaigns)
     .where(eq(campaigns.id, campaignId))
     .limit(1);
   const campaign = rows[0];
-  if (!campaign) return { ok: false, error: "Campaign not found" };
+  if (!campaign) return "Campaign not found";
 
   const templates = await db
     .select()
@@ -79,9 +79,7 @@ export async function snapshotCampaign(
     .where(eq(emailTemplates.slug, campaign.templateSlug))
     .limit(1);
   const template = templates[0];
-  if (!template) {
-    return { ok: false, error: `Template ${campaign.templateSlug} not found` };
-  }
+  if (!template) return `Template ${campaign.templateSlug} not found`;
 
   // Rendered against list-level context only; per-recipient reserved variables
   // are substituted later, per send, against this frozen HTML.
@@ -101,7 +99,8 @@ export async function snapshotCampaign(
     })
     .where(eq(campaigns.id, campaignId));
 
-  return { ok: true };
+  // null means "snapshotted"; a string is the reason it could not be.
+  return null;
 }
 
 // --- Fan-out ---

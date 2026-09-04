@@ -15,6 +15,7 @@ import { people } from "../db/people.schema";
 import { asyncJobs } from "../db/async-jobs.schema";
 import { env } from "cloudflare:workers";
 import { sourceKey } from "../lib/list-import";
+import { campaigns } from "../db/campaigns.schema";
 
 beforeAll(applyMigrations);
 beforeEach(cleanDb);
@@ -184,11 +185,6 @@ describe("lists CRUD", () => {
     expect(res.status).toBe(403);
   });
 
-  /**
-   * The `campaigns` table does not exist yet, so `listHasCampaignHistory` is
-   * false and this is always the hard-delete branch. The archive branch gets
-   * its test when campaigns land.
-   */
   it("hard-deletes a list with no campaign history, and its memberships", async () => {
     const apiKey = await adminKey();
     const { body: list } = await createList(apiKey);
@@ -207,6 +203,74 @@ describe("lists CRUD", () => {
 
     expect(await getDb().select().from(lists)).toHaveLength(0);
     expect(await getDb().select().from(listMembers)).toHaveLength(0);
+  });
+
+  /**
+   * Once a campaign has targeted the list, the row has to survive: the
+   * campaign's audit trail references it, and deleting would strand the record
+   * of who was sent what.
+   */
+  it("archives instead of deleting once a campaign references the list", async () => {
+    const apiKey = await adminKey();
+    const { body: list } = await createList(apiKey);
+    await authFetch(`/api/lists/${list.id}/members`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ email: "a@example.com" }),
+    });
+
+    const t = Math.floor(Date.now() / 1000);
+    await getDb().insert(campaigns).values({
+      id: "camp-1",
+      name: "Weekly #1",
+      subject: "S",
+      templateSlug: "weekly",
+      fromAddress: FROM,
+      listId: list.id,
+      status: "sent",
+      createdAt: t,
+      updatedAt: t,
+    });
+
+    const res = await authFetch(`/api/lists/${list.id}`, {
+      apiKey,
+      method: "DELETE",
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).outcome).toBe("archived");
+
+    // The list and its memberships survive, marked archived.
+    const rows = await getDb().select().from(lists);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].archivedAt).not.toBeNull();
+    expect(await getDb().select().from(listMembers)).toHaveLength(1);
+  });
+
+  it("archiving is idempotent and does not move the timestamp", async () => {
+    const apiKey = await adminKey();
+    const { body: list } = await createList(apiKey);
+    const t = Math.floor(Date.now() / 1000);
+    await getDb().insert(campaigns).values({
+      id: "camp-1",
+      name: "Weekly #1",
+      subject: "S",
+      templateSlug: "weekly",
+      fromAddress: FROM,
+      listId: list.id,
+      status: "sent",
+      createdAt: t,
+      updatedAt: t,
+    });
+
+    await authFetch(`/api/lists/${list.id}`, { apiKey, method: "DELETE" });
+    const first = (await getDb().select().from(lists))[0].archivedAt;
+    const again = await authFetch(`/api/lists/${list.id}`, {
+      apiKey,
+      method: "DELETE",
+    });
+
+    expect((await again.json<any>()).outcome).toBe("archived");
+    expect((await getDb().select().from(lists))[0].archivedAt).toBe(first);
   });
 });
 

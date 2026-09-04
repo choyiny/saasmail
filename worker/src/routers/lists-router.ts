@@ -5,6 +5,7 @@ import { lists } from "../db/lists.schema";
 import { listMembers } from "../db/list-members.schema";
 import { contacts } from "../db/contacts.schema";
 import { asyncJobs } from "../db/async-jobs.schema";
+import { campaigns } from "../db/campaigns.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import {
   assertInboxAllowed,
@@ -146,17 +147,20 @@ async function loadListForCaller(
 /**
  * Whether any campaign has ever targeted this list.
  *
- * The `campaigns` table does not exist yet — it lands with the campaign slice —
- * so this is `false` for now and `DELETE` always takes the hard-delete branch.
- * The archive branch below is already written and specified; when `campaigns`
- * arrives this becomes a `SELECT 1 FROM campaigns WHERE list_id = ? LIMIT 1`
- * and the archive path activates with no other change to the endpoint.
+ * A delivered campaign's audit trail references the list, so once one exists
+ * the row has to survive — deleting it would strand the record of who was sent
+ * what. That is why DELETE archives instead.
  */
 async function listHasCampaignHistory(
-  _db: Variables["db"],
-  _listId: string,
+  db: Variables["db"],
+  listId: string,
 ): Promise<boolean> {
-  return false;
+  const rows = await db
+    .select({ id: campaigns.id })
+    .from(campaigns)
+    .where(eq(campaigns.listId, listId))
+    .limit(1);
+  return rows.length > 0;
 }
 
 async function memberCounts(db: Variables["db"], listId: string) {

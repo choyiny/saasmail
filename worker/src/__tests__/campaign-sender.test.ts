@@ -176,8 +176,8 @@ describe("htmlToText", () => {
 describe("snapshotCampaign", () => {
   it("freezes the rendered content and derives a text part", async () => {
     await seed();
-    const result = await snapshotCampaign(getDb(), CAMPAIGN, now());
-    expect(result.ok).toBe(true);
+    // null means snapshotted; a string would be the reason it could not be.
+    expect(await snapshotCampaign(getDb(), CAMPAIGN, now())).toBeNull();
 
     const c = (
       await getDb().select().from(campaigns).where(eq(campaigns.id, CAMPAIGN))
@@ -224,8 +224,9 @@ describe("snapshotCampaign", () => {
   it("reports a missing template rather than sending blank mail", async () => {
     await seed();
     await getDb().delete(emailTemplates);
-    const result = await snapshotCampaign(getDb(), CAMPAIGN, now());
-    expect(result.ok).toBe(false);
+    expect(await snapshotCampaign(getDb(), CAMPAIGN, now())).toMatch(
+      /Template .* not found/,
+    );
   });
 });
 

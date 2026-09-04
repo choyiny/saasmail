@@ -42,6 +42,7 @@ import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
 import { listsRouter } from "./routers/lists-router";
 import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
+import { campaignsRouter } from "./routers/campaigns-router";
 import { publicSubscribeRouter } from "./routers/public-subscribe-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
@@ -256,6 +257,7 @@ app.route("/api/lists", listsRouter);
 app.use("/api/subscribe-forms", requireAdmin);
 app.use("/api/subscribe-forms/*", requireAdmin);
 app.route("/api/subscribe-forms", subscribeFormsRouter);
+app.route("/api/campaigns", campaignsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);

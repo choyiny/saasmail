@@ -1,0 +1,673 @@
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import {
+  applyMigrations,
+  authFetch,
+  cleanDb,
+  createTestUser,
+  getDb,
+} from "./helpers";
+import { asyncJobs } from "../db/async-jobs.schema";
+import { campaignRecipients } from "../db/campaign-recipients.schema";
+import { campaigns } from "../db/campaigns.schema";
+import { campaignUnsubscribeAttributions } from "../db/campaign-unsubscribe-attributions.schema";
+import { contacts } from "../db/contacts.schema";
+import { emailTemplates } from "../db/email-templates.schema";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
+import { listMembers } from "../db/list-members.schema";
+import { lists } from "../db/lists.schema";
+import {
+  ALLOWED_TRANSITIONS,
+  canPerform,
+  type CampaignAction,
+  type CampaignStatus,
+} from "../lib/campaign-states";
+import { runCampaignPass } from "../lib/newsletter-cron";
+
+beforeAll(applyMigrations);
+beforeEach(cleanDb);
+
+const FROM = "news@example.com";
+const LIST = "list-1";
+const ts = () => Math.floor(Date.now() / 1000);
+const cfEnv = () => env as unknown as CloudflareBindings;
+
+async function adminKey() {
+  const { apiKey } = await createTestUser({
+    id: "u-admin",
+    role: "admin",
+    email: "admin@example.com",
+  });
+  return apiKey;
+}
+
+async function seedListAndTemplate(members = 1) {
+  const t = ts();
+  await getDb().insert(lists).values({
+    id: LIST,
+    name: "Weekly",
+    description: null,
+    fromAddress: FROM,
+    doubleOptIn: 0,
+    confirmationTemplateSlug: null,
+    archivedAt: null,
+    createdAt: t,
+    updatedAt: t,
+  });
+  await getDb().insert(emailTemplates).values({
+    id: "tpl-1",
+    slug: "weekly",
+    name: "Weekly",
+    subject: "This week",
+    bodyHtml: "<p>Hi {{subscriber_name}}</p><p>{{unsubscribe_url}}</p>",
+    fromAddress: null,
+    createdAt: t,
+    updatedAt: t,
+  });
+  for (let i = 0; i < members; i++) {
+    await getDb()
+      .insert(contacts)
+      .values({
+        id: `c-${i}`,
+        email: `u${i}@example.com`,
+        name: `User ${i}`,
+        personId: null,
+        createdAt: t,
+        updatedAt: t,
+      });
+    await getDb()
+      .insert(listMembers)
+      .values({
+        id: `m-${i}`,
+        listId: LIST,
+        contactId: `c-${i}`,
+        email: `u${i}@example.com`,
+        status: "subscribed",
+        source: "api",
+        formId: null,
+        submittedIp: null,
+        consentSource: "api",
+        consentAt: t,
+        importJobId: null,
+        subscribedAt: t,
+        confirmedAt: null,
+        unsubscribedAt: null,
+        unsubscribeReason: null,
+        createdAt: t,
+      });
+  }
+}
+
+async function createCampaign(apiKey: string, overrides: object = {}) {
+  const res = await authFetch("/api/campaigns", {
+    apiKey,
+    method: "POST",
+    body: JSON.stringify({
+      name: "Weekly #1",
+      subject: "This week",
+      templateSlug: "weekly",
+      listId: LIST,
+      ...overrides,
+    }),
+  });
+  return { res, body: res.status === 201 ? await res.json<any>() : null };
+}
+
+async function setStatus(id: string, status: string) {
+  await getDb()
+    .update(campaigns)
+    .set({ status: status as never })
+    .where(eq(campaigns.id, id));
+}
+
+const ALL_STATUSES: CampaignStatus[] = [
+  "draft",
+  "scheduled",
+  "overdue",
+  "preparing",
+  "sending",
+  "sent",
+  "completed_with_failures",
+  "cancelled",
+  "stalled",
+];
+
+describe("campaign state machine", () => {
+  /**
+   * Exhaustive rather than illustrative: this table is the only thing standing
+   * between an operator and, say, re-sending a completed campaign. Every
+   * (action, status) pair is asserted, so adding a status without deciding what
+   * it permits fails here.
+   */
+  it.each(Object.keys(ALLOWED_TRANSITIONS) as CampaignAction[])(
+    "%s permits exactly its listed statuses and no others",
+    (action) => {
+      const permitted = ALLOWED_TRANSITIONS[action];
+      for (const status of ALL_STATUSES) {
+        expect(canPerform(action, status)).toBe(permitted.includes(status));
+      }
+    },
+  );
+
+  it("never allows editing or deleting anything but a draft", () => {
+    // Content is snapshotted on leaving draft; editing later would mean two
+    // different emails going out under one campaign name.
+    expect(ALLOWED_TRANSITIONS.edit).toEqual(["draft"]);
+    expect(ALLOWED_TRANSITIONS.delete).toEqual(["draft"]);
+  });
+
+  it("never allows sending a campaign that already sent", () => {
+    for (const status of ["sent", "completed_with_failures", "sending"]) {
+      expect(canPerform("send", status as CampaignStatus)).toBe(false);
+    }
+  });
+
+  it("allows retry only from the two stopped-part-way states", () => {
+    expect(ALLOWED_TRANSITIONS.retry.sort()).toEqual([
+      "completed_with_failures",
+      "stalled",
+    ]);
+  });
+});
+
+describe("campaigns CRUD", () => {
+  it("creates a draft that inherits the list's sending identity", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { res, body } = await createCampaign(apiKey);
+
+    expect(res.status).toBe(201);
+    expect(body.status).toBe("draft");
+    // Never taken from the request: a campaign cannot be sent from an identity
+    // the list does not use.
+    expect(body.fromAddress).toBe(FROM);
+  });
+
+  it("404s for an unknown list and 409s for an archived one", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+
+    const missing = await authFetch("/api/campaigns", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        name: "X",
+        subject: "S",
+        templateSlug: "weekly",
+        listId: "nope",
+      }),
+    });
+    expect(missing.status).toBe(404);
+
+    await getDb()
+      .update(lists)
+      .set({ archivedAt: ts() })
+      .where(eq(lists.id, LIST));
+    const { res } = await createCampaign(apiKey);
+    expect(res.status).toBe(409);
+  });
+
+  it("refuses a list the caller is not scoped to", async () => {
+    await adminKey();
+    await seedListAndTemplate();
+    const { apiKey } = await createTestUser({
+      id: "u-m1",
+      role: "member",
+      email: "m1@example.com",
+    });
+    await getDb().insert(inboxPermissions).values({
+      userId: "u-m1",
+      email: "other@example.com",
+      createdAt: ts(),
+      createdBy: "u-admin",
+    });
+
+    const { res } = await createCampaign(apiKey);
+    expect(res.status).toBe(403);
+  });
+
+  it("edits a draft and refuses to edit anything else", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+
+    const ok = await authFetch(`/api/campaigns/${body.id}`, {
+      apiKey,
+      method: "PATCH",
+      body: JSON.stringify({ subject: "Changed" }),
+    });
+    expect(ok.status).toBe(200);
+    expect((await ok.json<any>()).subject).toBe("Changed");
+
+    await setStatus(body.id, "sending");
+    const blocked = await authFetch(`/api/campaigns/${body.id}`, {
+      apiKey,
+      method: "PATCH",
+      body: JSON.stringify({ subject: "Too late" }),
+    });
+    expect(blocked.status).toBe(409);
+    expect((await blocked.json<any>()).error).toContain("sending");
+  });
+
+  it("deletes a draft but never a campaign that has sent", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+
+    await setStatus(body.id, "sent");
+    const blocked = await authFetch(`/api/campaigns/${body.id}`, {
+      apiKey,
+      method: "DELETE",
+    });
+    // The recipient ledger is the record of who received what.
+    expect(blocked.status).toBe(409);
+
+    await setStatus(body.id, "draft");
+    const ok = await authFetch(`/api/campaigns/${body.id}`, {
+      apiKey,
+      method: "DELETE",
+    });
+    expect(ok.status).toBe(200);
+    expect(await getDb().select().from(campaigns)).toHaveLength(0);
+  });
+
+  it("returns live stats computed from the ledgers", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+
+    await getDb()
+      .insert(campaignRecipients)
+      .values([
+        {
+          id: "cr-1",
+          campaignId: body.id,
+          contactId: "c-0",
+          email: "u0@example.com",
+          status: "sent",
+          idempotencyKey: "k1",
+          attempts: 1,
+          queuedAt: ts(),
+        },
+        {
+          id: "cr-2",
+          campaignId: body.id,
+          contactId: "c-x",
+          email: "x@example.com",
+          status: "permanent_failed",
+          idempotencyKey: "k2",
+          attempts: 1,
+          queuedAt: ts(),
+        },
+      ]);
+    await getDb().insert(campaignUnsubscribeAttributions).values({
+      id: "ua-1",
+      campaignId: body.id,
+      listMemberId: "m-0",
+      occurredAt: ts(),
+    });
+
+    const detail = await (
+      await authFetch(`/api/campaigns/${body.id}`, { apiKey })
+    ).json<any>();
+    expect(detail.stats.delivered).toBe(1);
+    expect(detail.stats.permanentFailed).toBe(1);
+    // Derived from the attribution ledger, never an incremented counter.
+    expect(detail.stats.unsubscribes).toBe(1);
+  });
+});
+
+describe("send", () => {
+  it("snapshots, creates a fan-out job and moves to preparing", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(2);
+    const { body } = await createCampaign(apiKey);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/send`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, body.id))
+    )[0];
+    expect(c.status).toBe("preparing");
+    expect(c.htmlSnapshot).not.toBeNull();
+    expect(c.textSnapshot).not.toBeNull();
+    expect(c.fanOutJobId).not.toBeNull();
+
+    const jobs = await getDb().select().from(asyncJobs);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0].jobType).toBe("campaign_fan_out");
+  });
+
+  it("refuses a list with no subscribers", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(0);
+    const { body } = await createCampaign(apiKey);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/send`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(422);
+  });
+
+  /**
+   * A missing template must not leave the campaign stuck in `preparing` with
+   * nothing to send — it has to fall back to where it started.
+   */
+  it("rolls back to draft when the template is gone", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    const { body } = await createCampaign(apiKey);
+    await getDb().delete(emailTemplates);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/send`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(422);
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, body.id))
+    )[0];
+    expect(c.status).toBe("draft");
+  });
+
+  it("refuses to send a campaign that is already sending", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    const { body } = await createCampaign(apiKey);
+    await setStatus(body.id, "sending");
+
+    const res = await authFetch(`/api/campaigns/${body.id}/send`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("schedule and cancel", () => {
+  it("schedules for the future and refuses the past", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+
+    const past = await authFetch(`/api/campaigns/${body.id}/schedule`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ scheduledAt: ts() - 60 }),
+    });
+    // Sending immediately would surprise someone who mistyped a date.
+    expect(past.status).toBe(422);
+
+    const ok = await authFetch(`/api/campaigns/${body.id}/schedule`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ scheduledAt: ts() + 3600 }),
+    });
+    expect(ok.status).toBe(200);
+    expect((await ok.json<any>()).status).toBe("scheduled");
+  });
+
+  it("cancels and stops the fan-out job", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    const { body } = await createCampaign(apiKey);
+    await authFetch(`/api/campaigns/${body.id}/send`, {
+      apiKey,
+      method: "POST",
+    });
+
+    const res = await authFetch(`/api/campaigns/${body.id}/cancel`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).status).toBe("cancelled");
+
+    const job = (await getDb().select().from(asyncJobs))[0];
+    expect(job.status).toBe("cancelled");
+  });
+
+  it("refuses to cancel an already-sent campaign", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+    await setStatus(body.id, "sent");
+
+    const res = await authFetch(`/api/campaigns/${body.id}/cancel`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("retry", () => {
+  async function seedRecipients(campaignId: string) {
+    const statuses = [
+      "queued",
+      "retrying",
+      "retryable_failed",
+      "permanent_failed",
+      "unknown",
+      "sent",
+    ];
+    await getDb()
+      .insert(campaignRecipients)
+      .values(
+        statuses.map((status, i) => ({
+          id: `cr-${i}`,
+          campaignId,
+          contactId: `c-r${i}`,
+          email: `r${i}@example.com`,
+          status: status as never,
+          idempotencyKey: `k-${i}`,
+          attempts: 1,
+          queuedAt: ts(),
+        })),
+      );
+  }
+
+  /**
+   * The rule that protects subscribers: an address the provider permanently
+   * rejected, or one whose outcome is unknown, is never re-sent — not by the
+   * cron and not by an operator clicking Retry.
+   */
+  it("re-enqueues only recoverable recipients", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+    await setStatus(body.id, "completed_with_failures");
+    await seedRecipients(body.id);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/retry`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    // queued + retrying + retryable_failed only.
+    expect((await res.json<any>()).requeued).toBe(3);
+  });
+
+  it("refuses to retry a campaign that is not stopped", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/retry`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it("is a no-op when nothing is recoverable", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+    await setStatus(body.id, "stalled");
+
+    const res = await authFetch(`/api/campaigns/${body.id}/retry`, {
+      apiKey,
+      method: "POST",
+    });
+    expect((await res.json<any>()).requeued).toBe(0);
+  });
+});
+
+describe("preview and test-send", () => {
+  it("previews with sample values and creates nothing", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/preview`, {
+      apiKey,
+    });
+    expect(res.status).toBe(200);
+    const preview = await res.json<any>();
+    expect(preview.html).toContain("Sample Subscriber");
+    expect(preview.subject).toBe("This week");
+
+    // A preview must never look like delivery.
+    expect(await getDb().select().from(campaignRecipients)).toHaveLength(0);
+  });
+
+  it("test-send creates no recipients and no stats", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/test-send`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ to: "me@example.com" }),
+    });
+    expect(res.status).toBe(200);
+
+    expect(await getDb().select().from(campaignRecipients)).toHaveLength(0);
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, body.id))
+    )[0];
+    expect(c.statsTargeted).toBe(0);
+    expect(c.status).toBe("draft");
+  });
+
+  it("refuses a test-send once the campaign is sending", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+    await setStatus(body.id, "sending");
+
+    const res = await authFetch(`/api/campaigns/${body.id}/test-send`, {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ to: "me@example.com" }),
+    });
+    expect(res.status).toBe(409);
+  });
+});
+
+describe("hourly campaign pass", () => {
+  async function seedCampaign(status: string, extra: object = {}) {
+    const t = ts();
+    await getDb()
+      .insert(campaigns)
+      .values({
+        id: "camp-x",
+        name: "X",
+        subject: "S",
+        templateSlug: "weekly",
+        fromAddress: FROM,
+        listId: LIST,
+        status: status as never,
+        createdAt: t,
+        updatedAt: t,
+        ...extra,
+      });
+  }
+
+  it("fires a campaign whose schedule has passed", async () => {
+    await seedListAndTemplate(1);
+    await seedCampaign("scheduled", { scheduledAt: ts() - 60 });
+
+    await runCampaignPass(getDb(), cfEnv(), ts());
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
+    )[0];
+    expect(c.status).toBe("preparing");
+  });
+
+  /**
+   * Neither fired nor dropped. A day-old announcement may no longer be correct,
+   * so it becomes visible and waits for a human.
+   */
+  it("moves a long-overdue campaign to overdue instead of firing it", async () => {
+    await seedListAndTemplate(1);
+    await seedCampaign("scheduled", { scheduledAt: ts() - 25 * 3600 });
+
+    await runCampaignPass(getDb(), cfEnv(), ts());
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
+    )[0];
+    expect(c.status).toBe("overdue");
+    expect(c.htmlSnapshot).toBeNull();
+  });
+
+  it("marks a campaign stuck mid-flight as stalled", async () => {
+    await seedListAndTemplate(1);
+    await seedCampaign("sending");
+    await getDb()
+      .update(campaigns)
+      .set({ updatedAt: ts() - 25 * 3600 })
+      .where(eq(campaigns.id, "camp-x"));
+
+    await runCampaignPass(getDb(), cfEnv(), ts());
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
+    )[0];
+    expect(c.status).toBe("stalled");
+  });
+
+  it("leaves a recently active campaign alone", async () => {
+    await seedListAndTemplate(1);
+    await seedCampaign("sending");
+
+    await runCampaignPass(getDb(), cfEnv(), ts());
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
+    )[0];
+    expect(c.status).toBe("sending");
+  });
+
+  it("refreshes the advisory stats cache", async () => {
+    await seedListAndTemplate(1);
+    await seedCampaign("sending");
+    await getDb().insert(campaignRecipients).values({
+      id: "cr-1",
+      campaignId: "camp-x",
+      contactId: "c-0",
+      email: "u0@example.com",
+      status: "sent",
+      idempotencyKey: "k",
+      attempts: 1,
+      queuedAt: ts(),
+    });
+
+    await runCampaignPass(getDb(), cfEnv(), ts());
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
+    )[0];
+    expect(c.statsDelivered).toBe(1);
+  });
+});
