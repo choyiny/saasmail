@@ -37,6 +37,7 @@ import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
+import { contactsRouter } from "./routers/contacts-router";
 import { publicTrackRouter } from "./routers/public-track-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
@@ -259,6 +260,11 @@ app.use("/api/subscribe-forms", requireAdmin);
 app.use("/api/subscribe-forms/*", requireAdmin);
 app.route("/api/subscribe-forms", subscribeFormsRouter);
 app.route("/api/campaigns", campaignsRouter);
+
+// Subject-access and erasure. Admin only: these read and rewrite an
+// identified person's whole newsletter history.
+app.use("/api/contacts/*", requireAdmin);
+app.route("/api/contacts", contactsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);

@@ -96,55 +96,55 @@ exist yet.
 
 ---
 
-## Slice B — CSV import (async job)
+## Slice B — CSV import (async job) ✅ complete (0089778)
 
-- [ ] **B.1 Queue message discriminated union + legacy fallback (TDD, plan R3)**
+- [x] **B.1 Queue message discriminated union + legacy fallback (TDD, plan R3)**
   - Acceptance: `handleQueueBatch` branches on `type`; a message with **no** `type` is processed as
     a sequence email (deploy-window safety), not dropped or infinitely retried
   - Verify: a test that feeds an untyped legacy message and asserts sequence handling
   - Files: `worker/src/lib/sequence-processor.ts`, `worker/src/index.ts`,
     `worker/src/__tests__/queue-routing.test.ts`
 
-- [ ] **B.2 R2 upload + `async_jobs` row + 202 response**
+- [x] **B.2 R2 upload + `async_jobs` row + 202 response**
   - Acceptance: `POST /api/lists/:id/members/import` streams to `env.R2` at `imports/{jobId}.csv`,
     creates the job row, enqueues one coordinator message, returns 202 `{ jobId }`
   - Verify: integration test asserting the R2 object and job row exist and nothing was parsed inline
   - Files: `worker/src/routers/lists-router.ts`, `worker/src/lib/list-import.ts`,
     `worker/src/__tests__/list-import.test.ts`
 
-- [ ] **B.3 Cursor-paged coordinator with RFC 4180 staging**
+- [x] **B.3 Cursor-paged coordinator with RFC 4180 staging**
   - Acceptance: first invocation stages the R2 object into row-addressable records; later pages use
     a **staged-row** cursor (not a byte offset), so a multiline quoted field survives a page
     boundary; `status = 'cancelled'` stops re-enqueue
   - Verify: 10,000-row import test + an explicit multiline-quoted-field-across-page-boundary test
   - Files: `worker/src/lib/list-import.ts`, `worker/src/__tests__/list-import.test.ts`
 
-- [ ] **B.4 Import semantics — dedup, skips, caps, cleanup**
+- [x] **B.4 Import semantics — dedup, skips, caps, cleanup**
   - Acceptance: first occurrence of a duplicate email wins (`duplicate_in_file` in `skippedCount`);
     invalid emails skipped with reasons capped at 50; imports land `subscribed` with
     `consentSource: 'import'`; 10MB/10k limits; R2 object deleted after a 24h retention window
   - Verify: integration tests per rule
   - Files: `worker/src/lib/list-import.ts`, `worker/src/__tests__/list-import.test.ts`
 
-- [ ] **B.5 Job progress + cancel endpoints**
+- [x] **B.5 Job progress + cancel endpoints**
   - Acceptance: `GET .../import/:jobId` reports progress; `DELETE` cancels
   - Verify: integration test polling a job to completion, and one cancelling mid-run
   - Files: `worker/src/routers/lists-router.ts`, `worker/src/__tests__/lists-router.test.ts`
 
-- [ ] **B.6 Checkpoint** — typecheck, test, format
+- [x] **B.6 Checkpoint** — typecheck, test, format
 
 ---
 
-## Slice C — Subscribe forms
+## Slice C — Subscribe forms ✅ complete (04d086a)
 
-- [ ] **C.1 `subscribe_forms` + `subscribe_attempts` schemas and migration**
+- [x] **C.1 `subscribe_forms` + `subscribe_attempts` schemas and migration**
   - Acceptance: tables per spec §Database Schema; `subscribe_attempts` stores `emailHash`
     (SHA-256 of the lowercased address), never the raw address, since it is a high-write ledger
   - Verify: `yarn db:generate` → `yarn db:migrate:dev`; add both to `applyMigrations` **and**
     `cleanDb` in `__tests__/helpers.ts`
   - Files: 2 schema files, `db/index.ts`, `db/schema.ts`, `__tests__/helpers.ts`, migration
 
-- [ ] **C.2 `subscribe-token.ts` — HMAC confirm tokens (TDD)**
+- [x] **C.2 `subscribe-token.ts` — HMAC confirm tokens (TDD)**
   - Acceptance: signs `{v, formId, contactId, exp}` with a key derived for the _subscribe-confirm_
     domain; round-trips; rejects a tampered signature, a wrong key, a malformed token, and an
     expired one; a token signed for another domain fails verification here
@@ -153,20 +153,20 @@ exist yet.
   - Note: domain separation is shared with the unsubscribe/tracking tokens — decide the key
     derivation helper here since this is the first of the four domains to land.
 
-- [ ] **C.3 Admin CRUD for forms**
+- [x] **C.3 Admin CRUD for forms**
   - Acceptance: `/api/subscribe-forms` list/create/read/update/delete, admin-only per the
     Authorization Matrix; `GET /:id` returns the embed snippet
   - Verify: integration tests including a member being refused
   - Files: `routers/subscribe-forms-router.ts`, `index.ts`, tests
 
-- [ ] **C.4 Public `POST /subscribe/:form_id` + `GET /subscribe/confirm/:token`**
+- [x] **C.4 Public `POST /subscribe/:form_id` + `GET /subscribe/confirm/:token`**
   - Acceptance: mounts **outside** `/api` (session middleware is scoped to `/api/*`); single and
     double opt-in flows; idempotent re-submit; 422 on invalid email; confirm is idempotent and
     410s on an expired token
   - Verify: integration tests for both flows
   - Files: `routers/public-subscribe-router.ts`, `index.ts`, tests
 
-- [ ] **C.5 Abuse controls**
+- [x] **C.5 Abuse controls**
   - Acceptance: honeypot `_hp` returns 200 without writing; 4 KB body cap → 413; 10
     submissions/IP/hour and 2 confirmation resends per (form, emailHash)/hour via
     `subscribe_attempts`; `allowedOrigins` fails **closed** (missing Origin is a non-match);
@@ -175,15 +175,15 @@ exist yet.
     repeat submission against an _existing_ pending membership (which a `list_members` count cannot)
   - Files: `routers/public-subscribe-router.ts`, `lib/subscribe-abuse.ts`, tests
 
-- [ ] **C.6 Confirmation email**
+- [x] **C.6 Confirmation email**
   - Acceptance: sends via the existing send path using `confirmationTemplateSlug`, falling back to
     a built-in default HTML constant so double opt-in works with no template setup
   - Verify: integration test asserting a send was attempted with the confirm URL in the body
   - Files: `lib/subscribe-confirmation.ts`, `routers/public-subscribe-router.ts`, tests
 
-- [ ] **C.7 Checkpoint** — tsc, `yarn test --maxWorkers=4`, format
+- [x] **C.7 Checkpoint** — tsc, `yarn test --maxWorkers=4`, format
 
-## Slice D — Campaign core _(stub — expand when reached)_
+## Slice D — Campaign core ✅ complete (d8530ec, b1fa909, f06b41f)
 
 Campaign tables + `sent_emails.campaignId` → **outbox extension first** (`campaignRecipientId`,
 `bookkeeping_pending`, reconciliation-before-claim, R1 regression tests) → resolve R2 (recompute
@@ -191,32 +191,73 @@ the v2 unsubscribe URL in `attemptOutboxRow`) → `SendInput.unsubscribeContext`
 (incl. `html-to-text.ts` for `textSnapshot`) → cursor-paged fan-out coordinator → per-recipient
 handler with the atomic claim → completion check → hourly cron pass → load test (R6).
 
-## Slice E — Tracking _(stub)_
+## Slice E — Tracking ✅ complete (039a1cc)
 
 `campaign_links`, `campaign_events` + the two partial unique indexes (raw SQL via
 `yarn db:generate --custom`) → `track-token.ts` → HTMLRewriter link rewriting (HTML part only) →
 public pixel + click routes → stats endpoints.
 
-## Slice F — Per-list unsubscribe _(stub)_
+## Slice F — Per-list unsubscribe ✅ complete (db2a07c)
 
 `unsubscribe-token.ts` v2 branch (v1 must keep verifying) →
 `campaign_unsubscribe_attributions` → unsubscribe handler batch (attribution insert + guarded
 membership update) → cross-campaign/cross-list token rejection.
 
-## Slice G — Frontend _(stub)_
+## Slice J — Privacy, retention and backfill ✅ complete
+
+Not in the original slice list — found while re-reading the spec's Privacy &
+Retention section against the code. Three of its requirements had no
+implementation at all, and two library comments referred to an "hourly
+backfill" that did not exist.
+
+- [x] **J.1 `list_members.submittedIp` 30-day sweep** — bounded batch, the
+      membership row is kept (it is the consent record); only the IP is cleared
+- [x] **J.2 `campaign_events` 13-month sweep** — bounded batch; an unbounded
+      DELETE over thirteen months of events is the statement that times out and
+      then never succeeds on any later tick either
+- [x] **J.3 `contacts.personId` backfill** — links subscribers who have since
+      become correspondents; never creates a `people` row (Decision 23)
+- [x] **J.4 `GET /api/contacts/:email/export`** — subject-access, admin only
+- [x] **J.5 `POST /api/contacts/:email/erase`** — keyed-HMAC pseudonym, not a
+      bare digest: email addresses are low-entropy, so a plain SHA-256 is
+      reversible with a dictionary and would not be erasure at all. Rows are
+      kept and rewritten — they are the evidence a suppression happened
+- [x] **J.6 Cron wiring test** — a sweep that is never called from the entry
+      point is indistinguishable from one that was never written, and the
+      worker typecheck does not cover that call path
+
+## Slice G — Frontend
+
+- [ ] **G.1 ListsPage + ListDetailPage + ListMembersTable** (import job progress)
+- [ ] **G.2 SubscribeFormsPage + SubscribeFormBuilderPage + FormSnippet**
+- [ ] **G.3 CampaignsPage + CampaignDetailPage + CampaignStatsCard**
+      (targeted vs delivered; overdue/stalled/completed_with_failures banners;
+      24h chart; links table; "~opens"/"~clicks" labels per the accuracy caveat)
+- [ ] **G.4 Sidebar nav links**
+- [ ] **G.5 PersonDetail — list memberships section + campaign badge in timeline**
+- [ ] **G.6 Admin contact export/erasure UI** (backed by slice J)
+- [ ] **G.7 e2e tests**
 
 `ListsPage`, `ListDetailPage`, `ListMembersTable`, `SubscribeFormsPage`,
 `SubscribeFormBuilderPage`, `FormSnippet`, `CampaignsPage`, `CampaignDetailPage`,
 `CampaignStatsCard`, sidebar nav, PersonDetail list-memberships section. Imperative
 `useState`/`useEffect` + `fetch`, matching `AdminUsersPage` — no `useQuery`.
 
-## Slice H — WebMCP read tools _(stub)_
+## Slice H — WebMCP read tools
+
+- [ ] **H.1** `list_newsletter_lists`, `get_newsletter_list`, `list_campaigns`,
+      `get_campaign_stats` — read only (Decision 27: no action tools in v1)
 
 Extend `createReadTools` in `src/webmcp/tools/read.ts`: `list_newsletter_lists`,
 `get_newsletter_list`, `list_campaigns`, `get_campaign_stats`. **No action tools** (spec
 Decision 27).
 
-## Slice I — Docs and release _(stub)_
+## Slice I — Docs and release
+
+- [ ] **I.1** `docs/newsletters.md`, linked from `docs/README.md`
+- [ ] **I.2** `CHANGELOG.md` `## [Unreleased]` entry
+- [ ] **I.3** `PROVIDER_DAILY_SEND_LIMIT` in `wrangler.jsonc.example`
+- [ ] **I.4** PR semver label
 
 `docs/newsletters.md` linked from `docs/README.md`; `CHANGELOG.md` `## [Unreleased]` entry;
 `PROVIDER_DAILY_SEND_LIMIT` documented in `wrangler.jsonc.example`; request a semver label.

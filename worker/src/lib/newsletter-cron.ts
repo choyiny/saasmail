@@ -8,6 +8,11 @@ import {
   refreshCampaignStats,
 } from "./campaign-sender";
 import { purgeFinishedImports } from "./list-import";
+import {
+  backfillContactPersonIds,
+  purgeExpiredCampaignEvents,
+  purgeExpiredMemberIps,
+} from "./newsletter-retention";
 import { purgeExpiredAttempts } from "./subscribe-abuse";
 
 /**
@@ -32,6 +37,15 @@ export async function runNewsletterMaintenance(
   );
   await runCampaignPass(db, env, now).catch((err) =>
     console.error("[cron] campaign pass failed:", err),
+  );
+  await purgeExpiredMemberIps(db, now).catch((err) =>
+    console.error("[cron] member-IP purge failed:", err),
+  );
+  await purgeExpiredCampaignEvents(db, now).catch((err) =>
+    console.error("[cron] campaign-event purge failed:", err),
+  );
+  await backfillContactPersonIds(db).catch((err) =>
+    console.error("[cron] contact person backfill failed:", err),
   );
 }
 
