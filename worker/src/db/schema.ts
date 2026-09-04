@@ -23,6 +23,11 @@ import { lists } from "./lists.schema";
 import { listMembers } from "./list-members.schema";
 import { subscribeForms } from "./subscribe-forms.schema";
 import { subscribeAttempts } from "./subscribe-attempts.schema";
+import { campaigns } from "./campaigns.schema";
+import { campaignRecipients } from "./campaign-recipients.schema";
+import { campaignLinks } from "./campaign-links.schema";
+import { campaignEvents } from "./campaign-events.schema";
+import { campaignUnsubscribeAttributions } from "./campaign-unsubscribe-attributions.schema";
 
 export const schema = {
   ...authSchema,
@@ -50,4 +55,9 @@ export const schema = {
   listMembers,
   subscribeForms,
   subscribeAttempts,
+  campaigns,
+  campaignRecipients,
+  campaignLinks,
+  campaignEvents,
+  campaignUnsubscribeAttributions,
 } as const;

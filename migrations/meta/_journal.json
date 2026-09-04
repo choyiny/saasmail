@@ -260,6 +260,20 @@
       "when": 1788473701799,
       "tag": "0036_newsletter_subscribe_forms",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1788502270924,
+      "tag": "0037_newsletter_campaigns",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1788502357321,
+      "tag": "0038_newsletter_partial_indexes",
+      "breakpoints": true
     }
   ]
 }

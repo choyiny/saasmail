@@ -39,6 +39,13 @@ export interface OutboxSendParams {
   sentEmailId: string;
   /** Set for sequence-step sends. */
   sequenceEmailId?: string | null;
+  /**
+   * Set for campaign sends. Its presence changes what happens on provider
+   * success: the row is held as `bookkeeping_pending` instead of deleted, so a
+   * crash before the campaign finishes its own bookkeeping leaves durable
+   * evidence that the message was already accepted.
+   */
+  campaignRecipientId?: string | null;
   /** Bare lowercase inbox address (scoping key; re-formatted on retry). */
   fromAddress: string;
   /** Formatted "Name <addr>" for the wire. */
@@ -56,6 +63,11 @@ export interface OutboxSendParams {
 export interface OutboxSendResult {
   outcome: OutboxOutcome;
   send: SendOutput;
+  /**
+   * The outbox row's id. Campaign callers need it to delete the row once their
+   * bookkeeping is done; other callers can ignore it (the row is already gone).
+   */
+  outboxId: string;
 }
 
 /**
@@ -73,6 +85,7 @@ export async function sendViaOutbox(
     sender,
     sentEmailId,
     sequenceEmailId,
+    campaignRecipientId,
     fromAddress,
     from,
     to,
@@ -91,6 +104,7 @@ export async function sendViaOutbox(
     id: outboxId,
     sentEmailId,
     sequenceEmailId: sequenceEmailId ?? null,
+    campaignRecipientId: campaignRecipientId ?? null,
     fromAddress,
     toAddress: to,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
@@ -143,13 +157,25 @@ export async function sendViaOutbox(
     // Every recipient suppressed — no transport call happened. Nothing to
     // retry; sent_emails gets no row (matches pre-outbox behavior).
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
-    return { outcome: "suppressed", send };
+    return { outcome: "suppressed", send, outboxId };
   }
 
   const result = send.result!;
   if (!result.error) {
-    await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
-    return { outcome: "sent", send };
+    if (campaignRecipientId) {
+      // The provider has ACCEPTED this message. Deleting now would erase the
+      // only durable evidence of that, and a crash before the campaign writes
+      // its sent_emails / campaign_recipients rows would look exactly like a
+      // send that never happened — which is how you get a duplicate. Hold the
+      // row until the caller confirms its bookkeeping is done.
+      await db
+        .update(outboxEmails)
+        .set({ status: "bookkeeping_pending", attempts: 1, updatedAt: after })
+        .where(eq(outboxEmails.id, outboxId));
+    } else {
+      await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
+    }
+    return { outcome: "sent", send, outboxId };
   }
 
   if (result.error.transient) {
@@ -168,7 +194,7 @@ export async function sendViaOutbox(
         updatedAt: after,
       })
       .where(eq(outboxEmails.id, outboxId));
-    return { outcome: "retrying", send };
+    return { outcome: "retrying", send, outboxId };
   }
 
   await db
@@ -180,7 +206,7 @@ export async function sendViaOutbox(
       updatedAt: after,
     })
     .where(eq(outboxEmails.id, outboxId));
-  return { outcome: "failed", send };
+  return { outcome: "failed", send, outboxId };
 }
 
 /**
@@ -312,7 +338,17 @@ export async function attemptOutboxRow(
         row.sentEmailId,
       );
     }
-    await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
+    if (row.campaignRecipientId) {
+      // Same reasoning as the inline path: a retry that finally succeeds still
+      // owes the campaign its bookkeeping, so hand the row to the campaign
+      // reconciliation sweep rather than deleting it here.
+      await db
+        .update(outboxEmails)
+        .set({ status: "bookkeeping_pending", updatedAt: after })
+        .where(eq(outboxEmails.id, row.id));
+    } else {
+      await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
+    }
     return "sent";
   }
 
@@ -415,4 +451,13 @@ async function loadOutboxAttachments(
     });
   }
   return out;
+}
+
+/**
+ * Delete a `bookkeeping_pending` row once the campaign's own bookkeeping has
+ * committed. Separate from the send path so the only way a held row disappears
+ * is a caller explicitly confirming it is safe.
+ */
+export async function finalizeOutboxRow(db: Db, id: string): Promise<void> {
+  await db.delete(outboxEmails).where(eq(outboxEmails.id, id));
 }
