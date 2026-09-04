@@ -15,6 +15,7 @@ import {
   normalizeTrackableUrl,
   recordClick,
   recordOpen,
+  resolveMarkersToDestinations,
   rewriteCampaignLinks,
 } from "../lib/campaign-tracking";
 import { signPayload } from "../lib/signed-token";
@@ -482,5 +483,68 @@ describe("event recording is idempotent at the data layer", () => {
       linkId: "l-1",
     });
     expect(await allEvents()).toHaveLength(2);
+  });
+});
+
+describe("link-heavy campaigns", () => {
+  /**
+   * A regression guard for D1's cap on bound variables per statement.
+   *
+   * A `campaign_links` row binds 4 variables, so a single INSERT of every
+   * distinct link in a rich newsletter blows the cap and fails outright with
+   * "too many SQL variables". 60 links is an ordinary link digest, not an
+   * adversarial input.
+   */
+  it("stores and rewrites 60 distinct links", async () => {
+    const urls = Array.from(
+      { length: 60 },
+      (_, i) => `https://example.com/story-${i}`,
+    );
+    const html = urls.map((u, i) => `<a href="${u}">Story ${i}</a>`).join("");
+
+    const out = await rewriteCampaignLinks(getDb(), CAMPAIGN, html, ts());
+
+    const links = await getDb().select().from(campaignLinks);
+    expect(links).toHaveLength(60);
+    expect(new Set(links.map((l) => l.url)).size).toBe(60);
+    for (const url of urls) expect(out).not.toContain(url);
+    expect(out.match(/click\.invalid/g)).toHaveLength(60);
+  });
+
+  it("resolves 60 markers back to destinations for preview", async () => {
+    const urls = Array.from(
+      { length: 60 },
+      (_, i) => `https://example.com/story-${i}`,
+    );
+    const html = urls.map((u) => `<a href="${u}">x</a>`).join("");
+    const snapshot = await rewriteCampaignLinks(getDb(), CAMPAIGN, html, ts());
+
+    const resolved = await resolveMarkersToDestinations(
+      getDb(),
+      CAMPAIGN,
+      snapshot,
+    );
+    expect(resolved).not.toContain("click.invalid");
+    for (const url of urls) expect(resolved).toContain(url);
+  });
+
+  it("mints a signed URL per link for one recipient", async () => {
+    const urls = Array.from(
+      { length: 60 },
+      (_, i) => `https://example.com/story-${i}`,
+    );
+    const snapshot = await rewriteCampaignLinks(
+      getDb(),
+      CAMPAIGN,
+      urls.map((u) => `<a href="${u}">x</a>`).join(""),
+      ts(),
+    );
+
+    const out = await applyRecipientTracking(cfEnv(), snapshot, {
+      campaignId: CAMPAIGN,
+      contactId: CONTACT,
+    });
+    expect(out).not.toContain("click.invalid");
+    expect(out.match(/\/track\/click\//g)).toHaveLength(60);
   });
 });

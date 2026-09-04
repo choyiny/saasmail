@@ -19,12 +19,14 @@ import { emailTemplates } from "../db/email-templates.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
+import { sentEmails } from "../db/sent-emails.schema";
 import {
   ALLOWED_TRANSITIONS,
   canPerform,
   type CampaignAction,
   type CampaignStatus,
 } from "../lib/campaign-states";
+import { beginCampaignSend } from "../routers/campaigns-router";
 import { runCampaignPass } from "../lib/newsletter-cron";
 
 beforeAll(applyMigrations);
@@ -891,5 +893,124 @@ describe("preview and test-send show real destinations", () => {
     const body = await res.json<any>();
     expect(body.html).toContain("https://example.com/read");
     expect(body.html).not.toContain("click.invalid");
+  });
+});
+
+describe("provider daily send limit", () => {
+  const CAMPAIGN = "camp-limit";
+
+  async function draftCampaign() {
+    await seedListAndTemplate(3);
+    const t = ts();
+    await getDb().insert(campaigns).values({
+      id: CAMPAIGN,
+      name: "Limited",
+      subject: "S",
+      templateSlug: "weekly",
+      fromAddress: FROM,
+      listId: LIST,
+      status: "draft",
+      createdAt: t,
+      updatedAt: t,
+    });
+  }
+
+  async function seedSentToday(count: number, fromAddress = FROM) {
+    const t = ts();
+    for (let i = 0; i < count; i++) {
+      await getDb()
+        .insert(sentEmails)
+        .values({
+          id: `se-${fromAddress}-${i}`,
+          personId: null,
+          fromAddress,
+          toAddress: `x${i}@example.com`,
+          subject: "prior",
+          status: "sent",
+          sentAt: t - 60,
+          createdAt: t - 60,
+        });
+    }
+  }
+
+  const envWithLimit = (limit: string | undefined) =>
+    ({ ...cfEnv(), PROVIDER_DAILY_SEND_LIMIT: limit }) as CloudflareBindings;
+
+  it("refuses a send that would exceed the day's quota", async () => {
+    await draftCampaign();
+    await seedSentToday(9);
+
+    // 9 already sent + 3 targeted = 12, past a limit of 10.
+    const failure = await beginCampaignSend(
+      getDb(),
+      envWithLimit("10"),
+      CAMPAIGN,
+    );
+    expect(failure).not.toBeNull();
+
+    // Refused up front: the campaign stays a draft rather than going out
+    // half-delivered and stopping when the provider starts rejecting.
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, CAMPAIGN))
+    )[0];
+    expect(c.status).toBe("draft");
+    expect(await getDb().select().from(campaignRecipients)).toHaveLength(0);
+  });
+
+  it("allows a send that fits", async () => {
+    await draftCampaign();
+    await seedSentToday(5);
+
+    expect(
+      await beginCampaignSend(getDb(), envWithLimit("100"), CAMPAIGN),
+    ).toBeNull();
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, CAMPAIGN))
+    )[0];
+    expect(c.status).toBe("preparing");
+  });
+
+  it("is skipped entirely when the limit is unset", async () => {
+    await draftCampaign();
+    await seedSentToday(500);
+
+    // Unset is the default, and must commit no operator to configuring it.
+    expect(
+      await beginCampaignSend(getDb(), envWithLimit(undefined), CAMPAIGN),
+    ).toBeNull();
+  });
+
+  it("counts only the sending identity's own recent mail", async () => {
+    await draftCampaign();
+    // Another identity's traffic is another provider quota; it must not
+    // consume this one's.
+    await seedSentToday(50, "other@example.com");
+
+    expect(
+      await beginCampaignSend(getDb(), envWithLimit("10"), CAMPAIGN),
+    ).toBeNull();
+  });
+
+  it("ignores mail older than the 24-hour window", async () => {
+    await draftCampaign();
+    const old = ts() - 25 * 3600;
+    for (let i = 0; i < 50; i++) {
+      await getDb()
+        .insert(sentEmails)
+        .values({
+          id: `se-old-${i}`,
+          personId: null,
+          fromAddress: FROM,
+          toAddress: `x${i}@example.com`,
+          subject: "yesterday",
+          status: "sent",
+          sentAt: old,
+          createdAt: old,
+        });
+    }
+
+    expect(
+      await beginCampaignSend(getDb(), envWithLimit("10"), CAMPAIGN),
+    ).toBeNull();
   });
 });

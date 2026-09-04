@@ -29,6 +29,17 @@ const CLICK_MARKER_RE = /https:\/\/click\.invalid\/([A-Za-z0-9_-]+)/g;
 const MAX_URL_LENGTH = 2048;
 
 /**
+ * Statement-level chunk sizes, set by D1's cap on bound variables per query.
+ *
+ * A `campaign_links` row binds 4 variables, so 20 rows is 80. A link-heavy
+ * newsletter really does carry dozens of distinct destinations, and one
+ * oversized INSERT fails outright with "too many SQL variables" rather than
+ * degrading.
+ */
+const INSERT_CHUNK_ROWS = 20;
+const SELECT_CHUNK_IDS = 80;
+
+/**
  * Decide whether an `href` from the template becomes a tracked link.
  *
  * Returns the URL to store, or `null` to leave the anchor exactly as authored.
@@ -76,22 +87,33 @@ export async function rewriteCampaignLinks(
   if (urls.size === 0) return html;
 
   const list = [...urls];
-  await db
-    .insert(campaignLinks)
-    .values(
-      list.map((url) => ({ id: nanoid(), campaignId, url, createdAt: now })),
-    )
-    .onConflictDoNothing();
+  const values = list.map((url) => ({
+    id: nanoid(),
+    campaignId,
+    url,
+    createdAt: now,
+  }));
+  for (let i = 0; i < values.length; i += INSERT_CHUNK_ROWS) {
+    await db
+      .insert(campaignLinks)
+      .values(values.slice(i, i + INSERT_CHUNK_ROWS))
+      .onConflictDoNothing();
+  }
 
-  const rows = await db
-    .select({ id: campaignLinks.id, url: campaignLinks.url })
-    .from(campaignLinks)
-    .where(
-      and(
-        eq(campaignLinks.campaignId, campaignId),
-        inArray(campaignLinks.url, list),
-      ),
+  const rows: Array<{ id: string; url: string }> = [];
+  for (let i = 0; i < list.length; i += SELECT_CHUNK_IDS) {
+    rows.push(
+      ...(await db
+        .select({ id: campaignLinks.id, url: campaignLinks.url })
+        .from(campaignLinks)
+        .where(
+          and(
+            eq(campaignLinks.campaignId, campaignId),
+            inArray(campaignLinks.url, list.slice(i, i + SELECT_CHUNK_IDS)),
+          ),
+        )),
     );
+  }
   const idByUrl = new Map(rows.map((r) => [r.url, r.id]));
 
   const rewritten = new HTMLRewriter()
@@ -125,15 +147,21 @@ export async function resolveMarkersToDestinations(
   for (const m of html.matchAll(CLICK_MARKER_RE)) ids.add(m[1]);
   if (ids.size === 0) return html;
 
-  const rows = await db
-    .select({ id: campaignLinks.id, url: campaignLinks.url })
-    .from(campaignLinks)
-    .where(
-      and(
-        eq(campaignLinks.campaignId, campaignId),
-        inArray(campaignLinks.id, [...ids]),
-      ),
+  const all = [...ids];
+  const rows: Array<{ id: string; url: string }> = [];
+  for (let i = 0; i < all.length; i += SELECT_CHUNK_IDS) {
+    rows.push(
+      ...(await db
+        .select({ id: campaignLinks.id, url: campaignLinks.url })
+        .from(campaignLinks)
+        .where(
+          and(
+            eq(campaignLinks.campaignId, campaignId),
+            inArray(campaignLinks.id, all.slice(i, i + SELECT_CHUNK_IDS)),
+          ),
+        )),
     );
+  }
   const urlById = new Map(rows.map((r) => [r.id, r.url]));
 
   return html.replace(

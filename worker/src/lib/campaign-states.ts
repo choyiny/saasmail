@@ -47,11 +47,3 @@ export function canPerform(
 ): boolean {
   return ALLOWED_TRANSITIONS[action].includes(status);
 }
-
-/** Statuses a campaign can never leave. */
-export const TERMINAL_STATUSES: CampaignStatus[] = [
-  "sent",
-  "cancelled",
-  "completed_with_failures",
-  "stalled",
-];

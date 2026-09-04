@@ -719,3 +719,157 @@ describe("tracking in a real campaign send", () => {
     expect(pixel(sender.calls[0].html!)).not.toBe(pixel(sender.calls[1].html!));
   });
 });
+
+describe("multi-page fan-out", () => {
+  /**
+   * Fast bulk seed. The shared `seed()` inserts row by row, which is fine for
+   * three members and far too slow for several pages' worth. Chunked to stay
+   * under D1's 100 bound-parameter cap.
+   */
+  async function seedMany(members: number) {
+    await seed({ members: 0 });
+    const ts = now();
+    const db = getDb();
+    const contactRows = [];
+    const memberRows = [];
+    for (let i = 0; i < members; i++) {
+      const id = `c-${String(i).padStart(4, "0")}`;
+      contactRows.push({
+        id,
+        email: `u${i}@example.com`,
+        name: `User ${i}`,
+        personId: null,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+      memberRows.push({
+        id: `m-${String(i).padStart(4, "0")}`,
+        listId: LIST,
+        contactId: id,
+        email: `u${i}@example.com`,
+        status: "subscribed" as const,
+        source: "api" as const,
+        formId: null,
+        submittedIp: null,
+        consentSource: "api" as const,
+        consentAt: ts,
+        importJobId: null,
+        subscribedAt: ts,
+        confirmedAt: null,
+        unsubscribedAt: null,
+        unsubscribeReason: null,
+        createdAt: ts,
+      });
+    }
+    for (let i = 0; i < contactRows.length; i += 10) {
+      await db.insert(contacts).values(contactRows.slice(i, i + 10));
+    }
+    for (let i = 0; i < memberRows.length; i += 5) {
+      await db.insert(listMembers).values(memberRows.slice(i, i + 5));
+    }
+  }
+
+  const job = async () =>
+    (await getDb().select().from(asyncJobs).where(eq(asyncJobs.id, JOB)))[0];
+
+  /** Drive the coordinator the way the queue would, until it stops. */
+  async function runToCompletion(maxPages = 20) {
+    let pages = 0;
+    while (pages < maxPages) {
+      const before = await job();
+      if (before.status !== "running") break;
+      await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+      pages++;
+    }
+    return pages;
+  }
+
+  it("enumerates every member across pages, exactly once", async () => {
+    // 250 = two full pages plus a short one, so both the "keep going" and the
+    // "short page means done" branches run. FAN_OUT_PAGE_SIZE is 100.
+    await seedMany(250);
+    await snapshotCampaign(getDb(), CAMPAIGN, now());
+
+    const pages = await runToCompletion();
+    expect(pages).toBe(3);
+
+    const recipients = await getDb().select().from(campaignRecipients);
+    expect(recipients).toHaveLength(250);
+    expect(new Set(recipients.map((r) => r.contactId)).size).toBe(250);
+
+    const j = await job();
+    expect(j.status).toBe("completed");
+    expect(j.processedRows).toBe(250);
+    expect(j.cursor).toBe("m-0249");
+  });
+
+  it("counts the whole list as targeted on the first page, not one page's worth", async () => {
+    await seedMany(150);
+    await snapshotCampaign(getDb(), CAMPAIGN, now());
+
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, CAMPAIGN))
+    )[0];
+    expect(c.status).toBe("sending");
+    // Targeted is fixed once, up front — a partially-enumerated campaign must
+    // not report a total that grows page by page.
+    expect(c.statsTargeted).toBe(150);
+    expect(await getDb().select().from(campaignRecipients)).toHaveLength(100);
+  });
+
+  it("resumes from the cursor rather than starting over", async () => {
+    await seedMany(150);
+    await snapshotCampaign(getDb(), CAMPAIGN, now());
+
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+    expect((await job()).cursor).toBe("m-0099");
+
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+
+    const recipients = await getDb().select().from(campaignRecipients);
+    expect(recipients).toHaveLength(150);
+    expect((await job()).status).toBe("completed");
+  });
+
+  it("a replayed page adds nobody twice and skips nobody", async () => {
+    await seedMany(150);
+    await snapshotCampaign(getDb(), CAMPAIGN, now());
+
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+    const afterFirst = await job();
+
+    // A duplicate queue delivery of the same coordinator message: rewind the
+    // cursor to where that page began and run it again. The conflict-ignored
+    // insert is what makes this harmless.
+    await getDb()
+      .update(asyncJobs)
+      .set({ cursor: null, processedRows: 0 })
+      .where(eq(asyncJobs.id, JOB));
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+
+    expect(await getDb().select().from(campaignRecipients)).toHaveLength(100);
+    expect((await job()).cursor).toBe(afterFirst.cursor);
+
+    await runToCompletion();
+    const recipients = await getDb().select().from(campaignRecipients);
+    expect(recipients).toHaveLength(150);
+    expect(new Set(recipients.map((r) => r.contactId)).size).toBe(150);
+  });
+
+  it("stops enumerating when the campaign is cancelled mid-run", async () => {
+    await seedMany(250);
+    await snapshotCampaign(getDb(), CAMPAIGN, now());
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+
+    await getDb()
+      .update(campaigns)
+      .set({ status: "cancelled" })
+      .where(eq(campaigns.id, CAMPAIGN));
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+
+    // The first page's recipients stand; nothing further is enumerated.
+    expect(await getDb().select().from(campaignRecipients)).toHaveLength(100);
+  });
+});

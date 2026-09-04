@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { asyncJobs } from "../db/async-jobs.schema";
@@ -48,6 +48,16 @@ export interface CampaignSendMessage {
  * exists; D1's cap is 100 bound parameters per query, a different constraint.
  */
 export const FAN_OUT_PAGE_SIZE = 100;
+
+/**
+ * Statement-level chunk sizes, set by D1's cap on bound variables per query.
+ *
+ * These are not tuning knobs. A `campaign_recipients` row binds 12 variables,
+ * so 8 rows is 96 — under the cap with room to spare if a column is ever added.
+ * An `IN` list binds one per id, plus one for the campaign id.
+ */
+const INSERT_CHUNK_ROWS = 8;
+const SELECT_CHUNK_IDS = 80;
 
 /** Reserved variables every campaign template can use. */
 export type ReservedVars = {
@@ -228,24 +238,38 @@ export async function runCampaignFanOutPage(
   // Conflict-ignored: a unique index alone does not make a replayed INSERT a
   // no-op, it makes the statement throw. Without this a replayed page fails
   // forever instead of being harmlessly redundant.
-  await db
-    .insert(campaignRecipients)
-    .values(recipients)
-    .onConflictDoNothing({
-      target: [campaignRecipients.campaignId, campaignRecipients.contactId],
-    });
+  //
+  // Chunked because D1 caps bound variables per statement: a whole page in one
+  // INSERT is 100 rows x 12 columns = 1200 variables, which fails outright with
+  // "too many SQL variables". The page size stays 100 — it is the coordinator's
+  // unit of work and the queue batch size, not a statement size.
+  for (let i = 0; i < recipients.length; i += INSERT_CHUNK_ROWS) {
+    await db
+      .insert(campaignRecipients)
+      .values(recipients.slice(i, i + INSERT_CHUNK_ROWS))
+      .onConflictDoNothing({
+        target: [campaignRecipients.campaignId, campaignRecipients.contactId],
+      });
+  }
 
   // Re-read: on a replay the ids above are fresh but the stored rows are the
   // originals, and the queue must reference the rows that actually exist.
-  const stored = await db
-    .select({ id: campaignRecipients.id })
-    .from(campaignRecipients)
-    .where(
-      and(
-        eq(campaignRecipients.campaignId, campaignId),
-        sql`${campaignRecipients.contactId} IN ${page.map((m) => m.contactId)}`,
-      ),
+  // Chunked for the same reason — one bound variable per id in the IN list.
+  const stored: Array<{ id: string }> = [];
+  for (let i = 0; i < page.length; i += SELECT_CHUNK_IDS) {
+    const ids = page.slice(i, i + SELECT_CHUNK_IDS).map((m) => m.contactId);
+    stored.push(
+      ...(await db
+        .select({ id: campaignRecipients.id })
+        .from(campaignRecipients)
+        .where(
+          and(
+            eq(campaignRecipients.campaignId, campaignId),
+            inArray(campaignRecipients.contactId, ids),
+          ),
+        )),
     );
+  }
 
   await env.EMAIL_QUEUE.sendBatch(
     stored.map((r) => ({
