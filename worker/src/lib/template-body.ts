@@ -7,8 +7,8 @@
  * template whose `bodyHtml` no longer matches its `bodyJson`.
  *
  * The invariant this exists to protect: **`bodyHtml` is the rendering source
- * for every consumer**, and for a block template the server is the only thing
- * allowed to produce it. A client-supplied `bodyHtml` on a block template is
+ * for every consumer**, and for block-authored content the server is the only
+ * thing allowed to produce it. A client-supplied `bodyHtml` alongside blocks is
  * refused rather than merged, because if both were accepted the two
  * representations would drift and whichever the client happened to set is what
  * subscribers would receive.
@@ -71,13 +71,13 @@ export function resolveCreateBody(input: BodyInput): ResolvedBody | BodyError {
       return {
         status: 400,
         error:
-          "bodyHtml is not accepted for a block template — it is compiled from bodyJson",
+          "bodyHtml is not accepted for block-authored content — it is compiled from bodyJson",
       };
     }
     if (input.bodyJson === undefined) {
       return {
         status: 400,
-        error: "bodyJson is required for a block template",
+        error: "bodyJson is required when format is 'block'",
       };
     }
     const compiled = compileBlockDocument(input.bodyJson);
@@ -153,7 +153,7 @@ export function resolveUpdateBody(
       return {
         status: 400,
         error:
-          "bodyHtml is not accepted for a block template — it is compiled from bodyJson",
+          "bodyHtml is not accepted for block-authored content — it is compiled from bodyJson",
       };
     }
     // An update that does not touch the body leaves both columns as they are.
