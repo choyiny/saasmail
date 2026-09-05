@@ -250,50 +250,15 @@
     {
       "idx": 35,
       "version": "6",
-      "when": 1788472722151,
-      "tag": "0035_newsletter_lists_foundation",
+      "when": 1788622787422,
+      "tag": "0035_newsletter_module",
       "breakpoints": true
     },
     {
       "idx": 36,
       "version": "6",
-      "when": 1788473701799,
-      "tag": "0036_newsletter_subscribe_forms",
-      "breakpoints": true
-    },
-    {
-      "idx": 37,
-      "version": "6",
-      "when": 1788502270924,
-      "tag": "0037_newsletter_campaigns",
-      "breakpoints": true
-    },
-    {
-      "idx": 38,
-      "version": "6",
-      "when": 1788502357321,
-      "tag": "0038_newsletter_partial_indexes",
-      "breakpoints": true
-    },
-    {
-      "idx": 39,
-      "version": "6",
-      "when": 1788557432957,
-      "tag": "0039_amazing_mastermind",
-      "breakpoints": true
-    },
-    {
-      "idx": 40,
-      "version": "6",
-      "when": 1788559369358,
-      "tag": "0040_cool_captain_cross",
-      "breakpoints": true
-    },
-    {
-      "idx": 41,
-      "version": "6",
-      "when": 1788590202702,
-      "tag": "0041_bent_skrulls",
+      "when": 1788622898280,
+      "tag": "0036_newsletter_custom_indexes",
       "breakpoints": true
     }
   ]
