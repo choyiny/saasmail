@@ -42,6 +42,25 @@ With **double opt-in** on, a submission creates a `pending` member and mails a c
 
 ## Campaigns
 
+**A campaign owns its content.** `bodyHtml` — and `bodyJson` when the campaign
+is block-authored — live on the campaign row and are edited on the campaign
+page while it is a `draft`.
+
+Picking a template at creation is optional and means _start from this_: the
+template's content is **copied in** once, and the campaign owns it from then on.
+Editing or deleting that template afterwards cannot reach back into the
+campaign. `templateSlug` is kept only as provenance and is never read when
+rendering.
+
+That split is what makes templates useful in both places. A newsletter needs its
+own words every time, so a campaign that could only point at a template forced
+one throwaway template per campaign. Templates keep their original job on the
+[transactional and sequence](sequences.md) paths, where a template genuinely is
+the content and carries a `{{variable}}` send contract.
+
+A campaign with an empty body is refused at send time rather than mailing a
+blank page to a list.
+
 A campaign moves through a small, explicit state machine. Anything not listed is a `409` — a campaign is real mail to real people, so an unspecified transition fails loudly rather than doing something plausible.
 
 | Action             | Allowed from                                            |
@@ -113,9 +132,16 @@ An instance deployed before the unsubscribe feature existed will not have it.
 | `list_members.submittedIp` | 30 days, then nulled — the membership row is kept |
 | Re-subscribe undo          | 7 days from `unsubscribedAt`                      |
 | `campaign_events`          | 13 months                                         |
+| Newsletter images          | Kept indefinitely — see below                     |
 | Delivery/consent rows      | Kept until the contact is explicitly erased       |
 
 Every sweep is a bounded batch on the hourly cron: one tick removes at most one batch and the next continues, because an unbounded delete over thirteen months of events is the statement that times out and then never succeeds on any later tick either.
+
+**Newsletter images are never garbage-collected.** An image referenced by a
+sent campaign has to outlive the template that introduced it — the campaign's
+frozen `htmlSnapshot` still points at that URL when a subscriber opens the mail
+months later — so reference counting would have to span every historical
+snapshot, not just live templates. Assets accumulate; budget R2 accordingly.
 
 Two admin-only operations answer subject requests:
 

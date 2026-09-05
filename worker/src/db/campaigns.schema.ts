@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import type { BlockDocument } from "../lib/blocks/schema";
 
 /**
  * A broadcast campaign.
@@ -11,8 +12,19 @@ import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
  * declare it done early.
  *
  * **Content is snapshotted, not referenced.** Once a campaign leaves `draft`
- * the `*Snapshot` columns are what actually gets sent, so editing or deleting
- * the source template afterwards cannot change mail already in flight.
+ * the `*Snapshot` columns are what actually gets sent, so editing the campaign
+ * afterwards cannot change mail already in flight.
+ *
+ * **A campaign owns its content.** `bodyHtml` (and `bodyJson` when the campaign
+ * is block-authored) live here, not on a template. A newsletter needs its own
+ * words every time, so pointing every campaign at a template made "template"
+ * mean "one throwaway per campaign" and stopped it being reusable at all.
+ * `templateSlug` is now only a *starting point*: its content is copied in at
+ * creation and the reference is provenance, never read when rendering.
+ *
+ * Templates keep their original job for the transactional and sequence paths,
+ * where a template genuinely is the content and carries a `{{variable}}` send
+ * contract.
  */
 export const campaigns = sqliteTable(
   "campaigns",
@@ -21,8 +33,24 @@ export const campaigns = sqliteTable(
     name: text("name").notNull(),
     /** Draft-editable; frozen into `subjectSnapshot` on leaving draft. */
     subject: text("subject").notNull(),
-    /** Source template reference, only consulted while status = 'draft'. */
-    templateSlug: text("template_slug").notNull(),
+    /**
+     * The template this campaign was seeded from, if any. Advisory only — the
+     * content was copied at creation and is never re-read from here, so
+     * editing or deleting that template cannot change this campaign.
+     */
+    templateSlug: text("template_slug"),
+    /** How the operator edits this campaign's body. */
+    format: text("format", { enum: ["html", "block"] })
+      .notNull()
+      .default("html"),
+    /** The block document, for `format = 'block'`. Null for HTML campaigns. */
+    bodyJson: text("body_json", { mode: "json" }).$type<BlockDocument>(),
+    /**
+     * The editable body. Compiled from `bodyJson` on write for a block
+     * campaign. Frozen into `htmlSnapshot` on leaving draft — this column is
+     * what the operator edits, that one is what actually ships.
+     */
+    bodyHtml: text("body_html").notNull().default(""),
     fromAddress: text("from_address").notNull(),
     /** FK lists.id */
     listId: text("list_id").notNull(),
@@ -55,9 +83,9 @@ export const campaigns = sqliteTable(
     textSnapshot: text("text_snapshot"),
     fromAddressSnapshot: text("from_address_snapshot"),
     /**
-     * Provenance string `"{templateId}@{updatedAt}"`, not an FK —
-     * `email_templates` has no revision history. Advisory only; never read
-     * when rendering.
+     * Provenance string, advisory only and never read when rendering. Now that
+     * content lives on the campaign, this records the campaign row it was
+     * frozen from rather than a template revision.
      */
     templateRevision: text("template_revision"),
     /**

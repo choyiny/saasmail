@@ -360,14 +360,21 @@ describe("send", () => {
   });
 
   /**
-   * A missing template must not leave the campaign stuck in `preparing` with
+   * An empty body must not leave the campaign stuck in `preparing` with
    * nothing to send — it has to fall back to where it started.
+   *
+   * This used to be "the template is gone". Deleting the seeding template is
+   * now a no-op, because content is copied into the campaign at creation, so
+   * the only way to reach the send path with nothing to send is an empty body.
    */
-  it("rolls back to draft when the template is gone", async () => {
+  it("rolls back to draft when the campaign has no content", async () => {
     const apiKey = await adminKey();
     await seedListAndTemplate(1);
     const { body } = await createCampaign(apiKey);
-    await getDb().delete(emailTemplates);
+    await getDb()
+      .update(campaigns)
+      .set({ bodyHtml: "" })
+      .where(eq(campaigns.id, body.id));
 
     const res = await authFetch(`/api/campaigns/${body.id}/send`, {
       apiKey,
@@ -378,6 +385,23 @@ describe("send", () => {
       await getDb().select().from(campaigns).where(eq(campaigns.id, body.id))
     )[0];
     expect(c.status).toBe("draft");
+  });
+
+  /**
+   * The point of copy-on-create: templates become genuinely reusable, because
+   * a campaign started from one no longer depends on it surviving.
+   */
+  it("sends fine after the seeding template is deleted", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate(1);
+    const { body } = await createCampaign(apiKey);
+    await getDb().delete(emailTemplates);
+
+    const res = await authFetch(`/api/campaigns/${body.id}/send`, {
+      apiKey,
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
   });
 
   it("refuses to send a campaign that is already sending", async () => {
@@ -587,6 +611,7 @@ describe("hourly campaign pass", () => {
         name: "X",
         subject: "S",
         templateSlug: "weekly",
+        bodyHtml: "<p>Hi {{subscriber_name}}</p><p>{{unsubscribe_url}}</p>",
         fromAddress: FROM,
         listId: LIST,
         status: status as never,
@@ -685,6 +710,7 @@ describe("campaign engagement endpoints", () => {
       name: "Stats",
       subject: "S",
       templateSlug: "weekly",
+      bodyHtml: "<p>Hi {{subscriber_name}}</p><p>{{unsubscribe_url}}</p>",
       fromAddress: FROM,
       listId: LIST,
       status: "sent",
@@ -907,6 +933,7 @@ describe("provider daily send limit", () => {
       name: "Limited",
       subject: "S",
       templateSlug: "weekly",
+      bodyHtml: "<p>Hi {{subscriber_name}}</p><p>{{unsubscribe_url}}</p>",
       fromAddress: FROM,
       listId: LIST,
       status: "draft",
@@ -1031,6 +1058,7 @@ describe("unsubscribe secret preflight", () => {
       name: "No secret",
       subject: "S",
       templateSlug: "weekly",
+      bodyHtml: "<p>Hi {{subscriber_name}}</p><p>{{unsubscribe_url}}</p>",
       fromAddress: FROM,
       listId: LIST,
       status: "draft",
@@ -1067,6 +1095,7 @@ describe("unsubscribe secret preflight", () => {
       name: "Has secret",
       subject: "S",
       templateSlug: "weekly",
+      bodyHtml: "<p>Hi {{subscriber_name}}</p><p>{{unsubscribe_url}}</p>",
       fromAddress: FROM,
       listId: LIST,
       status: "draft",

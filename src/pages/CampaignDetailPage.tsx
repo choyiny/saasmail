@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, ChevronLeft } from "lucide-react";
 import {
@@ -12,11 +12,15 @@ import {
   scheduleCampaign,
   sendCampaign,
   testSendCampaign,
+  updateCampaign,
   type CampaignDetail,
   type CampaignLinkStat,
   type CampaignTimeseriesPoint,
 } from "@/lib/api";
 import { PageContainer } from "@/components/PageHeader";
+import BlockEditor from "@/components/blocks/BlockEditor";
+import HtmlCodeEditor from "@/components/HtmlCodeEditor";
+import type { BlockDocument } from "@worker/lib/blocks/schema";
 import {
   CampaignLinksTable,
   CampaignStatsGrid,
@@ -44,9 +48,29 @@ export default function CampaignDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const [campaign, setCampaign] = useState<CampaignDetail | null>(null);
+
+  // Draft body editing. Held locally and saved explicitly rather than on every
+  // keystroke: each save recompiles server-side, and a campaign is not a
+  // document people expect to autosave mid-sentence.
+  const [draftSubject, setDraftSubject] = useState("");
+  const [draftJson, setDraftJson] = useState<BlockDocument | null>(null);
+  const [draftHtml, setDraftHtml] = useState("");
+  const [savingBody, setSavingBody] = useState(false);
+  const [bodyError, setBodyError] = useState("");
+  const [bodySaved, setBodySaved] = useState(false);
   const [series, setSeries] = useState<CampaignTimeseriesPoint[]>([]);
   const [links, setLinks] = useState<CampaignLinkStat[]>([]);
   const [preview, setPreview] = useState<string | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
+
+  // The preview renders at the bottom of a long page, so on anything but a
+  // tall screen "Preview" appeared to do nothing at all. Scroll it into view
+  // when it opens rather than leaving the operator to guess there is
+  // something below the fold.
+  useEffect(() => {
+    if (preview === null) return;
+    previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [preview]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,9 +83,50 @@ export default function CampaignDetailPage() {
       fetchCampaignLinks(id).catch(() => ({ data: [] })),
     ]);
     setCampaign(c);
+    setDraftSubject(c.subject);
+    setDraftJson(c.bodyJson ?? null);
+    setDraftHtml(c.bodyHtml ?? "");
     setSeries(t.data);
     setLinks(l.data);
   }, [id]);
+
+  const saveBody = useCallback(async () => {
+    if (!campaign) return;
+    setSavingBody(true);
+    setBodyError("");
+    setBodySaved(false);
+    try {
+      // A block campaign never sends `bodyHtml` — the server compiles it, and
+      // the API refuses a client-supplied one so the two cannot drift.
+      await updateCampaign(campaign.id, {
+        subject: draftSubject,
+        ...(campaign.format === "block"
+          ? { format: "block" as const, bodyJson: draftJson ?? undefined }
+          : { bodyHtml: draftHtml }),
+      });
+      await load();
+      setBodySaved(true);
+    } catch {
+      setBodyError("Could not save. Check the content and try again.");
+    } finally {
+      setSavingBody(false);
+    }
+  }, [campaign, draftSubject, draftJson, draftHtml, load]);
+
+  /** Turn a blank campaign into a block campaign. Only offered while empty. */
+  const useBlocks = useCallback(async () => {
+    if (!campaign) return;
+    setBodyError("");
+    try {
+      await updateCampaign(campaign.id, {
+        format: "block",
+        bodyJson: { version: 1, blocks: [] } as BlockDocument,
+      });
+      await load();
+    } catch {
+      setBodyError("Could not switch to blocks.");
+    }
+  }, [campaign, load]);
 
   useEffect(() => {
     load()
@@ -147,7 +212,8 @@ export default function CampaignDetailPage() {
             </span>
           </div>
           <p className="mt-1 text-sm font-light text-text-tertiary">
-            {campaign.subject} · template {campaign.templateSlug}
+            {campaign.subject}
+            {campaign.templateSlug ? ` · from ${campaign.templateSlug}` : ""}
           </p>
         </div>
 
@@ -281,6 +347,91 @@ export default function CampaignDetailPage() {
         </div>
       )}
 
+      {isDraft && (
+        <section className="mb-5 overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-text-primary">
+                Content
+              </h2>
+              <p className="mt-0.5 text-xs font-light text-text-secondary">
+                This campaign's own copy. Frozen when it sends.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {bodySaved && !savingBody && (
+                <span className="text-[11px] text-text-tertiary">Saved</span>
+              )}
+              <button
+                type="button"
+                onClick={() => void saveBody()}
+                disabled={savingBody}
+                className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+              >
+                {savingBody ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+
+          {bodyError && (
+            <p
+              role="alert"
+              className="border-b border-border bg-red-500/5 px-5 py-2 text-xs text-red-600 dark:text-red-400"
+            >
+              {bodyError}
+            </p>
+          )}
+
+          <div className="border-b border-border px-5 py-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-text-secondary">
+                Subject line
+              </span>
+              <input
+                value={draftSubject}
+                onChange={(e) => setDraftSubject(e.target.value)}
+                className="w-full rounded-[6px] border border-border bg-card px-3 py-2 text-sm"
+              />
+            </label>
+          </div>
+
+          {campaign.format === "block" ? (
+            <div className="flex min-h-[420px] flex-col">
+              <BlockEditor value={draftJson} onChange={setDraftJson} />
+            </div>
+          ) : draftHtml.trim() === "" ? (
+            /* A blank campaign has nothing to lose, so this is the one moment
+               the choice is open — the server refuses html → block once there
+               is content, because parsing it back would be lossy. */
+            <div className="px-5 py-8 text-center">
+              <p className="mb-3 text-sm text-text-secondary">
+                How do you want to write this campaign?
+              </p>
+              <div className="flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void useBlocks()}
+                  className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white"
+                >
+                  Use blocks
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDraftHtml("<p></p>")}
+                  className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-muted"
+                >
+                  Write HTML
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="h-[420px]">
+              <HtmlCodeEditor value={draftHtml} onChange={setDraftHtml} />
+            </div>
+          )}
+        </section>
+      )}
+
       <div className="space-y-5">
         <CampaignStatsGrid stats={campaign.stats} />
         <CampaignTimeseriesChart data={series} />
@@ -293,7 +444,7 @@ export default function CampaignDetailPage() {
       </div>
 
       {preview !== null && (
-        <div className="mt-5">
+        <div ref={previewRef} className="mt-5 scroll-mt-4">
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[11px] uppercase tracking-wide text-text-tertiary">
               Preview

@@ -1,3 +1,5 @@
+import type { BlockDocument } from "@worker/lib/blocks/schema";
+
 export interface Person {
   id: string;
   email: string;
@@ -434,7 +436,13 @@ export interface EmailTemplate {
   slug: string;
   name: string;
   subject: string;
+  /**
+   * The rendering source for every send path. For a block template this is
+   * compiled by the server from `bodyJson` — the client never writes it.
+   */
   bodyHtml: string;
+  format: "html" | "block";
+  bodyJson: BlockDocument | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -451,7 +459,9 @@ export async function createTemplate(data: {
   slug: string;
   name: string;
   subject: string;
-  bodyHtml: string;
+  format?: "html" | "block";
+  bodyHtml?: string;
+  bodyJson?: BlockDocument;
 }): Promise<EmailTemplate> {
   return apiFetch("/api/email-templates", {
     method: "POST",
@@ -462,7 +472,13 @@ export async function createTemplate(data: {
 
 export async function updateTemplate(
   slug: string,
-  data: { name?: string; subject?: string; bodyHtml?: string },
+  data: {
+    name?: string;
+    subject?: string;
+    format?: "html" | "block";
+    bodyHtml?: string;
+    bodyJson?: BlockDocument;
+  },
 ): Promise<EmailTemplate> {
   return apiFetch(`/api/email-templates/${slug}`, {
     method: "PUT",
@@ -1090,7 +1106,12 @@ export interface Campaign {
   id: string;
   name: string;
   subject: string;
-  templateSlug: string;
+  /** What the campaign was seeded from, if anything. Provenance only. */
+  templateSlug: string | null;
+  format: "html" | "block";
+  bodyJson: BlockDocument | null;
+  /** The campaign's own editable body — the thing that actually gets sent. */
+  bodyHtml: string;
   fromAddress: string;
   listId: string;
   status: CampaignStatus;
@@ -1301,8 +1322,12 @@ export async function fetchCampaign(id: string): Promise<CampaignDetail> {
 export async function createCampaign(body: {
   name: string;
   subject: string;
-  templateSlug: string;
+  /** Optional: copies that template's content in as a starting point. */
+  templateSlug?: string;
   listId: string;
+  format?: "html" | "block";
+  bodyHtml?: string;
+  bodyJson?: BlockDocument;
 }): Promise<Campaign> {
   return apiFetch("/api/campaigns", {
     method: "POST",
@@ -1316,8 +1341,10 @@ export async function updateCampaign(
   body: Partial<{
     name: string;
     subject: string;
-    templateSlug: string;
     listId: string;
+    format: "html" | "block";
+    bodyHtml: string;
+    bodyJson: BlockDocument;
   }>,
 ): Promise<Campaign> {
   return apiFetch(`/api/campaigns/${id}`, {
@@ -1417,4 +1444,40 @@ export async function fetchListMemberships(
   email: string,
 ): Promise<{ items: ListMembershipSummary[] }> {
   return apiFetch(`/api/lists/memberships?email=${encodeURIComponent(email)}`);
+}
+
+/** A stored newsletter image, as returned by the upload endpoint. */
+export interface NewsletterAsset {
+  id: string;
+  url: string;
+  contentType: string;
+  width: number;
+  height: number;
+  size: number;
+}
+
+/**
+ * Upload an image for use in a block template.
+ *
+ * The body is the raw bytes, not a multipart form — the server determines the
+ * format from the file header and ignores whatever the client declares, so
+ * there is nothing for a form envelope to carry.
+ */
+export async function uploadNewsletterAsset(
+  file: File,
+): Promise<NewsletterAsset> {
+  const res = await fetch("/api/newsletter-assets", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(
+      (detail as { error?: string } | null)?.error ??
+        `Upload failed (${res.status})`,
+    );
+  }
+  return res.json();
 }

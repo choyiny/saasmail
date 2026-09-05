@@ -57,7 +57,9 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, conversation_id TEXT, campaign_id TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_person_sent_idx ON sent_emails(person_id, sent_at)`,
     `CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, email_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'inbound', filename TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, content_id TEXT, created_at INTEGER NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, from_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, format TEXT NOT NULL DEFAULT 'html', body_json TEXT, from_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS newsletter_assets (id TEXT PRIMARY KEY, r2_key TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS newsletter_assets_sha256_idx ON newsletter_assets(sha256)`,
     `CREATE TABLE IF NOT EXISTS api_keys (id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'member', email TEXT, expires_at INTEGER NOT NULL, used_by TEXT REFERENCES users(id) ON DELETE SET NULL, used_at INTEGER, created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS sequences (id TEXT PRIMARY KEY, name TEXT NOT NULL, steps TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -101,7 +103,7 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS subscribe_attempts_form_email_idx ON subscribe_attempts(form_id, email_hash, created_at)`,
     `CREATE INDEX IF NOT EXISTS subscribe_attempts_ip_idx ON subscribe_attempts(ip, created_at)`,
     `CREATE INDEX IF NOT EXISTS subscribe_attempts_created_idx ON subscribe_attempts(created_at)`,
-    `CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, subject TEXT NOT NULL, template_slug TEXT NOT NULL, from_address TEXT NOT NULL, list_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', scheduled_at INTEGER, content_snapshot_at INTEGER, subject_snapshot TEXT, html_snapshot TEXT, text_body_override TEXT, text_snapshot TEXT, from_address_snapshot TEXT, template_revision TEXT, unsubscribe_domain_key_version INTEGER NOT NULL DEFAULT 1, fan_out_cursor TEXT, fan_out_job_id TEXT, sent_at INTEGER, stats_targeted INTEGER NOT NULL DEFAULT 0, stats_delivered INTEGER NOT NULL DEFAULT 0, stats_suppressed INTEGER NOT NULL DEFAULT 0, stats_retryable_failed INTEGER NOT NULL DEFAULT 0, stats_permanent_failed INTEGER NOT NULL DEFAULT 0, stats_unique_openers INTEGER NOT NULL DEFAULT 0, stats_unique_clicks INTEGER NOT NULL DEFAULT 0, stats_unsubscribes INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, subject TEXT NOT NULL, template_slug TEXT, format TEXT NOT NULL DEFAULT 'html', body_json TEXT, body_html TEXT NOT NULL DEFAULT '', from_address TEXT NOT NULL, list_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', scheduled_at INTEGER, content_snapshot_at INTEGER, subject_snapshot TEXT, html_snapshot TEXT, text_body_override TEXT, text_snapshot TEXT, from_address_snapshot TEXT, template_revision TEXT, unsubscribe_domain_key_version INTEGER NOT NULL DEFAULT 1, fan_out_cursor TEXT, fan_out_job_id TEXT, sent_at INTEGER, stats_targeted INTEGER NOT NULL DEFAULT 0, stats_delivered INTEGER NOT NULL DEFAULT 0, stats_suppressed INTEGER NOT NULL DEFAULT 0, stats_retryable_failed INTEGER NOT NULL DEFAULT 0, stats_permanent_failed INTEGER NOT NULL DEFAULT 0, stats_unique_openers INTEGER NOT NULL DEFAULT 0, stats_unique_clicks INTEGER NOT NULL DEFAULT 0, stats_unsubscribes INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS campaigns_list_idx ON campaigns(list_id)`,
     `CREATE INDEX IF NOT EXISTS campaigns_from_address_idx ON campaigns(from_address)`,
     `CREATE INDEX IF NOT EXISTS campaigns_status_scheduled_idx ON campaigns(status, scheduled_at)`,
@@ -336,6 +338,7 @@ export async function cleanDb() {
     DELETE FROM sent_emails;
     DELETE FROM emails;
     DELETE FROM people;
+    DELETE FROM newsletter_assets;
     DELETE FROM email_templates;
     DELETE FROM api_keys;
     DELETE FROM invitations;

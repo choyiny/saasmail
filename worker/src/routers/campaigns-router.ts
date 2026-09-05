@@ -8,6 +8,11 @@ import { campaignEvents } from "../db/campaign-events.schema";
 import { campaignLinks } from "../db/campaign-links.schema";
 import { campaignUnsubscribeAttributions } from "../db/campaign-unsubscribe-attributions.schema";
 import { emailTemplates } from "../db/email-templates.schema";
+import {
+  isBodyError,
+  resolveCreateBody,
+  resolveUpdateBody,
+} from "../lib/template-body";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -40,11 +45,19 @@ export const campaignsRouter = new OpenAPIHono<{
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
 
+/** Loosely typed for the same reason as on the templates router: the strict
+ *  shape carries `.transform()` sanitization, so publishing it would document
+ *  the input rather than what is stored. Validation happens in the handler. */
+const BlockDocumentIo = z.record(z.string(), z.unknown());
+
 const CampaignSchema = z.object({
   id: z.string(),
   name: z.string(),
   subject: z.string(),
-  templateSlug: z.string(),
+  templateSlug: z.string().nullable(),
+  format: z.enum(["html", "block"]),
+  bodyJson: BlockDocumentIo.nullable(),
+  bodyHtml: z.string(),
   fromAddress: z.string(),
   listId: z.string(),
   status: z.string(),
@@ -72,19 +85,30 @@ const StatsSchema = z.object({
 
 const CampaignDetailSchema = CampaignSchema.extend({ stats: StatsSchema });
 
+/**
+ * `templateSlug` is optional and means "seed this campaign's content from that
+ * template". The content is **copied**, not referenced: a newsletter needs its
+ * own words, and pointing every campaign at a template made "template" mean
+ * "one throwaway per campaign".
+ */
 const CreateCampaignSchema = z.object({
   name: z.string().min(1).max(200),
   subject: z.string().min(1).max(500),
-  templateSlug: z.string().min(1).max(200),
+  templateSlug: z.string().min(1).max(200).optional(),
   listId: z.string().min(1),
+  format: z.enum(["html", "block"]).optional(),
+  bodyHtml: z.string().optional(),
+  bodyJson: BlockDocumentIo.optional(),
 });
 
 const UpdateCampaignSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   subject: z.string().min(1).max(500).optional(),
-  templateSlug: z.string().min(1).max(200).optional(),
   listId: z.string().min(1).optional(),
   textBodyOverride: z.string().max(100_000).nullable().optional(),
+  format: z.enum(["html", "block"]).optional(),
+  bodyHtml: z.string().optional(),
+  bodyJson: BlockDocumentIo.optional(),
 });
 
 const ErrorSchema = z.object({ error: z.string() });
@@ -99,6 +123,9 @@ function serialize(row: typeof campaigns.$inferSelect) {
     name: row.name,
     subject: row.subject,
     templateSlug: row.templateSlug,
+    format: row.format,
+    bodyJson: row.bodyJson ?? null,
+    bodyHtml: row.bodyHtml,
     fromAddress: row.fromAddress,
     listId: row.listId,
     status: row.status,
@@ -281,12 +308,49 @@ campaignsRouter.openapi(createCampaignRoute, async (c) => {
   }
   assertInboxAllowed(allowed, list.fromAddress);
 
+  // Seeding from a template copies its content in once. After this the
+  // campaign owns that content outright — editing or deleting the template
+  // cannot reach back into a campaign that was started from it.
+  let seeded: {
+    format: "html" | "block";
+    bodyHtml: string;
+    bodyJson: unknown;
+  } = { format: "html", bodyHtml: "", bodyJson: null };
+
+  if (body.templateSlug) {
+    const rows = await db
+      .select()
+      .from(emailTemplates)
+      .where(eq(emailTemplates.slug, body.templateSlug))
+      .limit(1);
+    const template = rows[0];
+    if (!template) return c.json({ error: "Template not found" }, 404);
+    seeded = {
+      format: template.format,
+      bodyHtml: template.bodyHtml,
+      bodyJson: template.bodyJson ?? null,
+    };
+  } else if (body.bodyHtml !== undefined || body.bodyJson !== undefined) {
+    const resolved = resolveCreateBody(body);
+    if (isBodyError(resolved)) {
+      return c.json({ error: resolved.error }, resolved.status);
+    }
+    seeded = {
+      format: resolved.format,
+      bodyHtml: resolved.bodyHtml,
+      bodyJson: resolved.bodyJson,
+    };
+  }
+
   const ts = now();
   const row = {
     id: nanoid(),
     name: body.name,
     subject: body.subject,
-    templateSlug: body.templateSlug,
+    templateSlug: body.templateSlug ?? null,
+    format: seeded.format,
+    bodyHtml: seeded.bodyHtml,
+    bodyJson: seeded.bodyJson,
     fromAddress: list.fromAddress,
     listId: list.id,
     status: "draft" as const,
@@ -367,7 +431,24 @@ campaignsRouter.openapi(updateRoute, async (c) => {
   const patch: Partial<typeof campaigns.$inferInsert> = { updatedAt: now() };
   if (body.name !== undefined) patch.name = body.name;
   if (body.subject !== undefined) patch.subject = body.subject;
-  if (body.templateSlug !== undefined) patch.templateSlug = body.templateSlug;
+
+  // Body edits go through the same resolver the templates router uses, so a
+  // campaign and a template enforce identical rules: a block body is compiled
+  // server-side, a client-supplied `bodyHtml` on a block campaign is refused,
+  // and `html` → `block` conversion is refused as lossy.
+  if (
+    body.format !== undefined ||
+    body.bodyHtml !== undefined ||
+    body.bodyJson !== undefined
+  ) {
+    const resolved = resolveUpdateBody(body, campaign);
+    if (isBodyError(resolved)) {
+      return c.json({ error: resolved.error }, resolved.status);
+    }
+    patch.format = resolved.format;
+    patch.bodyHtml = resolved.bodyHtml;
+    patch.bodyJson = resolved.bodyJson;
+  }
   if (body.textBodyOverride !== undefined) {
     patch.textBodyOverride = body.textBodyOverride;
   }
@@ -825,16 +906,11 @@ campaignsRouter.openapi(previewRoute, async (c) => {
   const campaign = await loadForCaller(db, c.get("allowedInboxes")!, id);
   if (!campaign) return c.json({ error: "Campaign not found" }, 404);
 
-  const templates = await db
-    .select()
-    .from(emailTemplates)
-    .where(eq(emailTemplates.slug, campaign.templateSlug))
-    .limit(1);
-  // A sent campaign previews its frozen copy; a draft previews the live
-  // template, which is what the operator is still editing.
-  const snapshot = campaign.htmlSnapshot ?? templates[0]?.bodyHtml;
-  if (snapshot === undefined)
-    return c.json({ error: "Template not found" }, 404);
+  // A sent campaign previews its frozen copy; a draft previews its own live
+  // body, which is what the operator is still editing.
+  const snapshot = campaign.htmlSnapshot ?? campaign.bodyHtml;
+  if (!snapshot.trim())
+    return c.json({ error: "Campaign has no content yet" }, 404);
   const html = await resolveMarkersToDestinations(db, campaign.id, snapshot);
 
   const vars = {
@@ -892,14 +968,9 @@ campaignsRouter.openapi(testSendRoute, async (c) => {
     return c.json(transitionError("test_send", campaign.status), 409);
   }
 
-  const templates = await db
-    .select()
-    .from(emailTemplates)
-    .where(eq(emailTemplates.slug, campaign.templateSlug))
-    .limit(1);
-  const snapshot = campaign.htmlSnapshot ?? templates[0]?.bodyHtml;
-  if (snapshot === undefined)
-    return c.json({ error: "Template not found" }, 404);
+  const snapshot = campaign.htmlSnapshot ?? campaign.bodyHtml;
+  if (!snapshot.trim())
+    return c.json({ error: "Campaign has no content yet" }, 404);
   const html = await resolveMarkersToDestinations(db, campaign.id, snapshot);
 
   // A real per-list token, so the tester can verify the actual unsubscribe
