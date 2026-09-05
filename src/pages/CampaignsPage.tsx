@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Plus, Send } from "lucide-react";
 import {
   createCampaign,
@@ -37,6 +37,7 @@ export function statusLabel(status: CampaignStatus): string {
 }
 
 export default function CampaignsPage() {
+  const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [lists, setLists] = useState<SubscriberList[]>([]);
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -69,12 +70,19 @@ export default function CampaignsPage() {
       const created = await createCampaign({
         name: form.name.trim(),
         subject: form.subject.trim(),
-        templateSlug: form.templateSlug,
+        // Omitted entirely when blank: sending an empty slug would look like
+        // a request to seed from a template named "".
+        ...(form.templateSlug ? { templateSlug: form.templateSlug } : {}),
         listId: form.listId,
       });
       setCampaigns((prev) => [created, ...prev]);
       setOpen(false);
       setForm({ name: "", subject: "", templateSlug: "", listId: "" });
+      // Straight to the campaign, not back to the list. Creating one is the
+      // start of editing it — scheduling, previewing, test-sending all live on
+      // the detail page, and bouncing to the list makes every one of those an
+      // extra click away from where the operator already is.
+      navigate(`/campaigns/${created.id}`);
     } catch {
       setError("Could not create the campaign.");
     } finally {
@@ -82,7 +90,8 @@ export default function CampaignsPage() {
     }
   }
 
-  const canCreate = lists.length > 0 && templates.length > 0;
+  // Only a list is required now — content is authored on the campaign.
+  const canCreate = lists.length > 0;
 
   return (
     <PageContainer>
@@ -95,9 +104,7 @@ export default function CampaignsPage() {
               <button
                 disabled={!canCreate}
                 title={
-                  canCreate
-                    ? undefined
-                    : "A campaign needs at least one list and one template"
+                  canCreate ? undefined : "A campaign needs at least one list"
                 }
                 className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:opacity-50"
               >
@@ -160,24 +167,27 @@ export default function CampaignsPage() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-text-secondary">
-                    Template
+                    Start from
                   </span>
                   <select
-                    required
-                    aria-label="Campaign template"
+                    aria-label="Campaign starting point"
                     value={form.templateSlug}
                     onChange={(e) =>
                       setForm({ ...form, templateSlug: e.target.value })
                     }
                     className="w-full rounded-[6px] border border-border bg-card px-3 py-2 text-sm"
                   >
-                    <option value="">Choose a template…</option>
+                    <option value="">Blank — write it on the campaign</option>
                     {templates.map((t) => (
                       <option key={t.slug} value={t.slug}>
                         {t.name}
                       </option>
                     ))}
                   </select>
+                  <span className="mt-1 block text-[11px] text-text-tertiary">
+                    A template is only a starting point — its content is copied
+                    in, and you edit it on the campaign afterwards.
+                  </span>
                 </label>
                 {error && <p className="text-xs text-red-600">{error}</p>}
                 <button
@@ -207,7 +217,7 @@ export default function CampaignsPage() {
             <p className="text-xs font-light text-text-tertiary">
               {canCreate
                 ? "Create a draft, preview it, then send when you're ready."
-                : "Create a list and a template first."}
+                : "Create a list first."}
             </p>
           </div>
         ) : (

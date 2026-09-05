@@ -68,11 +68,21 @@ test.describe.serial("newsletters", () => {
     await page.getByLabel("Campaign name").fill("E2E Campaign");
     await page.getByLabel("Campaign subject").fill("This week");
     await page.getByLabel("Campaign list").selectOption({ label: "E2E List" });
+    // A template is now only a starting point — its content is copied into the
+    // campaign, which owns and edits it from then on.
     await page
-      .getByLabel("Campaign template")
+      .getByLabel("Campaign starting point")
       .selectOption({ label: "Digest" });
     await page.getByRole("button", { name: /create draft/i }).click();
 
+    // Creating a campaign lands on the campaign itself, not back on the list:
+    // creating one is the start of editing it.
+    await expect(page).toHaveURL(/\/campaigns\/[^/]+$/);
+    await expect(page.getByTestId(TEST_IDS.campaignStatus)).toHaveText("draft");
+    // The seeded content is editable here, on the campaign.
+    await expect(page.getByRole("heading", { name: "Content" })).toBeVisible();
+
+    await page.goto("/campaigns");
     const row = page
       .getByTestId(TEST_IDS.campaignRow)
       .filter({ hasText: "E2E Campaign" });

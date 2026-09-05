@@ -274,6 +274,27 @@
       "when": 1788502357321,
       "tag": "0038_newsletter_partial_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1788557432957,
+      "tag": "0039_amazing_mastermind",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1788559369358,
+      "tag": "0040_cool_captain_cross",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1788590202702,
+      "tag": "0041_bent_skrulls",
+      "breakpoints": true
     }
   ]
 }

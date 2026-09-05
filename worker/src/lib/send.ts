@@ -82,11 +82,29 @@ function buildUnsubscribeUrl(baseUrl: string, token: string): string {
   )}`;
 }
 
+/**
+ * Append the fallback unsubscribe footer.
+ *
+ * Inserted before `</body>` when the body is a complete HTML document, and
+ * plainly appended when it is a fragment.
+ *
+ * The distinction started to matter with block-authored templates: those
+ * compile to a full `<!doctype html>` document, so a bare append put the footer
+ * *after* `</html>` — outside the styled 600px container, unstyled and
+ * left-aligned against the page background. Mail clients tolerate the markup,
+ * so it rendered rather than failing, which is the sort of thing only a real
+ * send reveals. Hand-written templates are usually fragments and were never
+ * affected, which is why this went unnoticed.
+ *
+ * This is a fallback either way — it only fires when the template does not
+ * already contain the unsubscribe URL. A template with its own link is
+ * untouched.
+ */
 function appendHtmlFooter(html: string, url: string): string {
-  return (
-    html +
-    `<hr/>\n<p style="font-size:12px;color:#666"><a href="${url}">Unsubscribe</a></p>`
-  );
+  const footer = `<hr/>\n<p style="font-size:12px;color:#666"><a href="${url}">Unsubscribe</a></p>`;
+  const closingBody = html.toLowerCase().lastIndexOf("</body>");
+  if (closingBody === -1) return html + footer;
+  return html.slice(0, closingBody) + footer + html.slice(closingBody);
 }
 
 function appendTextFooter(text: string, url: string): string {

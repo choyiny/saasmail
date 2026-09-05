@@ -5,6 +5,7 @@ import { emails } from "./emails.schema";
 import { sentEmails } from "./sent-emails.schema";
 import { attachments } from "./attachments.schema";
 import { emailTemplates } from "./email-templates.schema";
+import { newsletterAssets } from "./newsletter-assets.schema";
 import { apiKeys } from "./api-keys.schema";
 import { sequences } from "./sequences.schema";
 import { sequenceEnrollments } from "./sequence-enrollments.schema";
@@ -60,4 +61,5 @@ export const schema = {
   campaignLinks,
   campaignEvents,
   campaignUnsubscribeAttributions,
+  newsletterAssets,
 } as const;

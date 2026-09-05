@@ -86,7 +86,10 @@ async function seed(opts: { members?: number; status?: string } = {}) {
     id: CAMPAIGN,
     name: "Weekly #1",
     subject: "This week",
+    // The campaign owns its content now; `templateSlug` only records what it
+    // was seeded from and is never read when rendering.
     templateSlug: "weekly",
+    bodyHtml: "<p>Hello {{subscriber_name}}</p><p>{{unsubscribe_url}}</p>",
     fromAddress: "news@saasmail.test",
     listId: LIST,
     status: (opts.status ?? "preparing") as never,
@@ -206,8 +209,9 @@ describe("snapshotCampaign", () => {
     expect(c.htmlSnapshot).toContain("{{subscriber_name}}");
     expect(c.subjectSnapshot).toBe("This week");
     expect(c.textSnapshot).not.toBeNull();
-    // Provenance only: which template version produced this, not an FK.
-    expect(c.templateRevision).toMatch(/^tpl-1@\d+$/);
+    // Provenance only, and now it names the campaign row the content was
+    // frozen from — the content no longer comes from a template.
+    expect(c.templateRevision).toMatch(/^camp-1@\d+$/);
   });
 
   it("prefers an admin-authored text body over the derived one", async () => {
@@ -225,16 +229,18 @@ describe("snapshotCampaign", () => {
   });
 
   /**
-   * The immutability guarantee: once snapshotted, editing the source template
-   * cannot change mail already going out.
+   * The immutability guarantee, restated for campaign-owned content: once
+   * snapshotted, editing the campaign cannot change mail already going out.
+   * A half-sent campaign whose body changed mid-flight would deliver two
+   * different emails under one name.
    */
-  it("is unaffected by a later template edit", async () => {
+  it("is unaffected by a later edit to the campaign body", async () => {
     await seed();
     await snapshotCampaign(getDb(), CAMPAIGN, now());
     await getDb()
-      .update(emailTemplates)
+      .update(campaigns)
       .set({ bodyHtml: "<p>REWRITTEN</p>" })
-      .where(eq(emailTemplates.id, "tpl-1"));
+      .where(eq(campaigns.id, CAMPAIGN));
 
     const c = (
       await getDb().select().from(campaigns).where(eq(campaigns.id, CAMPAIGN))
@@ -242,11 +248,31 @@ describe("snapshotCampaign", () => {
     expect(c.htmlSnapshot).not.toContain("REWRITTEN");
   });
 
-  it("reports a missing template rather than sending blank mail", async () => {
+  /**
+   * Deleting the template a campaign was seeded from is now a no-op: the
+   * content was copied at creation. This is the behaviour that makes templates
+   * genuinely reusable instead of one-throwaway-per-campaign.
+   */
+  it("is unaffected by deleting the template it was seeded from", async () => {
     await seed();
     await getDb().delete(emailTemplates);
+
+    expect(await snapshotCampaign(getDb(), CAMPAIGN, now())).toBeNull();
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, CAMPAIGN))
+    )[0];
+    expect(c.htmlSnapshot).toContain("{{subscriber_name}}");
+  });
+
+  it("refuses a campaign with no content rather than mailing a blank page", async () => {
+    await seed();
+    await getDb()
+      .update(campaigns)
+      .set({ bodyHtml: "   " })
+      .where(eq(campaigns.id, CAMPAIGN));
+
     expect(await snapshotCampaign(getDb(), CAMPAIGN, now())).toMatch(
-      /Template .* not found/,
+      /no content/i,
     );
   });
 });
@@ -673,10 +699,11 @@ describe("tracking in a real campaign send", () => {
 
   async function sendTracked(members = 1) {
     await seed({ members });
+    // The campaign's own body is what gets snapshotted and link-rewritten.
     await getDb()
-      .update(emailTemplates)
+      .update(campaigns)
       .set({ bodyHtml: TRACKED_BODY })
-      .where(eq(emailTemplates.id, "tpl-1"));
+      .where(eq(campaigns.id, CAMPAIGN));
     await snapshotCampaign(getDb(), CAMPAIGN, now());
     await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
 

@@ -46,6 +46,8 @@ import { listsRouter } from "./routers/lists-router";
 import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
 import { campaignsRouter } from "./routers/campaigns-router";
 import { publicSubscribeRouter } from "./routers/public-subscribe-router";
+import { newsletterAssetsRouter } from "./routers/newsletter-assets-router";
+import { publicAssetsRouter } from "./routers/public-assets-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 import type { Variables } from "./variables";
@@ -260,6 +262,7 @@ app.use("/api/subscribe-forms", requireAdmin);
 app.use("/api/subscribe-forms/*", requireAdmin);
 app.route("/api/subscribe-forms", subscribeFormsRouter);
 app.route("/api/campaigns", campaignsRouter);
+app.route("/api/newsletter-assets", newsletterAssetsRouter);
 
 // Subject-access and erasure. Admin only: these read and rewrite an
 // identified person's whole newsletter history.
@@ -309,6 +312,12 @@ app.route("/subscribe", publicSubscribeRouter);
 // no session — so this is mounted outside `/api` alongside the other public
 // token-authenticated routes.
 app.route("/track", publicTrackRouter);
+
+// Newsletter images. Fetched by subscribers' mail clients months after a
+// send, with no session and no API key, so this sits outside `/api` for the
+// same reason `/track` does. NOT mounted at `/assets` — that is where Vite
+// emits the SPA bundle. Hardening lives in the router.
+app.route("/newsletter-images", publicAssetsRouter);
 
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);

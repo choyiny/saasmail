@@ -7,7 +7,6 @@ import { campaignEvents } from "../db/campaign-events.schema";
 import { campaignUnsubscribeAttributions } from "../db/campaign-unsubscribe-attributions.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { contacts } from "../db/contacts.schema";
-import { emailTemplates } from "../db/email-templates.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -71,10 +70,14 @@ export type ReservedVars = {
 /**
  * Freeze what will actually be sent.
  *
- * After this runs, the campaign no longer reads `templateSlug`: editing or
- * deleting the source template cannot change mail that is already going out.
- * That is the whole point — a half-sent campaign whose content changed mid-flight
- * would deliver two different emails under one name.
+ * After this runs the campaign no longer reads its own editable body: editing
+ * the campaign afterwards cannot change mail that is already going out. That is
+ * the whole point — a half-sent campaign whose content changed mid-flight would
+ * deliver two different emails under one name.
+ *
+ * The content is the campaign's own `bodyHtml`. It used to be looked up from
+ * the referenced template, which is why a campaign could not be edited at all;
+ * `templateSlug` is now only a record of what the campaign was seeded from.
  */
 export async function snapshotCampaign(
   db: Db,
@@ -89,20 +92,19 @@ export async function snapshotCampaign(
   const campaign = rows[0];
   if (!campaign) return "Campaign not found";
 
-  const templates = await db
-    .select()
-    .from(emailTemplates)
-    .where(eq(emailTemplates.slug, campaign.templateSlug))
-    .limit(1);
-  const template = templates[0];
-  if (!template) return `Template ${campaign.templateSlug} not found`;
+  // An empty body is refused here rather than mailing a blank message to a
+  // list. This is the last point at which the operator can still fix it — once
+  // recipients are claimed they are not re-claimable.
+  if (!campaign.bodyHtml.trim()) {
+    return "Campaign has no content — add a body before sending";
+  }
 
   const subject = campaign.subject;
 
   // The text part is derived from the *unrewritten* HTML, deliberately: click
   // tracking is an HTML-part feature, and a plain-text body full of opaque
   // redirect URLs reads as phishing to filters and humans alike.
-  const text = campaign.textBodyOverride ?? htmlToText(template.bodyHtml);
+  const text = campaign.textBodyOverride ?? htmlToText(campaign.bodyHtml);
 
   // Link rewriting happens once here rather than per recipient. What lands in
   // the snapshot is an opaque marker per link; the send path swaps in each
@@ -112,7 +114,7 @@ export async function snapshotCampaign(
   const html = await rewriteCampaignLinks(
     db,
     campaignId,
-    template.bodyHtml,
+    campaign.bodyHtml,
     now,
   );
 
@@ -124,7 +126,7 @@ export async function snapshotCampaign(
       htmlSnapshot: html,
       textSnapshot: text,
       fromAddressSnapshot: campaign.fromAddress,
-      templateRevision: `${template.id}@${template.updatedAt}`,
+      templateRevision: `${campaign.id}@${campaign.updatedAt}`,
       updatedAt: now,
     })
     .where(eq(campaigns.id, campaignId));
