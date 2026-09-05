@@ -17,7 +17,6 @@
 
 import { z } from "zod";
 import { sanitizeInlineHtml } from "./sanitize";
-import { FONT_STACKS } from "./theme";
 
 /** Per-block horizontal alignment. Flattened onto the block rather than
  *  nested in a `tunes` object — we are not bound to Editor.js's plugin shape. */
