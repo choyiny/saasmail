@@ -17,7 +17,8 @@ type Db = DrizzleD1Database<any>;
  * correspond, at which point the inbound handler or a transactional send
  * creates the row and the hourly backfill picks it up.
  *
- * See SPEC.md Decision 23. The find-or-*create* pattern still lives inline in
+ * See `docs/newsletters.md` ("Contacts are not people"). The
+ * find-or-*create* pattern still lives inline in
  * `lib/send-email.ts`, where creating a person is the correct behaviour.
  */
 export async function findPersonIdByEmail(

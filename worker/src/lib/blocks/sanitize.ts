@@ -35,7 +35,7 @@
  * through: a construct this scanner misreads becomes escaped text, not a tag.
  *
  * `{{variable}}` passes through untouched — braces are not HTML, and the
- * compiler never interprets them. See `specs/newsletter-block-editor/`.
+ * compiler never interprets them. See `docs/templates.md`.
  */
 
 /** Tags that may appear, mapped to the attributes each may keep. */

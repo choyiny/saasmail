@@ -296,7 +296,8 @@ describe("list members", () => {
     expect(storedContacts[0].email).toBe("sub@example.com");
     expect(storedContacts[0].personId).toBeNull();
 
-    // The whole reason `contacts` exists (SPEC.md Decision 23).
+    // The whole reason `contacts` exists, separate from `people`:
+    // see `docs/newsletters.md`.
     expect(await peopleCount()).toBe(0);
   });
 

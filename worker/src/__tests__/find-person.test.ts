@@ -43,7 +43,7 @@ describe("findPersonIdByEmail", () => {
   });
 
   /**
-   * The whole point of this helper (SPEC.md Decision 23). A find-or-create on
+   * The whole point of this helper. A find-or-create on
    * the campaign send path would insert one `people` row per recipient — up to
    * 10,000 per blast — burying real correspondents in a view ordered by
    * `people_last_email_at_idx`. Looking up an unknown address must be a pure
