@@ -1,3 +1,5 @@
+import { verifyPayload } from "./signed-token";
+
 const encoder = new TextEncoder();
 
 function b64urlEncode(bytes: Uint8Array): string {
@@ -75,4 +77,59 @@ export async function verifyToken(
   } catch {
     return null;
   }
+}
+
+// --- v2: per-list campaign unsubscribe ---------------------------------------
+//
+// v1 tokens (above) sign `{ e, v: 1 }` with the raw secret and mean "suppress
+// this address globally". Campaign sends issue v2 tokens instead, which name
+// the list, the campaign and the contact, and mean "remove this membership".
+//
+// The two use *different keys*: v2 is signed with the `unsubscribe` domain key
+// derived in `signed-token.ts`, so a token minted for open- or click-tracking
+// can never be replayed here. v1 keeps its original raw-secret signature
+// untouched — tokens are already sitting in delivered mail and must keep
+// verifying for as long as those messages exist.
+
+export type UnsubscribeTokenResult =
+  | { version: 1; email: string }
+  | {
+      version: 2;
+      email: string;
+      listId: string;
+      campaignId: string;
+      contactId: string;
+    };
+
+/**
+ * Verify an unsubscribe token of either version.
+ *
+ * Tries v2 first, then falls back to v1. A token can only satisfy one of the
+ * two — they are signed with different keys — so the order is a matter of cost,
+ * not correctness.
+ */
+export async function verifyUnsubscribeToken(
+  token: string,
+  secret: string,
+): Promise<UnsubscribeTokenResult | null> {
+  const payload = await verifyPayload(token, secret, "unsubscribe");
+  if (
+    payload &&
+    payload.v === 2 &&
+    typeof payload.e === "string" &&
+    typeof payload.l === "string" &&
+    typeof payload.c === "string" &&
+    typeof payload.k === "string"
+  ) {
+    return {
+      version: 2,
+      email: payload.e.toLowerCase(),
+      listId: payload.l,
+      campaignId: payload.c,
+      contactId: payload.k,
+    };
+  }
+
+  const v1 = await verifyToken(token, secret);
+  return v1 ? { version: 1, email: v1.email } : null;
 }

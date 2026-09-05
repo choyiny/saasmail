@@ -14,6 +14,11 @@ import {
   SendPathErrorSchema,
 } from "../lib/openapi-send-errors";
 import { templateVariablesSchema } from "../lib/template-variables-schema";
+import {
+  isBodyError,
+  resolveCreateBody,
+  resolveUpdateBody,
+} from "../lib/template-body";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -45,12 +50,23 @@ function templateParseError(subject: string, bodyHtml: string): string | null {
   }
 }
 
+/**
+ * `bodyJson` is typed loosely here on purpose. The authoritative shape is
+ * `BlockDocumentSchema`, which carries `.transform()` sanitization — running it
+ * through the OpenAPI generator would document the *input* shape while the
+ * route actually stores the transformed one. The route validates strictly in
+ * the handler instead; see `lib/template-body.ts`.
+ */
+const BlockDocumentIo = z.record(z.string(), z.unknown());
+
 const EmailTemplateSchema = z.object({
   id: z.string(),
   slug: z.string(),
   name: z.string(),
   subject: z.string(),
   bodyHtml: z.string(),
+  format: z.enum(["html", "block"]),
+  bodyJson: BlockDocumentIo.nullable(),
   fromAddress: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -69,7 +85,9 @@ const createTemplateRoute = createRoute({
             slug: z.string().regex(/^[a-z0-9-]+$/),
             name: z.string(),
             subject: z.string(),
-            bodyHtml: z.string(),
+            format: z.enum(["html", "block"]).optional(),
+            bodyHtml: z.string().optional(),
+            bodyJson: BlockDocumentIo.optional(),
             fromAddress: z.string().email().nullable().optional(),
           }),
         },
@@ -88,9 +106,18 @@ const createTemplateRoute = createRoute({
 
 emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
   const db = c.get("db");
-  const { slug, name, subject, bodyHtml, fromAddress } = c.req.valid("json");
+  const { slug, name, subject, fromAddress, ...body } = c.req.valid("json");
 
-  const parseError = templateParseError(subject, bodyHtml);
+  // Resolve first: a block template's `bodyHtml` does not exist until the
+  // document is compiled, and the tag check below has to run on the compiled
+  // output so a malformed `{{#section}}` typed into a block fails the write
+  // with the same diagnostic a hand-written template would produce.
+  const resolved = resolveCreateBody(body);
+  if (isBodyError(resolved)) {
+    return c.json({ error: resolved.error }, resolved.status);
+  }
+
+  const parseError = templateParseError(subject, resolved.bodyHtml);
   if (parseError) {
     return c.json({ error: parseError }, 400);
   }
@@ -109,7 +136,9 @@ emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
     slug,
     name,
     subject,
-    bodyHtml,
+    bodyHtml: resolved.bodyHtml,
+    format: resolved.format,
+    bodyJson: resolved.bodyJson,
     fromAddress: fromAddress ?? null,
     createdAt: now,
     updatedAt: now,
@@ -203,7 +232,9 @@ const updateTemplateRoute = createRoute({
           schema: z.object({
             name: z.string().optional(),
             subject: z.string().optional(),
+            format: z.enum(["html", "block"]).optional(),
             bodyHtml: z.string().optional(),
+            bodyJson: BlockDocumentIo.optional(),
             fromAddress: z.string().email().nullable().optional(),
           }),
         },
@@ -214,7 +245,12 @@ const updateTemplateRoute = createRoute({
     ...json200Response(EmailTemplateSchema, "Updated email template"),
     400: {
       description:
-        "Template has an unbalanced section or an unknown filter — see the parse diagnostic.",
+        "Template has an unbalanced section or an unknown filter, or the body fields do not match the format — see the diagnostic.",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    422: {
+      description:
+        "An HTML template cannot be converted to blocks. The reverse conversion is allowed and is one-way.",
       content: { "application/json": { schema: ErrorSchema } },
     },
   },
@@ -240,20 +276,34 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
     assertInboxAllowed(allowed, updates.fromAddress);
   }
 
+  // Resolve the body against the row as it exists: this is where a format
+  // conversion is decided, and where a block document is compiled.
+  const resolved = resolveUpdateBody(updates, existing[0]);
+  if (isBodyError(resolved)) {
+    return c.json({ error: resolved.error }, resolved.status);
+  }
+
   // Both fields are optional on this route, so validate the template as it
   // will exist AFTER the merge — editing only the subject can still leave a
   // section unbalanced across the pair.
   const parseError = templateParseError(
     updates.subject ?? existing[0].subject,
-    updates.bodyHtml ?? existing[0].bodyHtml,
+    resolved.bodyHtml,
   );
   if (parseError) {
     return c.json({ error: parseError }, 400);
   }
 
+  const { format: _f, bodyHtml: _h, bodyJson: _j, ...rest } = updates;
   await db
     .update(emailTemplates)
-    .set({ ...updates, updatedAt: now })
+    .set({
+      ...rest,
+      format: resolved.format,
+      bodyHtml: resolved.bodyHtml,
+      bodyJson: resolved.bodyJson,
+      updatedAt: now,
+    })
     .where(eq(emailTemplates.slug, slug));
 
   const updated = await db
