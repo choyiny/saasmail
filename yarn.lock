@@ -3413,10 +3413,10 @@ hono-rate-limiter@^0.5.3:
   resolved "https://registry.yarnpkg.com/hono-rate-limiter/-/hono-rate-limiter-0.5.3.tgz#29ee906b904edd38651f623630342b249d884b34"
   integrity sha512-M0DxbVMpPELEzLi0AJg1XyBHLGJXz7GySjsPoK+gc5YeeBsdGDGe+2RvVuCAv8ydINiwlbxqYMNxUEyYfRji/A==
 
-hono@^4.11.4, hono@^4.13.1:
-  version "4.13.1"
-  resolved "https://registry.yarnpkg.com/hono/-/hono-4.13.1.tgz#d4a606b792954d07a6215d12c01b7cf59da03cbc"
-  integrity sha512-kdJoFVv2xmayw6cY09H7AbMJMt8Jn5jdlEdXsP7AGBdF2DIptVlKlOLKXP41yPip4/a3yQPv9gVcJYI8YY04dw==
+hono@^4.11.4, hono@^4.13.5:
+  version "4.13.5"
+  resolved "https://registry.yarnpkg.com/hono/-/hono-4.13.5.tgz#3df9463c4668a0321c39515309f5891e388e9709"
+  integrity sha512-O6+/eCYRkzzzy0rPWwKLiGBR1nFuUPZynnwjxN1MBA62NNqbT0wQEzQyK2gSO5yDIDB336sXQleAhOHrzlYyKw==
 
 html-encoding-sniffer@^6.0.0:
   version "6.0.0"
