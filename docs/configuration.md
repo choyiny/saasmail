@@ -35,6 +35,8 @@ Local development secrets. Created from `.dev.vars.example`. This file is gitign
 - `BETTER_AUTH_SECRET` — Secret for session signing
 - `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the [suppressions/unsubscribe](suppressions.md) feature.
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. **Never set this in production.**
+- `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` — OAuth client credentials for the [Gmail integration](gmail.md), from an **Internal** consent screen. Set in prod via `wrangler secret put`.
+- `TOKEN_ENCRYPTION_KEY` — Encrypts stored Gmail refresh tokens. 32 random bytes, base64-encoded (`openssl rand -base64 32`). Set in prod via `wrangler secret put`. See [Gmail integration](gmail.md) — never rotate this without reconnecting every mailbox.
 
 In production these are Cloudflare secrets (`wrangler secret put …`), not
 entries in this file.

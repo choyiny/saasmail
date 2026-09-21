@@ -18,16 +18,17 @@ Everything that used to live in one very long README. Start at
 
 ## Features
 
-| Page                                            | What's in it                                                                 |
-| ----------------------------------------------- | ---------------------------------------------------------------------------- |
-| [Inboxes and timelines](inboxes.md)             | One timeline per customer, team permissions, thread-vs-chat mode, forwarding |
-| [Email templates](templates.md)                 | The `{{variable}}` grammar, sections, escaping, and the send contract        |
-| [Sequences](sequences.md)                       | Multi-step drip campaigns and how they're scheduled                          |
-| [Suppressions and unsubscribe](suppressions.md) | The suppression list, RFC 8058 one-click, and the `transactional` flag       |
-| [Users and API keys](users-and-api-keys.md)     | Invites, roles, passkeys, and `sk_…` keys                                    |
-| [MCP server](mcp.md)                            | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation   |
-| [WebMCP](webmcp.md)                             | In-page agent access, the safety model, and the 20 tools                     |
-| [Webhooks](webhooks.md)                         | `message.received`, the payload, and signature verification                  |
+| Page                                            | What's in it                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------ |
+| [Inboxes and timelines](inboxes.md)             | One timeline per customer, team permissions, thread-vs-chat mode, forwarding   |
+| [Gmail integration](gmail.md)                   | Reading a Google Workspace mailbox over the Gmail API instead of Email Routing |
+| [Email templates](templates.md)                 | The `{{variable}}` grammar, sections, escaping, and the send contract          |
+| [Sequences](sequences.md)                       | Multi-step drip campaigns and how they're scheduled                            |
+| [Suppressions and unsubscribe](suppressions.md) | The suppression list, RFC 8058 one-click, and the `transactional` flag         |
+| [Users and API keys](users-and-api-keys.md)     | Invites, roles, passkeys, and `sk_…` keys                                      |
+| [MCP server](mcp.md)                            | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation     |
+| [WebMCP](webmcp.md)                             | In-page agent access, the safety model, and the 20 tools                       |
+| [Webhooks](webhooks.md)                         | `message.received`, the payload, and signature verification                    |
 
 ## Elsewhere in the repo
 
