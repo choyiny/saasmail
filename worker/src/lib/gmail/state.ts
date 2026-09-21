@@ -39,6 +39,10 @@ export async function verifyState(
   nowSeconds: number = Math.floor(Date.now() / 1000),
 ): Promise<string> {
   const parts = state.split(".");
+  // Defence in depth against delimiter injection: it keeps parsing into
+  // userId/issuedAt/signature unambiguous. It is not what stops forgery —
+  // the HMAC is computed over the full reconstructed payload below, so the
+  // signature check is the actual protection.
   if (parts.length !== 3) throw new Error("malformed OAuth state");
   const [userId, issuedAtRaw, signature] = parts;
   const expected = await hmac(`${userId}.${issuedAtRaw}`, secret);

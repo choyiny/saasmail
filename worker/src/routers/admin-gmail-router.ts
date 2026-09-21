@@ -20,7 +20,9 @@ export const adminGmailRouter = new OpenAPIHono<{
   Variables: Variables;
 }>();
 
-const INBOXES_PATH = "/settings/inboxes";
+// Must match a route declared in src/App.tsx — anything else is swallowed by
+// the SPA catch-all and the `?gmail=` result signal is lost.
+const INBOXES_PATH = "/inboxes";
 
 function config(env: GmailEnv) {
   const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
@@ -66,6 +68,8 @@ adminGmailRouter.openapi(connectRoute, async (c) => {
   if (!cfg) {
     return c.json({ error: "Gmail integration is not configured" }, 503);
   }
+  // TOKEN_ENCRYPTION_KEY does double duty: it seals stored refresh tokens and
+  // is the HMAC secret for the OAuth state. Deliberate — one secret to manage.
   const state = await signState(c.get("user").id, cfg.encryptionKey);
   return c.json({
     authUrl: buildAuthUrl({
@@ -100,6 +104,8 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
   }
 
   try {
+    // Same key as signState above — it both seals refresh tokens and signs
+    // this state parameter. Deliberate; see docs/configuration.md.
     const userId = await verifyState(state, cfg.encryptionKey);
     const tokens = await exchangeCode({
       code,
@@ -150,8 +156,10 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
 
     return c.redirect(`${INBOXES_PATH}?gmail=connected`, 302);
   } catch (err) {
-    // Never echo the error to the browser: it can carry token material.
-    console.error("[gmail] OAuth callback failed:", err);
+    // Log only the message, never the error object: a D1 error carries its
+    // bound query parameters, which on this path include the access token.
+    const reason = err instanceof Error ? err.message : "unknown error";
+    console.error(`[gmail] OAuth callback failed: ${reason}`);
     return c.redirect(`${INBOXES_PATH}?gmail=error`, 302);
   }
 });
@@ -170,6 +178,11 @@ const listRoute = createRoute({
 });
 
 adminGmailRouter.openapi(listRoute, async (c) => {
+  // The five columns are listed deliberately. `@hono/zod-openapi` does NOT
+  // validate or strip response bodies — AccountSchema only feeds the OpenAPI
+  // document — so selecting whole rows here would hand the caller
+  // `refreshTokenEncrypted` and `accessToken`. The shipped test asserts the
+  // response body contains neither token column.
   const rows = await c
     .get("db")
     .select({

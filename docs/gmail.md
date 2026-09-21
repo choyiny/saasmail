@@ -50,11 +50,26 @@ today does not make its mail appear anywhere in saasmail.
 5. Connect a mailbox by calling the API as an authenticated admin — this
    slice ships the HTTP endpoints only; a Connect control on the Inboxes
    page in the admin UI arrives in a later release.
-   - `GET /api/admin/gmail/connect` returns `{ "authUrl": "..." }`. Open that
-     URL in a browser to complete Google's consent screen; Google redirects
-     back to the callback URI from step 3 and the mailbox is connected.
+   - `GET /api/admin/gmail/connect` returns `{ "authUrl": "..." }`. You can
+     call this with an admin API key.
+   - Open that `authUrl` **in a browser that is signed in to saasmail as an
+     admin**. Google's consent screen redirects that same browser back to the
+     callback URI from step 3, and the callback sits behind the same admin
+     guard as every other `/api/admin/*` route. A browser navigation carries
+     cookies, not an `Authorization` header, so an API key cannot stand in
+     for the session here — without one the callback answers `403` and the
+     mailbox is never connected. Sign in to the saasmail web app first, then
+     paste the `authUrl` into that browser.
    - `GET /api/admin/gmail` lists connected mailboxes.
-   - `DELETE /api/admin/gmail/{id}` disconnects one.
+   - `DELETE /api/admin/gmail/{id}` disconnects one: it deletes saasmail's
+     stored row, including the encrypted refresh token, so saasmail can no
+     longer reach the mailbox. It does **not** revoke the grant at Google —
+     saasmail makes no revocation call. The refresh token stays valid on
+     Google's side until the mailbox owner removes it by hand, under their
+     Google Account's third-party access settings
+     (<https://myaccount.google.com/connections>). Revoke it there too if the
+     disconnect is a response to a compromise, or if the mailbox is leaving
+     for good.
 
 ## Internal-only, by design
 
