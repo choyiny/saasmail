@@ -1,0 +1,252 @@
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  vi,
+  afterEach,
+} from "vitest";
+import { env } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { gmailAccounts } from "../db/gmail-accounts.schema";
+import { decryptSecret } from "../lib/crypto";
+import { signState } from "../lib/gmail/state";
+import {
+  getDb,
+  applyMigrations,
+  cleanDb,
+  createTestUser,
+  authFetch,
+} from "./helpers";
+
+const KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
+
+beforeAll(async () => {
+  await applyMigrations();
+});
+
+beforeEach(async () => {
+  await cleanDb();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+/** Stub the two Google endpoints the callback touches. */
+function stubGoogle(
+  tokenBody: Record<string, unknown>,
+  profileBody: Record<string, unknown> = {
+    emailAddress: "collector@xyspace.dev",
+    historyId: "4242",
+  },
+  tokenStatus = 200,
+) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const body = url.includes("/token") ? tokenBody : profileBody;
+      const status = url.includes("/token") ? tokenStatus : 200;
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }),
+  );
+}
+
+describe("GET /api/admin/gmail/connect", () => {
+  it("returns a Google consent URL", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch("/api/admin/gmail/connect", { apiKey });
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { authUrl: string };
+    const url = new URL(body.authUrl);
+    expect(url.host).toBe("accounts.google.com");
+    expect(url.searchParams.get("client_id")).toBe("test-google-client-id");
+    expect(url.searchParams.get("state")).toBeTruthy();
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "http://localhost:8080/api/admin/gmail/callback",
+    );
+  });
+
+  it("returns 503 when the integration is unconfigured", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const saved = env.GOOGLE_OAUTH_CLIENT_ID;
+    // @ts-expect-error -- miniflare env is mutable inside a test isolate
+    delete env.GOOGLE_OAUTH_CLIENT_ID;
+    try {
+      const res = await authFetch("/api/admin/gmail/connect", { apiKey });
+      expect(res.status).toBe(503);
+    } finally {
+      // @ts-expect-error -- restore for the rest of the suite
+      env.GOOGLE_OAUTH_CLIENT_ID = saved;
+    }
+  });
+
+  it("rejects an unauthenticated request", async () => {
+    const res = await authFetch("/api/admin/gmail/connect");
+    expect([401, 403]).toContain(res.status);
+  });
+
+  it("rejects a non-admin", async () => {
+    const { apiKey } = await createTestUser({
+      id: "member-1",
+      role: "user",
+      email: "member@example.com",
+    });
+    const res = await authFetch("/api/admin/gmail/connect", { apiKey });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /api/admin/gmail/callback", () => {
+  it("stores the account with an encrypted refresh token", async () => {
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    const res = await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("gmail=connected");
+
+    const [row] = await getDb()
+      .select()
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.emailAddress, "collector@xyspace.dev"));
+
+    expect(row).toBeDefined();
+    expect(row.historyId).toBe("4242");
+    expect(row.connectedBy).toBe(userId);
+    expect(row.refreshTokenEncrypted).not.toContain("rt-secret");
+    expect(await decryptSecret(row.refreshTokenEncrypted, KEY)).toBe(
+      "rt-secret",
+    );
+  });
+
+  it("refuses a grant that returns no refresh token", async () => {
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    stubGoogle({ access_token: "at-1", expires_in: 3599 });
+
+    const state = await signState(userId, KEY);
+    const res = await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    expect(res.headers.get("location")).toContain("gmail=error");
+    expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
+  });
+
+  it("rejects a forged state without writing a row", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const res = await authFetch(
+      "/api/admin/gmail/callback?code=abc&state=forged.123.deadbeef",
+      { apiKey, redirect: "manual" },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("gmail=error");
+    expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
+  });
+
+  it("reconnecting the same mailbox replaces credentials and clears the error", async () => {
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-old",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "stale-sealed",
+      historyId: "1",
+      lastError: "invalid_grant",
+      connectedBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    stubGoogle({
+      access_token: "at-2",
+      refresh_token: "rt-new",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastError).toBeNull();
+    expect(await decryptSecret(rows[0].refreshTokenEncrypted, KEY)).toBe(
+      "rt-new",
+    );
+  });
+});
+
+describe("GET /api/admin/gmail", () => {
+  it("lists accounts without leaking token material", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed-blob",
+      accessToken: "at-cached",
+      historyId: "1",
+      connectedBy: "test-user-1",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    expect(res.status).toBe(200);
+
+    const body = await res.text();
+    expect(body).toContain("collector@xyspace.dev");
+    expect(body).not.toContain("sealed-blob");
+    expect(body).not.toContain("at-cached");
+    expect(body).not.toContain("refreshTokenEncrypted");
+  });
+});
+
+describe("DELETE /api/admin/gmail/{id}", () => {
+  it("removes the account", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed",
+      historyId: "1",
+      connectedBy: "test-user-1",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail/acct-1", {
+      method: "DELETE",
+      apiKey,
+    });
+    expect(res.status).toBe(200);
+    expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
+  });
+});
