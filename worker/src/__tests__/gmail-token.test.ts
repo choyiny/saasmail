@@ -9,7 +9,7 @@ import {
 } from "vitest";
 import { eq } from "drizzle-orm";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
-import { encryptSecret } from "../lib/crypto";
+import { decryptSecret, encryptSecret } from "../lib/crypto";
 import { getAccessToken } from "../lib/gmail/token";
 import { GoogleAuthError } from "../lib/gmail/oauth";
 import { getDb, applyMigrations } from "./helpers";
@@ -77,6 +77,34 @@ describe("getAccessToken", () => {
       .where(eq(gmailAccounts.id, "acct-1"));
     expect(row.accessToken).toBe("fresh-at");
     expect(row.expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+  });
+
+  it("re-seals and stores a rotated refresh token when Google issues one", async () => {
+    await seed({ accessToken: "stale", expiresAt: 1 });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              access_token: "fresh-at",
+              refresh_token: "rt-rotated",
+              expires_in: 3599,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+
+    expect(await getAccessToken(getDb(), "acct-1", CFG)).toBe("fresh-at");
+
+    const [row] = await getDb()
+      .select()
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.id, "acct-1"));
+    expect(await decryptSecret(row.refreshTokenEncrypted, KEY)).toBe(
+      "rt-rotated",
+    );
   });
 
   it("refreshes when the token expires inside the 60-second margin", async () => {
