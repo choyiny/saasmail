@@ -17,4 +17,5 @@ export * from "./app-settings.schema";
 export * from "./suppressions.schema";
 export * from "./blocklist.schema";
 export * from "./drafts.schema";
+export * from "./gmail-accounts.schema";
 export * from "./schema";

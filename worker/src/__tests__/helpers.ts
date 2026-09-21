@@ -81,6 +81,7 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS outbox_from_idx ON outbox_emails(from_address)`,
     `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, context_key TEXT NOT NULL, from_address TEXT, to_address TEXT, cc TEXT, subject TEXT, body_html TEXT, body_text TEXT, reply_to_email_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS drafts_user_context_idx ON drafts(user_id, context_key)`,
+    `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   ];
 
   for (const sql of statements) {
@@ -272,6 +273,7 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM gmail_accounts;
     DELETE FROM drafts;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;
