@@ -14,11 +14,12 @@ land on one customer timeline.
 
 ## What this release ships
 
-This is the credential layer only. An admin can connect a Google mailbox, list
-connected mailboxes, and disconnect one — the refresh token is stored
-encrypted. **No mail is synced yet.** Message sync, the send path, and mapping
-a Gmail mailbox to a saasmail inbox arrive in later releases. Connecting a
-mailbox today does not make its mail appear anywhere in saasmail.
+This is the credential layer only, driven by direct API calls — no admin UI
+ships in this slice. An admin can connect a Google mailbox, list connected
+mailboxes, and disconnect one — the refresh token is stored encrypted. **No
+mail is synced yet.** Message sync, the send path, and mapping a Gmail
+mailbox to a saasmail inbox arrive in later releases. Connecting a mailbox
+today does not make its mail appear anywhere in saasmail.
 
 ## Setup
 
@@ -46,7 +47,14 @@ mailbox today does not make its mail appear anywhere in saasmail.
    command above produces exactly that. A key of the wrong length makes
    connecting fail.
 
-5. Connect mailboxes from the **Inboxes** page in the admin UI.
+5. Connect a mailbox by calling the API as an authenticated admin — this
+   slice ships the HTTP endpoints only; a Connect control on the Inboxes
+   page in the admin UI arrives in a later release.
+   - `GET /api/admin/gmail/connect` returns `{ "authUrl": "..." }`. Open that
+     URL in a browser to complete Google's consent screen; Google redirects
+     back to the callback URI from step 3 and the mailbox is connected.
+   - `GET /api/admin/gmail` lists connected mailboxes.
+   - `DELETE /api/admin/gmail/{id}` disconnects one.
 
 ## Internal-only, by design
 
@@ -83,5 +91,4 @@ disconnecting and reconnecting each mailbox from scratch.
 
 ---
 
-**See also:** [Configuration](configuration.md) for where the secrets live ·
-[Inboxes and timelines](inboxes.md) for the page mailboxes are connected from
+**See also:** [Configuration](configuration.md) for where the secrets live
