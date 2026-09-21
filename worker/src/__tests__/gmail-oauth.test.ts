@@ -24,6 +24,18 @@ function stubFetch(status: number, body: unknown) {
   return fn;
 }
 
+function stubFetchNonJson(status: number, body: string) {
+  const fn = vi.fn(
+    async () =>
+      new Response(body, {
+        status,
+        headers: { "content-type": "text/html" },
+      }),
+  );
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
 describe("buildAuthUrl", () => {
   it("requests offline access and forces a refresh token", () => {
     const url = new URL(
@@ -82,6 +94,18 @@ describe("exchangeCode", () => {
       }),
     ).rejects.toMatchObject({ code: "invalid_grant" });
   });
+
+  it("raises GoogleAuthError with invalid_response on non-JSON body", async () => {
+    stubFetchNonJson(503, "<html><body>Service Unavailable</body></html>");
+    const err = await exchangeCode({
+      code: "auth-code",
+      clientId: "cid",
+      clientSecret: "secret",
+      redirectUri: "https://mail.example.com/cb",
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(GoogleAuthError);
+    expect(err.code).toBe("invalid_response");
+  });
 });
 
 describe("refreshAccessToken", () => {
@@ -126,5 +150,12 @@ describe("getProfile", () => {
     expect((init as RequestInit).headers).toMatchObject({
       Authorization: "Bearer at-1",
     });
+  });
+
+  it("raises GoogleAuthError with invalid_response on non-JSON body", async () => {
+    stubFetchNonJson(200, "<html><body>Service Unavailable</body></html>");
+    const err = await getProfile("at-1").catch((e) => e);
+    expect(err).toBeInstanceOf(GoogleAuthError);
+    expect(err.code).toBe("invalid_response");
   });
 });

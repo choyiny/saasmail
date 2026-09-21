@@ -54,13 +54,21 @@ async function postToken(body: URLSearchParams): Promise<GoogleTokens> {
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
   });
-  const payload = (await res.json()) as {
+  let payload: {
     access_token?: string;
     refresh_token?: string;
     expires_in?: number;
     error?: string;
     error_description?: string;
   };
+  try {
+    payload = (await res.json()) as typeof payload;
+  } catch {
+    throw new GoogleAuthError(
+      "invalid_response",
+      `Google token endpoint returned ${res.status} with non-JSON body`,
+    );
+  }
   if (!res.ok || !payload.access_token) {
     throw new GoogleAuthError(
       payload.error ?? "token_request_failed",
@@ -123,10 +131,18 @@ export async function getProfile(
       `Gmail profile endpoint returned ${res.status}`,
     );
   }
-  const payload = (await res.json()) as {
+  let payload: {
     emailAddress: string;
     historyId: string;
   };
+  try {
+    payload = (await res.json()) as typeof payload;
+  } catch {
+    throw new GoogleAuthError(
+      "invalid_response",
+      `Gmail profile endpoint returned ${res.status} with non-JSON body`,
+    );
+  }
   return {
     emailAddress: payload.emailAddress,
     historyId: String(payload.historyId),
