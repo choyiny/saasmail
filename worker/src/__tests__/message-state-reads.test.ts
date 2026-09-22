@@ -24,6 +24,7 @@ import {
   setUserState,
 } from "../lib/messages/state";
 import { listPersonEmails } from "../lib/queries/emails";
+import { snoozeConversations } from "../lib/messages/conversation-state";
 
 const INBOX = "support@saasmail.test";
 
@@ -429,6 +430,154 @@ describe("message state reads", () => {
     expect(included.messages.map((message) => message.ref.id).sort()).toEqual(
       ["ordinary-send", "campaign-send"].sort(),
     );
+  });
+
+  it("hides snoozed conversations from inbox, exposes snoozed, and wakes at read-time expiry", async () => {
+    const { userId } = await createTestUser({
+      id: "snooze-read-admin",
+      email: "snooze-read-admin@example.com",
+    });
+    await createTestPerson({
+      id: "snooze-person",
+      email: "snooze-person@example.com",
+    });
+    await createTestEmail({
+      id: "snooze-a",
+      personId: "snooze-person",
+      recipient: INBOX,
+      messageId: "snooze-a@example.com",
+    });
+    await createTestEmail({
+      id: "snooze-b",
+      personId: "snooze-person",
+      recipient: INBOX,
+      messageId: "snooze-b@example.com",
+    });
+
+    const db = getDb();
+    const until = Math.floor(Date.now() / 1000) + 3600;
+    await snoozeConversations(
+      db,
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "snooze-a" }],
+      until,
+    );
+
+    const activeNow = until - 1;
+    const inbox = await queryMessages(
+      db,
+      { isAdmin: true },
+      { folder: "inbox", inboxes: [INBOX], now: activeNow },
+    );
+    expect(inbox.messages).toEqual([]);
+
+    const snoozed = await queryMessages(
+      db,
+      { isAdmin: true },
+      {
+        folder: "snoozed",
+        inboxes: [INBOX],
+        now: activeNow,
+        withState: true,
+      },
+    );
+    expect(snoozed.messages.map((message) => message.ref.id).sort()).toEqual([
+      "snooze-a",
+      "snooze-b",
+    ]);
+    expect(
+      snoozed.messages.every(
+        (message) =>
+          message.state?.conversationKey === "p:snooze-person" &&
+          message.state?.snoozedUntil === until,
+      ),
+    ).toBe(true);
+
+    const neutral = await queryMessages(
+      db,
+      { isAdmin: true },
+      { inboxes: [INBOX], now: activeNow },
+    );
+    expect(neutral.messages.map((message) => message.ref.id).sort()).toEqual([
+      "snooze-a",
+      "snooze-b",
+    ]);
+
+    const explicitlyHidden = await queryMessages(
+      db,
+      { isAdmin: true },
+      { inboxes: [INBOX], now: activeNow, includeSnoozed: false },
+    );
+    expect(explicitlyHidden.messages).toEqual([]);
+
+    const expiredInbox = await queryMessages(
+      db,
+      { isAdmin: true },
+      { folder: "inbox", inboxes: [INBOX], now: until + 1 },
+    );
+    expect(
+      expiredInbox.messages.map((message) => message.ref.id).sort(),
+    ).toEqual(["snooze-a", "snooze-b"]);
+
+    const expiredSnoozed = await queryMessages(
+      db,
+      { isAdmin: true },
+      { folder: "snoozed", inboxes: [INBOX], now: until + 1 },
+    );
+    expect(expiredSnoozed.messages).toEqual([]);
+  });
+
+  it("keeps a snoozed group thread separate from the sender's one-to-one conversation", async () => {
+    const { userId } = await createTestUser({
+      id: "group-snooze-admin",
+      email: "group-snooze-admin@example.com",
+    });
+    await createTestPerson({
+      id: "shared-person",
+      email: "shared-person@example.com",
+    });
+    await createTestEmail({
+      id: "group-snoozed",
+      personId: "shared-person",
+      recipient: INBOX,
+      conversationId: "group-thread-1",
+      messageId: "group-snoozed@example.com",
+    });
+    await createTestEmail({
+      id: "person-visible",
+      personId: "shared-person",
+      recipient: INBOX,
+      conversationId: null,
+      messageId: "person-visible@example.com",
+    });
+
+    const until = Math.floor(Date.now() / 1000) + 3600;
+    await snoozeConversations(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "group-snoozed" }],
+      until,
+    );
+
+    const inbox = await queryMessages(
+      getDb(),
+      { isAdmin: true },
+      { folder: "inbox", inboxes: [INBOX], now: until - 1 },
+    );
+    expect(inbox.messages.map((message) => message.ref.id)).toEqual([
+      "person-visible",
+    ]);
+
+    const snoozed = await queryMessages(
+      getDb(),
+      { isAdmin: true },
+      { folder: "snoozed", inboxes: [INBOX], now: until - 1 },
+    );
+    expect(snoozed.messages.map((message) => message.ref.id)).toEqual([
+      "group-snoozed",
+    ]);
   });
 
   it("paginates folder=inbox across timestamp ties", async () => {

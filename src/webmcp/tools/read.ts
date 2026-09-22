@@ -231,7 +231,7 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
           inbox: { type: "string" },
           folder: {
             type: "string",
-            enum: ["inbox", "sent", "archive", "junk", "trash"],
+            enum: ["inbox", "sent", "archive", "junk", "trash", "snoozed"],
           },
           mailboxId: { type: "string" },
           starred: { type: "boolean" },

@@ -83,6 +83,8 @@ export async function applyMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS mailboxes_root_name_unique ON mailboxes(inbox, name) WHERE parent_id IS NULL`,
     `CREATE TABLE IF NOT EXISTS message_mailboxes (message_kind TEXT NOT NULL, message_id TEXT NOT NULL, mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE, added_by TEXT, added_at INTEGER NOT NULL, PRIMARY KEY(message_kind, message_id, mailbox_id))`,
     `CREATE INDEX IF NOT EXISTS message_mailboxes_mailbox_added_idx ON message_mailboxes(mailbox_id, added_at)`,
+    `CREATE TABLE IF NOT EXISTS inbox_conversation_state (inbox TEXT NOT NULL, conversation_key TEXT NOT NULL, snoozed_until INTEGER, snoozed_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(inbox, conversation_key))`,
+    `CREATE INDEX IF NOT EXISTS inbox_conversation_state_inbox_snoozed_idx ON inbox_conversation_state(inbox, snoozed_until)`,
     `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_insert BEFORE INSERT ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
     `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_update BEFORE UPDATE OF message_kind ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
     `CREATE TRIGGER IF NOT EXISTS mailbox_message_state_kind_insert BEFORE INSERT ON mailbox_message_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
@@ -405,6 +407,7 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM inbox_conversation_state;
     DELETE FROM message_mailboxes;
     DELETE FROM mailboxes;
     DELETE FROM mailbox_message_state;

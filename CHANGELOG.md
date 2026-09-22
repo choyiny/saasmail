@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Conversation snooze.** Inbox conversations can now be snoozed until a future Unix timestamp (up to 366 days) and appear in a derived Snoozed folder while active. Snooze is scoped by inbox plus group conversation id or one-to-one person key, expires at read time without cron work, wakes on newly received mail, and is exposed through HTTP, MCP, and reversible WebMCP state actions.
+
 - **Message state, folders, and state-aware message APIs.** Received and sent messages now have persistent personal state (seen/starred), shared inbox state (archive/spam/trash), and custom mailbox membership. `GET /api/messages` exposes cursor-paged state-aware reads without changing the visibility-neutral default of `queryMessages()`; system folder definitions are explicit, the Sent folder hides campaign sends by default, and person timelines hide spam/trash while keeping archived mail. New mailbox/state mutation routes are documented in OpenAPI. Remote MCP gains `list_messages` and `set_message_state`; WebMCP gains the same pair but deliberately cannot trash or delete mail.
 
 - **A block editor for newsletter templates.** A template now records how it was authored in a `format` column: `html` is the raw-HTML editor that has always existed, and `block` is a new visual editor built on Tiptap. Seven block types — heading, paragraph, list, quote, image, button, separator — arranged in an editor whose live preview is compiled by the same module the worker runs on save, so the preview is the email rather than an approximation of it. Multi-column layouts are deliberately not supported.

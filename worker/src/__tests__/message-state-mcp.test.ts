@@ -103,4 +103,31 @@ describe("MCP message state tools", () => {
       ]),
     );
   });
+  it("snoozes through set_message_state and exposes the snoozed folder", async () => {
+    const token = await getAccessToken(
+      MEMBER,
+      "openid email:read email:manage",
+    );
+    const until = Math.floor(Date.now() / 1000) + 3600;
+
+    let out = await callTool(token, "set_message_state", {
+      refs: ["received:mcp-state-mine"],
+      snoozeUntil: until,
+    });
+    expect(out.isError).toBe(false);
+
+    out = await callTool(token, "list_messages", { folder: "snoozed" });
+    expect(out.isError).toBe(false);
+    expect(out.data.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          ref: "received:mcp-state-mine",
+          state: expect.objectContaining({
+            conversationKey: "p:mcp-state-person",
+            snoozedUntil: until,
+          }),
+        }),
+      ]),
+    );
+  });
 });

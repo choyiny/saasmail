@@ -21,6 +21,8 @@ export interface UnifiedMessageState {
   spamAt: number | null;
   trashedAt: number | null;
   mailboxIds: string[];
+  conversationKey: string | null;
+  snoozedUntil: number | null;
 }
 
 export interface UnifiedMessage {

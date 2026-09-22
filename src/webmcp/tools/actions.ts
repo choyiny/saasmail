@@ -14,6 +14,7 @@ export interface ActionDeps {
     starred?: boolean;
     archived?: boolean;
     spam?: boolean;
+    snoozeUntil?: number | null;
   }) => Promise<any>;
   enrollPerson: (
     sequenceId: string,
@@ -218,7 +219,7 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
     {
       name: "set_message_state",
       description:
-        "Set seen, starred, archived, or spam state on messages. This tool cannot trash or delete messages.",
+        "Set seen, starred, archived, spam, or reversible snooze state on messages. This tool cannot trash or delete messages.",
       inputSchema: {
         type: "object",
         properties: {
@@ -231,6 +232,11 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
           starred: { type: "boolean" },
           archived: { type: "boolean" },
           spam: { type: "boolean" },
+          snoozeUntil: {
+            type: ["number", "null"],
+            description:
+              "Unix timestamp in seconds to snooze until, or null to clear snooze.",
+          },
         },
         required: ["refs"],
       },
@@ -244,6 +250,7 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
           starred: args.starred,
           archived: args.archived,
           spam: args.spam,
+          snoozeUntil: args.snoozeUntil,
         });
         deps.invalidate();
         return okJson(result);

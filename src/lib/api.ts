@@ -305,7 +305,7 @@ export interface MessageListResult {
 
 export async function fetchMessages(params?: {
   inbox?: string;
-  folder?: "inbox" | "sent" | "archive" | "junk" | "trash";
+  folder?: "inbox" | "sent" | "archive" | "junk" | "trash" | "snoozed";
   mailboxId?: string;
   starred?: boolean;
   unseen?: boolean;
@@ -337,6 +337,7 @@ export async function setMessageState(data: {
   starred?: boolean;
   archived?: boolean;
   spam?: boolean;
+  snoozeUntil?: number | null;
 }): Promise<{ success: boolean }> {
   if (data.seen !== undefined || data.starred !== undefined) {
     await apiFetch("/api/messages/user-state", {
@@ -357,6 +358,16 @@ export async function setMessageState(data: {
         refs: data.refs,
         archived: data.archived,
         spam: data.spam,
+      }),
+    });
+  }
+  if (data.snoozeUntil !== undefined) {
+    await apiFetch("/api/messages/snooze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refs: data.refs,
+        until: data.snoozeUntil,
       }),
     });
   }

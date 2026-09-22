@@ -295,6 +295,13 @@
       "when": 1790103490979,
       "tag": "0041_message_state_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1790108525741,
+      "tag": "0042_conversation_snooze",
+      "breakpoints": true
     }
   ]
 }

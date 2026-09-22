@@ -8,6 +8,7 @@ import {
   SYSTEM_INBOX_ACCESS,
 } from "./delete-email";
 import { deleteMessageState } from "./messages/state";
+import { deletePersonConversationState } from "./messages/conversation-state";
 
 /**
  * Hard-delete every email + person whose address matches any block rule, and
@@ -56,6 +57,7 @@ export async function purgeBlockedMail(
       sent.map((message) => ({ kind: "sent" as const, id: message.id })),
     );
     await db.delete(sentEmails).where(eq(sentEmails.personId, personId));
+    await deletePersonConversationState(db, personId);
     // Finally the person row.
     await db.delete(people).where(eq(people.id, personId));
   }

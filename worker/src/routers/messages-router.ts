@@ -18,6 +18,7 @@ import {
   setMailboxState,
   setUserState,
 } from "../lib/messages/state";
+import { snoozeConversations } from "../lib/messages/conversation-state";
 import { bearerSecurity } from "../lib/openapi-auth";
 import type { Variables } from "../variables";
 
@@ -45,6 +46,8 @@ const MessageStateSchema = z.object({
   spamAt: z.number().nullable(),
   trashedAt: z.number().nullable(),
   mailboxIds: z.array(z.string()),
+  conversationKey: z.string().nullable(),
+  snoozedUntil: z.number().nullable(),
 });
 
 const MessageSchema = z.object({
@@ -116,7 +119,9 @@ const listMessagesRoute = createRoute({
   request: {
     query: z.object({
       inbox: z.string().optional(),
-      folder: z.enum(["inbox", "sent", "archive", "junk", "trash"]).optional(),
+      folder: z
+        .enum(["inbox", "sent", "archive", "junk", "trash", "snoozed"])
+        .optional(),
       mailboxId: z.string().min(1).optional(),
       starred: BoolQuery,
       unseen: BoolQuery,
@@ -292,6 +297,55 @@ messagesRouter.openapi(mailboxStateRoute, async (c) => {
       },
     );
     return c.json({ success: true }, 200);
+  } catch (error) {
+    const mapped = stateError(error);
+    if (mapped) return c.json({ error: mapped.message }, mapped.status);
+    throw error;
+  }
+});
+
+const snoozeRoute = createRoute({
+  method: "post",
+  path: "/snooze",
+  tags: ["Messages"],
+  security: bearerSecurity,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            refs: RefsSchema,
+            until: z.number().int().nullable(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Conversation snooze state updated",
+      content: {
+        "application/json": {
+          schema: z.object({ conversations: z.number().int().nonnegative() }),
+        },
+      },
+    },
+    400: errorResponse("Invalid snooze state"),
+    404: errorResponse("Message not found"),
+  },
+});
+
+messagesRouter.openapi(snoozeRoute, async (c) => {
+  const body = c.req.valid("json");
+  try {
+    const conversations = await snoozeConversations(
+      c.get("db"),
+      c.get("allowedInboxes")!,
+      c.get("user").id,
+      parseRefs(body.refs),
+      body.until,
+    );
+    return c.json({ conversations }, 200);
   } catch (error) {
     const mapped = stateError(error);
     if (mapped) return c.json({ error: mapped.message }, mapped.status);

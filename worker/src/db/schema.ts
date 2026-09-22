@@ -33,6 +33,7 @@ import { messageUserState } from "./message-user-state.schema";
 import { mailboxMessageState } from "./mailbox-message-state.schema";
 import { mailboxes } from "./mailboxes.schema";
 import { messageMailboxes } from "./message-mailboxes.schema";
+import { inboxConversationState } from "./inbox-conversation-state.schema";
 
 export const schema = {
   ...authSchema,
@@ -70,4 +71,5 @@ export const schema = {
   mailboxMessageState,
   mailboxes,
   messageMailboxes,
+  inboxConversationState,
 } as const;

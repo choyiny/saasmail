@@ -19,6 +19,7 @@ import {
 import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
 import { forwardInbound } from "./lib/inbound-forward";
+import { wakeConversation } from "./lib/messages/conversation-state";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -215,6 +216,19 @@ export async function handleEmail(
     receivedAt: now,
     createdAt: now,
   });
+
+  // A new inbound message wakes its conversation. Snooze is deliberately
+  // evaluated/read separately from delivery, so this best-effort state update
+  // must never cause inbound delivery to fail.
+  try {
+    await wakeConversation(
+      db,
+      recipientCanonical,
+      conversationId ?? `p:${actualPersonId}`,
+    );
+  } catch (error) {
+    console.warn("Failed to wake snoozed conversation:", error);
+  }
 
   // Notify connected WebSocket clients about the new email (per-user DOs).
   // Fan out to users with explicit permission for this inbox, plus admins

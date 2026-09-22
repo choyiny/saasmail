@@ -34,6 +34,7 @@ describe("WebMCP message state tools", () => {
     const tools = createActionTools({ setMessageState, invalidate } as any);
     const tool = byName(tools, "set_message_state");
     expect(tool.inputSchema.properties.trashed).toBeUndefined();
+    expect(tool.inputSchema.properties.snoozeUntil).toBeDefined();
 
     const result = await tool.execute(
       {
@@ -42,6 +43,7 @@ describe("WebMCP message state tools", () => {
         starred: true,
         archived: false,
         spam: false,
+        snoozeUntil: 1_800_000_000,
       },
       signal,
     );
@@ -51,6 +53,7 @@ describe("WebMCP message state tools", () => {
       starred: true,
       archived: false,
       spam: false,
+      snoozeUntil: 1_800_000_000,
     });
     expect(invalidate).toHaveBeenCalled();
     expect(result.isError).toBeFalsy();

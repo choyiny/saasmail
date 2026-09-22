@@ -298,4 +298,128 @@ describe("message state routes", () => {
       "received:member-message",
     ]);
   });
+  it("snoozes conversations through the API and lists the snoozed folder", async () => {
+    const { apiKey } = await admin();
+    await createTestPerson({
+      id: "route-snooze-person",
+      email: "route-snooze@example.com",
+    });
+    await createTestEmail({
+      id: "route-snooze-a",
+      personId: "route-snooze-person",
+      recipient: INBOX,
+      messageId: "route-snooze-a@example.com",
+    });
+    await createTestEmail({
+      id: "route-snooze-b",
+      personId: "route-snooze-person",
+      recipient: INBOX,
+      messageId: "route-snooze-b@example.com",
+    });
+
+    const until = Math.floor(Date.now() / 1000) + 3600;
+    let res = await authFetch("/api/messages/snooze", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["received:route-snooze-a"],
+        until,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ conversations: 1 });
+
+    res = await authFetch(
+      `/api/messages?folder=snoozed&inbox=${encodeURIComponent(INBOX)}`,
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      messages: Array<{
+        ref: string;
+        state?: { conversationKey: string | null; snoozedUntil: number | null };
+      }>;
+    };
+    expect(body.messages.map((message) => message.ref).sort()).toEqual([
+      "received:route-snooze-a",
+      "received:route-snooze-b",
+    ]);
+    expect(
+      body.messages.every(
+        (message) =>
+          message.state?.conversationKey === "p:route-snooze-person" &&
+          message.state.snoozedUntil === until,
+      ),
+    ).toBe(true);
+
+    res = await authFetch("/api/messages/snooze", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["received:route-snooze-a"],
+        until: null,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ conversations: 1 });
+  });
+
+  it("rejects invalid snooze times and messages without a conversation key", async () => {
+    const { apiKey } = await admin();
+    await createTestSentEmail({
+      id: "route-no-key",
+      personId: null,
+      fromAddress: INBOX,
+      toAddress: "campaign-contact@example.com",
+      conversationId: null,
+    });
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const until of [now, now + 367 * 24 * 60 * 60]) {
+      const res = await authFetch("/api/messages/snooze", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({ refs: ["sent:route-no-key"], until }),
+      });
+      expect(res.status).toBe(400);
+    }
+
+    const res = await authFetch("/api/messages/snooze", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["sent:route-no-key"],
+        until: now + 60,
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when a member snoozes a message outside their inboxes", async () => {
+    const member = await createTestUser({
+      id: "route-snooze-member",
+      role: "member",
+      email: "route-snooze-member@example.com",
+    });
+    await createTestPerson({
+      id: "route-private-person",
+      email: "route-private@example.com",
+    });
+    await createTestEmail({
+      id: "route-private-message",
+      personId: "route-private-person",
+      recipient: INBOX,
+      messageId: "route-private-message@example.com",
+    });
+
+    const res = await authFetch("/api/messages/snooze", {
+      apiKey: member.apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["received:route-private-message"],
+        until: Math.floor(Date.now() / 1000) + 60,
+      }),
+    });
+    expect(res.status).toBe(404);
+  });
 });

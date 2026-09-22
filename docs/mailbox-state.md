@@ -21,6 +21,13 @@ Shared inbox state is keyed by message:
 - **spam**
 - **trashed**
 
+Conversation snooze state is shared per inbox and conversation key. A group
+thread uses its `conversation_id`; a one-to-one thread uses `p:<person_id>`.
+Messages without either value have no conversation and cannot be snoozed.
+`snoozed_until` is evaluated at read time, so no scheduler or cron job is
+needed. A new received message clears the snooze for that conversation; outbound
+replies do not.
+
 Archive and spam apply only to received mail. Trash applies to both received and
 sent mail. Custom folders are rows in `mailboxes` plus
 `message_mailboxes` memberships; system folders are derived and are never
@@ -30,18 +37,21 @@ mailbox rows.
 
 | Folder         | Messages included                                                                           |
 | -------------- | ------------------------------------------------------------------------------------------- |
-| Inbox          | Received only; not archived, spam, or trashed                                               |
+| Inbox          | Received only; not archived, spam, trashed, or actively snoozed                             |
 | Sent           | Sent only; not trashed. Campaign sends are excluded by default on the HTTP/MCP Sent surface |
 | Archive        | Received only; archived, not spam or trashed                                                |
 | Junk           | Received only; spam, not trashed                                                            |
 | Trash          | Received and sent with trash state                                                          |
+| Snoozed        | Received only; actively snoozed, not spam or trashed                                        |
 | Custom mailbox | Members of that mailbox, not trashed, scoped to the mailbox inbox                           |
 
 A message that is both spam and trashed appears in Trash. Removing the trash
 state makes it visible in Junk again.
 
 `queryMessages()` is visibility-neutral when no folder/include flags are
-supplied: archived, spam, and trashed messages are not hidden implicitly. Each
+supplied: archived, spam, trashed, and snoozed messages are not hidden
+implicitly. Callers can set `includeSnoozed: false` for a neutral non-folder
+query that should exclude active snoozes. Each
 surface opts into its own policy. The existing per-person timeline excludes
 spam and trash but continues to show archived messages.
 
@@ -56,7 +66,7 @@ All routes use the normal authenticated API middleware and inbox permissions.
 Query parameters:
 
 - `inbox`
-- `folder=inbox|sent|archive|junk|trash`
+- `folder=inbox|sent|archive|junk|trash|snoozed`
 - `mailboxId` for a custom mailbox
 - `starred=true`
 - `unseen=true`
@@ -68,8 +78,9 @@ Query parameters:
 
 The response is `{ messages, nextCursor }`. Message references are serialized
 as `received:<id>` or `sent:<id>`. Each message includes a `state` object
-with `seen`, `starredAt`, `archivedAt`, `spamAt`, `trashedAt`, and
-`mailboxIds`.
+with `seen`, `starredAt`, `archivedAt`, `spamAt`, `trashedAt`,
+`mailboxIds`, `conversationKey`, and the active `snoozedUntil` value (or
+`null` after expiry).
 
 When `folder=sent`, campaign sends are excluded unless
 `excludeCampaignSends=false` is supplied.
@@ -79,6 +90,8 @@ When `folder=sent`, campaign sends are excluded unless
 - `POST /api/messages/user-state` — `{ refs, seen?, starred? }`
 - `POST /api/messages/mailbox-state` — `{ refs, archived?, spam?, trashed? }`
 - `POST /api/messages/mailbox-membership` — `{ refs, add?, remove? }`
+- `POST /api/messages/snooze` — `{ refs, until }`, where `until` is a
+  future Unix timestamp no more than 366 days away, or `null` to clear snooze
 
 Each request accepts at most 500 message refs.
 
@@ -98,16 +111,18 @@ The remote MCP server exposes:
 
 - `list_messages` — requires `email:read`; mirrors `GET /api/messages`.
 - `set_message_state` — requires `email:manage`; supports
-  seen/starred/archive/spam/trash.
+  seen/starred/archive/spam/trash plus `snoozeUntil`.
 
-WebMCP exposes the same tool names for the signed-in browser session, but its
-`set_message_state` is intentionally limited to seen, starred, archive, and
-spam. It cannot trash or delete messages.
+WebMCP exposes the same tool names for the signed-in browser session. Its
+`set_message_state` supports seen, starred, archive, spam, and reversible
+`snoozeUntil`, but it still cannot trash or delete messages.
 
 ## Contributor invariants
 
 - Unified message reads go through `worker/src/lib/messages/query.ts`.
-- State mutations go through `worker/src/lib/messages/state.ts`.
+- Message state mutations go through `worker/src/lib/messages/state.ts`;
+  conversation snooze mutations go through
+  `worker/src/lib/messages/conversation-state.ts`.
 - Every hard-delete of a message must call `deleteMessageState()` before the
   message row is removed.
 - State lookups that can exceed D1's bound-parameter limit are batched.

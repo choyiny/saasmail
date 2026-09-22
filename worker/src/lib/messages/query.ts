@@ -2,6 +2,7 @@ import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { attachments } from "../../db/attachments.schema";
 import { messageMailboxes } from "../../db/message-mailboxes.schema";
+import { conversationKeySql } from "./conversation-state";
 import { escapeFts, escapeLike } from "../helpers";
 import { inboxScopeSql, type AllowedInboxes } from "../inbox-permissions";
 import {
@@ -21,6 +22,7 @@ export type MessageFolder =
   | "archive"
   | "junk"
   | "trash"
+  | "snoozed"
   | { mailboxId: string };
 
 export class InvalidQueryError extends Error {
@@ -55,7 +57,10 @@ export interface MessageQuery {
   includeArchived?: boolean;
   includeTrashed?: boolean;
   includeSpam?: boolean;
+  includeSnoozed?: boolean;
   excludeCampaignSends?: boolean;
+  /** Unix seconds used for snooze evaluation. Defaults to the current time. */
+  now?: number;
 }
 
 export interface MessagePage {
@@ -92,6 +97,8 @@ type RawMessageRow = {
   archived_at: number | null;
   spam_at: number | null;
   trashed_at: number | null;
+  conversation_key: string | null;
+  snoozed_until: number | null;
 };
 
 function normalizeInboxes(inboxes: string[] | undefined): string[] | undefined {
@@ -169,6 +176,81 @@ function mailboxFolderId(
   return typeof folder === "object" ? folder.mailboxId : undefined;
 }
 
+function snoozeStateJoin(
+  query: MessageQuery,
+  inboxColumn: SQL,
+  conversationIdColumn: SQL,
+  personIdColumn: SQL,
+): SQL {
+  if (!query.withState) return sql``;
+  const key = conversationKeySql({
+    conversationId: conversationIdColumn,
+    personId: personIdColumn,
+  });
+  return sql`LEFT JOIN inbox_conversation_state ics
+    ON ics.inbox = ${inboxColumn}
+    AND ics.conversation_key = ${key}`;
+}
+
+function snoozeStateSelect(
+  query: MessageQuery,
+  conversationIdColumn: SQL,
+  personIdColumn: SQL,
+): SQL {
+  if (!query.withState) {
+    return sql`NULL AS conversation_key, NULL AS snoozed_until`;
+  }
+  const now = query.now ?? Math.floor(Date.now() / 1000);
+  const key = conversationKeySql({
+    conversationId: conversationIdColumn,
+    personId: personIdColumn,
+  });
+  return sql`${key} AS conversation_key,
+    CASE WHEN ics.snoozed_until > ${now}
+      THEN ics.snoozed_until
+      ELSE NULL
+    END AS snoozed_until`;
+}
+
+function snoozeScope(
+  query: MessageQuery,
+  inboxColumn: SQL,
+  conversationIdColumn: SQL,
+  personIdColumn: SQL,
+): SQL {
+  const now = query.now ?? Math.floor(Date.now() / 1000);
+  const key = conversationKeySql({
+    conversationId: conversationIdColumn,
+    personId: personIdColumn,
+  });
+
+  if (query.folder === "inbox") {
+    return sql`AND NOT EXISTS (
+      SELECT 1 FROM inbox_conversation_state snooze
+      WHERE snooze.inbox = ${inboxColumn}
+        AND snooze.conversation_key = ${key}
+        AND snooze.snoozed_until > ${now}
+    )`;
+  }
+  if (query.folder === "snoozed") {
+    return sql`AND EXISTS (
+      SELECT 1 FROM inbox_conversation_state snooze
+      WHERE snooze.inbox = ${inboxColumn}
+        AND snooze.conversation_key = ${key}
+        AND snooze.snoozed_until > ${now}
+    )`;
+  }
+  if (query.folder === undefined && query.includeSnoozed === false) {
+    return sql`AND NOT EXISTS (
+      SELECT 1 FROM inbox_conversation_state snooze
+      WHERE snooze.inbox = ${inboxColumn}
+        AND snooze.conversation_key = ${key}
+        AND snooze.snoozed_until > ${now}
+    )`;
+  }
+  return sql``;
+}
+
 function stateScope(
   query: MessageQuery,
   kind: MessageKind,
@@ -195,6 +277,9 @@ function stateScope(
       AND mms.trashed_at IS NULL`;
   } else if (folder === "trash") {
     folderScope = sql`AND mms.trashed_at IS NOT NULL`;
+  } else if (folder === "snoozed") {
+    folderScope = sql`AND mms.trashed_at IS NULL
+      AND mms.spam_at IS NULL`;
   } else if (mailboxId !== undefined) {
     folderScope = sql`AND mms.trashed_at IS NULL
       AND EXISTS (
@@ -364,13 +449,20 @@ function receivedArm(
       ${personalStateSelect(query)},
       mms.archived_at AS archived_at,
       mms.spam_at AS spam_at,
-      mms.trashed_at AS trashed_at
+      mms.trashed_at AS trashed_at,
+      ${snoozeStateSelect(query, sql`e.conversation_id`, sql`e.person_id`)}
     FROM emails e
     ${search.join}
     LEFT JOIN people p ON p.id = e.person_id
     LEFT JOIN mailbox_message_state mms
       ON mms.message_kind = 'received' AND mms.message_id = e.id
     ${personalStateJoin(query, "received", sql`e.id`)}
+    ${snoozeStateJoin(
+      query,
+      sql`e.recipient`,
+      sql`e.conversation_id`,
+      sql`e.person_id`,
+    )}
     WHERE 1 = 1
       ${allowedScope}
       ${explicitInboxScope(sql`e.recipient`, requestedInboxes)}
@@ -385,6 +477,12 @@ function receivedArm(
         sql`e.id`,
         sql`e.recipient`,
         sql`e.is_read`,
+      )}
+      ${snoozeScope(
+        query,
+        sql`e.recipient`,
+        sql`e.conversation_id`,
+        sql`e.person_id`,
       )}
       ${sourceCursorScope(
         sql`e.received_at`,
@@ -431,12 +529,19 @@ function sentArm(
       ${personalStateSelect(query)},
       mms.archived_at AS archived_at,
       mms.spam_at AS spam_at,
-      mms.trashed_at AS trashed_at
+      mms.trashed_at AS trashed_at,
+      ${snoozeStateSelect(query, sql`se.conversation_id`, sql`se.person_id`)}
     FROM sent_emails se
     LEFT JOIN people p ON p.id = se.person_id
     LEFT JOIN mailbox_message_state mms
       ON mms.message_kind = 'sent' AND mms.message_id = se.id
     ${personalStateJoin(query, "sent", sql`se.id`)}
+    ${snoozeStateJoin(
+      query,
+      sql`se.from_address`,
+      sql`se.conversation_id`,
+      sql`se.person_id`,
+    )}
     WHERE 1 = 1
       ${allowedScope}
       ${explicitInboxScope(sql`se.from_address`, requestedInboxes)}
@@ -446,6 +551,12 @@ function sentArm(
       ${sentSearch(query.search, query.searchMode ?? "subject")}
       ${blockedScope(query.excludeBlocked ?? false)}
       ${stateScope(query, "sent", sql`se.id`, sql`se.from_address`)}
+      ${snoozeScope(
+        query,
+        sql`se.from_address`,
+        sql`se.conversation_id`,
+        sql`se.person_id`,
+      )}
       ${campaignScope(query)}
       ${sourceCursorScope(
         sql`se.sent_at`,
@@ -550,6 +661,8 @@ function toUnified(
       spamAt: row.spam_at,
       trashedAt: row.trashed_at,
       mailboxIds: [],
+      conversationKey: row.conversation_key,
+      snoozedUntil: row.snoozed_until,
     };
   }
 
@@ -756,6 +869,7 @@ export function buildMessageQuerySql(
     folder === "inbox" ||
     folder === "archive" ||
     folder === "junk" ||
+    folder === "snoozed" ||
     query.unseen === true;
   const forceSent = folder === "sent";
   const forceBoth =

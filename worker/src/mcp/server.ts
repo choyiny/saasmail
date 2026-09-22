@@ -31,6 +31,7 @@ import {
   serializeMessageRef,
   type MessageRef,
 } from "../lib/messages/types";
+import { snoozeConversations } from "../lib/messages/conversation-state";
 import {
   InvalidMessageStateError,
   MessageStateAccessError,
@@ -273,7 +274,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       inputSchema: {
         inbox: z.string().optional(),
         folder: z
-          .enum(["inbox", "sent", "archive", "junk", "trash"])
+          .enum(["inbox", "sent", "archive", "junk", "trash", "snoozed"])
           .optional(),
         mailboxId: z.string().optional(),
         starred: z.boolean().optional(),
@@ -337,6 +338,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         archived: z.boolean().optional(),
         spam: z.boolean().optional(),
         trashed: z.boolean().optional(),
+        snoozeUntil: z.number().int().nullable().optional(),
       },
     },
     guard(ctx, SCOPE_MANAGE, async (input) => {
@@ -357,6 +359,15 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           seen: input.seen,
           starred: input.starred,
         });
+      }
+      if (input.snoozeUntil !== undefined) {
+        await snoozeConversations(
+          db,
+          allowed,
+          ctx.user.id,
+          refs,
+          input.snoozeUntil,
+        );
       }
       return ok({ success: true });
     }),
