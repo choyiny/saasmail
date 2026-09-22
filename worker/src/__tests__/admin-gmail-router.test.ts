@@ -311,6 +311,51 @@ describe("GET /api/admin/gmail", () => {
     };
     expect(body.accounts[0].connectedBy).toBeNull();
   });
+
+  it("returns lastGapAt when a gap was recorded", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-1",
+        emailAddress: "collector@xyspace.dev",
+        refreshTokenEncrypted: "sealed-blob",
+        historyId: "1",
+        lastGapAt: now - 3600,
+        connectedBy: "test-user-1",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      accounts: Array<{ id: string; lastGapAt: number | null }>;
+    };
+    expect(body.accounts[0].lastGapAt).toBe(now - 3600);
+  });
+
+  it("returns lastGapAt as null when no gap has occurred", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed-blob",
+      historyId: "1",
+      connectedBy: "test-user-1",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      accounts: Array<{ id: string; lastGapAt: number | null }>;
+    };
+    expect(body.accounts[0].lastGapAt).toBeNull();
+  });
 });
 
 describe("DELETE /api/admin/gmail/{id}", () => {

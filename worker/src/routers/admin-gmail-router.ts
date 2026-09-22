@@ -45,6 +45,10 @@ const AccountSchema = z.object({
   emailAddress: z.string(),
   lastSyncedAt: z.number().nullable(),
   lastError: z.string().nullable(),
+  // When an expired history cursor last forced a re-seed (unix seconds), or
+  // null if that has never happened. Mail from inside that gap could not be
+  // recovered — see the doc comment on gmail_accounts.last_gap_at.
+  lastGapAt: z.number().nullable(),
   createdAt: z.number(),
   /**
    * The admin who last connected or reconnected this mailbox, resolved from
@@ -192,7 +196,7 @@ const listRoute = createRoute({
 });
 
 adminGmailRouter.openapi(listRoute, async (c) => {
-  // The five columns are listed deliberately. `@hono/zod-openapi` does NOT
+  // The columns are listed deliberately. `@hono/zod-openapi` does NOT
   // validate or strip response bodies — AccountSchema only feeds the OpenAPI
   // document — so selecting whole rows here would hand the caller
   // `refreshTokenEncrypted` and `accessToken`. The shipped test asserts the
@@ -204,6 +208,7 @@ adminGmailRouter.openapi(listRoute, async (c) => {
       emailAddress: gmailAccounts.emailAddress,
       lastSyncedAt: gmailAccounts.lastSyncedAt,
       lastError: gmailAccounts.lastError,
+      lastGapAt: gmailAccounts.lastGapAt,
       createdAt: gmailAccounts.createdAt,
       connectedById: gmailAccounts.connectedBy,
       // Left join: `connected_by` carries no foreign key, so the admin who
