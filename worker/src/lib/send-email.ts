@@ -558,9 +558,15 @@ export async function replyToEmail(
       return {
         ok: false,
         code: "SEND_FAILED",
-        message:
-          "Gmail did not accept this reply, and it was not queued for " +
-          `retry: ${result.error.message}. Send it again to retry.`,
+        // "Send it again" is the right advice only when sending it again can
+        // work. When the mailbox's Google grant is dead, an identical resend
+        // fails identically forever, so say what actually has to happen
+        // instead of sending the user round a loop.
+        message: result.error.reconnect
+          ? `${result.error.message} This reply was not sent and was not ` +
+            "queued for retry."
+          : "Gmail did not accept this reply, and it was not queued for " +
+            `retry: ${result.error.message}. Send it again to retry.`,
       };
     }
     outcome = "sent";

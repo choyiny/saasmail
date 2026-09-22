@@ -210,6 +210,40 @@ describe("GmailSender", () => {
     expect(raw).toContain("three@example.com");
   });
 
+  it("carries an attachment into the raw message Gmail receives", async () => {
+    // Nothing exercised the addAttachment loop on this transport before:
+    // the reply route sized attachments with the CONFIGURED provider, so on
+    // a Gmail-only install every attachment 413'd before it reached here.
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ id: "1" }));
+    const sender = makeSender(fetchMock as unknown as typeof fetch);
+
+    // Bytes chosen so their base64 is distinctive and cannot collide with
+    // anything mimetext emits on its own.
+    const content = new TextEncoder().encode("invoice-contents-42");
+    const expectedB64 = btoa("invoice-contents-42");
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "d@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      attachments: [
+        { filename: "invoice.pdf", contentType: "application/pdf", content },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    const raw = decodeMimeEncodedWords(decodeBase64Url(body.raw));
+    // The filename, the declared type, and the actual bytes — asserting only
+    // the filename would still pass if the content were dropped.
+    expect(raw).toContain("invoice.pdf");
+    expect(raw).toContain("application/pdf");
+    expect(raw.replace(/\r?\n/g, "")).toContain(expectedB64);
+  });
+
   it("classifies a 429 as transient", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
@@ -294,8 +328,22 @@ describe("GmailSender", () => {
     expect(result.error?.transient).toBe(true);
   });
 
-  it("returns Gmail's 25MB attachment limit, not Cloudflare's", () => {
+  it("budgets Gmail's 25MB message limit against the ENCODED size", () => {
     const sender = makeSender(vi.fn() as unknown as typeof fetch);
-    expect(sender.maxAttachmentBytes()).toBe(25 * 1024 * 1024);
+    const limit = sender.maxAttachmentBytes();
+
+    // Not the flat 25 MB: messages.send carries the whole MIME message
+    // base64url-encoded in JSON, and the attachment is already base64 inside
+    // that message, so an attachment costs ~1.78x its own size on the wire.
+    // A flat budget would let through a request Gmail rejects — on the path
+    // that is never queued, so the user cannot retry past it.
+    expect(limit).toBeLessThan(25 * 1024 * 1024);
+    // An attachment at exactly the limit must still fit inside 25 MB once
+    // both encodings are applied. This is the property that matters; the
+    // exact byte count is an implementation detail.
+    expect(limit * (4 / 3) * (4 / 3)).toBeLessThanOrEqual(25 * 1024 * 1024);
+    // And it must not be so conservative as to be useless — a 10 MB
+    // attachment still has to be sendable through Gmail.
+    expect(limit).toBeGreaterThan(10 * 1024 * 1024);
   });
 });

@@ -288,6 +288,147 @@ describe("send router — Gmail reply routing", () => {
     expect(sentRows).toHaveLength(0);
   });
 
+  it("a grant revoked UNDER a still-valid cached token is surfaced, recorded and re-authorized once", async () => {
+    // The gap the other revocation test cannot reach: the cached access
+    // token is present and unexpired, so nothing refreshes and nothing ever
+    // discovers that Google killed the grant. Gmail answers 401, and without
+    // the forced re-authorization below this fails identically on every
+    // resend for up to an hour — no outbox row, no audit row, no lastError.
+    await seedGmailAccount();
+    await seedGmailIdentity();
+
+    const person = await createTestPerson({
+      id: "p-revoked",
+      email: "customer4@example.com",
+    });
+    await createTestEmail({
+      id: "rcv-revoked",
+      personId: person.id,
+      recipient: "support@acme.dev",
+      subject: "Question",
+      messageId: "parent-revoked@example.com",
+    });
+
+    let refreshAttempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com")) {
+        refreshAttempts++;
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ error: { message: "Invalid Credentials" } }),
+        { status: 401, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await authFetch("/api/send/reply/rcv-revoked", {
+      apiKey,
+      method: "POST",
+      body: buildSendForm({
+        fromAddress: "support@acme.dev",
+        bodyHtml: "<p>Thanks for reaching out.</p>",
+      }),
+    });
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    // The 401 was acted on rather than passed through: exactly one forced
+    // refresh, which is what turns an invisible revocation into a recorded one.
+    expect(refreshAttempts).toBe(1);
+    // The user is told to reconnect, NOT to press send again — resending is
+    // futile until the grant is restored.
+    expect(body.error).toMatch(/reconnect this mailbox/i);
+    expect(body.error).not.toMatch(/send it again/i);
+    expect(body.error).not.toMatch(/bearer|access.?token|refresh.?token/i);
+
+    // Visible in GET /api/admin/gmail, exactly as a sync-side revocation is.
+    const accounts = await getDb()
+      .select()
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.id, "acct-1"));
+    expect(accounts[0].lastError).toBe("invalid_grant");
+    // And the dead token is gone, so the NEXT reply takes the refresh path in
+    // createSenderForInbox and degrades to the configured provider.
+    expect(accounts[0].accessToken).toBeNull();
+
+    // The no-queue rule still holds on this path.
+    expect(await getDb().select().from(outboxEmails)).toHaveLength(0);
+    expect(await getDb().select().from(sentEmails)).toHaveLength(0);
+  });
+
+  it("a merely stale cached token is re-authorized and the reply goes out", async () => {
+    // Same 401, but the grant is alive — the cached token had simply been
+    // invalidated early. One forced refresh and the reply must succeed
+    // rather than becoming a 502 the user has to retry by hand.
+    await seedGmailAccount();
+    await seedGmailIdentity();
+
+    const person = await createTestPerson({
+      id: "p-stale",
+      email: "customer5@example.com",
+    });
+    await createTestEmail({
+      id: "rcv-stale",
+      personId: person.id,
+      recipient: "support@acme.dev",
+      subject: "Question",
+      messageId: "parent-stale@example.com",
+    });
+
+    let sendAttempts = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com")) {
+        return new Response(
+          JSON.stringify({ access_token: "fresh-at", expires_in: 3600 }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      sendAttempts++;
+      if (sendAttempts === 1) {
+        return new Response(
+          JSON.stringify({ error: { message: "Invalid Credentials" } }),
+          { status: 401, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ id: "18stale", threadId: "thread-stale" }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await authFetch("/api/send/reply/rcv-stale", {
+      apiKey,
+      method: "POST",
+      body: buildSendForm({
+        fromAddress: "support@acme.dev",
+        bodyHtml: "<p>Thanks for reaching out.</p>",
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+    // Retried exactly once, and the retry carried the refreshed token.
+    expect(sendAttempts).toBe(2);
+    const secondInit = fetchMock.mock.calls.at(-1)![1] as RequestInit;
+    expect((secondInit.headers as Record<string, string>).Authorization).toBe(
+      "Bearer fresh-at",
+    );
+
+    const rows = await getDb()
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, body.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].gmailMessageId).toBe("18stale");
+  });
+
   it("a reply that FELL BACK off Gmail (revoked grant) still queues on a transient failure, unchanged", async () => {
     // Gmail-mapped, but the cached token is gone and refresh will fail —
     // createSenderForInbox falls back to the configured provider.
