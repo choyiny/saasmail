@@ -7,7 +7,7 @@ import { senderIdentities } from "../../db/sender-identities.schema";
 import { emails } from "../../db/emails.schema";
 import { people } from "../../db/people.schema";
 import { sentEmails } from "../../db/sent-emails.schema";
-import { parseRaw } from "../email-parser";
+import { parseRaw, type ParsedEmailAddress } from "../email-parser";
 import { computeConversationId, externalsOnly } from "../conversation-id";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
@@ -154,77 +154,16 @@ function header(
 }
 
 /**
- * The FIRST entry of a comma-separated address list, as written.
- *
- * Split before extracting anything, and never across the whole header: a
- * pattern matched against the entire string finds the LAST-written address
- * as readily as the first, so `jane@example.com, "Bob" <bob@x.com>` would
- * yield Bob — filing a reply on the wrong customer's timeline.
- *
- * The scan ignores commas inside a quoted display name (`"Smith, Jane"`) and
- * inside a bracketed address, because neither separates list entries.
- */
-function firstListEntry(raw: string): string | null {
-  let inQuotes = false;
-  let inAngles = false;
-  for (let i = 0; i < raw.length; i++) {
-    const c = raw[i];
-    if (inQuotes && c === "\\") {
-      i++; // escaped character inside a quoted string, never a delimiter
-      continue;
-    }
-    if (c === '"') {
-      inQuotes = !inQuotes;
-      continue;
-    }
-    if (!inQuotes && c === "<") inAngles = true;
-    else if (!inQuotes && c === ">") inAngles = false;
-    else if (c === "," && !inQuotes && !inAngles) return raw.slice(0, i);
-  }
-  // Ending mid-quote or mid-bracket means the header is malformed, and a
-  // malformed list has no identifiable first entry. Returning the WHOLE
-  // header here would be the wrong-customer bug all over again: one stray
-  // quote suppresses every delimiter, and the extraction below would then
-  // pick up whatever bracketed address appears LAST. Refuse instead.
-  return inQuotes || inAngles ? null : raw;
-}
-
-/**
- * The entry with its quoted display names removed.
- *
- * A display name may legally contain anything, including a complete
- * address in brackets, so the search for the real address has to ignore it:
- * `"Bob <bob@x.com>" <jane@example.com>` is a message to JANE.
- *
- * Only ever called on an entry `firstListEntry` already accepted, so the
- * quoting is known to be balanced.
- */
-function withoutQuotedText(entry: string): string {
-  let out = "";
-  let inQuotes = false;
-  for (let i = 0; i < entry.length; i++) {
-    const c = entry[i];
-    if (inQuotes && c === "\\") {
-      i++;
-      continue;
-    }
-    if (c === '"') {
-      inQuotes = !inQuotes;
-      continue;
-    }
-    if (!inQuotes) out += c;
-  }
-  return out;
-}
-
-/**
  * Is this a plain addr-spec we are willing to file a customer's mail under?
  *
- * Deliberately strict, and applied AFTER extraction: the extractor's job is
- * to find the candidate, this one's is to refuse anything that is not
- * actually an address. `<jane,x@example.com>` extracts cleanly and is still
- * not an address. Prefer null over a guess — a skipped mirror costs one row,
- * a wrong one puts a customer's reply on someone else's timeline.
+ * The LAST gate, applied to whatever the MIME parser hands back. A parser's
+ * job is to say what the header contains; this one's is to say whether that
+ * is something we will put a customer's reply under. postal-mime will
+ * faithfully report `jane,x@example.com`, or the entire text of a header it
+ * could not make sense of, and neither is an address.
+ *
+ * Prefer null over a guess — a skipped mirror costs one row, a wrong one puts
+ * a customer's reply on someone else's timeline.
  */
 function isAddrSpec(address: string): boolean {
   // RFC 5321's 254-octet ceiling; also stops a pathological header early.
@@ -245,25 +184,19 @@ function isAddrSpec(address: string): boolean {
 }
 
 /**
- * The first address on an address-list header, lowercased.
+ * The first usable address on one of postal-mime's parsed header lists.
  *
- * Only the first matters here: a mirrored Sent message needs one counterparty
- * to hang off a timeline, and everyone else on the message is already carried
- * by the Cc column.
+ * FIRST, not any: a mirrored Sent message needs one counterparty to hang off
+ * a timeline, and the first-written recipient is the one the sender meant.
+ * Everyone else on the message is already carried by the Cc column.
  *
- * Three steps, in this order, because each one is unsafe without the one
- * before it: split the list, drop the display names, then VALIDATE what is
- * left. Null whenever any step cannot answer confidently — a missing header,
- * a malformed one, or a candidate that is not an address.
+ * The list is already ordered, filtered and lowercased by `parseRaw`; all
+ * that is left is to refuse a parsed "address" that is not one.
  */
-function firstAddress(raw: string | undefined): string | null {
-  if (!raw) return null;
-  const entry = firstListEntry(raw);
-  if (entry === null) return null;
-  const unquoted = withoutQuotedText(entry);
-  const angled = unquoted.match(/<([^>]*)>/);
-  const address = (angled ? angled[1] : unquoted).trim().toLowerCase();
-  return isAddrSpec(address) ? address : null;
+function firstAddress(list: ParsedEmailAddress[]): string | null {
+  const first = list[0];
+  if (!first) return null;
+  return isAddrSpec(first.email) ? first.email : null;
 }
 
 /**
@@ -336,11 +269,14 @@ async function mirrorSentMessage(
   // rescues a blind-copied send that would otherwise have no counterparty at
   // all. Each step reads one header and takes its first entry; they are never
   // mixed.
-  const toHeader = header(parsed.headers, "to");
-  const ccHeader = header(parsed.headers, "cc");
-  const bccHeader = header(parsed.headers, "bcc");
+  // Straight off postal-mime's parsed lists. Quoting, escaping, embedded
+  // commas and display names that contain whole addresses are its problem,
+  // and it is a library that does nothing else — three rounds of review
+  // found three distinct defects in the hand-rolled scanner this replaces.
   const toAddress =
-    firstAddress(toHeader) ?? firstAddress(ccHeader) ?? firstAddress(bccHeader);
+    firstAddress(parsed.headerTo) ??
+    firstAddress(parsed.cc) ??
+    firstAddress(parsed.headerBcc);
   if (!toAddress) {
     // There is no timeline to put it on, and `sent_emails.to_address` is NOT
     // NULL, so inventing a value would be worse than passing over it.
@@ -349,8 +285,8 @@ async function mirrorSentMessage(
     // with no recipient headers at all is ordinary, while headers that are
     // present but unusable mean mail IS being skipped and something upstream
     // is wrong.
-    const anyHeaderPresent = [toHeader, ccHeader, bccHeader].some(
-      (h) => h && h.trim(),
+    const anyHeaderPresent = ["to", "cc", "bcc"].some((name) =>
+      header(parsed.headers, name)?.trim(),
     );
     console.warn(
       anyHeaderPresent

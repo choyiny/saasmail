@@ -16,6 +16,27 @@ export interface ParsedEmail {
   to: string;
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
   cc: ParsedEmailAddress[];
+  /**
+   * The `To:` header's address list, as parsed from the MIME headers.
+   *
+   * NOT the same thing as `to`, and never a substitute for it: `to` is the
+   * SMTP envelope recipient — the inbox this message was actually delivered
+   * to — and that is what decides where inbound mail lands. This is what the
+   * sender WROTE on the To: line, which may be a mailing list, an alias, a
+   * dozen people, or nobody at all.
+   *
+   * Exists for the Gmail Sent-folder mirror, which has no envelope to go on:
+   * a message the mailbox sent has its counterparty on this line.
+   */
+  headerTo: ParsedEmailAddress[];
+  /**
+   * The `Bcc:` header's address list, when the message still carries one.
+   *
+   * Received mail normally does not — the header is stripped in transit — but
+   * a message in the SENDER's own Sent folder usually keeps the Bcc it went
+   * out with, which is the only counterparty a blind-copied send has.
+   */
+  headerBcc: ParsedEmailAddress[];
   subject: string;
   /** Quote-trimmed HTML body, with `cid:` refs left intact. For display/storage. */
   bodyHtml: string | null;
@@ -171,8 +192,9 @@ export async function parseRaw(
   const bodyText = parsed.text || null;
   const bodyHtml = parsed.html || null;
 
-  // Extract CC list from the parsed MIME structure. postal-mime exposes
-  // `parsed.cc` as an array of `{ address, name }` (or undefined). We
+  // Normalize one of postal-mime's parsed address lists — it exposes each as
+  // an array of `{ address, name }`, or undefined when the header is absent.
+  // We
   // - filter to entries with a syntactically-valid email (don't trust
   //   header data — malformed Cc: lines pollute displayed rosters
   //   and the de-dupe-by-email logic elsewhere),
@@ -180,20 +202,24 @@ export async function parseRaw(
   //   don't fork conversation_id buckets,
   // - cap the array so a single inbound message can't slam storage
   //   with thousands of header-entries.
-  const cc: ParsedEmailAddress[] = (
-    (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? []
-  )
-    .filter((c): c is { address: string; name?: string } => {
-      if (!c.address || typeof c.address !== "string") return false;
-      // Cheap RFC 5322-ish gate. Defers strict validation to downstream
-      // schemas; we only need to reject the obviously-not-email cases.
-      return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
-    })
-    .slice(0, 50)
-    .map((c) => ({
-      email: c.address.trim().toLowerCase(),
-      name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
-    }));
+  //
+  // Order is preserved, which matters to callers that need the FIRST-written
+  // recipient rather than any recipient.
+  const addressList = (raw: unknown): ParsedEmailAddress[] =>
+    ((raw as Array<{ address?: string; name?: string }> | undefined) ?? [])
+      .filter((c): c is { address: string; name?: string } => {
+        if (!c.address || typeof c.address !== "string") return false;
+        // Cheap RFC 5322-ish gate. Defers strict validation to downstream
+        // schemas; we only need to reject the obviously-not-email cases.
+        return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
+      })
+      .slice(0, 50)
+      .map((c) => ({
+        email: c.address.trim().toLowerCase(),
+        name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
+      }));
+
+  const cc: ParsedEmailAddress[] = addressList(parsed.cc);
 
   return {
     from: {
@@ -202,6 +228,8 @@ export async function parseRaw(
     },
     to: envelope.to,
     cc,
+    headerTo: addressList(parsed.to),
+    headerBcc: addressList((parsed as { bcc?: unknown }).bcc),
     subject: parsed.subject || "",
     bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
     bodyText: bodyText ? trimQuotedText(bodyText) : null,
