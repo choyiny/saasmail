@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../../db/schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
-import { getAccessToken } from "../gmail/token";
+import { getAccessToken, invalidateAccessToken } from "../gmail/token";
 import { createEmailSender } from "./index";
 import { GmailSender } from "./providers/gmail";
 import type { EmailSender } from "./types";
@@ -89,10 +89,24 @@ async function tryGmailSender(
   const cfg = { clientId, clientSecret, encryptionKey };
 
   // Resolve a token now — this is what surfaces a dangling gmailAccountId
-  // (getAccessToken throws "unknown gmail account") or a revoked grant
-  // (getAccessToken throws GoogleAuthError on invalid_grant) here, instead of
-  // deep inside a later send() call where nothing would catch it.
-  await getAccessToken(db, accountId, cfg);
+  // (getAccessToken throws "unknown gmail account") or a grant revoked
+  // BEFORE the cached token expired (getAccessToken throws GoogleAuthError on
+  // invalid_grant) here, where the fallback below catches it.
+  //
+  // It cannot see a grant revoked while the cached token is still inside its
+  // TTL: no refresh happens, so there is nothing to fail. That case is caught
+  // at the other end, by the 401 handling inside GmailSender — which is what
+  // `reauthorize` below exists for.
+  //
+  // The resolved token is handed to the sender rather than re-resolved by it:
+  // one reply, one token lookup.
+  const accessToken = await getAccessToken(db, accountId, cfg);
 
-  return new GmailSender(() => getAccessToken(db, accountId, cfg));
+  return new GmailSender(accessToken, undefined, {
+    accountId,
+    reauthorize: async () => {
+      await invalidateAccessToken(db, accountId);
+      return getAccessToken(db, accountId, cfg);
+    },
+  });
 }

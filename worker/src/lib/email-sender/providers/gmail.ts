@@ -1,9 +1,38 @@
 import { createMimeMessage, Mailbox } from "mimetext/browser";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { parseFrom, toBase64 } from "../shared";
-import { transientFromStatus } from "../classify";
+import { classifyErrorMessage, transientFromStatus } from "../classify";
 
 const SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+
+/** Gmail's answer to a dead access token. */
+const UNAUTHORIZED = 401;
+
+/**
+ * Gmail's own 25 MB ceiling on a single message, and the two encodings that
+ * stand between an attachment's bytes and that ceiling.
+ *
+ * `messages.send` (the non-upload endpoint) carries the whole RFC822 message
+ * base64url-encoded inside a JSON body, and the attachment is ALREADY base64
+ * inside that message — so a byte of attachment costs 4/3 × 4/3 ≈ 1.78 bytes
+ * on the wire. A flat 25 MB budget therefore lets through an attachment that
+ * produces a ~44 MB request, which Gmail rejects; and because a Gmail reply
+ * is never queued, that rejection is a dead end the user cannot retry past.
+ * Budget against the ENCODED size so the limit we advertise is one Gmail can
+ * actually accept.
+ */
+const GMAIL_MAX_MESSAGE_BYTES = 25 * 1024 * 1024;
+const BASE64_INFLATION = 4 / 3;
+export const GMAIL_MAX_ATTACHMENT_BYTES = Math.floor(
+  GMAIL_MAX_MESSAGE_BYTES / (BASE64_INFLATION * BASE64_INFLATION),
+);
+
+/**
+ * Forces a token refresh and returns the fresh token — see
+ * `invalidateAccessToken`. Supplied by whoever owns the database handle;
+ * `GmailSender` deliberately has none.
+ */
+export type GmailReauthorize = () => Promise<string>;
 
 /**
  * Gmail's messages.send endpoint requires the RFC822 message as base64url
@@ -36,20 +65,33 @@ function extractGmailError(res: Response, data: any): string {
 
 export class GmailSender implements EmailSender {
   readonly provider = "gmail" as const;
+  /**
+   * The `gmail_accounts` row this sender sends from, when the caller knew it.
+   *
+   * Gmail thread ids are per-mailbox, so a caller holding a parent message's
+   * thread id needs to know WHICH mailbox it belongs to before passing it as
+   * `threadId` — see the guard in `replyToEmail`.
+   */
+  readonly accountId: string | null;
   private tokenSource: string | (() => Promise<string>);
   private fetchFn: typeof fetch;
+  private reauthorize: GmailReauthorize | null;
 
   /**
    * Takes an access token, or a function that resolves one on demand — but
    * never a database handle. Deciding *which* token to use (looking up the
-   * mapped Gmail account, refreshing it) is the next task's job; this class
-   * only knows how to send with whatever token it's given.
+   * mapped Gmail account, refreshing it) belongs to `createSenderForInbox`;
+   * this class only knows how to send with whatever token it's given, and how
+   * to ask for one more when Gmail says the one it has is dead.
    */
   constructor(
     accessToken: string | (() => Promise<string>),
     fetchFn?: typeof fetch,
+    opts?: { accountId?: string; reauthorize?: GmailReauthorize },
   ) {
     this.tokenSource = accessToken;
+    this.accountId = opts?.accountId ?? null;
+    this.reauthorize = opts?.reauthorize ?? null;
     // Bind to globalThis: invoking the global `fetch` as a method reference
     // (`this.fetchFn(...)`) throws "Illegal invocation" in the Cloudflare
     // Workers runtime. Tests inject their own fetch, so the unbound default
@@ -61,6 +103,20 @@ export class GmailSender implements EmailSender {
     return typeof this.tokenSource === "function"
       ? this.tokenSource()
       : this.tokenSource;
+  }
+
+  private post(
+    body: Record<string, unknown>,
+    accessToken: string,
+  ): Promise<Response> {
+    return this.fetchFn(SEND_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
   }
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
@@ -124,14 +180,54 @@ export class GmailSender implements EmailSender {
         body.threadId = params.threadId;
       }
 
-      const res = await this.fetchFn(SEND_URL, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
+      let res = await this.post(body, accessToken);
+
+      // A 401 means the access token is dead. The commonest cause is a grant
+      // revoked while a CACHED token was still inside its TTL: nothing
+      // refreshes, so nothing ever discovers the revocation, and — because a
+      // Gmail reply is deliberately never queued — every resend fails
+      // identically with no outbox row, no audit row and no `lastError`.
+      //
+      // One forced refresh settles it. If it succeeds the token was merely
+      // stale and the reply goes out; if it fails, `getAccessToken` has
+      // recorded `lastError` on the account (so the admin route shows it) and
+      // the caller is told to reconnect rather than to try again.
+      if (res.status === UNAUTHORIZED && this.reauthorize) {
+        let refreshed: string;
+        try {
+          refreshed = await this.reauthorize();
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : String(e);
+          return {
+            id: null,
+            error: {
+              message:
+                "Gmail rejected saasmail's access to this mailbox and " +
+                `re-authorizing it failed (${detail}). The Google grant ` +
+                "looks revoked — reconnect this mailbox under Gmail settings.",
+              transient: false,
+              reconnect: true,
+            },
+          };
+        }
+        res = await this.post(body, refreshed);
+        if (res.status === UNAUTHORIZED) {
+          // A token minted seconds ago that Gmail still refuses: the grant
+          // itself no longer carries the send scope for this mailbox.
+          const data = await readJson(res);
+          return {
+            id: null,
+            error: {
+              message:
+                "Gmail rejected saasmail's access to this mailbox even " +
+                `after re-authorizing (${extractGmailError(res, data)}). ` +
+                "Reconnect this mailbox under Gmail settings.",
+              transient: false,
+              reconnect: true,
+            },
+          };
+        }
+      }
 
       const data = await readJson(res);
 
@@ -174,13 +270,18 @@ export class GmailSender implements EmailSender {
         message,
         e instanceof Error ? e.stack : "",
       );
-      return { id: null, error: { message, transient: true } };
+      // Classified, not assumed: a malformed-message or validation failure
+      // that threw is not something a retry can fix, and calling every one of
+      // them transient invites a queue to re-attempt a send that can only
+      // fail again.
+      return {
+        id: null,
+        error: { message, transient: classifyErrorMessage(message) },
+      };
     }
   }
 
   maxAttachmentBytes(): number {
-    // Gmail's own cap on a single message, unrelated to Cloudflare's
-    // (which budgets for base64 inflation against a different limit).
-    return 25 * 1024 * 1024;
+    return GMAIL_MAX_ATTACHMENT_BYTES;
   }
 }

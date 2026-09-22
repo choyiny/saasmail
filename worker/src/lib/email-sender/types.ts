@@ -29,6 +29,16 @@ export interface SendEmailError {
    * false = terminal reject (bad recipient, auth failure).
    */
   transient: boolean;
+  /**
+   * Set when the provider's credentials for this mailbox are dead and a
+   * resend of the identical request can never succeed — today, a Gmail grant
+   * that was revoked or otherwise no longer refreshes.
+   *
+   * `transient: false` already says "do not queue this"; this says the
+   * stronger thing the USER has to be told, which is that pressing send again
+   * is pointless until the mailbox is reconnected.
+   */
+  reconnect?: boolean;
 }
 
 export interface SendEmailResult {
