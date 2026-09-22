@@ -297,10 +297,12 @@ function topLevelChunks(masked: string): string[] {
  * TWO of the lines below are not killed by any test in this suite, and the
  * honest thing is to say so rather than let a future maintainer credit them
  * with work they are not observably doing. They are "no `@` may precede the
- * answer" and "one chunk per parsed entry". Every input found so far — some
- * two thousand generated headers plus every case in `gmail-sync-sent.test.ts`
- * — is refused by one of the other checks first, so deleting either leaves
- * the suite green. They are kept anyway, because between them they are what
+ * answer" and "one chunk per parsed entry". The first of them does fire on
+ * real headers — it is what rejects `Jane <jane@example.com, Bob <bob@x.com>`
+ * — but every input found so far, some two thousand generated headers plus
+ * every case in `gmail-sync-sent.test.ts`, is ALSO refused further down, so
+ * deleting either leaves the suite green. They are kept because between them
+ * they are what
  * makes the argument above SOUND rather than merely true today: they are the
  * two checks that fail closed if postal-mime ever starts silently dropping an
  * entry, which is precisely how this function was wrong before. Nothing else

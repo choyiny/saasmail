@@ -35,8 +35,12 @@ function fakeCtx(): ExecutionContext {
 /** A message the mailbox SENT: we are the From, the customer is the To. */
 function rawSent(opts: {
   from?: string;
-  /** Omitted entirely when absent, so a Bcc-only send can be built. */
-  to?: string;
+  /**
+   * Omitted entirely when absent, so a Bcc-only send can be built. An array
+   * writes one `To:` header per element, which is how a message carrying
+   * DUPLICATE recipient headers is built.
+   */
+  to?: string | string[];
   messageId: string;
   subject?: string;
   body?: string;
@@ -47,7 +51,9 @@ function rawSent(opts: {
 }) {
   return [
     `From: Support <${opts.from ?? "collector@acme.dev"}>`,
-    ...(opts.to ? [`To: ${opts.to}`] : []),
+    ...(opts.to
+      ? (Array.isArray(opts.to) ? opts.to : [opts.to]).map((v) => `To: ${v}`)
+      : []),
     ...(opts.date ? [`Date: ${opts.date}`] : []),
     ...(opts.cc ? [`Cc: ${opts.cc}`] : []),
     ...(opts.bcc ? [`Bcc: ${opts.bcc}`] : []),
@@ -81,7 +87,17 @@ function rawInbound(opts: {
 }
 
 function b64url(s: string) {
-  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  // UTF-8 first: `btoa` is latin1-only and would replace any non-ASCII byte
+  // with U+FFFD, which would quietly turn a unicode-recipient fixture into a
+  // test of mojibake instead of a test of the parser. Identical output for
+  // the ASCII fixtures.
+  const bytes = new TextEncoder().encode(s);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
 }
 
 /** Same shape as the engine's own harness: one stub serves every endpoint. */
@@ -469,93 +485,203 @@ describe("syncAccount — mirroring the Sent folder", () => {
       { email: "bob@example.com", name: "Bob" },
     ]);
   });
+
+  it("carries the members of a Cc: group onto the mirrored row", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          // An RFC 5322 group. postal-mime reports it as `{name, group:[…]}`
+          // with no `.address` at all, so a roster built by reading `.address`
+          // off each entry drops every member silently — the Cc column comes
+          // back empty for a message that copied two people.
+          raw: rawSent({
+            to: "jane@example.com",
+            cc: "Team: Alice <alice@x.com>, Bob <bob@y.com>;",
+            messageId: "<s4@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    await sync();
+    const rows = await getDb().select().from(sentEmails);
+    expect(rows).toHaveLength(1);
+    expect(JSON.parse(rows[0].cc ?? "[]")).toEqual([
+      { email: "alice@x.com", name: "Alice" },
+      { email: "bob@y.com", name: "Bob" },
+    ]);
+  });
 });
 
 describe("syncAccount — picking the counterparty off the header", () => {
   /**
    * Each case is the raw `To:` value and the address that must end up on the
-   * row. The first is the regression: matching `<…>` across the WHOLE header
-   * picks Bob — the last-written address — and files the reply on the wrong
-   * customer's timeline.
+   * row: the FIRST-WRITTEN recipient, every time.
+   *
+   * "First written" is not "first the parser handed back". postal-mime drops
+   * entries it cannot make sense of, so its element 0 is the first SURVIVING
+   * recipient — a different person from the first written one exactly when
+   * the first written one is malformed. The rejects table below is where that
+   * difference is pinned; this table is the other half: everything the header
+   * says clearly enough that we can name its first recipient.
    */
-  const cases: Array<[label: string, to: string, expected: string | null]> = [
+  const cases: Array<[label: string, to: string | string[], expected: string]> =
     [
-      "a bare address followed by a bracketed one",
-      'jane@example.com, "Bob" <bob@x.com>',
-      "jane@example.com",
-    ],
-    ["a bare single address", "jane@example.com", "jane@example.com"],
-    ["a single bracketed address", "<jane@example.com>", "jane@example.com"],
-    [
-      "a display name with a comma inside quotes",
-      '"Smith, Jane" <jane@x.com>',
-      "jane@x.com",
-    ],
-    [
-      "leading whitespace before the display name",
-      "   Jane Doe <jane@example.com>",
-      "jane@example.com",
-    ],
-    [
-      "two bracketed addresses",
-      "Jane <jane@example.com>, Bob <bob@x.com>",
-      "jane@example.com",
-    ],
-    // A display name may legally contain a whole address. The real recipient
-    // is the bracketed one OUTSIDE the quotes.
-    [
-      "a bracketed address hidden inside the display name",
-      '"Bob <bob@x.com>" <jane@example.com>',
-      "jane@example.com",
-    ],
-    ["doubled quotes", '""Jane"" <jane@example.com>', "jane@example.com"],
-    [
-      "a quoted display name with no brackets",
-      '"Jane" jane@example.com',
-      "jane@example.com",
-    ],
-    [
-      "a trailing backslash outside quotes",
-      "Jane <jane@example.com>\\",
-      "jane@example.com",
-    ],
-    // First-written wins, which is the whole contract of this function.
-    [
-      "two bracketed addresses in ONE entry",
-      "Jane <jane@example.com> <bob@x.com>",
-      "jane@example.com",
-    ],
-    ["mixed case", "Jane <JANE@Example.COM>", "jane@example.com"],
-    [
-      "a very long list",
-      Array.from(
-        { length: 200 },
-        (_, i) => `User${i} <u${i}@example.com>`,
-      ).join(", "),
-      "u0@example.com",
-    ],
-    // The three below look malformed and ARE recovered, deliberately. The
-    // old hand-rolled scanner skipped each of them, because it could not tell
-    // a malformed header from a recoverable one and refusing was the only
-    // safe answer available to it. postal-mime can tell, and recovers the
-    // correct first-written address in every case — same customer, same
-    // timeline, one more mirrored reply instead of a dropped one.
-    [
-      "an unclosed angle bracket, which the parser recovers",
-      "Jane <jane@example.com",
-      "jane@example.com",
-    ],
-    [
-      "an address followed by an unclosed quote, which the parser recovers",
-      'jane@example.com "Bob',
-      "jane@example.com",
-    ],
-    [
-      "a leading empty entry, which the parser recovers",
-      ",jane@example.com",
-      "jane@example.com",
-    ],
-  ];
+      [
+        "a bare address followed by a bracketed one",
+        'jane@example.com, "Bob" <bob@x.com>',
+        "jane@example.com",
+      ],
+      ["a bare single address", "jane@example.com", "jane@example.com"],
+      ["a single bracketed address", "<jane@example.com>", "jane@example.com"],
+      [
+        "a display name with a comma inside quotes",
+        '"Smith, Jane" <jane@x.com>',
+        "jane@x.com",
+      ],
+      [
+        "leading whitespace before the display name",
+        "   Jane Doe <jane@example.com>",
+        "jane@example.com",
+      ],
+      [
+        "two bracketed addresses",
+        "Jane <jane@example.com>, Bob <bob@x.com>",
+        "jane@example.com",
+      ],
+      // A display name may legally contain a whole address. The real recipient
+      // is the bracketed one OUTSIDE the quotes — and because the quotes are
+      // balanced, the masking step blanks them out and the `@` inside them is
+      // not mistaken for an earlier recipient.
+      [
+        "a bracketed address hidden inside the display name",
+        '"Bob <bob@x.com>" <jane@example.com>',
+        "jane@example.com",
+      ],
+      // Same trick, unquoted: an encoded word that DECODES to another address.
+      // Nothing addressy survives in the raw header, so jane is still first.
+      [
+        "an encoded-word display name that decodes to another address",
+        "=?utf-8?B?Ym9iQHguY29t?= <jane@example.com>",
+        "jane@example.com",
+      ],
+      ["doubled quotes", '""Jane"" <jane@example.com>', "jane@example.com"],
+      [
+        "a quoted display name with no brackets",
+        '"Jane" jane@example.com',
+        "jane@example.com",
+      ],
+      [
+        "a trailing backslash outside quotes",
+        "Jane <jane@example.com>\\",
+        "jane@example.com",
+      ],
+      ["mixed case", "Jane <JANE@Example.COM>", "jane@example.com"],
+      // Folded across two lines, which is how any real long recipient list
+      // arrives. The fold must not become a recipient boundary of its own.
+      [
+        "a header folded across two lines",
+        "Jane <jane@example.com>,\r\n\tBob <bob@x.com>",
+        "jane@example.com",
+      ],
+      // Comments are legal anywhere and may be nested. They name nobody, so
+      // they must neither supply an address nor hide one.
+      [
+        "a nested comment before the first address",
+        "(a (nested) comment) jane@example.com, bob@x.com",
+        "jane@example.com",
+      ],
+      [
+        "a comment between the first and second address",
+        "jane@example.com (Jane Doe), bob@x.com",
+        "jane@example.com",
+      ],
+      // A comment that CONTAINS an address. It names nobody — a comment is
+      // annotation, not a recipient — so blanking it out is what lets Jane be
+      // recognised as the first recipient instead of the header looking like
+      // it holds one more person than the parser handed back.
+      [
+        "a comment containing an address, ahead of the first recipient",
+        "(a@b.com) jane@example.com, bob@x.com",
+        "jane@example.com",
+      ],
+      [
+        "a unicode local part and an IDN domain",
+        "jäne@exämple.com, bob@x.com",
+        "jäne@exämple.com",
+      ],
+      // RFC 5322 groups. postal-mime reports these as `{name, group:[…]}`
+      // with no `.address`, so a naive read drops the whole group and promotes
+      // whoever came after it. The members are real recipients written at the
+      // group's position, and the first of them is the first-written address.
+      ["an all-group header", "Team: alice@x.com, bob@y.com;", "alice@x.com"],
+      [
+        "a group followed by a plain recipient",
+        "Team: alice@x.com;, bob@y.com",
+        "alice@x.com",
+      ],
+      // An EMPTY group names nobody at all, so nobody was written ahead of
+      // Bob and Bob really is the first recipient.
+      [
+        "an empty group followed by a plain recipient",
+        "undisclosed-recipients:;, bob@x.com",
+        "bob@x.com",
+      ],
+      // Recipient #2 is unusable. That is #2's problem: #1 is written plainly
+      // ahead of it and is not in any doubt, and the comma inside the angle
+      // brackets belongs to the broken entry rather than separating recipients.
+      [
+        "a broken second recipient behind a clean first one",
+        "jane@example.com, <bob,x@y.com>",
+        "jane@example.com",
+      ],
+      // Only ONE address is written here — masking guarantees each recipient
+      // contributes exactly one `@` — so the trailing name-only entry cannot
+      // be a recipient that got dropped ahead of Jane.
+      [
+        "a name-only entry behind the only address",
+        "jane@example.com, Bob Doe",
+        "jane@example.com",
+      ],
+      [
+        "a very long list",
+        Array.from(
+          { length: 200 },
+          (_, i) => `User${i} <u${i}@example.com>`,
+        ).join(", "),
+        "u0@example.com",
+      ],
+      // Two `To:` headers. postal-mime's own `to` array concatenates them
+      // LAST-header-first; the first one written is the one that counts.
+      [
+        "duplicate To: headers",
+        ["jane@example.com", "bob@x.com"],
+        "jane@example.com",
+      ],
+      // The three below look malformed and ARE recovered, deliberately —
+      // but only because each names exactly ONE recipient, so there is nobody
+      // it could be confused with. Add a second recipient to any of them and
+      // it moves to the rejects table; the paired entries are there.
+      [
+        "an unclosed angle bracket around the only recipient",
+        "Jane <jane@example.com",
+        "jane@example.com",
+      ],
+      [
+        "an unclosed quote after the only recipient",
+        'jane@example.com "Bob',
+        "jane@example.com",
+      ],
+      [
+        "a leading empty entry before the only recipient",
+        ",jane@example.com",
+        "jane@example.com",
+      ],
+    ];
 
   for (const [label, to, expected] of cases) {
     it(`takes the first recipient from ${label}`, async () => {
@@ -579,33 +705,149 @@ describe("syncAccount — picking the counterparty off the header", () => {
   }
 
   /**
-   * Headers that must yield NOTHING. Every one of these once had, or could
-   * have had, a plausible-looking answer — and a plausible-looking answer to
-   * a malformed header is how a customer's reply ends up on someone else's
-   * timeline. A skipped mirror costs one row; a wrong one costs trust.
+   * Headers that must yield NOTHING, each paired with the specific answer we
+   * are refusing to give.
    *
-   * Malformed is not the test: some malformed headers are recovered (see the
-   * last three accepted cases above). What disqualifies these is that no
-   * single unambiguous address comes back.
+   * `refused` is not decoration. Every one of these headers has a
+   * plausible-looking address in it that some earlier version of this code
+   * did, or would, hand back — and a plausible-looking answer to a header we
+   * cannot fully read is how a customer's reply lands on someone else's
+   * timeline. Asserting the row is absent is the same as asserting that
+   * address was not filed, because it is the only address that could have
+   * been filed.
+   *
+   * Malformed is not by itself the test — three malformed headers are
+   * recovered in the table above. What disqualifies these is that we cannot
+   * prove which recipient was written first, or that the one that was is not
+   * an address we will file a customer under.
+   *
+   * The `gate` column names which of `firstWrittenAddress`'s gates does the
+   * refusing, so that deleting a gate visibly breaks the cases that exist to
+   * cover it rather than quietly leaving the suite green.
    */
-  const rejects: Array<[label: string, to: string]> = [
-    // The round-3 regression: one stray quote suppressed every delimiter in
-    // the old scanner, which then handed back Bob — the LAST address written.
-    // postal-mime returns the whole header text as one "address" instead, and
-    // `isAddrSpec` refuses it, so the misattribution cannot recur.
-    ["an unclosed quote", '"Jane jane@example.com, Bob <bob@x.com>'],
-    // The parser reports this one faithfully as a single entry; only the
-    // strict addr-spec gate catches that a comma is not part of an address.
-    ["a comma inside the angle brackets", "<jane,x@example.com>"],
-    ["a backslash at the very end of a quoted name", '"Jane\\'],
-    ["empty angle brackets", "<>"],
-    ["only whitespace", "   "],
-    ["two at-signs", "<jane@@example.com>"],
-    ["a dotless domain", "<jane@localhost>"],
-    ["no at-sign at all", "Jane Doe"],
+  const rejects: Array<[label: string, to: string, refused: string]> = [
+    // GATE: "nothing address-shaped may precede the chosen recipient".
+    // postal-mime reports ONE entry here, `{address: "bob@x.com", name:
+    // "Jane"}` — the missing `>` swallowed Jane into a display name. Taking
+    // that entry files the reply on the LAST-written address, which is the
+    // literal shape of the original wrong-customer defect.
+    [
+      "an unclosed angle bracket ahead of a second recipient",
+      "Jane <jane@example.com, Bob <bob@x.com>",
+      "bob@x.com",
+    ],
+    // GATE: same. This one is the pure case — the header is structurally
+    // perfect, so the cleanliness gate passes and ONLY the preceding-`@` check
+    // refuses it. postal-mime unquotes `"john doe"` to a local part with a
+    // space in it, the addr-spec gate drops that entry, and recipient #2 is
+    // promoted into slot 0.
+    [
+      "a quoted local part the parser unquotes into something unusable",
+      '"john doe"@example.com, bob@x.com',
+      "bob@x.com",
+    ],
+    // GATE: same. An unquoted `@` in a display name is illegal, so we cannot
+    // tell a display name from a dropped first recipient.
+    [
+      "a bare address used as a display name",
+      "bob@x.com <jane@example.com>",
+      "jane@example.com",
+    ],
+    // GATE: "the answer must be findable in the header". The one case in this
+    // table that is NOT a misattribution: `a@b.com` really is the
+    // first-written recipient, but the parser RECONSTRUCTED it by unquoting
+    // `"a"`, so that string appears nowhere in the header and its position
+    // cannot be established. The header is otherwise structurally perfect, so
+    // this is the only gate standing between us and an answer we cannot prove.
+    [
+      "a quoted local part the parser unquotes into a valid address",
+      '"a"@b.com, jane@x.com',
+      "a@b.com",
+    ],
+    // GATE: same, and the nastiest input found while attacking this. RFC 5322
+    // comments nest; postal-mime's do not, so it ends the comment at the inner
+    // `)` and hands back `a@b.com` — an address that is COMMENT TEXT, not a
+    // recipient at all, with the real recipient stuffed into its display name.
+    // Nothing about the entry looks wrong: it is a clean, valid addr-spec.
+    // What gives it away is that it is nowhere in the header outside the
+    // comment we blanked out.
+    [
+      "an address buried in a nested comment",
+      "(outer (nested) a@b.com) jane@example.com, bob@x.com",
+      "a@b.com",
+    ],
+    // GATE: "malformed AND multi-recipient". Each of these three is the
+    // two-recipient variant of a header that IS recovered above. The
+    // difference is the whole policy: recovery is safe when nothing could
+    // have been dropped ahead of the answer, and only then.
+    [
+      "an unclosed quote ahead of a second recipient",
+      'jane@example.com "Bob <bob@x.com>',
+      "jane@example.com",
+    ],
+    [
+      "a leading empty entry ahead of a second recipient",
+      ",jane@example.com, bob@x.com",
+      "jane@example.com",
+    ],
+    [
+      "two bracketed addresses crammed into ONE entry",
+      "Jane <jane@example.com> <bob@x.com>",
+      "jane@example.com",
+    ],
+    // GATE: same. The round-3 regression — one stray quote suppressed every
+    // delimiter in the hand-rolled scanner, which handed back Bob, the LAST
+    // address written. Two gates refuse it now: postal-mime returns the whole
+    // header text as a single "address", which is neither an addr-spec nor a
+    // clean one-address-per-entry list.
+    [
+      "an unclosed quote around the whole header",
+      '"Jane jane@example.com, Bob <bob@x.com>',
+      "bob@x.com",
+    ],
+    // GATE: the addr-spec check, and nothing else. Each of these is a single
+    // clean entry that the parser reports faithfully and that we still refuse,
+    // so each one fails the moment that clause is relaxed.
+    ["a comma inside the angle brackets", "<jane,x@example.com>", "jane"],
+    [
+      "a semicolon inside the angle brackets",
+      "<jane;x@example.com>",
+      "jane;x@example.com",
+    ],
+    ["a dotless domain", "<jane@localhost>", "jane@localhost"],
+    [
+      "a trailing dot on the domain",
+      "<jane@example.com.>",
+      "jane@example.com.",
+    ],
+    [
+      "a doubled dot inside the domain",
+      "<jane@exa..mple.com>",
+      "jane@exa..mple.com",
+    ],
+    ["an empty local part", "<@example.com>", "@example.com"],
+    [
+      "an address past RFC 5321's 254-octet ceiling",
+      `<${"a".repeat(250)}@example.com>`,
+      `${"a".repeat(250)}@example.com`,
+    ],
+    ["two at-signs", "<jane@@example.com>", "jane@@example.com"],
+    // GATE: the addr-spec check again, reached through a first recipient that
+    // is syntactically fine but not one we will file mail under. The danger
+    // is not the dotless address — it is bob, sitting behind it in slot 1.
+    [
+      "a dotless domain ahead of a valid one",
+      "jane@localhost, bob@x.com",
+      "bob@x.com",
+    ],
+    // GATE: there is no first entry to take, or it carries no address.
+    ["a backslash at the very end of a quoted name", '"Jane\\', ""],
+    ["empty angle brackets", "<>", ""],
+    ["only whitespace", "   ", ""],
+    ["no at-sign at all", "Jane Doe", ""],
   ];
 
-  for (const [label, to] of rejects) {
+  for (const [label, to, refused] of rejects) {
     it(`refuses to guess a counterparty from ${label}`, async () => {
       await seedAccount();
       await seedInbox();
@@ -623,41 +865,92 @@ describe("syncAccount — picking the counterparty off the header", () => {
       expect(res.ingested).toBe(0);
       expect(res.skipped).toBe(1);
       expect(res.failed).toBe(0);
-      expect(await getDb().select().from(sentEmails)).toHaveLength(0);
+      const rows = await getDb().select().from(sentEmails);
+      expect(rows).toHaveLength(0);
+      // Spelled out so the failure message names the customer whose timeline
+      // this header would otherwise have polluted.
+      expect(rows.map((r) => r.toAddress)).not.toContain(refused);
     });
   }
 
-  it("falls back to Cc, then to Bcc, when there is no To", async () => {
+  it("prefers To: over Cc: over Bcc:, not merely reaching each of them", async () => {
     await seedAccount();
     await seedInbox();
     stubGmail({
-      historyIds: ["m1", "m2"],
+      historyIds: ["m1", "m2", "m3"],
       messages: {
+        // All three headers present, all three usable: To: must win. This is
+        // what makes the ORDER of the fallback chain load-bearing — a chain
+        // that tried Cc: or Bcc: first would file this on the wrong person.
         m1: {
           labelIds: ["SENT"],
           raw: rawSent({
+            to: "jane@example.com",
             cc: "Bob <bob@example.com>",
+            bcc: "Carol <carol@example.com>",
             messageId: "<c2@acme.dev>",
           }),
         },
+        // No To:, but Cc: AND Bcc: — Cc: must win over Bcc:.
         m2: {
           labelIds: ["SENT"],
-          // A blind-copied send: the Sent folder keeps the Bcc it went out
-          // with, and that is the only counterparty there is.
           raw: rawSent({
-            bcc: "Carol <carol@example.com>",
+            cc: "Dave <dave@example.com>",
+            bcc: "Erin <erin@example.com>",
             messageId: "<c3@acme.dev>",
+          }),
+        },
+        // A blind-copied send: the Sent folder keeps the Bcc it went out
+        // with, and that is the only counterparty there is.
+        m3: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            bcc: "Frank <frank@example.com>",
+            messageId: "<c4@acme.dev>",
           }),
         },
       },
     });
 
     const res = await sync();
-    expect(res.ingested).toBe(2);
+    expect(res.ingested).toBe(3);
     const addresses = (await getDb().select().from(sentEmails))
       .map((r) => r.toAddress)
       .sort();
-    expect(addresses).toEqual(["bob@example.com", "carol@example.com"]);
+    expect(addresses).toEqual([
+      "dave@example.com",
+      "frank@example.com",
+      "jane@example.com",
+    ]);
+  });
+
+  it("stops at an unusable To: instead of falling through to Cc:", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          // The To: line names somebody — we just will not file mail under a
+          // dotless domain. Bob is a copied third party, not the person this
+          // was addressed to, and mirroring it onto his timeline would be a
+          // wrong-customer filing dressed up as a graceful fallback.
+          raw: rawSent({
+            to: "<jane@localhost>",
+            cc: "Bob <bob@example.com>",
+            messageId: "<c5@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    const res = await sync();
+    expect(res.ingested).toBe(0);
+    expect(res.skipped).toBe(1);
+    const rows = await getDb().select().from(sentEmails);
+    expect(rows).toHaveLength(0);
+    expect(rows.map((r) => r.toAddress)).not.toContain("bob@example.com");
   });
 
   it("skips a message with no address-shaped recipient anywhere", async () => {
