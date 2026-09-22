@@ -1,10 +1,14 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { nanoid } from "nanoid";
 import { schema } from "../../db/schema";
 import { gmailAccounts } from "../../db/gmail-accounts.schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
 import { emails } from "../../db/emails.schema";
+import { people } from "../../db/people.schema";
+import { sentEmails } from "../../db/sent-emails.schema";
 import { parseRaw } from "../email-parser";
+import { computeConversationId, externalsOnly } from "../conversation-id";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
 import { getProfile, GoogleAuthError } from "./oauth";
@@ -35,8 +39,20 @@ export { HISTORY_GAP_ERROR, SYNC_FAILED_PREFIX };
  */
 export const MAX_MESSAGES_PER_RUN = 50;
 
-/** Never reaches a customer timeline. SENT is a later slice's job. */
-const SKIP_LABELS = new Set(["SENT", "DRAFT", "TRASH", "SPAM"]);
+/**
+ * Never reaches a customer timeline, whatever else the message carries.
+ *
+ * Checked BEFORE the SENT branch on purpose: a sent message that was later
+ * trashed carries both SENT and TRASH, and the skip must win.
+ */
+const SKIP_LABELS = new Set(["DRAFT", "TRASH", "SPAM"]);
+
+/**
+ * Gmail's label for the mailbox's own outgoing mail. These are mirrored into
+ * `sent_emails` rather than ingested as inbound, so a reply someone typed in
+ * Gmail lands on the customer's timeline next to everything else.
+ */
+const SENT_LABEL = "SENT";
 
 export type GmailAccountRow = typeof gmailAccounts.$inferSelect;
 
@@ -126,6 +142,140 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
+/** Header lookup that tolerates either casing, like the parser's own. */
+function header(
+  headers: Record<string, string>,
+  name: string,
+): string | undefined {
+  return (
+    headers[name] ??
+    headers[name.replace(/(^|-)([a-z])/g, (_, s, c) => s + c.toUpperCase())]
+  );
+}
+
+/**
+ * The first address on an address-list header, lowercased.
+ *
+ * Only the first matters here: a mirrored Sent message needs one counterparty
+ * to hang off a timeline, and everyone else on the message is already carried
+ * by the Cc column. Null when the header is missing or holds nothing
+ * address-shaped — the same cheap RFC 5322-ish gate the parser uses on Cc.
+ */
+function firstAddress(raw: string | undefined): string | null {
+  if (!raw) return null;
+  // Prefer the angle-bracket form: it survives a display name that contains
+  // a comma (`"Doe, Jane" <jane@example.com>`), which splitting would not.
+  const angled = raw.match(/<([^>]+)>/);
+  const candidate = (angled ? angled[1] : raw.split(",")[0]).trim();
+  const address = candidate.toLowerCase();
+  return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(address) ? address : null;
+}
+
+/**
+ * Mirror one message from the mailbox's Sent folder onto the timeline.
+ *
+ * Returns whether a row was written. A `false` is an ordinary skip, not a
+ * failure — it never stops the run. Anything genuinely wrong throws, and the
+ * caller treats that exactly as it treats a failed inbound ingest.
+ */
+async function mirrorSentMessage(
+  db: DrizzleD1Database<typeof schema>,
+  opts: {
+    gmailMessageId: string;
+    message: { raw: ArrayBuffer; threadId: string };
+    /** The saasmail inbox this account is mapped to. */
+    inbox: string;
+    internalDomains: string[];
+  },
+): Promise<boolean> {
+  const { gmailMessageId, message, inbox, internalDomains } = opts;
+
+  // ECHO SUPPRESSION. saasmail now sends replies THROUGH Gmail, and Gmail
+  // files those in the same mailbox's Sent folder, so they come straight back
+  // here. The send path records Gmail's returned id on the `sent_emails` row
+  // (`sent_emails.gmailMessageId`), so seeing that id again means this is our
+  // own send coming home. Without this check every reply a user sends would
+  // appear on the timeline twice.
+  //
+  // It doubles as this mirror's idempotency key: a row written below stores
+  // the same id, so replaying a history page re-skips the message instead of
+  // inserting a second copy. (`emails` gets that for free from the UNIQUE
+  // Message-ID dedupe inside `ingestParsedEmail`; `sent_emails` has no such
+  // constraint, so the id is the only thing standing in for it.)
+  const echo = await db
+    .select({ id: sentEmails.id })
+    .from(sentEmails)
+    .where(eq(sentEmails.gmailMessageId, gmailMessageId))
+    .limit(1);
+  if (echo.length > 0) return false;
+
+  // Provisional envelope: nothing in a Sent message's envelope is known to
+  // us, and the addresses that matter are read back out of the headers below.
+  const parsed = await parseRaw(message.raw, { from: inbox, to: inbox });
+
+  // The counterparty of a SENT message is its RECIPIENT, not its sender —
+  // the sender is us.
+  const toAddress = firstAddress(header(parsed.headers, "to"));
+  if (!toAddress) {
+    // Bcc-only or otherwise recipient-less. There is no timeline to put it
+    // on, and `sent_emails.to_address` is NOT NULL, so inventing a value
+    // would be worse than passing over it.
+    console.warn(
+      `Gmail sync: sent message ${gmailMessageId} has no usable To: recipient; not mirrored.`,
+    );
+    return false;
+  }
+
+  // Person matching follows the inbound path: look the person up by the
+  // canonical (trimmed, lowercased) address — `firstAddress` already did
+  // both — so casing variants resolve to the same row.
+  //
+  // Unlike the inbound path this never CREATES a person. Inbound mail is
+  // proof someone exists and wants to be on the timeline; our own outgoing
+  // mail is not, and `sent_emails.person_id` is nullable precisely so a row
+  // can be stored without one. A message to an address we have never heard
+  // from is therefore recorded, not dropped and not a failure.
+  const personRow = await db
+    .select({ id: people.id })
+    .from(people)
+    .where(eq(people.email, toAddress))
+    .limit(1);
+
+  // Same grouping the outbound send path computes, so a mirrored reply lands
+  // in the same group thread as the messages it answers rather than forking
+  // one of its own.
+  const externals = externalsOnly(
+    [toAddress, ...parsed.cc.map((c) => c.email)],
+    internalDomains,
+  );
+  const conversationId = await computeConversationId(inbox, externals);
+
+  const now = nowSeconds();
+  await db.insert(sentEmails).values({
+    id: nanoid(),
+    personId: personRow[0]?.id ?? null,
+    // The mapped inbox, not the Gmail account's own address: the timeline
+    // groups sent mail by `from_address`, and the inbox is what the rest of
+    // the thread is filed under.
+    fromAddress: inbox,
+    toAddress,
+    subject: parsed.subject,
+    bodyHtml: parsed.bodyHtml,
+    bodyText: parsed.bodyText,
+    inReplyTo: header(parsed.headers, "in-reply-to") ?? null,
+    messageId: parsed.messageId,
+    status: "sent",
+    cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
+    conversationId,
+    gmailMessageId,
+    gmailThreadId: message.threadId || null,
+    sentAt: now,
+    createdAt: now,
+  });
+
+  return true;
+}
+
 /**
  * Point this account's cursor at the mailbox's current history position.
  *
@@ -213,6 +363,31 @@ export async function syncAccount(
   let ingested = 0;
   let skipped = 0;
   let failed = 0;
+
+  /**
+   * Our own domains, for the conversation grouping a mirrored Sent message
+   * needs. Loaded at most once per run and only when a Sent message actually
+   * turns up, so an account that never sees one pays nothing for it.
+   */
+  let internalDomains: string[] | null = null;
+  const getInternalDomains = async (): Promise<string[]> => {
+    if (internalDomains === null) {
+      const rows = await db
+        .select({ email: senderIdentities.email })
+        .from(senderIdentities);
+      internalDomains = Array.from(
+        new Set(
+          rows
+            .map((r) => {
+              const at = r.email.lastIndexOf("@");
+              return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
+            })
+            .filter(Boolean),
+        ),
+      );
+    }
+    return internalDomains;
+  };
 
   // No usable destination — so stall, before touching history at all.
   //
@@ -338,6 +513,27 @@ export async function syncAccount(
 
           if (message.labelIds.some((label) => SKIP_LABELS.has(label))) {
             skipped++;
+            continue;
+          }
+
+          // The mailbox's own outgoing mail goes onto the timeline as a
+          // `sent_emails` row instead of down the inbound path. Everything
+          // below this branch is the inbound path, unchanged.
+          //
+          // Inside the same try/catch as the inbound ingest deliberately: a
+          // mirror that throws is not a new failure mode, it is the existing
+          // one. The catch counts it, leaves this record incomplete and stops
+          // the run with the cursor at the last record that finished.
+          if (message.labelIds.includes(SENT_LABEL)) {
+            const mirrored = await mirrorSentMessage(db, {
+              gmailMessageId: messageId,
+              message,
+              inbox,
+              internalDomains: await getInternalDomains(),
+            });
+            // Counted either way, so the per-run message cap stays honest.
+            if (mirrored) ingested++;
+            else skipped++;
             continue;
           }
 
