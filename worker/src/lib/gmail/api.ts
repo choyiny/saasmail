@@ -65,7 +65,7 @@ export async function listHistory(
   return {
     addedMessageIds,
     nextPageToken: payload.nextPageToken ?? null,
-    historyId: payload.historyId ? String(payload.historyId) : null,
+    historyId: payload.historyId != null ? String(payload.historyId) : null,
   };
 }
 

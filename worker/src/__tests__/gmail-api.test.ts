@@ -53,6 +53,7 @@ describe("listHistory", () => {
     const url = new URL(String(fn.mock.calls[0][0]));
     expect(url.searchParams.get("startHistoryId")).toBe("9000");
     expect(url.searchParams.get("pageToken")).toBe("tok");
+    expect(url.searchParams.get("historyTypes")).toBe("messageAdded");
   });
 
   it("reports an expired cursor as history_gone", async () => {
@@ -73,13 +74,21 @@ describe("listHistory", () => {
     expect(err.code).toBe("rate_limited");
   });
 
-  it("does not let a non-JSON body throw a SyntaxError", async () => {
+  it("reports a non-JSON error body as http_500", async () => {
     stub(500, "<html>upstream is sad</html>");
     const err = await listHistory("at", { startHistoryId: "1" }).catch(
       (e) => e,
     );
     expect(err).toBeInstanceOf(GmailApiError);
     expect(err.code).toBe("http_500");
+  });
+
+  it("handles HTTP 200 with malformed JSON body on success path", async () => {
+    stub(200, "<html>not json</html>");
+    const res = await listHistory("at", { startHistoryId: "9000" });
+    expect(res.addedMessageIds).toEqual([]);
+    expect(res.nextPageToken).toBeNull();
+    expect(res.historyId).toBeNull();
   });
 });
 
@@ -114,5 +123,14 @@ describe("getMessage", () => {
   it("throws for a non-404 failure", async () => {
     stub(500, { error: { message: "boom" } });
     await expect(getMessage("at", "m1")).rejects.toBeInstanceOf(GmailApiError);
+  });
+
+  it("handles HTTP 200 with malformed JSON body on success path", async () => {
+    stub(200, "<html>not json</html>");
+    const msg = await getMessage("at", "m1");
+    expect(msg).not.toBeNull();
+    expect(new TextDecoder().decode(msg!.raw)).toBe("");
+    expect(msg!.labelIds).toEqual([]);
+    expect(msg!.threadId).toBe("");
   });
 });
