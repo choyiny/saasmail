@@ -18,10 +18,20 @@ import { formatFromAddress } from "./format-from-address";
 import { isDemoMode } from "./is-dev";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
-/** Total provider attempts before a transient failure becomes terminal.
- *  With the hourly cron this is ~24h — enough to ride out Cloudflare's
- *  daily send-quota reset. */
-export const MAX_OUTBOX_ATTEMPTS = 24;
+/**
+ * Total provider attempts before a transient failure becomes terminal.
+ *
+ * COUNTED IN CRON TICKS, NOT HOURS. A transient failure re-arms the row as due
+ * immediately, so it is retried once per tick and this constant divided by the
+ * cron frequency is the real retry window.
+ *
+ * The cron in `wrangler.jsonc` runs every 15 minutes, so 96 ticks is ~24h —
+ * enough to ride out Cloudflare's daily send-quota reset. **Changing the cron
+ * schedule changes this budget.** It was 24 while the cron was hourly; if the
+ * schedule moves again, recompute this or quota-blocked mail starts failing
+ * permanently before the quota resets.
+ */
+export const MAX_OUTBOX_ATTEMPTS = 96;
 
 /** Caps one cron tick's work; anything beyond drains on subsequent ticks. */
 const OUTBOX_BATCH_LIMIT = 200;
@@ -61,7 +71,7 @@ export interface OutboxSendResult {
 /**
  * Write-ahead send: insert an outbox row, attempt the provider call inline,
  * then resolve the row — deleted on success/suppression, kept `pending` for
- * the hourly retry processor on a transient failure, kept `failed` on a
+ * the cron retry processor on a transient failure, kept `failed` on a
  * terminal one. Callers write their sent_emails row from `outcome`.
  */
 export async function sendViaOutbox(
@@ -103,8 +113,8 @@ export async function sendViaOutbox(
     attempts: 0,
     // The row must not be claimable while the inline attempt is in flight.
     // On a transient failure the resolution below resets it to "due now", and a
-    // hard crash mid-attempt self-heals at the next hourly run (same cool-down
-    // semantics as the processor's claim).
+    // hard crash mid-attempt self-heals on the first cron run after this
+    // one-hour cool-down elapses (same semantics as the processor's claim).
     nextRetryAt: now + 3600,
     createdAt: now,
     updatedAt: now,
@@ -113,7 +123,7 @@ export async function sendViaOutbox(
   // Wrap in try/catch so that an unexpected throw (e.g. a D1 error during the
   // suppression lookup, or a sender implementation that throws) cleans up the
   // write-ahead row. Without this, the caller's route fails with 500 and never
-  // writes its sent_emails row, yet the hourly retry processor would later
+  // writes its sent_emails row, yet the cron retry processor would later
   // resend the email — producing a send that is invisible in app history.
   // Deleting the row and rethrowing preserves the pre-outbox failure semantics.
   let send: SendOutput;
@@ -153,7 +163,7 @@ export async function sendViaOutbox(
   }
 
   if (result.error.transient) {
-    // Stays pending; due at the next hourly run (after + 60: the 60-second cool-down
+    // Stays pending; due at the next cron tick (after + 60: the 60-second cool-down
     // covers the caller's post-return bookkeeping — specifically the sent_emails insert
     // that happens after sendViaOutbox returns. Without this gap, a concurrent
     // cron/manual claim that resolves successfully could update a nonexistent
@@ -184,8 +194,8 @@ export async function sendViaOutbox(
 }
 
 /**
- * Cron entry point: re-attempt every due pending outbox row. Called from
- * the hourly `scheduled()` handler after sequence dispatch.
+ * Cron entry point: re-attempt every due pending outbox row. Called from the
+ * `scheduled()` handler after sequence dispatch, once every 15 minutes.
  */
 export async function processOutbox(env: CloudflareBindings): Promise<void> {
   if (isDemoMode(env)) return;
@@ -317,7 +327,9 @@ export async function attemptOutboxRow(
   }
 
   if (result.error.transient && row.attempts < MAX_OUTBOX_ATTEMPTS) {
-    // Due again immediately — i.e. at the next hourly run.
+    // Due again immediately — i.e. at the next cron tick, 15 minutes out.
+    // This is what makes MAX_OUTBOX_ATTEMPTS a tick count: one attempt per
+    // tick, so the retry window is that constant times the cron interval.
     await db
       .update(outboxEmails)
       .set({
