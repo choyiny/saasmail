@@ -56,7 +56,16 @@ export type SyncResult = {
   ingested: number;
   skipped: number;
   reseeded: boolean;
+  /** Messages that threw. At most one — a failure stops the run. */
+  failed: number;
 };
+
+/**
+ * Written to `gmail_accounts.lastError` when an expired cursor forced a
+ * re-seed. Mail arrived in the gap and was never synced, so the account is
+ * working but incomplete, and an operator needs to be told.
+ */
+export const HISTORY_GAP_ERROR = "history_gap";
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -75,6 +84,8 @@ async function seedCursor(
   db: DrizzleD1Database<typeof schema>,
   accountId: string,
   accessToken: string,
+  /** Marker to leave on the account; null for a first seed, which loses nothing. */
+  lastError: string | null = null,
 ): Promise<string> {
   const profile = await getProfile(accessToken);
   const now = nowSeconds();
@@ -83,7 +94,7 @@ async function seedCursor(
     .set({
       historyId: profile.historyId,
       lastSyncedAt: now,
-      lastError: null,
+      lastError,
       updatedAt: now,
     })
     .where(eq(gmailAccounts.id, accountId));
@@ -129,10 +140,13 @@ export async function syncAccount(
 
   let ingested = 0;
   let skipped = 0;
+  let failed = 0;
 
   if (!account.historyId) {
+    // A first seed skips nothing — there was no cursor — so it leaves no
+    // error marker behind.
     await seedCursor(db, account.id, accessToken);
-    return { ingested, skipped, reseeded: false };
+    return { ingested, skipped, reseeded: false, failed };
   }
 
   const startHistoryId = account.historyId;
@@ -147,8 +161,10 @@ export async function syncAccount(
    * safe to resume from when a run stops early.
    */
   let lastCompleteRecordId: string | null = null;
+  /** Set when a message threw; stops the run without discarding finished work. */
+  let failedMessageId: string | null = null;
 
-  while (!truncated && !exhausted) {
+  while (!truncated && !exhausted && !failedMessageId) {
     let page;
     try {
       page = await listHistory(accessToken, { startHistoryId, pageToken });
@@ -157,11 +173,19 @@ export async function syncAccount(
         // The cursor is older than Gmail's ~1 week history retention. Retrying
         // would fail forever, so re-seed at the mailbox's current position and
         // log the gap loudly — mail in that window is not recoverable here.
-        const seeded = await seedCursor(db, account.id, accessToken);
+        // Mail arrived in the gap and is not recoverable here, so the account
+        // is left marked: re-seeding keeps sync alive, but an operator has to
+        // be able to see that something was missed.
+        const seeded = await seedCursor(
+          db,
+          account.id,
+          accessToken,
+          HISTORY_GAP_ERROR,
+        );
         console.warn(
           `Gmail history expired for ${account.emailAddress}: cursor ${startHistoryId} is gone, re-seeded at ${seeded}. Messages in the gap were not synced.`,
         );
-        return { ingested, skipped, reseeded: true };
+        return { ingested, skipped, reseeded: true, failed };
       }
       throw err;
     }
@@ -185,64 +209,88 @@ export async function syncAccount(
         break;
       }
 
+      /** Cleared if any message in this record throws. */
+      let recordComplete = true;
+
       for (const messageId of record.messageIds) {
-        const message = await getMessage(accessToken, messageId);
-        // Deleted between the history page and this fetch. Ordinary, not a
-        // failure — Gmail history is a log of what happened, not of what
-        // still exists.
-        if (!message) {
-          skipped++;
-          continue;
-        }
+        try {
+          const message = await getMessage(accessToken, messageId);
+          // Deleted between the history page and this fetch. Ordinary, not a
+          // failure — Gmail history is a log of what happened, not of what
+          // still exists.
+          if (!message) {
+            skipped++;
+            continue;
+          }
 
-        if (message.labelIds.some((label) => SKIP_LABELS.has(label))) {
-          skipped++;
-          continue;
-        }
+          if (message.labelIds.some((label) => SKIP_LABELS.has(label))) {
+            skipped++;
+            continue;
+          }
 
-        if (!inbox) {
-          skipped++;
-          continue;
-        }
+          if (!inbox) {
+            skipped++;
+            continue;
+          }
 
-        // Provisional envelope: the raw bytes carry the real addresses, and
-        // `parsed.to` is what decides the destination, so it is overwritten
-        // with the resolved inbox immediately below.
-        const parsed = await parseRaw(message.raw, {
-          from: account.emailAddress,
-          to: account.emailAddress,
-        });
-        parsed.to = inbox;
+          // Provisional envelope: the raw bytes carry the real addresses, and
+          // `parsed.to` is what decides the destination, so it is overwritten
+          // with the resolved inbox immediately below.
+          const parsed = await parseRaw(message.raw, {
+            from: account.emailAddress,
+            to: account.emailAddress,
+          });
+          parsed.to = inbox;
 
-        await ingestParsedEmail(db, parsed, env, ctx);
-        ingested++;
+          await ingestParsedEmail(db, parsed, env, ctx);
+          ingested++;
 
-        // `gmailMessageId` / `gmailThreadId` are not ParsedEmail fields, so
-        // they are written back by matching the UNIQUE `emails.message_id`.
-        //
-        // `isNull(emails.gmailMessageId)` is load-bearing. `ingestParsedEmail`
-        // silently DROPS blocked senders and duplicate Message-IDs, and
-        // returns void either way. Without the guard, a message dropped as a
-        // duplicate of one Cloudflare already delivered would stamp Gmail ids
-        // onto that pre-existing row — a row this sync never created.
-        //
-        // With no Message-ID there is no row we can identify as ours, so we
-        // write nothing rather than guess.
-        if (parsed.messageId) {
-          await db
-            .update(emails)
-            .set({
-              gmailMessageId: messageId,
-              gmailThreadId: message.threadId || null,
-            })
-            .where(
-              and(
-                eq(emails.messageId, parsed.messageId),
-                isNull(emails.gmailMessageId),
-              ),
-            );
+          // `gmailMessageId` / `gmailThreadId` are not ParsedEmail fields, so
+          // they are written back by matching the UNIQUE `emails.message_id`.
+          //
+          // `isNull(emails.gmailMessageId)` is load-bearing.
+          // `ingestParsedEmail` silently DROPS blocked senders and duplicate
+          // Message-IDs, and returns void either way. Without the guard, a
+          // message dropped as a duplicate of one Cloudflare already
+          // delivered would stamp Gmail ids onto that pre-existing row — a
+          // row this sync never created.
+          //
+          // With no Message-ID there is no row we can identify as ours, so we
+          // write nothing rather than guess.
+          if (parsed.messageId) {
+            await db
+              .update(emails)
+              .set({
+                gmailMessageId: messageId,
+                gmailThreadId: message.threadId || null,
+              })
+              .where(
+                and(
+                  eq(emails.messageId, parsed.messageId),
+                  isNull(emails.gmailMessageId),
+                ),
+              );
+          }
+        } catch (err) {
+          // One message must not discard the work this run already finished,
+          // and must not be skipped past either. So: stop here, leave this
+          // record incomplete, and let the cursor stand at the last record
+          // that finished BEFORE this one. The next run retries from there.
+          //
+          // A permanently poisonous message therefore stalls this account —
+          // visibly, via lastError — rather than being silently dropped.
+          console.error(
+            `Gmail sync failed on message ${messageId} for ${account.emailAddress}:`,
+            err,
+          );
+          failed++;
+          failedMessageId = messageId;
+          recordComplete = false;
+          break;
         }
       }
+
+      if (!recordComplete) break;
 
       // Reached only when every message in the record was handled, which is
       // what makes this id safe to resume from.
@@ -250,6 +298,9 @@ export async function syncAccount(
     }
 
     if (truncated) break;
+    // Do not fall through to `exhausted` — that would advance the cursor to
+    // the mailbox head and skip everything from the failed message onward.
+    if (failedMessageId) break;
     if (page.nextPageToken) {
       pageToken = page.nextPageToken;
     } else {
@@ -260,11 +311,13 @@ export async function syncAccount(
   const now = nowSeconds();
   const patch: Partial<typeof gmailAccounts.$inferInsert> = {
     lastSyncedAt: now,
-    lastError: null,
+    // Naming the message gives an operator something to act on: they can open
+    // it in Gmail and see why it cannot be ingested.
+    lastError: failedMessageId ? `message_failed:${failedMessageId}` : null,
     updatedAt: now,
   };
 
-  // Two ways to advance, and the distinction matters.
+  // Three ways to advance, and the distinctions matter.
   //
   // A run that consumed the whole history range advances to the page-level
   // historyId — the mailbox's current position, correct because nothing is
@@ -277,7 +330,14 @@ export async function syncAccount(
   // unprocessed; using a message's own `historyId` would be worse still,
   // since Gmail defines that as the last record to MODIFY the message and a
   // later read or label can sort it past mail this run never saw.
-  if (exhausted && latestHistoryId) {
+  //
+  // A run stopped by a failing message keeps whatever it finished: the cursor
+  // moves to the last record completed BEFORE the failure, so that work is
+  // not thrown away and re-fetched every tick. It never moves past the failed
+  // record, so nothing is skipped.
+  if (failedMessageId) {
+    if (lastCompleteRecordId) patch.historyId = lastCompleteRecordId;
+  } else if (exhausted && latestHistoryId) {
     patch.historyId = latestHistoryId;
   } else if (truncated && lastCompleteRecordId) {
     patch.historyId = lastCompleteRecordId;
@@ -291,7 +351,7 @@ export async function syncAccount(
     .set(patch)
     .where(eq(gmailAccounts.id, account.id));
 
-  return { ingested, skipped, reseeded: false };
+  return { ingested, skipped, reseeded: false, failed };
 }
 
 /**

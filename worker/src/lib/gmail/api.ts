@@ -70,17 +70,33 @@ export async function listHistory(
 
   const payload = (await readJson(res)) ?? {};
   const added: AddedMessage[] = [];
-  for (const entry of payload.history ?? []) {
-    // Without a record id there is no cursor we could resume from, and
-    // inventing one would risk advancing past unprocessed mail. Gmail always
-    // sets it, so this is a defensive drop rather than an expected path.
+  const history = payload.history ?? [];
+
+  // Both fields below are required by Gmail's schema, so neither branch should
+  // ever fire. They throw rather than skip because skipping would be silent
+  // mail loss: a dropped entry leaves the enclosing record looking complete,
+  // the cursor advances past it, and the message is never fetched again.
+  // Stalling loudly on an impossible payload is the cheaper mistake.
+  for (let i = 0; i < history.length; i++) {
+    const entry = history[i];
     const recordId = entry?.id != null ? String(entry.id) : null;
-    if (!recordId) continue;
+    if (!recordId) {
+      throw new GmailApiError(
+        res.status,
+        "malformed_history",
+        `Gmail history.list returned a record with no id at index ${i}; refusing to continue rather than skip the mail it added.`,
+      );
+    }
     for (const item of entry.messagesAdded ?? []) {
       const id = item?.message?.id;
-      if (typeof id === "string") {
-        added.push({ messageId: id, historyId: recordId });
+      if (typeof id !== "string") {
+        throw new GmailApiError(
+          res.status,
+          "malformed_history",
+          `Gmail history.list returned a messagesAdded entry with no message id in record ${recordId}; refusing to continue rather than advance the cursor past it.`,
+        );
       }
+      added.push({ messageId: id, historyId: recordId });
     }
   }
 

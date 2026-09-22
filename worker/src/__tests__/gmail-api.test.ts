@@ -44,7 +44,7 @@ describe("listHistory", () => {
     expect(res.nextPageToken).toBeNull();
   });
 
-  it("drops a history record with no usable id", async () => {
+  it("stalls rather than drop a history record with no usable id", async () => {
     stub(200, {
       history: [
         { messagesAdded: [{ message: { id: "orphan" } }] },
@@ -53,10 +53,36 @@ describe("listHistory", () => {
       historyId: "9003",
     });
 
-    // No record id means no cursor we could resume from, and inventing one
-    // could advance past unprocessed mail.
-    const res = await listHistory("at", { startHistoryId: "9000" });
-    expect(res.added).toEqual([{ messageId: "m1", historyId: "9003" }]);
+    // Skipping the record would leave the rest of the page looking complete,
+    // so the cursor would advance past mail we never fetched. Stalling is the
+    // safe failure; losing mail is not.
+    const err = await listHistory("at", { startHistoryId: "9000" }).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(GmailApiError);
+    expect(err.code).toBe("malformed_history");
+    expect(err.message).toContain("index 0");
+  });
+
+  it("stalls rather than drop a messagesAdded entry with no message id", async () => {
+    stub(200, {
+      history: [
+        {
+          id: "9004",
+          messagesAdded: [{ message: { id: "m1" } }, { message: {} }],
+        },
+      ],
+      historyId: "9004",
+    });
+
+    // The subtler half: the record would otherwise look complete and become a
+    // legal resume point, stranding the message whose id was missing.
+    const err = await listHistory("at", { startHistoryId: "9000" }).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(GmailApiError);
+    expect(err.code).toBe("malformed_history");
+    expect(err.message).toContain("record 9004");
   });
 
   it("coerces a numeric record id to a string", async () => {
