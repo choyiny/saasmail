@@ -1,4 +1,20 @@
-import type { ParsedEmail } from "../email-parser";
+/**
+ * Resolve a Gmail message to the personal mailbox it belongs to.
+ *
+ * This module deliberately does NOT scan headers. Header-based routing was
+ * removed after three rounds of security review found that both List-ID and
+ * Delivered-To are sender-forgeable: List-ID has no authentication; Delivered-To
+ * is forgeable via duplicate-header collapse in the email parser (the real one
+ * is prepended by Gmail, an attacker's sits below, parser takes last-wins).
+ *
+ * Personal mailboxes are 1:1 — exactly one saasmail inbox per Gmail account.
+ * Group routing (many Groups → many inboxes from one mailbox) is deferred to a
+ * later slice with a design that keys on something a sender cannot set.
+ *
+ * For now, resolve to the account's own mailbox (gmailGroupAddress === null).
+ * Ignore all group mappings. This removes the attack surface instead of trying
+ * to parse around it.
+ */
 
 export type InboxMapping = {
   email: string;
@@ -7,154 +23,30 @@ export type InboxMapping = {
 };
 
 /**
- * Only these three headers decide routing. They are stamped by receiving infrastructure
- * (Delivered-To, X-Original-To) or the Group itself (List-ID) and cannot be forged by senders.
- * Removed: To, Cc — wholly sender-controlled with no integrity. Removing them deletes most
- * attack surface instead of trying to out-parse adversarial input.
- * Deliberately NOT the subject or body: a group address mentioned in prose must never redirect.
+ * Resolve a Gmail message to the saasmail inbox for a personal mailbox.
+ *
+ * For a personal account, there is exactly one mapping with gmailGroupAddress === null.
+ * Group mappings (gmailGroupAddress !== null) are ignored entirely.
+ *
+ * @param mappings - InboxMappings, each with email and gmailGroupAddress
+ * @returns The email address of the account's own mailbox (lowercase, trimmed),
+ *          or null if no personal mailbox mapping exists or if the configuration
+ *          is ambiguous (multiple null mappings).
  */
-const TRUSTED_HEADERS = ["delivered-to", "x-original-to", "list-id"];
+export function resolvePersonalInbox(mappings: InboxMapping[]): string | null {
+  // Find all mappings where gmailGroupAddress is null (personal mailbox)
+  const personalMappings = mappings.filter((m) => m.gmailGroupAddress === null);
 
-/**
- * Strip RFC 5322 comments (parenthesised runs with nesting).
- */
-function stripComments(value: string): string {
-  let result = "";
-  let depth = 0;
-
-  for (let i = 0; i < value.length; i++) {
-    const char = value[i];
-
-    if (char === "(") {
-      depth++;
-    } else if (char === ")") {
-      depth--;
-    } else if (depth === 0) {
-      result += char;
-    }
+  // Exactly one personal mailbox expected. More than one is a misconfiguration
+  // and we return null rather than picking arbitrarily, because picking based on
+  // array order would make which inbox receives customer mail depend on database row order.
+  if (personalMappings.length === 0) {
+    return null;
+  }
+  if (personalMappings.length > 1) {
+    return null;
   }
 
-  return result;
-}
-
-/**
- * Extract a candidate address from a chunk of an RFC 5322 address list.
- * If the chunk contains angle brackets, extract the content of the FIRST pair.
- * If there is an addr-spec-like text before the bracket, reject (suspicious).
- * Otherwise, use the whole chunk trimmed.
- */
-function extractAddress(chunk: string, allowBrackets: boolean): string | null {
-  const trimmed = chunk.trim();
-
-  const firstOpenBracket = trimmed.indexOf("<");
-  if (firstOpenBracket !== -1) {
-    // If this is a machine-generated header (not List-ID), reject if brackets present
-    if (!allowBrackets) {
-      return null;
-    }
-
-    // Check if text before bracket looks like an addr-spec (suspicious)
-    if (firstOpenBracket > 0) {
-      const beforeBracket = trimmed.substring(0, firstOpenBracket).trim();
-      if (beforeBracket && isValidAddrSpec(beforeBracket)) {
-        // Addr-spec before bracket: reject as suspicious
-        return null;
-      }
-    }
-
-    const firstCloseBracket = trimmed.indexOf(">", firstOpenBracket);
-    if (firstCloseBracket > firstOpenBracket) {
-      return trimmed.substring(firstOpenBracket + 1, firstCloseBracket);
-    }
-  }
-
-  // No brackets, use whole chunk
-  return trimmed;
-}
-
-/**
- * Validate that a candidate matches strict addr-spec syntax (for delivered-to, x-original-to).
- * Machine-generated headers have narrow grammar requiring exactly: localpart@domain.tld
- */
-function isValidAddrSpec(candidate: string): boolean {
-  // Require exactly: (non-special)+@(non-special)+.(non-special)+
-  const addrSpecRegex = /^[^\s<>()@,;:"]+@[^\s<>()@,;:"]+\.[^\s<>()@,;:"]+$/;
-  return addrSpecRegex.test(candidate);
-}
-
-export function resolveInbox(
-  parsed: ParsedEmail,
-  mappings: InboxMapping[],
-): string | null {
-  // Collect exact addresses from delivered-to and x-original-to
-  const exactAddresses: string[] = [];
-
-  // Collect List-ID values for dot-form comparison
-  const listIdValues: string[] = [];
-
-  // Process delivered-to
-  const deliveredTo = parsed.headers?.["delivered-to"];
-  if (deliveredTo && !deliveredTo.includes('"')) {
-    // Machine-generated: reject if contains quotes (brackets are handled by extractAddress)
-    const cleaned = stripComments(deliveredTo);
-    const chunks = cleaned.split(",");
-    for (const chunk of chunks) {
-      const candidate = extractAddress(chunk, false);
-      if (candidate && isValidAddrSpec(candidate)) {
-        exactAddresses.push(candidate.toLowerCase().trim());
-      }
-    }
-  }
-
-  // Process x-original-to
-  const xOriginalTo = parsed.headers?.["x-original-to"];
-  if (xOriginalTo && !xOriginalTo.includes('"')) {
-    // Machine-generated: reject if contains quotes (brackets are handled by extractAddress)
-    const cleaned = stripComments(xOriginalTo);
-    const chunks = cleaned.split(",");
-    for (const chunk of chunks) {
-      const candidate = extractAddress(chunk, false);
-      if (candidate && isValidAddrSpec(candidate)) {
-        exactAddresses.push(candidate.toLowerCase().trim());
-      }
-    }
-  }
-
-  // Process List-ID (allows brackets, single pair only)
-  const listId = parsed.headers?.["list-id"];
-  if (listId) {
-    // Reject if contains quotes or multiple bracket pairs
-    if (!listId.includes('"') && (listId.match(/</g) || []).length <= 1) {
-      const cleaned = stripComments(listId);
-      const chunks = cleaned.split(",");
-      for (const chunk of chunks) {
-        const candidate = extractAddress(chunk, true);
-        if (candidate) {
-          listIdValues.push(candidate.toLowerCase().trim());
-        }
-      }
-    }
-  }
-
-  // Check for group matches
-  for (const mapping of mappings) {
-    if (!mapping.gmailGroupAddress) continue;
-
-    const mappingEmail = mapping.gmailGroupAddress.trim().toLowerCase();
-
-    // Exact match for delivered-to and x-original-to
-    if (exactAddresses.includes(mappingEmail)) {
-      return mapping.email.trim().toLowerCase();
-    }
-
-    // Dot-form match for list-id
-    const dotForm = mappingEmail.replace("@", ".");
-    if (listIdValues.includes(dotForm)) {
-      return mapping.email.trim().toLowerCase();
-    }
-  }
-
-  // Fall back to catch-all
-  const catchAll = mappings.find((m) => !m.gmailGroupAddress);
-  return catchAll ? catchAll.email.trim().toLowerCase() : null;
+  // Return the single personal mailbox address (lowercase and trimmed)
+  return personalMappings[0].email.trim().toLowerCase();
 }
