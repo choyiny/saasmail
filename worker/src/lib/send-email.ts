@@ -17,6 +17,7 @@ import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
+import { sendWithSuppressionCheck, type SendOutput } from "./send";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -97,7 +98,8 @@ export type ReplyEmailFailure =
         | "EMAIL_HAS_NO_PERSON"
         | "TEMPLATE_NOT_FOUND"
         | "MISSING_BODY"
-        | "TEMPLATE_PARSE_ERROR";
+        | "TEMPLATE_PARSE_ERROR"
+        | "SEND_FAILED";
       message: string;
     }
   | {
@@ -492,43 +494,99 @@ export async function replyToEmail(
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
-  // Replies are 1:1 conversational responses to an inbound — the recipient
-  // initiated by emailing first, so route through sendViaOutbox
-  // with transactional: true. That bypasses the suppression list AND skips
-  // the unsubscribe footer / List-Unsubscribe header (this is a reply, not
-  // a bulk send).
   const id = nanoid();
-  const { outcome, send: sendResult } = await sendViaOutbox({
-    db,
-    env,
-    sender,
-    sentEmailId: id,
-    fromAddress,
-    from: formattedFrom,
-    to: toAddress,
-    cc,
-    subject: finalSubject,
-    html: finalBodyHtml,
-    ...(bodyText !== undefined ? { text: bodyText } : {}),
-    headers: {
-      "Message-ID": messageId,
-      ...(origInReplyToMessageId
-        ? { "In-Reply-To": origInReplyToMessageId }
-        : {}),
-      ...(replyTo ? { "Reply-To": replyTo } : {}),
-    },
-    ...(files.length > 0
-      ? {
-          attachments: files.map((f) => ({
-            filename: f.filename,
-            contentType: f.contentType,
-            content: f.bytes,
-          })),
-        }
+  const replyHeaders = {
+    "Message-ID": messageId,
+    ...(origInReplyToMessageId
+      ? { "In-Reply-To": origInReplyToMessageId }
       : {}),
-    ...(origGmailThreadId ? { threadId: origGmailThreadId } : {}),
-    transactional: true,
-  });
+    ...(replyTo ? { "Reply-To": replyTo } : {}),
+  };
+  const replyAttachments =
+    files.length > 0
+      ? files.map((f) => ({
+          filename: f.filename,
+          contentType: f.contentType,
+          content: f.bytes,
+        }))
+      : undefined;
+
+  // Discriminate on the sender that was actually resolved, not on whether
+  // fromAddress is Gmail-mapped — createSenderForInbox already falls back to
+  // the configured provider on a revoked grant or missing secrets, and that
+  // fallback send legitimately IS going out via the configured provider, so
+  // it keeps the normal outbox retry below.
+  const usingGmail = sender.provider === "gmail";
+
+  let outcome: OutboxOutcome;
+  let sendResult: SendOutput;
+
+  if (usingGmail) {
+    // A reply that actually goes out through Gmail must never fall back to
+    // the outbox's retry queue: a transient failure there would silently
+    // re-attempt via the CONFIGURED provider on the next cron tick —
+    // DKIM-signed by the wrong service, invisible in the user's own Gmail
+    // Sent folder, and with no Gmail thread to continue. The user decided
+    // that surfacing the failure and asking them to press send again is
+    // safer than sending from a different identity behind their back, so
+    // this calls the transport directly instead of going through
+    // sendViaOutbox — nothing is queued.
+    sendResult = await sendWithSuppressionCheck({
+      db,
+      env,
+      sender,
+      from: formattedFrom,
+      to: toAddress,
+      cc,
+      subject: finalSubject,
+      html: finalBodyHtml,
+      ...(bodyText !== undefined ? { text: bodyText } : {}),
+      headers: replyHeaders,
+      ...(replyAttachments ? { attachments: replyAttachments } : {}),
+      ...(origGmailThreadId ? { threadId: origGmailThreadId } : {}),
+      // Replies are 1:1 conversational responses to an inbound — the
+      // recipient initiated by emailing first — so this bypasses the
+      // suppression list and skips the unsubscribe footer / List-Unsubscribe
+      // header (this is a reply, not a bulk send), same as the queued path.
+      transactional: true,
+    });
+
+    const result = sendResult.result!;
+    if (result.error) {
+      // Not queued anywhere — no outbox row, no sent_emails row. The caller
+      // must retry explicitly; nothing is silently in flight.
+      return {
+        ok: false,
+        code: "SEND_FAILED",
+        message:
+          "Gmail did not accept this reply, and it was not queued for " +
+          `retry: ${result.error.message}. Send it again to retry.`,
+      };
+    }
+    outcome = "sent";
+  } else {
+    // Every other provider keeps its existing queued-and-retried behavior,
+    // unchanged: bulk sends, sequences, and a reply that fell back off
+    // Gmail all still route through sendViaOutbox.
+    const outboxResult = await sendViaOutbox({
+      db,
+      env,
+      sender,
+      sentEmailId: id,
+      fromAddress,
+      from: formattedFrom,
+      to: toAddress,
+      cc,
+      subject: finalSubject,
+      html: finalBodyHtml,
+      ...(bodyText !== undefined ? { text: bodyText } : {}),
+      headers: replyHeaders,
+      ...(replyAttachments ? { attachments: replyAttachments } : {}),
+      transactional: true,
+    });
+    outcome = outboxResult.outcome;
+    sendResult = outboxResult.send;
+  }
 
   // Compute conversation_id for this reply.
   const internalDomainsReply = await fetchInternalDomains(db);

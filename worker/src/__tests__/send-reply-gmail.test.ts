@@ -23,6 +23,7 @@ import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
+import { outboxEmails } from "../db/outbox-emails.schema";
 import { encryptSecret } from "../lib/crypto";
 
 // Matches TOKEN_ENCRYPTION_KEY in vitest.config.test.ts.
@@ -228,5 +229,135 @@ describe("send router — Gmail reply routing", () => {
     expect(rows[0].resendId).toMatch(/^demo_/);
     expect(rows[0].gmailMessageId).toBeNull();
     expect(rows[0].gmailThreadId).toBeNull();
+  });
+
+  it("a Gmail send that fails transiently returns an error and queues nothing", async () => {
+    await seedGmailAccount();
+    await seedGmailIdentity();
+
+    const person = await createTestPerson({
+      id: "p-gmail-fail",
+      email: "customer2@example.com",
+    });
+    await createTestEmail({
+      id: "rcv-gmail-fail",
+      personId: person.id,
+      recipient: "support@acme.dev",
+      subject: "Question",
+      messageId: "parent-fail@example.com",
+    });
+
+    // Gmail's send endpoint rejects with a rate-limit (429) — the canonical
+    // transient failure that, for every other provider, would be queued for
+    // a cron retry.
+    const fetchMock = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({ error: { message: "Rate limit exceeded" } }),
+        { status: 429, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await authFetch("/api/send/reply/rcv-gmail-fail", {
+      apiKey,
+      method: "POST",
+      body: buildSendForm({
+        fromAddress: "support@acme.dev",
+        bodyHtml: "<p>Thanks for reaching out.</p>",
+      }),
+    });
+
+    // Surfaced as an error, not a 201 with a "retrying" status — there is
+    // nothing in flight for the caller to wait on.
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/gmail/i);
+    // Tells the caller plainly that nothing is in flight.
+    expect(body.error).toMatch(/not queued for retry/i);
+    // Never leaks token material into the surfaced error.
+    expect(body.error).not.toMatch(/bearer|access.?token|refresh.?token/i);
+
+    // The behavior change under test: no outbox row was ever created for
+    // this attempt — asserting only the error status would still pass even
+    // if this were silently queued behind a different provider.
+    const outboxRows = await getDb().select().from(outboxEmails);
+    expect(outboxRows).toHaveLength(0);
+
+    // Nothing was persisted as a (misleading) sent/failed audit row either.
+    const sentRows = await getDb().select().from(sentEmails);
+    expect(sentRows).toHaveLength(0);
+  });
+
+  it("a reply that FELL BACK off Gmail (revoked grant) still queues on a transient failure, unchanged", async () => {
+    // Gmail-mapped, but the cached token is gone and refresh will fail —
+    // createSenderForInbox falls back to the configured provider.
+    await seedGmailAccount({ accessToken: null, expiresAt: null });
+    await seedGmailIdentity();
+
+    const person = await createTestPerson({
+      id: "p-fallback",
+      email: "customer3@example.com",
+    });
+    await createTestEmail({
+      id: "rcv-fallback",
+      personId: person.id,
+      recipient: "support@acme.dev",
+      subject: "Question",
+      messageId: "parent-fallback@example.com",
+    });
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("oauth2.googleapis.com")) {
+        // The revoked grant: token refresh itself fails, which is what
+        // forces the fallback in the first place.
+        return new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // The configured provider (Resend, via RESEND_API_KEY in the test
+      // env) rejects transiently.
+      return new Response(
+        JSON.stringify({
+          name: "rate_limit_exceeded",
+          message: "Rate limit exceeded, please try again later",
+        }),
+        { status: 429, headers: { "content-type": "application/json" } },
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await authFetch("/api/send/reply/rcv-fallback", {
+      apiKey,
+      method: "POST",
+      body: buildSendForm({
+        fromAddress: "support@acme.dev",
+        bodyHtml: "<p>Thanks for reaching out.</p>",
+      }),
+    });
+
+    // Queued exactly like any other provider's transient failure: 201 with
+    // a "retrying" status, not a hard error.
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string; status: string };
+    expect(body.status).toBe("retrying");
+
+    const outboxRows = await getDb()
+      .select()
+      .from(outboxEmails)
+      .where(eq(outboxEmails.sentEmailId, body.id));
+    expect(outboxRows).toHaveLength(1);
+    expect(outboxRows[0].status).toBe("pending");
+
+    const sentRows = await getDb()
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, body.id));
+    expect(sentRows).toHaveLength(1);
+    expect(sentRows[0].status).toBe("retrying");
+    // Confirms this really did fall back off Gmail: no gmail ids recorded.
+    expect(sentRows[0].gmailMessageId).toBeNull();
+    expect(sentRows[0].gmailThreadId).toBeNull();
   });
 });

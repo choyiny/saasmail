@@ -6,6 +6,7 @@ import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { replyToEmail, sendEmail } from "../lib/send-email";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
+  ErrorSchema,
   inboxForbiddenResponse,
   multipartParseErrorResponses,
   replyNotFoundResponse,
@@ -258,6 +259,13 @@ const replyEmailRoute = createRoute({
     413: multipartParseErrorResponses[413],
     ...inboxForbiddenResponse,
     ...replyNotFoundResponse,
+    502: {
+      description:
+        "The reply went out through Gmail and Gmail rejected it (or the request failed before reaching Gmail). Not sent and not queued for retry — resend explicitly.",
+      content: {
+        "application/json": { schema: ErrorSchema },
+      },
+    },
   },
 });
 
@@ -301,6 +309,9 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       result.code === "TEMPLATE_PARSE_ERROR"
     ) {
       return c.json({ error: result.message }, 400);
+    }
+    if (result.code === "SEND_FAILED") {
+      return c.json({ error: result.message }, 502);
     }
     return c.json({ error: result.message }, 404);
   }
