@@ -9,6 +9,7 @@ import { people } from "../../db/people.schema";
 import { sentEmails } from "../../db/sent-emails.schema";
 import { addressParser } from "postal-mime";
 import { parseRaw } from "../email-parser";
+import { cancelSequencesForPerson } from "../cancel-sequence";
 import { computeConversationId, externalsOnly } from "../conversation-id";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
@@ -496,6 +497,20 @@ async function mirrorSentMessage(
     sentAt,
     createdAt: now,
   });
+
+  // A rep who answered this lead from their phone has made contact, so the
+  // automated follow-ups must stop — exactly as they do for inbound mail
+  // (email-handler.ts) and for every saasmail-originated send. Without this
+  // the customer keeps getting nudged about a question a human already
+  // answered, and the slice's whole premise — a Gmail-typed reply behaves
+  // like a saasmail-typed one — fails on the behaviour that is most visible
+  // to the customer.
+  //
+  // Conditional because `sent_emails.person_id` is nullable on mirrored rows:
+  // a message to an address we have never heard from has no timeline and no
+  // enrollments to cancel.
+  const personId = personRow[0]?.id;
+  if (personId) await cancelSequencesForPerson(db, personId);
 
   return true;
 }
