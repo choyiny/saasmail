@@ -139,12 +139,22 @@ function parseSpamScore(headers: Record<string, string>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function parseEmail(
-  message: ForwardableEmailMessage,
+/**
+ * Parse raw RFC822 bytes. The envelope carries the SMTP-level sender and
+ * recipient, which are not always present or trustworthy in the MIME
+ * headers — `from` is a fallback when the message has no parseable From,
+ * and `to` is the inbox this message was delivered to.
+ *
+ * Split out from `parseEmail` so a non-Cloudflare source can reuse it:
+ * the Gmail API's `messages.get(format=raw)` returns the same bytes the
+ * Email Worker receives.
+ */
+export async function parseRaw(
+  raw: ArrayBuffer,
+  envelope: { from: string; to: string },
 ): Promise<ParsedEmail> {
-  const rawEmail = await new Response(message.raw).arrayBuffer();
   const parser = new PostalMime();
-  const parsed = await parser.parse(rawEmail);
+  const parsed = await parser.parse(raw);
 
   const headers: Record<string, string> = {};
   if (parsed.headers) {
@@ -182,10 +192,10 @@ export async function parseEmail(
 
   return {
     from: {
-      address: parsed.from?.address || message.from,
+      address: parsed.from?.address || envelope.from,
       name: parsed.from?.name || "",
     },
-    to: message.to,
+    to: envelope.to,
     cc,
     subject: parsed.subject || "",
     bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
@@ -204,4 +214,12 @@ export async function parseEmail(
     auth: parseAuthResults(headers),
     spamScore: parseSpamScore(headers),
   };
+}
+
+/** Adapter for the Cloudflare Email Worker entry point. */
+export async function parseEmail(
+  message: ForwardableEmailMessage,
+): Promise<ParsedEmail> {
+  const raw = await new Response(message.raw).arrayBuffer();
+  return parseRaw(raw, { from: message.from, to: message.to });
 }
