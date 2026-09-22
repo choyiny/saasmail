@@ -91,4 +91,39 @@ describe("resolveInbox", () => {
       resolveInbox(parsed({ subject: "about support@acme.dev" }), GROUPS),
     ).toBeNull();
   });
+
+  it("rejects a partial-match on the left (info-support@acme.dev does not match support@acme.dev)", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
+    expect(
+      resolveInbox(
+        parsed({ "delivered-to": "info-support@acme.dev" }),
+        mappings,
+      ),
+    ).toBe("cho@acme.dev");
+  });
+
+  it("rejects a partial-match on the right (support@acme.dev.evil.test does not match support@acme.dev)", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
+    expect(
+      resolveInbox(parsed({ to: "support@acme.dev.evil.test" }), mappings),
+    ).toBe("cho@acme.dev");
+  });
+
+  it("matches a group on X-Original-To", () => {
+    expect(
+      resolveInbox(parsed({ "x-original-to": "support@acme.dev" }), GROUPS),
+    ).toBe("support@acme.dev");
+  });
+
+  it("matches a group on Cc", () => {
+    expect(resolveInbox(parsed({ cc: "support@acme.dev" }), GROUPS)).toBe(
+      "support@acme.dev",
+    );
+  });
 });
