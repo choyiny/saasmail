@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { schema } from "../../db/schema";
 import { gmailAccounts } from "../../db/gmail-accounts.schema";
 import { decryptSecret, encryptSecret } from "../crypto";
 import { GoogleAuthError, refreshAccessToken } from "./oauth";
@@ -16,7 +17,7 @@ export type GmailAuthConfig = {
 };
 
 export async function getAccessToken(
-  db: DrizzleD1Database<any>,
+  db: DrizzleD1Database<typeof schema>,
   accountId: string,
   cfg: GmailAuthConfig,
 ): Promise<string> {
