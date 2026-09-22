@@ -148,6 +148,71 @@ describe("send router — Gmail reply routing", () => {
     expect(rows[0].gmailThreadId).toBe("thread-parent-1");
   });
 
+  it("drops a parent thread id that belongs to a DIFFERENT Gmail mailbox", async () => {
+    // Gmail thread ids are per-mailbox. Handing one mailbox's thread to
+    // another's users/me/messages/send gets a 400, which is terminal, and a
+    // terminal Gmail failure is never queued — so this would be a reply that
+    // can never be sent. Losing the threading is the better outcome.
+    await seedGmailAccount();
+    await seedGmailAccount({
+      id: "acct-2",
+      emailAddress: "other@xyspace.dev",
+    });
+    await seedGmailIdentity();
+    await seedGmailIdentity({
+      email: "billing@acme.dev",
+      displayName: "Billing",
+      gmailAccountId: "acct-2",
+    });
+
+    const person = await createTestPerson({
+      id: "p-cross",
+      email: "customer-cross@example.com",
+    });
+    // The parent was synced into billing@acme.dev — acct-2's mailbox.
+    await createTestEmail({
+      id: "rcv-cross",
+      personId: person.id,
+      recipient: "billing@acme.dev",
+      subject: "Question",
+      messageId: "parent-cross@example.com",
+    });
+    await getDb()
+      .update(emails)
+      .set({ gmailThreadId: "thread-acct-2" })
+      .where(eq(emails.id, "rcv-cross"));
+
+    const fetchMock = stubGmailSend({ id: "18cross", threadId: "thread-new" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // ...but the reply goes out from support@acme.dev, which is acct-1.
+    const res = await authFetch("/api/send/reply/rcv-cross", {
+      apiKey,
+      method: "POST",
+      body: buildSendForm({
+        fromAddress: "support@acme.dev",
+        bodyHtml: "<p>Thanks for reaching out.</p>",
+      }),
+    });
+
+    // Sent, not refused.
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+
+    const sentBody = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    // The other mailbox's thread id never reached Gmail.
+    expect(sentBody.threadId).toBeUndefined();
+
+    // And the row records the thread Gmail actually assigned.
+    const rows = await getDb()
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.id, body.id));
+    expect(rows[0].gmailThreadId).toBe("thread-new");
+  });
+
   it("replies from a Cloudflare inbox unaffected — same provider, both gmail columns null", async () => {
     // DemoSender stands in for "the configured provider" so this doesn't hit
     // a real network call — same technique send-router.test.ts uses.

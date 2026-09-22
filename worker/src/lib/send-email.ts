@@ -11,6 +11,8 @@ import { cancelSequencesForPerson } from "./cancel-sequence";
 import { computeConversationId, externalsOnly } from "./conversation-id";
 import { createEmailSender } from "./email-sender";
 import { createSenderForInbox } from "./email-sender/for-inbox";
+import { GmailSender } from "./email-sender/providers/gmail";
+import type { EmailSender } from "./email-sender/types";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
@@ -131,6 +133,49 @@ async function fetchInternalDomains(db: Db): Promise<string[]> {
         .filter(Boolean),
     ),
   ) as string[];
+}
+
+/**
+ * The parent's Gmail thread id, but only when it means something to the
+ * mailbox this reply is going out from.
+ *
+ * Gmail thread ids are per-MAILBOX. With two connected mailboxes, replying
+ * from inbox A to a message synced into inbox B would hand B's thread id to
+ * A's `users/me/messages/send`; Gmail answers 400, which classifies as
+ * terminal, and a terminal Gmail failure is deliberately never queued — so
+ * the reply becomes an unrecoverable dead end that fails identically on every
+ * resend. `fromAddress` is caller-chosen, so this is reachable from the
+ * ordinary API, not a contrived setup.
+ *
+ * Dropping the id costs the threading; refusing to send costs the reply.
+ */
+async function threadIdForSender(
+  db: Db,
+  sender: EmailSender,
+  fromAddress: string,
+  origInbox: string,
+  origGmailThreadId: string | null,
+): Promise<string | null> {
+  if (!origGmailThreadId || !(sender instanceof GmailSender)) return null;
+  // Same inbox, so necessarily the same Gmail account: no lookup needed.
+  if (origInbox === fromAddress) return origGmailThreadId;
+
+  const [parentIdentity] = await db
+    .select({ gmailAccountId: senderIdentities.gmailAccountId })
+    .from(senderIdentities)
+    .where(eq(senderIdentities.email, origInbox))
+    .limit(1);
+  if (
+    parentIdentity?.gmailAccountId &&
+    parentIdentity.gmailAccountId === sender.accountId
+  ) {
+    return origGmailThreadId;
+  }
+
+  console.warn(
+    `[replyToEmail] the parent message's Gmail thread belongs to ${origInbox}, not to the Gmail account behind ${fromAddress}; sending this reply as a new thread rather than letting Gmail reject it.`,
+  );
+  return null;
 }
 
 async function persistSentAttachments(
@@ -385,6 +430,10 @@ export async function replyToEmail(
   // conversation instead of starting a new one; null (e.g. a Cloudflare-sourced
   // parent) means Gmail will assign a fresh thread on send.
   let origGmailThreadId: string | null = null;
+  // The inbox the parent message is filed under — where its Gmail thread id,
+  // if any, came from. Gmail thread ids are per-mailbox, so this is what says
+  // whether that id means anything to the account this reply goes out from.
+  let origInbox: string;
 
   if (receivedRow.length > 0) {
     const orig = receivedRow[0];
@@ -408,6 +457,7 @@ export async function replyToEmail(
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
     origGmailThreadId = orig.gmailThreadId ?? null;
+    origInbox = orig.recipient.trim().toLowerCase();
     // Canonicalize the recipient — older rows may be mixed-case.
     toAddress = person[0].email.toLowerCase();
   } else {
@@ -435,6 +485,7 @@ export async function replyToEmail(
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
     origGmailThreadId = orig.gmailThreadId ?? null;
+    origInbox = orig.fromAddress.trim().toLowerCase();
     toAddress = orig.toAddress.toLowerCase();
   }
 
@@ -521,6 +572,14 @@ export async function replyToEmail(
   let outcome: OutboxOutcome;
   let sendResult: SendOutput;
 
+  const gmailThreadId = await threadIdForSender(
+    db,
+    sender,
+    fromAddress,
+    origInbox,
+    origGmailThreadId,
+  );
+
   if (usingGmail) {
     // A reply that actually goes out through Gmail must never fall back to
     // the outbox's retry queue: a transient failure there would silently
@@ -543,7 +602,7 @@ export async function replyToEmail(
       ...(bodyText !== undefined ? { text: bodyText } : {}),
       headers: replyHeaders,
       ...(replyAttachments ? { attachments: replyAttachments } : {}),
-      ...(origGmailThreadId ? { threadId: origGmailThreadId } : {}),
+      ...(gmailThreadId ? { threadId: gmailThreadId } : {}),
       // Replies are 1:1 conversational responses to an inbound — the
       // recipient initiated by emailing first — so this bypasses the
       // suppression list and skips the unsubscribe footer / List-Unsubscribe
