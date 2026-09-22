@@ -148,6 +148,11 @@ function parseSpamScore(headers: Record<string, string>): number | null {
  * Split out from `parseEmail` so a non-Cloudflare source can reuse it:
  * the Gmail API's `messages.get(format=raw)` returns the same bytes the
  * Email Worker receives.
+ *
+ * A Gmail caller often cannot know the correct inbox before parsing — the
+ * real address may live in a `Delivered-To` or `List-ID` header inside
+ * `raw` rather than the envelope — so such a caller may pass a provisional
+ * `envelope.to` and reassign `parsed.to` afterwards.
  */
 export async function parseRaw(
   raw: ArrayBuffer,
