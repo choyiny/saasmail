@@ -22,6 +22,8 @@ const InboxRowSchema = z.object({
   signatureHtml: z.string().nullable(),
   forwardTo: z.string().nullable(),
   assignedUserIds: z.array(z.string()),
+  source: z.enum(["cloudflare", "gmail"]),
+  gmailAccountId: z.string().nullable(),
 });
 
 const listInboxesRoute = createRoute({
@@ -44,6 +46,8 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     signatureHtml: string | null;
     forwardTo: string | null;
     assignedUserIds: string | null;
+    source: "cloudflare" | "gmail" | null;
+    gmailAccountId: string | null;
   };
   const rows = await db.all<Row>(sql`
     WITH universe AS (
@@ -57,6 +61,8 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       s.display_mode AS displayMode,
       s.signature_html AS signatureHtml,
       s.forward_to AS forwardTo,
+      s.source AS source,
+      s.gmail_account_id AS gmailAccountId,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -78,6 +84,8 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       signatureHtml: r.signatureHtml,
       forwardTo: r.forwardTo,
       assignedUserIds: r.assignedUserIds ? JSON.parse(r.assignedUserIds) : [],
+      source: r.source ?? "cloudflare",
+      gmailAccountId: r.gmailAccountId,
     })),
     200,
   );
@@ -180,13 +188,27 @@ const PatchInboxBodySchema = z
     forwardTo: z
       .union([z.string().email(), z.literal(""), z.null()])
       .optional(),
+    // Where this inbox's mail comes from. Absent = unchanged.
+    source: z.enum(["cloudflare", "gmail"]).optional(),
+    // FK to gmail_accounts.id. Absent = unchanged; null clears it.
+    gmailAccountId: z.string().nullable().optional(),
+    // Google Group routing was attempted in this slice and withdrawn after
+    // adversarial review found List-ID and Delivered-To are both
+    // sender-forgeable — an attacker could pick which customer's timeline
+    // their message lands on. The column still exists for a later slice;
+    // nothing may configure it yet, so a non-null value here is rejected
+    // outright (see the handler) rather than silently accepted or ignored.
+    gmailGroupAddress: z.string().nullable().optional(),
   })
   .refine(
     (b) =>
       b.displayName !== undefined ||
       b.displayMode !== undefined ||
       b.signatureHtml !== undefined ||
-      b.forwardTo !== undefined,
+      b.forwardTo !== undefined ||
+      b.source !== undefined ||
+      b.gmailAccountId !== undefined ||
+      b.gmailGroupAddress !== undefined,
     "must update at least one field",
   );
 
@@ -195,7 +217,7 @@ const patchInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Update display name, display mode, signature HTML, and/or forward destination for an inbox. Row is deleted only when all four fields are at defaults (null + 'chat' + null + null).",
+    "Update display name, display mode, signature HTML, forward destination, and/or Gmail source mapping for an inbox. Row is deleted only when all four display/forward fields are at defaults (null + 'chat' + null + null). Google Group routing (gmailGroupAddress) is not accepted in this release.",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -214,11 +236,14 @@ const patchInboxRoute = createRoute({
         displayMode: z.enum(["thread", "chat"]),
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
+        source: z.enum(["cloudflare", "gmail"]),
+        gmailAccountId: z.string().nullable(),
       }),
       "Updated",
     ),
     400: {
-      description: "Invalid forward destination",
+      description:
+        "Invalid forward destination, invalid source, or a group address was supplied",
       content: {
         "application/json": {
           schema: z.object({ error: z.string() }),
@@ -233,6 +258,21 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   const { email } = c.req.valid("param");
   const body = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
+
+  // Google Group routing was attempted in this slice and withdrawn after
+  // adversarial review found List-ID and Delivered-To are both
+  // sender-forgeable — an attacker could choose which customer's timeline
+  // their message landed on. Reject outright, before touching the row at
+  // all: a rejected request must not half-apply the rest of the body.
+  if (body.gmailGroupAddress != null) {
+    return c.json(
+      {
+        error:
+          "Google Group routing is not supported yet. Only personal mailboxes can be mapped to an inbox in this release.",
+      },
+      400,
+    );
+  }
 
   // Load current row (if any) so we can apply a partial update without losing
   // the field the caller didn't touch.
@@ -269,6 +309,14 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         ? null
         : body.forwardTo.trim().toLowerCase()
       : (currentRow?.forwardTo ?? null);
+  const nextSource =
+    body.source !== undefined
+      ? body.source
+      : (currentRow?.source ?? "cloudflare");
+  const nextGmailAccountId =
+    body.gmailAccountId !== undefined
+      ? body.gmailAccountId
+      : (currentRow?.gmailAccountId ?? null);
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
@@ -286,7 +334,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextDisplayName === null &&
     nextDisplayMode === "chat" &&
     nextSignatureHtml === null &&
-    nextForwardTo === null
+    nextForwardTo === null &&
+    nextSource === "cloudflare" &&
+    nextGmailAccountId === null
   ) {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
     return c.json(
@@ -296,6 +346,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         displayMode: "chat",
         signatureHtml: null,
         forwardTo: null,
+        source: "cloudflare",
+        gmailAccountId: null,
       },
       200,
     );
@@ -309,6 +361,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       displayMode: nextDisplayMode,
       signatureHtml: nextSignatureHtml,
       forwardTo: nextForwardTo,
+      source: nextSource,
+      gmailAccountId: nextGmailAccountId,
       createdAt: now,
       updatedAt: now,
     })
@@ -319,6 +373,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         displayMode: nextDisplayMode,
         signatureHtml: nextSignatureHtml,
         forwardTo: nextForwardTo,
+        source: nextSource,
+        gmailAccountId: nextGmailAccountId,
         updatedAt: now,
       },
     });
@@ -330,6 +386,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       displayMode: nextDisplayMode,
       signatureHtml: nextSignatureHtml,
       forwardTo: nextForwardTo,
+      source: nextSource,
+      gmailAccountId: nextGmailAccountId,
     },
     200,
   );
