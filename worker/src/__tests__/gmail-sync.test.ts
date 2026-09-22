@@ -68,6 +68,10 @@ function stubGmail(opts: {
   revokedRefreshToken?: string;
   /** Return history_gone only for this cursor, leaving other accounts healthy. */
   historyGoneForStartId?: string;
+  /** Records per history page; omitted means one page holds everything. */
+  pageSize?: number;
+  /** Message ids whose fetch returns a 500, so processing them throws. */
+  failMessageIds?: string[];
 }) {
   vi.stubGlobal(
     "fetch",
@@ -107,7 +111,9 @@ function stubGmail(opts: {
         if (opts.historyStatus && opts.historyStatus !== 200) {
           return json({ error: { message: "gone" } }, opts.historyStatus);
         }
-        const startId = new URL(url).searchParams.get("startHistoryId");
+        const query = new URL(url).searchParams;
+        const startId = query.get("startHistoryId");
+        const pageToken = query.get("pageToken");
         if (
           opts.historyGoneForStartId &&
           startId === opts.historyGoneForStartId
@@ -124,19 +130,39 @@ function stubGmail(opts: {
         // here is what lets a test replay a truncated run and prove the
         // resume point skipped nothing.
         const from = Number(startId);
-        const records = Number.isFinite(from)
+        const remaining = Number.isFinite(from)
           ? allRecords.filter((r) => Number(r.id) > from)
           : allRecords;
+
+        // The mailbox head is by definition at or above every record it
+        // contains; a page id below its own records is something Gmail could
+        // never return, and fixtures that do it hide ordering bugs.
+        const pageHistoryId = String(
+          Math.max(
+            9100,
+            ...allRecords.map((r) => Number(r.id)).filter(Number.isFinite),
+          ),
+        );
+
+        const size = opts.pageSize ?? Math.max(remaining.length, 1);
+        const offset = pageToken ? Number(pageToken.replace("p", "")) : 0;
+        const slice = remaining.slice(offset, offset + size);
+        const more = offset + size < remaining.length;
+
         return json({
-          history: records.map((r) => ({
+          history: slice.map((r) => ({
             id: r.id,
             messagesAdded: r.messageIds.map((id) => ({ message: { id } })),
           })),
-          historyId: "9100",
+          ...(more ? { nextPageToken: `p${offset + size}` } : {}),
+          historyId: pageHistoryId,
         });
       }
       if (url.includes("/users/me/messages/")) {
         const id = decodeURIComponent(url.split("/messages/")[1].split("?")[0]);
+        if (opts.failMessageIds?.includes(id)) {
+          return json({ error: { message: "boom" } }, 500);
+        }
         const msg = opts.messages?.[id];
         if (!msg) return json({ error: { message: "nope" } }, 404);
         return json({
@@ -527,7 +553,49 @@ describe("syncAccount — the message cap and the resume cursor", () => {
     expect(rows).toHaveLength(total);
     // Every single message arrived exactly once — no gap at the resume point.
     expect(rows.map((r) => r.gmailMessageId).sort()).toEqual([...ids].sort());
-    expect((await account()).historyId).toBe("9100");
+    // Second run consumed the remainder, so the cursor reaches the mailbox
+    // head — which sits at the highest record id, 10001 + 59.
+    expect((await account()).historyId).toBe("10060");
+  });
+
+  it("follows nextPageToken and processes every page's records", async () => {
+    await seedAccount();
+    await seedInbox("support@acme.dev", null);
+
+    // Six messages spread over four records, delivered two records per page,
+    // so the run must follow nextPageToken twice and group records within
+    // each page independently.
+    const records = [
+      { id: "10001", messageIds: ["p1", "p2"] },
+      { id: "10002", messageIds: ["p3"] },
+      { id: "10003", messageIds: ["p4", "p5"] },
+      { id: "10004", messageIds: ["p6"] },
+    ];
+    const ids = records.flatMap((r) => r.messageIds);
+    stubGmail({ records, pageSize: 2, messages: bulkMessages(ids) });
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(res.ingested).toBe(6);
+    const rows = await getDb().select().from(emails);
+    // Nothing skipped at a page boundary, nothing ingested twice.
+    expect(rows.map((r) => r.gmailMessageId).sort()).toEqual([...ids].sort());
+    expect((await account()).historyId).toBe("10004");
+
+    // Prove the pagination path actually ran rather than one page happening
+    // to carry everything.
+    const historyCalls = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).includes("/users/me/history"),
+    );
+    expect(historyCalls.length).toBe(2);
+    expect(String(historyCalls[1][0])).toContain("pageToken=p2");
   });
 
   it("never splits a record, even when that means overshooting the cap", async () => {
@@ -591,7 +659,104 @@ describe("syncAccount — the message cap and the resume cursor", () => {
     expect(res.ingested).toBe(ids.length);
     expect(res.ingested).toBeGreaterThan(MAX_MESSAGES_PER_RUN);
     // The whole page was consumed, so the cursor reaches the mailbox head.
-    expect((await account()).historyId).toBe("9100");
+    expect((await account()).historyId).toBe("30001");
+  });
+});
+
+describe("syncAccount — a failing message", () => {
+  function bulkMessages(ids: string[]) {
+    const messages: Record<string, { raw: string }> = {};
+    for (const id of ids) {
+      messages[id] = {
+        raw: rawEmail({
+          from: "jane@example.com",
+          deliveredTo: "support@acme.dev",
+          messageId: `<${id}@example.com>`,
+        }),
+      };
+    }
+    return messages;
+  }
+
+  it("keeps completed work, stops at the failure, and marks the account", async () => {
+    await seedAccount();
+    await seedInbox("support@acme.dev", null);
+    stubGmail({
+      records: [
+        { id: "10001", messageIds: ["ok1"] },
+        { id: "10002", messageIds: ["bad"] },
+        { id: "10003", messageIds: ["later"] },
+      ],
+      messages: bulkMessages(["ok1", "bad", "later"]),
+      failMessageIds: ["bad"],
+    });
+
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(res.ingested).toBe(1);
+    expect(res.failed).toBe(1);
+
+    // Work finished before the failure is kept, not re-fetched next tick.
+    const rows = await getDb().select().from(emails);
+    expect(rows.map((r) => r.gmailMessageId)).toEqual(["ok1"]);
+
+    const row = await account();
+    // The cursor stops at the last record completed BEFORE the failure: far
+    // enough not to redo `ok1`, not so far as to skip `bad` or `later`.
+    expect(row.historyId).toBe("10001");
+    // An operator can act on this: the id names the message to look at.
+    expect(row.lastError).toBe("message_failed:bad");
+  });
+
+  it("does not skip ahead past the failed record", async () => {
+    await seedAccount();
+    await seedInbox("support@acme.dev", null);
+    const opts = {
+      records: [
+        { id: "10001", messageIds: ["ok1"] },
+        { id: "10002", messageIds: ["bad"] },
+        { id: "10003", messageIds: ["later"] },
+      ],
+      messages: bulkMessages(["ok1", "bad", "later"]),
+      failMessageIds: ["bad"],
+    };
+    stubGmail(opts);
+    await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    // The poison message clears; the retry must pick up `bad` AND `later`,
+    // proving the stall never became a silent gap.
+    stubGmail({ ...opts, failMessageIds: [] });
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(res.ingested).toBe(2);
+    const rows = await getDb().select().from(emails);
+    expect(rows.map((r) => r.gmailMessageId).sort()).toEqual([
+      "bad",
+      "later",
+      "ok1",
+    ]);
+    const row = await account();
+    expect(row.historyId).toBe("10003");
+    // Recovered, so the marker is gone.
+    expect(row.lastError).toBeNull();
   });
 });
 
@@ -610,7 +775,30 @@ describe("syncAccount — failure handling", () => {
     );
 
     expect(res.reseeded).toBe(true);
-    expect((await account()).historyId).toBe("77777");
+    const row = await account();
+    expect(row.historyId).toBe("77777");
+    // Re-seeding keeps sync alive but skips whatever arrived in the gap. That
+    // is mail the operator will never see, so the account is marked rather
+    // than quietly carrying on as if nothing happened.
+    expect(row.lastError).toBe("history_gap");
+  });
+
+  it("leaves no gap marker on a first seed, which loses nothing", async () => {
+    await seedAccount(null);
+    await seedInbox("support@acme.dev", null);
+    stubGmail({ profileHistoryId: "55555" });
+
+    await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    const row = await account();
+    expect(row.historyId).toBe("55555");
+    expect(row.lastError).toBeNull();
   });
 
   it("seeds from the profile when the account has no cursor yet", async () => {
