@@ -160,6 +160,8 @@ export async function processSequenceEmail(
           ? (JSON.parse(outboxRow.headers)["Message-ID"] ?? null)
           : null,
         status: "retrying" as const,
+        sequenceId: enrollment.sequenceId,
+        sequenceEnrollmentId: enrollment.id,
         sentAt: repairNow,
         createdAt: repairNow,
       })
@@ -288,6 +290,8 @@ export async function processSequenceEmail(
       messageId,
       resendId: result.id,
       status: outcome,
+      sequenceId: enrollment.sequenceId,
+      sequenceEnrollmentId: enrollment.id,
       sentAt: now,
       createdAt: now,
     });

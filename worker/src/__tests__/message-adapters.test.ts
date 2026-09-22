@@ -42,7 +42,11 @@ describe("message adapters", () => {
       bodyHtml: "<p>Hello</p>",
       occurredAt: 123,
       isRead: false,
-      source: { campaignId: null },
+      source: {
+        campaignId: null,
+        sequenceId: null,
+        sequenceEnrollmentId: null,
+      },
       delivery: null,
     });
   });
@@ -82,6 +86,8 @@ describe("message adapters", () => {
       cc: null,
       conversationId: null,
       campaignId: "campaign-1",
+      sequenceId: "sequence-1",
+      sequenceEnrollmentId: "enrollment-1",
       sentAt: 456,
       personName: "Subscriber",
     };
@@ -102,7 +108,11 @@ describe("message adapters", () => {
       bodyHtml: null,
       occurredAt: 456,
       isRead: null,
-      source: { campaignId: "campaign-1" },
+      source: {
+        campaignId: "campaign-1",
+        sequenceId: "sequence-1",
+        sequenceEnrollmentId: "enrollment-1",
+      },
       delivery: { status: "sent" },
     });
   });

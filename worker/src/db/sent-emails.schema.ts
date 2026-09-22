@@ -29,6 +29,8 @@ export const sentEmails = sqliteTable(
      * appear in the recipient's timeline without any new query logic.
      */
     campaignId: text("campaign_id"),
+    sequenceId: text("sequence_id"),
+    sequenceEnrollmentId: text("sequence_enrollment_id"),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
@@ -36,5 +38,6 @@ export const sentEmails = sqliteTable(
     index("sent_emails_person_sent_idx").on(table.personId, table.sentAt),
     index("sent_emails_conversation_idx").on(table.conversationId),
     index("sent_emails_from_sent_idx").on(table.fromAddress, table.sentAt),
+    index("sent_emails_sequence_sent_idx").on(table.sequenceId, table.sentAt),
   ],
 );

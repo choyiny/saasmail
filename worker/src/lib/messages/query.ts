@@ -59,6 +59,8 @@ type RawMessageRow = {
   occurred_at: number;
   is_read: number | null;
   campaign_id: string | null;
+  sequence_id: string | null;
+  sequence_enrollment_id: string | null;
   delivery_status: string | null;
 };
 
@@ -231,6 +233,8 @@ function receivedArm(
       e.received_at AS occurred_at,
       e.is_read AS is_read,
       NULL AS campaign_id,
+      NULL AS sequence_id,
+      NULL AS sequence_enrollment_id,
       NULL AS delivery_status
     FROM emails e
     ${search.join}
@@ -282,6 +286,8 @@ function sentArm(
       se.sent_at AS occurred_at,
       NULL AS is_read,
       se.campaign_id AS campaign_id,
+      se.sequence_id AS sequence_id,
+      se.sequence_enrollment_id AS sequence_enrollment_id,
       se.status AS delivery_status
     FROM sent_emails se
     LEFT JOIN people p ON p.id = se.person_id
@@ -368,6 +374,8 @@ function toUnified(row: RawMessageRow): UnifiedMessage {
     cc: row.cc,
     conversationId: row.conversation_id,
     campaignId: row.campaign_id,
+    sequenceId: row.sequence_id,
+    sequenceEnrollmentId: row.sequence_enrollment_id,
     sentAt: row.occurred_at,
     personName: row.to_name,
   };

@@ -30,6 +30,8 @@ export type SentSelect = {
   cc: string | null;
   conversationId: string | null;
   campaignId: string | null;
+  sequenceId: string | null;
+  sequenceEnrollmentId: string | null;
   sentAt: number;
   personName: string | null;
 };
@@ -74,7 +76,11 @@ export function adaptReceived(row: ReceivedSelect): UnifiedMessage {
     bodyHtml: row.bodyHtml,
     occurredAt: row.receivedAt,
     isRead: row.isRead === 1,
-    source: { campaignId: null },
+    source: {
+      campaignId: null,
+      sequenceId: null,
+      sequenceEnrollmentId: null,
+    },
     delivery: null,
   };
 }
@@ -99,7 +105,11 @@ export function adaptSent(row: SentSelect): UnifiedMessage {
     bodyHtml: row.bodyHtml,
     occurredAt: row.sentAt,
     isRead: null,
-    source: { campaignId: row.campaignId },
+    source: {
+      campaignId: row.campaignId,
+      sequenceId: row.sequenceId,
+      sequenceEnrollmentId: row.sequenceEnrollmentId,
+    },
     delivery: { status: row.status },
   };
 }

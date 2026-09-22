@@ -422,6 +422,8 @@ describe("queryMessages", () => {
         subject: "Sequence",
         bodyText: "Sequence body",
         status: "sent",
+        sequenceId: "sequence-1",
+        sequenceEnrollmentId: "enrollment-1",
         sentAt: 200,
         createdAt: 200,
       },
@@ -470,6 +472,11 @@ describe("queryMessages", () => {
       "campaign-visible",
       "sequence-visible",
     ]);
+    const sequenceMessage = page.messages.find(
+      (message) => message.ref.id === "sequence-visible",
+    );
+    expect(sequenceMessage?.source.sequenceId).toBe("sequence-1");
+    expect(sequenceMessage?.source.sequenceEnrollmentId).toBe("enrollment-1");
   });
 
   it("supports offsets beyond the search wrapper's 500-row ceiling", async () => {

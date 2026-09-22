@@ -32,6 +32,8 @@ export interface UnifiedMessage {
   isRead: boolean | null;
   source: {
     campaignId: string | null;
+    sequenceId: string | null;
+    sequenceEnrollmentId: string | null;
   };
   delivery: {
     status: string;
