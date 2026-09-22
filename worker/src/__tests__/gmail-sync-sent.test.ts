@@ -35,19 +35,22 @@ function fakeCtx(): ExecutionContext {
 /** A message the mailbox SENT: we are the From, the customer is the To. */
 function rawSent(opts: {
   from?: string;
-  to: string;
+  /** Omitted entirely when absent, so a Bcc-only send can be built. */
+  to?: string;
   messageId: string;
   subject?: string;
   body?: string;
   cc?: string;
+  bcc?: string;
   inReplyTo?: string;
   date?: string;
 }) {
   return [
     `From: Support <${opts.from ?? "collector@acme.dev"}>`,
-    `To: ${opts.to}`,
+    ...(opts.to ? [`To: ${opts.to}`] : []),
     ...(opts.date ? [`Date: ${opts.date}`] : []),
     ...(opts.cc ? [`Cc: ${opts.cc}`] : []),
+    ...(opts.bcc ? [`Bcc: ${opts.bcc}`] : []),
     ...(opts.inReplyTo ? [`In-Reply-To: ${opts.inReplyTo}`] : []),
     `Message-ID: ${opts.messageId}`,
     `Subject: ${opts.subject ?? "Re: your question"}`,
@@ -62,10 +65,12 @@ function rawInbound(opts: {
   from: string;
   deliveredTo: string;
   messageId: string;
+  cc?: string;
 }) {
   return [
     `From: ${opts.from}`,
     `To: ${opts.deliveredTo}`,
+    ...(opts.cc ? [`Cc: ${opts.cc}`] : []),
     `Delivered-To: ${opts.deliveredTo}`,
     `Message-ID: ${opts.messageId}`,
     `Subject: Synced subject`,
@@ -223,6 +228,7 @@ describe("syncAccount — mirroring the Sent folder", () => {
             subject: "Re: your question",
             body: "answered from the train",
             inReplyTo: "<orig@example.com>",
+            date: "Tue, 15 Apr 2025 09:30:00 +0000",
           }),
         },
       },
@@ -243,7 +249,8 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(rows[0].gmailThreadId).toBe("t-m1");
     expect(rows[0].messageId).toBe("<s1@acme.dev>");
     expect(rows[0].inReplyTo).toBe("<orig@example.com>");
-    expect(rows[0].sentAt).toBeGreaterThan(0);
+    // The exact instant from the Date: header, not "some positive number".
+    expect(rows[0].sentAt).toBe(1744709400); // 2025-04-15T09:30:00Z
 
     // A mirrored Sent message is not inbound mail.
     expect(await getDb().select().from(emails)).toHaveLength(0);
@@ -387,11 +394,13 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(rows[0].createdAt).toBeGreaterThanOrEqual(before);
   });
 
-  it("falls back to the sync time when the Date header is missing or junk", async () => {
+  it("falls back to the sync time ONLY when the Date header is missing or junk", async () => {
     await seedAccount();
     await seedInbox();
     stubGmail({
-      historyIds: ["m1", "m2"],
+      // The third message is the control: without it this test would pass
+      // just as happily if the Date header were never parsed at all.
+      historyIds: ["m1", "m2", "m3"],
       messages: {
         m1: {
           labelIds: ["SENT"],
@@ -408,19 +417,32 @@ describe("syncAccount — mirroring the Sent folder", () => {
             date: "not a date at all",
           }),
         },
+        m3: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "carol@example.com",
+            messageId: "<s7@acme.dev>",
+            date: "Wed, 01 Jan 2020 00:00:00 +0000",
+          }),
+        },
       },
     });
 
     const before = Math.floor(Date.now() / 1000);
     const res = await sync();
-    expect(res.ingested).toBe(2);
+    expect(res.ingested).toBe(3);
     expect(res.failed).toBe(0);
 
-    const rows = await getDb().select().from(sentEmails);
-    expect(rows).toHaveLength(2);
-    for (const row of rows) {
-      expect(row.sentAt).toBeGreaterThanOrEqual(before);
-    }
+    const byTo = new Map(
+      (await getDb().select().from(sentEmails)).map((r) => [r.toAddress, r]),
+    );
+    expect(byTo.size).toBe(3);
+    // No header, and unparseable: the sync time.
+    expect(byTo.get("jane@example.com")!.sentAt).toBeGreaterThanOrEqual(before);
+    expect(byTo.get("bob@example.com")!.sentAt).toBeGreaterThanOrEqual(before);
+    // Parseable: that instant exactly, and nowhere near the sync time.
+    expect(byTo.get("carol@example.com")!.sentAt).toBe(1577836800);
+    expect(byTo.get("carol@example.com")!.sentAt).toBeLessThan(before);
   });
 
   it("carries Cc recipients onto the mirrored row", async () => {
@@ -446,6 +468,234 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(JSON.parse(rows[0].cc ?? "[]")).toEqual([
       { email: "bob@example.com", name: "Bob" },
     ]);
+  });
+});
+
+describe("syncAccount — picking the counterparty off the header", () => {
+  /**
+   * Each case is the raw `To:` value and the address that must end up on the
+   * row. The first is the regression: matching `<…>` across the WHOLE header
+   * picks Bob — the last-written address — and files the reply on the wrong
+   * customer's timeline.
+   */
+  const cases: Array<[label: string, to: string, expected: string | null]> = [
+    [
+      "a bare address followed by a bracketed one",
+      'jane@example.com, "Bob" <bob@x.com>',
+      "jane@example.com",
+    ],
+    ["a bare single address", "jane@example.com", "jane@example.com"],
+    ["a single bracketed address", "<jane@example.com>", "jane@example.com"],
+    [
+      "a display name with a comma inside quotes",
+      '"Smith, Jane" <jane@x.com>',
+      "jane@x.com",
+    ],
+    [
+      "leading whitespace before the display name",
+      "   Jane Doe <jane@example.com>",
+      "jane@example.com",
+    ],
+    [
+      "two bracketed addresses",
+      "Jane <jane@example.com>, Bob <bob@x.com>",
+      "jane@example.com",
+    ],
+  ];
+
+  for (const [label, to, expected] of cases) {
+    it(`takes the first recipient from ${label}`, async () => {
+      await seedAccount();
+      await seedInbox();
+      stubGmail({
+        historyIds: ["m1"],
+        messages: {
+          m1: {
+            labelIds: ["SENT"],
+            raw: rawSent({ to, messageId: "<c1@acme.dev>" }),
+          },
+        },
+      });
+
+      await sync();
+      const rows = await getDb().select().from(sentEmails);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].toAddress).toBe(expected);
+    });
+  }
+
+  it("falls back to Cc, then to Bcc, when there is no To", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["m1", "m2"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            cc: "Bob <bob@example.com>",
+            messageId: "<c2@acme.dev>",
+          }),
+        },
+        m2: {
+          labelIds: ["SENT"],
+          // A blind-copied send: the Sent folder keeps the Bcc it went out
+          // with, and that is the only counterparty there is.
+          raw: rawSent({
+            bcc: "Carol <carol@example.com>",
+            messageId: "<c3@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    const res = await sync();
+    expect(res.ingested).toBe(2);
+    const addresses = (await getDb().select().from(sentEmails))
+      .map((r) => r.toAddress)
+      .sort();
+    expect(addresses).toEqual(["bob@example.com", "carol@example.com"]);
+  });
+
+  it("skips a message with no address-shaped recipient anywhere", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({ to: "undisclosed-recipients:;", messageId: "<c4@a>" }),
+        },
+      },
+    });
+
+    const res = await sync();
+    expect(res.ingested).toBe(0);
+    expect(res.skipped).toBe(1);
+    expect(res.failed).toBe(0);
+    expect(await getDb().select().from(sentEmails)).toHaveLength(0);
+  });
+});
+
+describe("syncAccount — conversation grouping of a mirrored reply", () => {
+  it("stamps the same conversation id as the inbound mail it answers", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["in1", "out1"],
+      messages: {
+        in1: {
+          raw: rawInbound({
+            from: "jane@example.com",
+            cc: "Bob <bob@example.com>",
+            deliveredTo: "support@acme.dev",
+            messageId: "<g1@example.com>",
+          }),
+        },
+        out1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "jane@example.com",
+            cc: "Bob <bob@example.com>",
+            messageId: "<s1@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    await sync();
+
+    const [inbound] = await getDb().select().from(emails);
+    const [mirrored] = await getDb().select().from(sentEmails);
+    // Non-null first: a null on both sides would make the equality vacuous.
+    expect(inbound.conversationId).not.toBeNull();
+    expect(mirrored.conversationId).toBe(inbound.conversationId);
+  });
+
+  it("leaves it null for a 1-on-1 reply", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "jane@example.com",
+            messageId: "<s1@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    await sync();
+    const [row] = await getDb().select().from(sentEmails);
+    expect(row.conversationId).toBeNull();
+  });
+});
+
+describe("syncAccount — the internal-domain filter for grouping", () => {
+  /** A Cloudflare-routed identity on a DIFFERENT domain to the Gmail one. */
+  async function seedOtherDomainIdentity(email: string) {
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email,
+      displayName: email,
+      source: "cloudflare",
+      gmailAccountId: null,
+      gmailGroupAddress: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  async function mirrorWithCc(cc: string) {
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "jane@example.com",
+            cc,
+            messageId: "<s1@acme.dev>",
+          }),
+        },
+      },
+    });
+    await sync();
+    const [row] = await getDb().select().from(sentEmails);
+    return row;
+  }
+
+  it("counts an outside Cc as a second participant", async () => {
+    await seedAccount();
+    await seedInbox();
+    // Control for the two cases below: with a genuinely external Cc there
+    // ARE two externals, so a conversation id must exist.
+    const row = await mirrorWithCc("bob@example.com");
+    expect(row.conversationId).not.toBeNull();
+  });
+
+  it("does not count a teammate on our own domain", async () => {
+    await seedAccount();
+    await seedInbox(); // support@acme.dev
+    // acme.dev is ours, so teammate@acme.dev is internal: one external is
+    // left, and a 1-on-1 thread has no conversation id. Were the internal
+    // domains not loaded, this would come back non-null.
+    const row = await mirrorWithCc("Teammate <teammate@acme.dev>");
+    expect(row.conversationId).toBeNull();
+  });
+
+  it("counts every sender identity as ours, not just this account's", async () => {
+    await seedAccount();
+    await seedInbox(); // support@acme.dev, mapped to this Gmail account
+    await seedOtherDomainIdentity("hello@other.dev"); // a Cloudflare inbox
+    // other.dev is ours too. A loader that only looked at THIS account's
+    // mappings would not know that, and would return a conversation id.
+    const row = await mirrorWithCc("Colleague <colleague@other.dev>");
+    expect(row.conversationId).toBeNull();
   });
 });
 
