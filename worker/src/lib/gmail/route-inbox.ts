@@ -19,30 +19,42 @@ const ROUTING_HEADERS = [
 ];
 
 /**
- * A Google Group's List-ID is usually the address with dots for the @ and
- * wrapped in angle brackets — `<support.acme.dev>`. Normalising both sides to
- * a dotted, punctuation-free form lets one comparison cover every header.
+ * Normalise a token: lowercase, map `@<>` to `.`, then strip leading/trailing dots.
+ * This handles Google Group List-IDs like `<support.acme.dev>` which become
+ * `..support.acme.dev.` after punctuation mapping, then `support.acme.dev` after stripping.
  */
-function normalize(value: string): string {
-  return value.toLowerCase().replace(/[@<>]/g, ".");
+function normalizeToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[@<>]/g, ".")
+    .replace(/^\.+|\.+$/g, "");
 }
 
 export function resolveInbox(
   parsed: ParsedEmail,
   mappings: InboxMapping[],
 ): string | null {
-  const haystack = ROUTING_HEADERS.map((h) => parsed.headers?.[h] ?? "")
+  // Collect all candidate tokens from routing headers, split on whitespace/comma/semicolon/quote
+  const headerText = ROUTING_HEADERS.map((h) => parsed.headers?.[h] ?? "")
     .filter(Boolean)
-    .map(normalize)
     .join(" ");
 
+  const tokens = headerText
+    .split(/[\s,;"]+/)
+    .filter(Boolean)
+    .map(normalizeToken)
+    .filter(Boolean); // Remove empty strings after stripping
+
+  // Check for group matches (highest priority)
   for (const mapping of mappings) {
     if (!mapping.gmailGroupAddress) continue;
-    if (haystack.includes(normalize(mapping.gmailGroupAddress.trim()))) {
+    const normalizedAddress = normalizeToken(mapping.gmailGroupAddress.trim());
+    if (tokens.includes(normalizedAddress)) {
       return mapping.email.trim().toLowerCase();
     }
   }
 
+  // Fall back to catch-all
   const catchAll = mappings.find((m) => !m.gmailGroupAddress);
   return catchAll ? catchAll.email.trim().toLowerCase() : null;
 }
