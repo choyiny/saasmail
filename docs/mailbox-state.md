@@ -70,6 +70,8 @@ Query parameters:
 - `mailboxId` for a custom mailbox
 - `starred=true`
 - `unseen=true`
+- `includeTrashed=true|false`
+- `includeSpam=true|false`
 - `personId`
 - `q`
 - `cursor`
@@ -126,3 +128,36 @@ WebMCP exposes the same tool names for the signed-in browser session. Its
 - Every hard-delete of a message must call `deleteMessageState()` before the
   message row is removed.
 - State lookups that can exceed D1's bound-parameter limit are batched.
+
+## Conventional mailbox UI
+
+The web app exposes a conventional three-pane mailbox at `/mail` alongside the
+customer-centric inbox at `/`. The mailbox UI reads the same unified message
+rows and state described above; it does not maintain a second copy of mail.
+
+Routes are URL-addressable:
+
+- `/mail/:inbox/:folder` for Inbox, Starred, Snoozed, Sent, Archive, Junk,
+  and Trash.
+- `/mail/:inbox/f/:mailboxId` for custom folders.
+- `?m=received:<id>|sent:<id>` selects a message.
+- `?q=...` searches the current folder.
+
+Opening a received message marks personal `seen` state through
+`POST /api/messages/user-state`. Star/archive/spam/trash, snooze, and custom
+folder actions use the state APIs above. HTML bodies are rendered only after
+the same `sanitizeEmailHtml()` sanitization used by the customer timeline.
+
+The Starred surface is a neutral `starred=true` read with
+`includeTrashed=false&includeSpam=false`; filtering happens in SQL before
+cursor pagination, not in the browser. Sent hides campaign sends by default and
+offers an explicit toggle to include them.
+
+Live `email_received` events reload the first page when the user is already at
+the top of the current inbox. When scrolled down, the UI shows a **New messages**
+control instead of replacing the visible page. In-page/WebMCP state mutations
+dispatch the mailbox refresh event and reload authoritative state.
+
+Users can choose **Customers** or **Mailbox** as the default home view in
+Settings. The preference is stored as `saasmail.defaultView`; only the exact
+`/` route redirects to `/mail`, so deep links are never rewritten.

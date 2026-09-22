@@ -30,8 +30,13 @@ describe("WebMCP message state tools", () => {
 
   it("set_message_state excludes trash and delegates allowed state", async () => {
     const setMessageState = vi.fn().mockResolvedValue({ success: true });
-    const invalidate = vi.fn();
-    const tools = createActionTools({ setMessageState, invalidate } as any);
+    const refreshInbox = vi.fn();
+    const refreshMail = vi.fn();
+    const tools = createActionTools({
+      setMessageState,
+      refreshInbox,
+      refreshMail,
+    } as any);
     const tool = byName(tools, "set_message_state");
     expect(tool.inputSchema.properties.trashed).toBeUndefined();
     expect(tool.inputSchema.properties.snoozeUntil).toBeDefined();
@@ -55,7 +60,8 @@ describe("WebMCP message state tools", () => {
       spam: false,
       snoozeUntil: 1_800_000_000,
     });
-    expect(invalidate).toHaveBeenCalled();
+    expect(refreshInbox).toHaveBeenCalled();
+    expect(refreshMail).toHaveBeenCalled();
     expect(result.isError).toBeFalsy();
   });
 });

@@ -14,6 +14,11 @@ import {
 } from "@/lib/signatures";
 import { useSession } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
+import {
+  readDefaultView,
+  writeDefaultView,
+  type DefaultView,
+} from "@/lib/default-view";
 
 interface Subscription {
   id: string;
@@ -207,6 +212,9 @@ function DisplayPreferencesSection() {
   const [hideSignatures, setHideSignatures] = useState(() =>
     readHideSignatures(),
   );
+  const [defaultView, setDefaultView] = useState<DefaultView>(() =>
+    readDefaultView(),
+  );
 
   // Stay in sync with other tabs (cross-tab) AND with the in-tab event the
   // signatures lib dispatches.
@@ -233,11 +241,42 @@ function DisplayPreferencesSection() {
     writeHideSignatures(next);
   }
 
+  function changeDefaultView(value: DefaultView) {
+    setDefaultView(value);
+    writeDefaultView(value);
+  }
+
   return (
     <section className="space-y-3">
       <h2 className="text-base font-semibold text-text-primary">
         Display preferences
       </h2>
+
+      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-text-primary">
+              Default home view
+            </h3>
+            <p className="mt-1 text-xs font-light text-text-secondary">
+              Choose what opens when you visit the app root. Deep links are
+              never redirected.
+            </p>
+          </div>
+          <select
+            aria-label="Default home view"
+            data-testid="default-view-select"
+            value={defaultView}
+            onChange={(event) =>
+              changeDefaultView(event.target.value as DefaultView)
+            }
+            className="h-9 shrink-0 rounded-[6px] border border-border bg-bg-subtle px-2 text-xs text-text-primary"
+          >
+            <option value="customers">Customers</option>
+            <option value="mailbox">Mailbox</option>
+          </select>
+        </div>
+      </div>
 
       <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
         <div className="flex items-start justify-between gap-4">

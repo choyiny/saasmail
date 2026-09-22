@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Conventional mailbox UI.** A new `/mail` surface adds inbox/system/custom-folder navigation, cursor-paged message rows, sanitized reading pane, reply and state actions, conversation snooze, custom-folder moves, realtime New messages handling, and a per-browser Customers/Mailbox default-home preference. It uses the same unified messages and message-state APIs as the customer-centric inbox; the existing `/` customer view remains available.
+
 - **Conversation snooze.** Inbox conversations can now be snoozed until a future Unix timestamp (up to 366 days) and appear in a derived Snoozed folder while active. Snooze is scoped by inbox plus group conversation id or one-to-one person key, expires at read time without cron work, wakes on newly received mail, and is exposed through HTTP, MCP, and reversible WebMCP state actions.
 
 - **Message state, folders, and state-aware message APIs.** Received and sent messages now have persistent personal state (seen/starred), shared inbox state (archive/spam/trash), and custom mailbox membership. `GET /api/messages` exposes cursor-paged state-aware reads without changing the visibility-neutral default of `queryMessages()`; system folder definitions are explicit, the Sent folder hides campaign sends by default, and person timelines hide spam/trash while keeping archived mail. New mailbox/state mutation routes are documented in OpenAPI. Remote MCP gains `list_messages` and `set_message_state`; WebMCP gains the same pair but deliberately cannot trash or delete mail.

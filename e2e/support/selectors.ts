@@ -53,6 +53,16 @@ export const TEST_IDS = {
   replySendButton: "reply-send-button",
   replyComposer: "reply-composer",
 
+  // Mailbox
+  mailMessageRow: "mail-message-row",
+  mailReadingPane: "mail-reading-pane",
+  mailReadingStar: "mail-reading-star",
+  mailReadingArchive: "mail-reading-archive",
+  mailReadingTrash: "mail-reading-trash",
+  mailCreateFolderInput: "mail-create-folder-input",
+  mailCreateFolderButton: "mail-create-folder-button",
+  mailMoveFolder: "mail-move-folder",
+
   // API keys
   apiKeyRow: "api-key-row",
   apiKeyRevealed: "api-key-revealed",

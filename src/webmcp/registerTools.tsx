@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth-client";
 import { renderPreview } from "@/lib/template-syntax";
 import {
@@ -25,6 +24,7 @@ import {
   fetchCampaign,
 } from "@/lib/api";
 import { dispatchInboxRefresh } from "@/lib/inbox-events";
+import { dispatchMailRefresh } from "@/lib/mail-events";
 import { dispatchAgentPlan } from "@/lib/agent-plan";
 import { useWebMcpTools } from "./useWebMcpTool";
 import { useWebMcpBridge } from "./bridge";
@@ -47,10 +47,8 @@ export const WEBMCP_TOOL_COUNT = 26;
  */
 export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
   const bridge = useWebMcpBridge();
-  const qc = useQueryClient();
 
   const tools = useMemo(() => {
-    const invalidate = () => qc.invalidateQueries();
     const read = createReadTools({
       fetchGroupedPeople,
       fetchPerson,
@@ -79,12 +77,12 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       saveDraft,
       fetchTemplate,
       renderTemplate: (tpl, vars) => renderPreview(tpl, vars),
-      invalidate,
       refreshInbox: dispatchInboxRefresh,
+      refreshMail: dispatchMailRefresh,
       showPlan: dispatchAgentPlan,
     });
     return [...read, ...actions].map(withActivity);
-  }, [bridge, qc]);
+  }, [bridge]);
 
   useWebMcpTools(tools, enabled);
   return <WebMcpActivityFeed />;

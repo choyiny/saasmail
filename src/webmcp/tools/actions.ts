@@ -32,9 +32,10 @@ export interface ActionDeps {
   }) => Promise<any>;
   fetchTemplate: (slug: string) => Promise<any>;
   renderTemplate: (tpl: string, vars: Record<string, unknown>) => string;
-  invalidate: () => void;
   /** Force the inbox people-list to refetch (see lib/inbox-events). */
   refreshInbox: () => void;
+  /** Force the conventional mail list to refetch (see lib/mail-events). */
+  refreshMail: () => void;
   /** Publish the agent's plan to the Agent Plan tab (see lib/agent-plan). */
   showPlan: (plan: AgentPlan) => void;
 }
@@ -198,7 +199,8 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
       },
       execute: async (args) => {
         await deps.markEmailRead(args.emailId, true);
-        deps.invalidate();
+        deps.refreshInbox();
+        deps.refreshMail();
         return okJson({ emailId: args.emailId, isRead: true });
       },
     },
@@ -212,7 +214,8 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
       },
       execute: async (args) => {
         await deps.markEmailRead(args.emailId, false);
-        deps.invalidate();
+        deps.refreshInbox();
+        deps.refreshMail();
         return okJson({ emailId: args.emailId, isRead: false });
       },
     },
@@ -252,7 +255,8 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
           spam: args.spam,
           snoozeUntil: args.snoozeUntil,
         });
-        deps.invalidate();
+        deps.refreshInbox();
+        deps.refreshMail();
         return okJson(result);
       },
     },

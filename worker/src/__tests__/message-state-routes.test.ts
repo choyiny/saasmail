@@ -10,7 +10,11 @@ import {
   getDb,
 } from "./helpers";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
-import { createMailbox, setMailboxMembership } from "../lib/messages/state";
+import {
+  createMailbox,
+  setMailboxMembership,
+  setMailboxState,
+} from "../lib/messages/state";
 
 const INBOX = "support@saasmail.test";
 
@@ -63,6 +67,62 @@ describe("message state routes", () => {
     expect(body.messages.map((message) => message.ref).sort()).toEqual(
       ["sent:ordinary-send", "sent:campaign-send"].sort(),
     );
+  });
+
+  it("forwards includeTrashed and includeSpam to neutral message reads", async () => {
+    const { apiKey, userId } = await admin();
+    await createTestPerson({
+      id: "visibility-person",
+      email: "visibility@example.com",
+    });
+    for (const id of ["visible", "trashed", "spam"]) {
+      await createTestEmail({
+        id: `visibility-${id}`,
+        personId: "visibility-person",
+        recipient: INBOX,
+        messageId: `visibility-${id}@example.com`,
+      });
+    }
+
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "visibility-trashed" }],
+      { trashed: true },
+    );
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "visibility-spam" }],
+      { spam: true },
+    );
+
+    const neutral = await authFetch("/api/messages", { apiKey });
+    expect(neutral.status).toBe(200);
+    const neutralBody = (await neutral.json()) as {
+      messages: Array<{ ref: string }>;
+    };
+    expect(neutralBody.messages.map((message) => message.ref).sort()).toEqual(
+      [
+        "received:visibility-spam",
+        "received:visibility-trashed",
+        "received:visibility-visible",
+      ].sort(),
+    );
+
+    const filtered = await authFetch(
+      "/api/messages?includeTrashed=false&includeSpam=false",
+      { apiKey },
+    );
+    expect(filtered.status).toBe(200);
+    const filteredBody = (await filtered.json()) as {
+      messages: Array<{ ref: string }>;
+    };
+    expect(filteredBody.messages.map((message) => message.ref)).toEqual([
+      "received:visibility-visible",
+    ]);
   });
 
   it("returns 404 for a custom mailbox outside a member's inboxes", async () => {
