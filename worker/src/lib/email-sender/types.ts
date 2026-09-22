@@ -15,6 +15,11 @@ export interface SendEmailParams {
   text?: string;
   headers?: Record<string, string>;
   attachments?: SendEmailAttachment[];
+  /**
+   * Gmail thread to reply within, instead of starting a new conversation.
+   * Optional and Gmail-specific — other providers ignore it.
+   */
+  threadId?: string;
 }
 
 export interface SendEmailError {
@@ -32,7 +37,14 @@ export interface SendEmailResult {
 }
 
 export interface EmailSender {
-  provider: "resend" | "cloudflare" | "none" | "demo" | "bavimail" | "postmark";
+  provider:
+    | "resend"
+    | "cloudflare"
+    | "none"
+    | "demo"
+    | "bavimail"
+    | "postmark"
+    | "gmail";
   send(params: SendEmailParams): Promise<SendEmailResult>;
   maxAttachmentBytes(): number;
 }
