@@ -64,6 +64,10 @@ export type SyncResult = {
  * Written to `gmail_accounts.lastError` when an expired cursor forced a
  * re-seed. Mail arrived in the gap and was never synced, so the account is
  * working but incomplete, and an operator needs to be told.
+ *
+ * This signal is TRANSIENT — the next successful run clears `lastError`. The
+ * durable record of the same event is `gmail_accounts.lastGapAt`, which
+ * nothing in this file ever clears.
  */
 export const HISTORY_GAP_ERROR = "history_gap";
 
@@ -84,8 +88,11 @@ async function seedCursor(
   db: DrizzleD1Database<typeof schema>,
   accountId: string,
   accessToken: string,
-  /** Marker to leave on the account; null for a first seed, which loses nothing. */
-  lastError: string | null = null,
+  /**
+   * True when this seed skipped mail — i.e. an expired cursor forced it. A
+   * first seed skips nothing and must leave both markers alone.
+   */
+  afterGap = false,
 ): Promise<string> {
   const profile = await getProfile(accessToken);
   const now = nowSeconds();
@@ -94,7 +101,11 @@ async function seedCursor(
     .set({
       historyId: profile.historyId,
       lastSyncedAt: now,
-      lastError,
+      // `lastError` is the transient signal, cleared by the next successful
+      // run. `lastGapAt` is the durable one and is never written anywhere
+      // else in this file, so no success can erase it.
+      lastError: afterGap ? HISTORY_GAP_ERROR : null,
+      ...(afterGap ? { lastGapAt: now } : {}),
       updatedAt: now,
     })
     .where(eq(gmailAccounts.id, accountId));
@@ -176,12 +187,7 @@ export async function syncAccount(
         // Mail arrived in the gap and is not recoverable here, so the account
         // is left marked: re-seeding keeps sync alive, but an operator has to
         // be able to see that something was missed.
-        const seeded = await seedCursor(
-          db,
-          account.id,
-          accessToken,
-          HISTORY_GAP_ERROR,
-        );
+        const seeded = await seedCursor(db, account.id, accessToken, true);
         console.warn(
           `Gmail history expired for ${account.emailAddress}: cursor ${startHistoryId} is gone, re-seeded at ${seeded}. Messages in the gap were not synced.`,
         );
