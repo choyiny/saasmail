@@ -8,7 +8,12 @@ import { parseRaw } from "../email-parser";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
 import { getProfile } from "./oauth";
-import { listHistory, getMessage, GmailApiError } from "./api";
+import {
+  listHistory,
+  getMessage,
+  GmailApiError,
+  type AddedMessage,
+} from "./api";
 import { resolvePersonalInbox } from "./route-inbox";
 
 /**
@@ -22,6 +27,30 @@ export const MAX_MESSAGES_PER_RUN = 50;
 const SKIP_LABELS = new Set(["SENT", "DRAFT", "TRASH", "SPAM"]);
 
 export type GmailAccountRow = typeof gmailAccounts.$inferSelect;
+
+/** One Gmail history record: the messages it added, under its own id. */
+type HistoryRecord = { historyId: string; messageIds: string[] };
+
+/**
+ * Regroup the flat added-message list back into its history records.
+ *
+ * A record's entries are contiguous in the list, so grouping consecutive
+ * equal `historyId`s reconstructs the record boundaries exactly. We need
+ * those boundaries because the cursor may only ever advance to a record we
+ * processed IN FULL — see the truncation rule in `syncAccount`.
+ */
+function groupIntoRecords(added: AddedMessage[]): HistoryRecord[] {
+  const records: HistoryRecord[] = [];
+  for (const item of added) {
+    const current = records[records.length - 1];
+    if (current && current.historyId === item.historyId) {
+      current.messageIds.push(item.messageId);
+    } else {
+      records.push({ historyId: item.historyId, messageIds: [item.messageId] });
+    }
+  }
+  return records;
+}
 
 export type SyncResult = {
   ingested: number;
@@ -113,6 +142,11 @@ export async function syncAccount(
   let truncated = false;
   /** True once Gmail has no further history pages for this cursor. */
   let exhausted = false;
+  /**
+   * The id of the last history record processed IN FULL. The only value it is
+   * safe to resume from when a run stops early.
+   */
+  let lastCompleteRecordId: string | null = null;
 
   while (!truncated && !exhausted) {
     let page;
@@ -134,68 +168,85 @@ export async function syncAccount(
 
     if (page.historyId) latestHistoryId = page.historyId;
 
-    for (const messageId of page.addedMessageIds) {
-      if (ingested + skipped >= MAX_MESSAGES_PER_RUN) {
+    for (const record of groupIntoRecords(page.added)) {
+      // Records are processed whole, never partially. Advancing the cursor to
+      // a record we only half-processed would skip its remaining messages
+      // permanently, which is the exact loss this cursor design exists to
+      // prevent. So the cap is checked at record boundaries only.
+      //
+      // The `lastCompleteRecordId` guard means a single record larger than
+      // the cap is still processed in full, slightly over budget: refusing it
+      // would leave the cursor unable to advance past that record, ever.
+      if (
+        lastCompleteRecordId !== null &&
+        ingested + skipped + record.messageIds.length > MAX_MESSAGES_PER_RUN
+      ) {
         truncated = true;
         break;
       }
 
-      const message = await getMessage(accessToken, messageId);
-      // Deleted between the history page and this fetch. Ordinary, not a
-      // failure — Gmail history is a log of what happened, not of what still
-      // exists.
-      if (!message) {
-        skipped++;
-        continue;
+      for (const messageId of record.messageIds) {
+        const message = await getMessage(accessToken, messageId);
+        // Deleted between the history page and this fetch. Ordinary, not a
+        // failure — Gmail history is a log of what happened, not of what
+        // still exists.
+        if (!message) {
+          skipped++;
+          continue;
+        }
+
+        if (message.labelIds.some((label) => SKIP_LABELS.has(label))) {
+          skipped++;
+          continue;
+        }
+
+        if (!inbox) {
+          skipped++;
+          continue;
+        }
+
+        // Provisional envelope: the raw bytes carry the real addresses, and
+        // `parsed.to` is what decides the destination, so it is overwritten
+        // with the resolved inbox immediately below.
+        const parsed = await parseRaw(message.raw, {
+          from: account.emailAddress,
+          to: account.emailAddress,
+        });
+        parsed.to = inbox;
+
+        await ingestParsedEmail(db, parsed, env, ctx);
+        ingested++;
+
+        // `gmailMessageId` / `gmailThreadId` are not ParsedEmail fields, so
+        // they are written back by matching the UNIQUE `emails.message_id`.
+        //
+        // `isNull(emails.gmailMessageId)` is load-bearing. `ingestParsedEmail`
+        // silently DROPS blocked senders and duplicate Message-IDs, and
+        // returns void either way. Without the guard, a message dropped as a
+        // duplicate of one Cloudflare already delivered would stamp Gmail ids
+        // onto that pre-existing row — a row this sync never created.
+        //
+        // With no Message-ID there is no row we can identify as ours, so we
+        // write nothing rather than guess.
+        if (parsed.messageId) {
+          await db
+            .update(emails)
+            .set({
+              gmailMessageId: messageId,
+              gmailThreadId: message.threadId || null,
+            })
+            .where(
+              and(
+                eq(emails.messageId, parsed.messageId),
+                isNull(emails.gmailMessageId),
+              ),
+            );
+        }
       }
 
-      if (message.labelIds.some((label) => SKIP_LABELS.has(label))) {
-        skipped++;
-        continue;
-      }
-
-      if (!inbox) {
-        skipped++;
-        continue;
-      }
-
-      // Provisional envelope: the raw bytes carry the real addresses, and
-      // `parsed.to` is what decides the destination, so it is overwritten
-      // with the resolved inbox immediately below.
-      const parsed = await parseRaw(message.raw, {
-        from: account.emailAddress,
-        to: account.emailAddress,
-      });
-      parsed.to = inbox;
-
-      await ingestParsedEmail(db, parsed, env, ctx);
-      ingested++;
-
-      // `gmailMessageId` / `gmailThreadId` are not ParsedEmail fields, so they
-      // are written back by matching the UNIQUE `emails.message_id`.
-      //
-      // `isNull(emails.gmailMessageId)` is load-bearing. `ingestParsedEmail`
-      // silently DROPS blocked senders and duplicate Message-IDs, and returns
-      // void either way. Without the guard, a message dropped as a duplicate
-      // of one Cloudflare already delivered would stamp Gmail ids onto that
-      // pre-existing row — a row this sync never created.
-      //
-      // With no Message-ID there is no row we can identify as ours, so we
-      // write nothing rather than guess.
-      if (parsed.messageId) {
-        await db
-          .update(emails)
-          .set({
-            gmailMessageId: messageId,
-            gmailThreadId: message.threadId || null,
-          })
-          .where(
-            and(
-              eq(emails.messageId, parsed.messageId),
-              isNull(emails.gmailMessageId),
-            ),
-          );
-      }
+      // Reached only when every message in the record was handled, which is
+      // what makes this id safe to resume from.
+      lastCompleteRecordId = record.historyId;
     }
 
     if (truncated) break;
@@ -213,15 +264,25 @@ export async function syncAccount(
     updatedAt: now,
   };
 
-  // The cursor advances only once the whole history range has been processed.
-  // A mid-run failure (or a truncated run) therefore retries from the same
-  // point next tick instead of skipping mail — re-delivery is deduplicated by
-  // Message-ID inside `ingestParsedEmail`, whereas skipped mail is lost.
+  // Two ways to advance, and the distinction matters.
+  //
+  // A run that consumed the whole history range advances to the page-level
+  // historyId — the mailbox's current position, correct because nothing is
+  // left behind.
+  //
+  // A run cut short by the cap advances only to the last record it processed
+  // IN FULL. `startHistoryId` is exclusive ("returns history records AFTER
+  // the specified startHistoryId"), so the next run resumes at the very next
+  // record. Using the page-level historyId here would jump past everything
+  // unprocessed; using a message's own `historyId` would be worse still,
+  // since Gmail defines that as the last record to MODIFY the message and a
+  // later read or label can sort it past mail this run never saw.
   if (exhausted && latestHistoryId) {
     patch.historyId = latestHistoryId;
-  } else if (truncated) {
+  } else if (truncated && lastCompleteRecordId) {
+    patch.historyId = lastCompleteRecordId;
     console.warn(
-      `Gmail sync for ${account.emailAddress} hit the ${MAX_MESSAGES_PER_RUN}-message cap; cursor ${startHistoryId} held for the next run.`,
+      `Gmail sync for ${account.emailAddress} hit the ${MAX_MESSAGES_PER_RUN}-message cap; resuming after history record ${lastCompleteRecordId} on the next run.`,
     );
   }
 

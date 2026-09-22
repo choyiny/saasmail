@@ -21,8 +21,9 @@ describe("listHistory", () => {
   it("collects added message ids across a history page", async () => {
     stub(200, {
       history: [
-        { messagesAdded: [{ message: { id: "m1" } }] },
+        { id: "9001", messagesAdded: [{ message: { id: "m1" } }] },
         {
+          id: "9002",
           messagesAdded: [{ message: { id: "m2" } }, { message: { id: "m3" } }],
         },
       ],
@@ -30,15 +31,49 @@ describe("listHistory", () => {
     });
 
     const res = await listHistory("at", { startHistoryId: "9000" });
-    expect(res.addedMessageIds).toEqual(["m1", "m2", "m3"]);
+    expect(res.added.map((a) => a.messageId)).toEqual(["m1", "m2", "m3"]);
+    // Each message carries its OWN enclosing record's id, not the page-level
+    // historyId. This is the whole point: m1 must stay pinned to 9001, so a
+    // run that stops after m1 resumes at 9002 rather than skipping m2 and m3.
+    expect(res.added).toEqual([
+      { messageId: "m1", historyId: "9001" },
+      { messageId: "m2", historyId: "9002" },
+      { messageId: "m3", historyId: "9002" },
+    ]);
     expect(res.historyId).toBe("9002");
     expect(res.nextPageToken).toBeNull();
+  });
+
+  it("drops a history record with no usable id", async () => {
+    stub(200, {
+      history: [
+        { messagesAdded: [{ message: { id: "orphan" } }] },
+        { id: "9003", messagesAdded: [{ message: { id: "m1" } }] },
+      ],
+      historyId: "9003",
+    });
+
+    // No record id means no cursor we could resume from, and inventing one
+    // could advance past unprocessed mail.
+    const res = await listHistory("at", { startHistoryId: "9000" });
+    expect(res.added).toEqual([{ messageId: "m1", historyId: "9003" }]);
+  });
+
+  it("coerces a numeric record id to a string", async () => {
+    stub(200, {
+      history: [{ id: 9004, messagesAdded: [{ message: { id: "m1" } }] }],
+      historyId: 9004,
+    });
+
+    const res = await listHistory("at", { startHistoryId: "9000" });
+    expect(res.added).toEqual([{ messageId: "m1", historyId: "9004" }]);
+    expect(res.historyId).toBe("9004");
   });
 
   it("returns an empty list when nothing changed", async () => {
     stub(200, { historyId: "9000" });
     const res = await listHistory("at", { startHistoryId: "9000" });
-    expect(res.addedMessageIds).toEqual([]);
+    expect(res.added).toEqual([]);
   });
 
   it("surfaces the page token so the caller can continue", async () => {
@@ -86,7 +121,7 @@ describe("listHistory", () => {
   it("handles HTTP 200 with malformed JSON body on success path", async () => {
     stub(200, "<html>not json</html>");
     const res = await listHistory("at", { startHistoryId: "9000" });
-    expect(res.addedMessageIds).toEqual([]);
+    expect(res.added).toEqual([]);
     expect(res.nextPageToken).toBeNull();
     expect(res.historyId).toBeNull();
   });
