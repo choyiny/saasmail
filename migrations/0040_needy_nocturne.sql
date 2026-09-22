@@ -1,0 +1,1 @@
+CREATE INDEX `sent_emails_gmail_message_idx` ON `sent_emails` (`gmail_message_id`);

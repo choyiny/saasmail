@@ -48,5 +48,15 @@ export const sentEmails = sqliteTable(
     index("sent_emails_person_sent_idx").on(table.personId, table.sentAt),
     index("sent_emails_conversation_idx").on(table.conversationId),
     index("sent_emails_from_sent_idx").on(table.fromAddress, table.sentAt),
+    /**
+     * Echo suppression looks this column up once per mirrored Gmail `SENT`
+     * message (see `lib/gmail/sync.ts`), against a table that grows without
+     * bound — so the lookup needs an index or it degrades into a full scan
+     * per message.
+     *
+     * NOT unique, deliberately: Gmail owns this identifier, and a duplicate
+     * API response must be a no-op rather than a constraint violation.
+     */
+    index("sent_emails_gmail_message_idx").on(table.gmailMessageId),
   ],
 );

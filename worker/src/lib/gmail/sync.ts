@@ -172,6 +172,26 @@ function firstAddress(raw: string | undefined): string | null {
 }
 
 /**
+ * A `Date:` header as unix seconds, or null when absent or unparseable.
+ *
+ * Worth the parse: `sentAt` decides where a mirrored reply sorts on the
+ * timeline, and stamping the sync time instead would file a backlog drained
+ * after an outage at the moment it was pulled — every reply sorting after the
+ * mail it answers, on a feature whose whole point is a coherent timeline.
+ *
+ * The header is sender-controlled in general, but these are messages from the
+ * mailbox's OWN Sent folder, so the writer is us. A value that is missing,
+ * junk, or not a finite instant falls back to the sync time.
+ */
+function parseDateHeader(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const ms = Date.parse(raw.trim());
+  if (!Number.isFinite(ms)) return null;
+  const seconds = Math.floor(ms / 1000);
+  return seconds > 0 ? seconds : null;
+}
+
+/**
  * Mirror one message from the mailbox's Sent folder onto the timeline.
  *
  * Returns whether a row was written. A `false` is an ordinary skip, not a
@@ -221,7 +241,7 @@ async function mirrorSentMessage(
     // on, and `sent_emails.to_address` is NOT NULL, so inventing a value
     // would be worse than passing over it.
     console.warn(
-      `Gmail sync: sent message ${gmailMessageId} has no usable To: recipient; not mirrored.`,
+      `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no usable To: recipient (Bcc-only, or a malformed header), and sent_emails.to_address is NOT NULL — not mirrored.`,
     );
     return false;
   }
@@ -251,6 +271,9 @@ async function mirrorSentMessage(
   const conversationId = await computeConversationId(inbox, externals);
 
   const now = nowSeconds();
+  // When the message was actually sent, not when we got around to pulling it.
+  const sentAt = parseDateHeader(header(parsed.headers, "date")) ?? now;
+
   await db.insert(sentEmails).values({
     id: nanoid(),
     personId: personRow[0]?.id ?? null,
@@ -269,7 +292,9 @@ async function mirrorSentMessage(
     conversationId,
     gmailMessageId,
     gmailThreadId: message.threadId || null,
-    sentAt: now,
+    // `sentAt` orders the timeline, so it is the message's own time.
+    // `createdAt` is when this row appeared here, which is now.
+    sentAt,
     createdAt: now,
   });
 
