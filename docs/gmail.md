@@ -86,8 +86,19 @@ all done through the endpoints below.
      `{ "source": "gmail", "gmailAccountId": "<id from the list above>" }`.
      `{email}` is the saasmail inbox address that should receive this
      mailbox's mail — it does not need to already exist. Until an inbox is
-     mapped this way, a connected mailbox's mail is read from Gmail but
-     discarded rather than filed anywhere.
+     mapped this way, syncing for that mailbox is paused: the engine will not
+     guess a destination, so it does not fetch or consume any history for the
+     account. This is a safe, recoverable state, not data loss — the mail
+     stays in Gmail and sync resumes exactly where it left off as soon as
+     exactly one saasmail inbox is mapped to the account. While paused, the
+     account's `lastError` records why (`no_personal_inbox` if nothing is
+     mapped yet), and `GET /api/admin/gmail` surfaces it. The same pause
+     applies if the mapping becomes _ambiguous_ — for example if a second
+     saasmail inbox is also mapped to the same connected Google account —
+     since the engine only ever routes to a single personal mailbox and
+     refuses to pick between two (`lastError: ambiguous_inbox_mapping`). If
+     sync looks stuck on a mailbox, check that it has exactly one inbox
+     mapped to it.
    - `DELETE /api/admin/gmail/{id}` disconnects one: it deletes saasmail's
      stored row, including the encrypted refresh token, so saasmail can no
      longer reach the mailbox. It does **not** revoke the grant at Google —
