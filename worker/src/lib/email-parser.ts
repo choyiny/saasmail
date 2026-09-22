@@ -1,4 +1,4 @@
-import PostalMime from "postal-mime";
+import PostalMime, { type Address, type Mailbox } from "postal-mime";
 
 export interface AuthResults {
   spf: string | null;
@@ -17,26 +17,42 @@ export interface ParsedEmail {
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
   cc: ParsedEmailAddress[];
   /**
-   * The `To:` header's address list, as parsed from the MIME headers.
+   * The recipient headers as WRITTEN — unparsed, unfiltered, undecoded.
    *
-   * NOT the same thing as `to`, and never a substitute for it: `to` is the
-   * SMTP envelope recipient — the inbox this message was actually delivered
-   * to — and that is what decides where inbound mail lands. This is what the
-   * sender WROTE on the To: line, which may be a mailing list, an alias, a
-   * dozen people, or nobody at all.
+   * Each is the value of the FIRST header of that name in the message, with
+   * folding unwrapped and nothing else done to it. `null` means the message
+   * carried no header of that name at all; an empty string means it carried
+   * an empty one, and the two are not the same thing to a caller that must
+   * decide whether to look at the next header.
+   *
+   * Deliberately raw, and deliberately not `ParsedEmailAddress[]`. A caller
+   * that needs the FIRST-WRITTEN recipient cannot get it from a parsed list:
+   * any list that has been filtered has silently renumbered itself, so its
+   * element 0 is the first SURVIVING recipient, which is a different person
+   * from the first written one exactly when the first written one is
+   * malformed. Only the original text can answer "was anything ahead of
+   * this?", so the original text is what is handed over.
+   *
+   * "First header of that name" matters too: postal-mime's own `to`/`cc`
+   * arrays concatenate duplicate headers LAST-header-first, which reverses
+   * the written order of a message carrying two `To:` lines.
+   *
+   * NOT a substitute for `to`, which is the SMTP envelope recipient and the
+   * only thing that decides where inbound mail lands. These are what the
+   * sender typed, which may be a mailing list, an alias, a group, a dozen
+   * people, or nobody at all.
    *
    * Exists for the Gmail Sent-folder mirror, which has no envelope to go on:
-   * a message the mailbox sent has its counterparty on this line.
+   * a message the mailbox sent has its counterparty on these lines. `bcc` is
+   * there because received mail normally has it stripped in transit, but a
+   * message in the SENDER's own Sent folder usually keeps the Bcc it went out
+   * with, and that is the only counterparty a blind-copied send has.
    */
-  headerTo: ParsedEmailAddress[];
-  /**
-   * The `Bcc:` header's address list, when the message still carries one.
-   *
-   * Received mail normally does not — the header is stripped in transit — but
-   * a message in the SENDER's own Sent folder usually keeps the Bcc it went
-   * out with, which is the only counterparty a blind-copied send has.
-   */
-  headerBcc: ParsedEmailAddress[];
+  recipientHeaders: {
+    to: string | null;
+    cc: string | null;
+    bcc: string | null;
+  };
   subject: string;
   /** Quote-trimmed HTML body, with `cid:` refs left intact. For display/storage. */
   bodyHtml: string | null;
@@ -192,9 +208,24 @@ export async function parseRaw(
   const bodyText = parsed.text || null;
   const bodyHtml = parsed.html || null;
 
-  // Normalize one of postal-mime's parsed address lists — it exposes each as
-  // an array of `{ address, name }`, or undefined when the header is absent.
-  // We
+  // postal-mime types an address list as `Address[]`, a union of a plain
+  // mailbox and an RFC 5322 GROUP (`Team: a@x.com, b@y.com;`), which arrives
+  // as `{ name, group: Mailbox[] }` with no `.address` at all. A group's
+  // members are ordinary recipients that happen to be written inside a label,
+  // so they are spliced into the list where the group stood rather than
+  // vanishing with it. An empty group (`undisclosed-recipients:;`) therefore
+  // contributes nothing, which is correct — it names nobody.
+  const flatten = (list: Address[] | undefined): Mailbox[] => {
+    const out: Mailbox[] = [];
+    for (const entry of list ?? []) {
+      if (entry.address !== undefined) out.push(entry);
+      else out.push(...entry.group);
+    }
+    return out;
+  };
+
+  // Normalize one of postal-mime's parsed address lists into the roster shape
+  // the rest of the app stores and displays. We
   // - filter to entries with a syntactically-valid email (don't trust
   //   header data — malformed Cc: lines pollute displayed rosters
   //   and the de-dupe-by-email logic elsewhere),
@@ -203,11 +234,14 @@ export async function parseRaw(
   // - cap the array so a single inbound message can't slam storage
   //   with thousands of header-entries.
   //
-  // Order is preserved, which matters to callers that need the FIRST-written
-  // recipient rather than any recipient.
-  const addressList = (raw: unknown): ParsedEmailAddress[] =>
-    ((raw as Array<{ address?: string; name?: string }> | undefined) ?? [])
-      .filter((c): c is { address: string; name?: string } => {
+  // Relative order survives, but ENTRIES DO NOT: a recipient this filter
+  // dislikes is deleted and everyone behind them moves up one. So this list
+  // answers "who else was on the message", and it cannot answer "who was
+  // written first" — element 0 is the first recipient that SURVIVED. Callers
+  // that need the first-written recipient must read `recipientHeaders`.
+  const addressList = (list: Address[] | undefined): ParsedEmailAddress[] =>
+    flatten(list)
+      .filter((c) => {
         if (!c.address || typeof c.address !== "string") return false;
         // Cheap RFC 5322-ish gate. Defers strict validation to downstream
         // schemas; we only need to reject the obviously-not-email cases.
@@ -221,6 +255,13 @@ export async function parseRaw(
 
   const cc: ParsedEmailAddress[] = addressList(parsed.cc);
 
+  // The FIRST header of each name, in the order the message wrote them.
+  // `parsed.headers` preserves duplicates and document order; the `headers`
+  // map built above does not (a second `To:` overwrites the first), and
+  // postal-mime's own `parsed.to` concatenates duplicates last-header-first.
+  const firstHeaderValue = (key: string): string | null =>
+    parsed.headers?.find((h) => h.key === key)?.value ?? null;
+
   return {
     from: {
       address: parsed.from?.address || envelope.from,
@@ -228,8 +269,11 @@ export async function parseRaw(
     },
     to: envelope.to,
     cc,
-    headerTo: addressList(parsed.to),
-    headerBcc: addressList((parsed as { bcc?: unknown }).bcc),
+    recipientHeaders: {
+      to: firstHeaderValue("to"),
+      cc: firstHeaderValue("cc"),
+      bcc: firstHeaderValue("bcc"),
+    },
     subject: parsed.subject || "",
     bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
     bodyText: bodyText ? trimQuotedText(bodyText) : null,
