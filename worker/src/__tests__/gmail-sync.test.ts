@@ -781,6 +781,55 @@ describe("syncAccount — failure handling", () => {
     // is mail the operator will never see, so the account is marked rather
     // than quietly carrying on as if nothing happened.
     expect(row.lastError).toBe("history_gap");
+    expect(row.lastGapAt).toBeGreaterThan(0);
+    expect(row.lastGapAt).toBeLessThanOrEqual(Math.floor(Date.now() / 1000));
+  });
+
+  it("keeps the gap on record after a later successful sync", async () => {
+    await seedAccount("1");
+    await seedInbox("support@acme.dev", null);
+    // Re-seed to 9000 rather than an arbitrary high value, so the follow-up
+    // run's record (9001) actually sits after the new cursor.
+    stubGmail({ historyGoneForStartId: "1", profileHistoryId: "9000" });
+
+    await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+    const gapAt = (await account()).lastGapAt;
+    expect(gapAt).toBeGreaterThan(0);
+
+    // A healthy run from the re-seeded cursor. It clears lastError, which is
+    // exactly why lastError alone could not carry this signal.
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          raw: rawEmail({
+            from: "jane@example.com",
+            deliveredTo: "support@acme.dev",
+            messageId: "<after-gap@example.com>",
+          }),
+        },
+      },
+    });
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+    expect(res.ingested).toBe(1);
+
+    const row = await account();
+    expect(row.lastError).toBeNull();
+    // The gap happened. A later healthy run does not un-happen it, so the
+    // record survives until an operator reconnects the account.
+    expect(row.lastGapAt).toBe(gapAt);
   });
 
   it("leaves no gap marker on a first seed, which loses nothing", async () => {
@@ -799,6 +848,8 @@ describe("syncAccount — failure handling", () => {
     const row = await account();
     expect(row.historyId).toBe("55555");
     expect(row.lastError).toBeNull();
+    // No mail was missed, so there is no gap to record.
+    expect(row.lastGapAt).toBeNull();
   });
 
   it("seeds from the profile when the account has no cursor yet", async () => {

@@ -20,6 +20,18 @@ export const gmailAccounts = sqliteTable("gmail_accounts", {
   lastSyncedAt: integer("last_synced_at"),
   /** Set when sync fails; surfaced as "Reconnect" on the Inboxes page. */
   lastError: text("last_error"),
+  /**
+   * When an expired history cursor forced a re-seed, in unix seconds.
+   *
+   * Mail that arrived inside the gap was never synced and cannot be recovered
+   * from history, so this is a RECORD THAT SOMETHING WAS MISSED, not a
+   * current-state flag. A successful sync must never clear it — the gap
+   * happened whether or not the mailbox is healthy now. `lastError` carries
+   * the same signal transiently and is cleared on the next success, which is
+   * exactly why that alone was not enough. Cleared only when an operator
+   * reconnects the account.
+   */
+  lastGapAt: integer("last_gap_at"),
   connectedBy: text("connected_by"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
