@@ -14,6 +14,7 @@ import type { ParsedEmail } from "./lib/email-parser";
 import { isBlocked } from "./lib/blocklist";
 import { computeConversationId, externalsOnly } from "./lib/conversation-id";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
+import { internalDomainsFrom } from "./lib/internal-domains";
 import {
   MAX_ADMIN_FANOUT,
   computeFanoutTargets,
@@ -247,16 +248,7 @@ export async function ingestParsedEmail(
     })
     .from(senderIdentities);
 
-  const ourDomains = Array.from(
-    new Set(
-      identityRows
-        .map((r) => {
-          const at = r.email.lastIndexOf("@");
-          return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-        })
-        .filter(Boolean),
-    ),
-  );
+  const ourDomains = internalDomainsFrom(identityRows);
   const allParticipants = [
     fromAddressCanonical,
     ...parsed.cc.map((c) => c.email),
