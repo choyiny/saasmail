@@ -179,17 +179,35 @@ provider, not Gmail, on its next tick — from a different identity,
 DKIM-signed by a different service, absent from the Gmail Sent folder, and
 unable to thread onto the Gmail conversation. Sending from the wrong mailbox
 behind someone's back is worse than asking them to press send again. If you
-see this error, the reply was not sent and is not in flight: send it again.
+see this error, the reply was not sent and is not in flight: send it again —
+unless the error asks you to reconnect the mailbox, which means the Google
+grant is dead and resending cannot work until you do (see below).
 
 ### A revoked grant degrades, it doesn't break
 
-If the Google grant is revoked, or `GOOGLE_OAUTH_CLIENT_ID` /
-`GOOGLE_OAUTH_CLIENT_SECRET` / `TOKEN_ENCRYPTION_KEY` are unset, a reply to a
-Gmail-mapped inbox falls back to the configured provider and sends
-normally — it just will not appear in that mailbox's Gmail Sent folder or
-thread onto the Gmail conversation. The account's `lastError` records why,
-and `GET /api/admin/gmail` surfaces it, the same as it does for a sync
-failure.
+If `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` /
+`TOKEN_ENCRYPTION_KEY` are unset, or the Google grant is revoked and saasmail
+already knows it, a reply to a Gmail-mapped inbox falls back to the
+configured provider — it just will not appear in that mailbox's Gmail Sent
+folder or thread onto the Gmail conversation.
+
+A revocation is discovered when saasmail next refreshes the access token,
+which is either when the cached one expires or when Gmail rejects it
+mid-send. In the mid-send case that first reply is **not** sent: saasmail
+forces one token refresh, and when that fails it returns the `502` above with
+an error telling you to reconnect the mailbox rather than to resend. The
+account's `lastError` records the refresh failure and `GET /api/admin/gmail`
+surfaces it, the same as it does for a sync failure. Replies after that take
+the fallback. (Unset secrets are a configuration problem, not an account
+one: they are logged, but nothing is written to `lastError`, because
+saasmail never reaches the account row to write it.)
+
+One caveat on the fallback. It sends through whichever provider is
+configured, and **Cloudflare Email Sending currently keeps only the last `Cc`
+recipient** — so a fallback reply Cc'd to several people reaches one of them.
+Resend, Postmark and Bavimail all carry the full list. If your fallback
+provider is Cloudflare Email Sending, treat a multi-`Cc` reply from a
+Gmail-mapped inbox as unreliable until the grant is reconnected.
 
 ### No duplicates
 
