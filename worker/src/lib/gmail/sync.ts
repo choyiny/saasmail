@@ -397,6 +397,31 @@ export async function syncAllGmailAccounts(
         `Gmail sync failed for ${accounts[i].emailAddress}:`,
         result.reason,
       );
+      return;
+    }
+
+    // A fulfilled result can still carry a failure: `syncAccount` catches a
+    // poisonous message internally, increments `failed`, and RESOLVES
+    // rather than rejecting (see the comment on its own catch block). Without
+    // this branch, `Promise.allSettled` reports the account as healthy and
+    // the failure is visible only on `gmail_accounts.lastError` — never in
+    // cron output. A rejection above means "this account could not sync at
+    // all"; this means "it synced, but some messages did not make it".
+    if (result.value.failed > 0) {
+      console.error(
+        `Gmail sync failed to ingest ${result.value.failed} message(s) for ${accounts[i].emailAddress}`,
+      );
+    }
+
+    // A re-seed means an expired history cursor forced a jump to the
+    // mailbox's current position, and mail inside the gap was never synced.
+    // `gmail_accounts.lastGapAt` records this durably, so it isn't invisible
+    // — but a line here means it's also visible to whoever is watching cron
+    // output in real time, not just to someone later querying the account.
+    if (result.value.reseeded) {
+      console.warn(
+        `Gmail sync re-seeded the history cursor for ${accounts[i].emailAddress} after an expired cursor; mail in the gap was not synced.`,
+      );
     }
   });
 }
