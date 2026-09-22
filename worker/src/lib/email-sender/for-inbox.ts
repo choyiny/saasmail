@@ -60,13 +60,28 @@ async function tryGmailSender(
   const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;
   const encryptionKey = env.TOKEN_ENCRYPTION_KEY;
-  if (!clientId || !clientSecret || !encryptionKey) return null;
+  if (!clientId || !clientSecret || !encryptionKey) {
+    console.error(
+      "[createSenderForInbox] Gmail integration is not configured (missing OAuth secrets); falling back to the configured provider",
+    );
+    return null;
+  }
+
+  // sender_identities.email is stored lowercased; every other lookup site
+  // normalises before querying (see admin-inboxes-router.ts, email-handler.ts,
+  // send-email.ts, send-template.ts, route-inbox.ts) and this must too, or a
+  // from-address that merely differs in case/whitespace silently misses its
+  // Gmail mapping and falls back with no error anywhere.
+  const normalizedFrom = fromAddress.trim().toLowerCase();
 
   const [identity] = await db
     .select()
     .from(senderIdentities)
-    .where(eq(senderIdentities.email, fromAddress));
+    .where(eq(senderIdentities.email, normalizedFrom));
   if (!identity || identity.source !== "gmail" || !identity.gmailAccountId) {
+    console.error(
+      `[createSenderForInbox] ${normalizedFrom} is not a Gmail-mapped inbox; falling back to the configured provider`,
+    );
     return null;
   }
 

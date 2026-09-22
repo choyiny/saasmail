@@ -83,11 +83,18 @@ describe("createSenderForInbox", () => {
   });
 
   it("returns the configured provider for a Cloudflare inbox, unchanged", async () => {
+    // Gmail secrets ARE supplied, so the only reason this falls back is the
+    // identity's source discrimination ("cloudflare" !== "gmail") — not the
+    // secrets guard. Omitting the secrets here would make this test pass
+    // even if that source check were deleted or inverted.
     await seedIdentity({ source: "cloudflare" });
 
     const sender = await createSenderForInbox(
       getDb(),
-      { RESEND_API_KEY: "re_test" } as unknown as CloudflareBindings,
+      {
+        RESEND_API_KEY: "re_test",
+        ...GMAIL_ENV,
+      } as unknown as CloudflareBindings,
       "support@acme.dev",
     );
 
@@ -95,13 +102,34 @@ describe("createSenderForInbox", () => {
   });
 
   it("falls back rather than throwing for an unknown from-address", async () => {
+    // Gmail secrets ARE supplied (see note above) so this exercises the
+    // identity-lookup miss, not the secrets guard.
     const sender = await createSenderForInbox(
       getDb(),
-      { RESEND_API_KEY: "re_test" } as unknown as CloudflareBindings,
+      {
+        RESEND_API_KEY: "re_test",
+        ...GMAIL_ENV,
+      } as unknown as CloudflareBindings,
       "nobody@acme.dev",
     );
 
     expect(sender.provider).toBe("resend");
+  });
+
+  it("normalises case and whitespace before looking up the inbox", async () => {
+    // sender_identities.email is stored lowercased. A from-address that
+    // merely differs in case or has stray whitespace must still resolve.
+    await seedGmailAccount();
+    await seedIdentity({ source: "gmail", gmailAccountId: "acct-1" });
+    vi.stubGlobal("fetch", vi.fn());
+
+    const sender = await createSenderForInbox(
+      getDb(),
+      GMAIL_ENV,
+      "  Support@Acme.DEV  ",
+    );
+
+    expect(sender.provider).toBe("gmail");
   });
 
   it("falls back when the mapped gmail_accounts row is missing", async () => {
