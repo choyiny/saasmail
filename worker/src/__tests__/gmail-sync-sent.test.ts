@@ -41,10 +41,12 @@ function rawSent(opts: {
   body?: string;
   cc?: string;
   inReplyTo?: string;
+  date?: string;
 }) {
   return [
     `From: Support <${opts.from ?? "collector@acme.dev"}>`,
     `To: ${opts.to}`,
+    ...(opts.date ? [`Date: ${opts.date}`] : []),
     ...(opts.cc ? [`Cc: ${opts.cc}`] : []),
     ...(opts.inReplyTo ? [`In-Reply-To: ${opts.inReplyTo}`] : []),
     `Message-ID: ${opts.messageId}`,
@@ -350,6 +352,75 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].toAddress).toBe("stranger@example.com");
     expect(rows[0].personId).toBeNull();
+  });
+
+  it("dates the row from the message, not from the sync", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "jane@example.com",
+            messageId: "<s4@acme.dev>",
+            // Well in the past: a backlog drained after an outage must not
+            // file every mirrored reply at the moment it was pulled, or the
+            // replies sort after the mail they answer.
+            date: "Tue, 15 Apr 2025 09:30:00 +0000",
+          }),
+        },
+      },
+    });
+
+    const before = Math.floor(Date.now() / 1000);
+    await sync();
+
+    const rows = await getDb().select().from(sentEmails);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sentAt).toBe(
+      Math.floor(Date.parse("2025-04-15T09:30:00Z") / 1000),
+    );
+    expect(rows[0].sentAt).toBeLessThan(before);
+    // The row itself still records when it landed here.
+    expect(rows[0].createdAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it("falls back to the sync time when the Date header is missing or junk", async () => {
+    await seedAccount();
+    await seedInbox();
+    stubGmail({
+      historyIds: ["m1", "m2"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "jane@example.com",
+            messageId: "<s5@acme.dev>",
+          }),
+        },
+        m2: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "bob@example.com",
+            messageId: "<s6@acme.dev>",
+            date: "not a date at all",
+          }),
+        },
+      },
+    });
+
+    const before = Math.floor(Date.now() / 1000);
+    const res = await sync();
+    expect(res.ingested).toBe(2);
+    expect(res.failed).toBe(0);
+
+    const rows = await getDb().select().from(sentEmails);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.sentAt).toBeGreaterThanOrEqual(before);
+    }
   });
 
   it("carries Cc recipients onto the mirrored row", async () => {
