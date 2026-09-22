@@ -534,6 +534,27 @@ describe("syncAccount — picking the counterparty off the header", () => {
       ).join(", "),
       "u0@example.com",
     ],
+    // The three below look malformed and ARE recovered, deliberately. The
+    // old hand-rolled scanner skipped each of them, because it could not tell
+    // a malformed header from a recoverable one and refusing was the only
+    // safe answer available to it. postal-mime can tell, and recovers the
+    // correct first-written address in every case — same customer, same
+    // timeline, one more mirrored reply instead of a dropped one.
+    [
+      "an unclosed angle bracket, which the parser recovers",
+      "Jane <jane@example.com",
+      "jane@example.com",
+    ],
+    [
+      "an address followed by an unclosed quote, which the parser recovers",
+      'jane@example.com "Bob',
+      "jane@example.com",
+    ],
+    [
+      "a leading empty entry, which the parser recovers",
+      ",jane@example.com",
+      "jane@example.com",
+    ],
   ];
 
   for (const [label, to, expected] of cases) {
@@ -562,21 +583,23 @@ describe("syncAccount — picking the counterparty off the header", () => {
    * have had, a plausible-looking answer — and a plausible-looking answer to
    * a malformed header is how a customer's reply ends up on someone else's
    * timeline. A skipped mirror costs one row; a wrong one costs trust.
+   *
+   * Malformed is not the test: some malformed headers are recovered (see the
+   * last three accepted cases above). What disqualifies these is that no
+   * single unambiguous address comes back.
    */
   const rejects: Array<[label: string, to: string]> = [
-    // The round-3 regression: one stray quote suppresses every delimiter, so
-    // a whole-header search would hand back Bob — the LAST address written.
+    // The round-3 regression: one stray quote suppressed every delimiter in
+    // the old scanner, which then handed back Bob — the LAST address written.
+    // postal-mime returns the whole header text as one "address" instead, and
+    // `isAddrSpec` refuses it, so the misattribution cannot recur.
     ["an unclosed quote", '"Jane jane@example.com, Bob <bob@x.com>'],
-    ["an unclosed angle bracket", "Jane <jane@example.com"],
-    // Isolates the unterminated-state guard specifically: everything before
-    // the stray quote IS a valid address, so without the guard this header
-    // quietly mirrors. Policy is to refuse a malformed list outright.
-    ["an address followed by an unclosed quote", 'jane@example.com "Bob'],
+    // The parser reports this one faithfully as a single entry; only the
+    // strict addr-spec gate catches that a comma is not part of an address.
     ["a comma inside the angle brackets", "<jane,x@example.com>"],
     ["a backslash at the very end of a quoted name", '"Jane\\'],
     ["empty angle brackets", "<>"],
     ["only whitespace", "   "],
-    ["a leading empty entry", ",jane@example.com"],
     ["two at-signs", "<jane@@example.com>"],
     ["a dotless domain", "<jane@localhost>"],
     ["no at-sign at all", "Jane Doe"],
