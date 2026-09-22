@@ -15,6 +15,7 @@ import { GmailSender } from "./email-sender/providers/gmail";
 import type { EmailSender } from "./email-sender/types";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
+import { fetchInternalDomains } from "./internal-domains";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import type { ParsedFile } from "./multipart-send";
@@ -113,27 +114,6 @@ export type ReplyEmailFailure =
     };
 
 export type ReplyEmailResult = ReplyEmailSuccess | ReplyEmailFailure;
-
-/**
- * Fetch the set of "internal" domains (domains owned by our
- * sender_identities) for the current request — used to derive the
- * external-only participant list when computing a conversation_id.
- */
-async function fetchInternalDomains(db: Db): Promise<string[]> {
-  const rows = await db
-    .select({ email: senderIdentities.email })
-    .from(senderIdentities);
-  return Array.from(
-    new Set(
-      rows
-        .map((r: { email: string }) => {
-          const at = r.email.lastIndexOf("@");
-          return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-        })
-        .filter(Boolean),
-    ),
-  ) as string[];
-}
 
 /**
  * The parent's Gmail thread id, but only when it means something to the

@@ -11,6 +11,7 @@ import { addressParser } from "postal-mime";
 import { parseRaw } from "../email-parser";
 import { cancelSequencesForPerson } from "../cancel-sequence";
 import { computeConversationId, externalsOnly } from "../conversation-id";
+import { fetchInternalDomains } from "../internal-domains";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
 import { getProfile, GoogleAuthError } from "./oauth";
@@ -83,7 +84,16 @@ function groupIntoRecords(added: AddedMessage[]): HistoryRecord[] {
 }
 
 export type SyncResult = {
+  /** Inbound messages that reached a customer timeline as `emails` rows. */
   ingested: number;
+  /**
+   * Messages from the mailbox's own Sent folder written to `sent_emails`.
+   *
+   * Counted apart from `ingested` because it is not an ingest: an operator
+   * reading these numbers is asking how much mail ARRIVED, and folding our
+   * own outgoing mail into that answer inflates it.
+   */
+  mirrored: number;
   skipped: number;
   reseeded: boolean;
   /** Messages that threw. At most one — a failure stops the run. */
@@ -144,15 +154,16 @@ function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
-/** Header lookup that tolerates either casing, like the parser's own. */
+/**
+ * Header lookup. Keys are lowercase: postal-mime lowercases them, which is
+ * the same fact `firstHeaderValue("to")` in email-parser.ts relies on. There
+ * is no Title-Case variant to fall back to.
+ */
 function header(
   headers: Record<string, string>,
   name: string,
 ): string | undefined {
-  return (
-    headers[name] ??
-    headers[name.replace(/(^|-)([a-z])/g, (_, s, c) => s + c.toUpperCase())]
-  );
+  return headers[name];
 }
 
 /**
@@ -399,10 +410,20 @@ async function mirrorSentMessage(
   // inserting a second copy. (`emails` gets that for free from the UNIQUE
   // Message-ID dedupe inside `ingestParsedEmail`; `sent_emails` has no such
   // constraint, so the id is the only thing standing in for it.)
+  //
+  // Scoped to this account's inbox: Gmail documents message ids as immutable
+  // per MAILBOX, not globally unique, so with two connected mailboxes an
+  // unscoped match could let one mailbox's id suppress the other's genuine
+  // Sent message. The index still carries the lookup.
   const echo = await db
     .select({ id: sentEmails.id })
     .from(sentEmails)
-    .where(eq(sentEmails.gmailMessageId, gmailMessageId))
+    .where(
+      and(
+        eq(sentEmails.gmailMessageId, gmailMessageId),
+        eq(sentEmails.fromAddress, inbox),
+      ),
+    )
     .limit(1);
   if (echo.length > 0) return false;
 
@@ -600,6 +621,7 @@ export async function syncAccount(
   const inbox = resolvePersonalInbox(mappings);
 
   let ingested = 0;
+  let mirrored = 0;
   let skipped = 0;
   let failed = 0;
 
@@ -611,19 +633,7 @@ export async function syncAccount(
   let internalDomains: string[] | null = null;
   const getInternalDomains = async (): Promise<string[]> => {
     if (internalDomains === null) {
-      const rows = await db
-        .select({ email: senderIdentities.email })
-        .from(senderIdentities);
-      internalDomains = Array.from(
-        new Set(
-          rows
-            .map((r) => {
-              const at = r.email.lastIndexOf("@");
-              return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-            })
-            .filter(Boolean),
-        ),
-      );
+      internalDomains = await fetchInternalDomains(db);
     }
     return internalDomains;
   };
@@ -660,14 +670,14 @@ export async function syncAccount(
       // cursor stays exactly where it was.
       .set({ lastError: reason, updatedAt: now })
       .where(eq(gmailAccounts.id, account.id));
-    return { ingested, skipped, reseeded: false, failed };
+    return { ingested, mirrored, skipped, reseeded: false, failed };
   }
 
   if (!account.historyId) {
     // A first seed skips nothing — there was no cursor — so it leaves no
     // error marker behind.
     await seedCursor(db, account.id, accessToken);
-    return { ingested, skipped, reseeded: false, failed };
+    return { ingested, mirrored, skipped, reseeded: false, failed };
   }
 
   const startHistoryId = account.historyId;
@@ -710,7 +720,7 @@ export async function syncAccount(
         console.warn(
           `Gmail history expired for ${account.emailAddress}: cursor ${startHistoryId} is gone, re-seeded at ${seeded}. Messages in the gap were not synced.`,
         );
-        return { ingested, skipped, reseeded: true, failed };
+        return { ingested, mirrored, skipped, reseeded: true, failed };
       }
       throw err;
     }
@@ -730,7 +740,8 @@ export async function syncAccount(
       // would leave the cursor unable to advance past that record, ever.
       if (
         lastCompleteRecordId !== null &&
-        ingested + skipped + record.messageIds.length > MAX_MESSAGES_PER_RUN
+        ingested + mirrored + skipped + record.messageIds.length >
+          MAX_MESSAGES_PER_RUN
       ) {
         truncated = true;
         break;
@@ -764,14 +775,16 @@ export async function syncAccount(
           // one. The catch counts it, leaves this record incomplete and stops
           // the run with the cursor at the last record that finished.
           if (message.labelIds.includes(SENT_LABEL)) {
-            const mirrored = await mirrorSentMessage(db, {
+            const didMirror = await mirrorSentMessage(db, {
               gmailMessageId: messageId,
               message,
               inbox,
               internalDomains: await getInternalDomains(),
             });
-            // Counted either way, so the per-run message cap stays honest.
-            if (mirrored) ingested++;
+            // Counted either way, so the per-run message cap stays honest —
+            // but under `mirrored`, not `ingested`: our own outgoing mail
+            // coming home is not mail that arrived.
+            if (didMirror) mirrored++;
             else skipped++;
             continue;
           }
@@ -909,7 +922,7 @@ export async function syncAccount(
     .set(patch)
     .where(eq(gmailAccounts.id, account.id));
 
-  return { ingested, skipped, reseeded: false, failed };
+  return { ingested, mirrored, skipped, reseeded: false, failed };
 }
 
 /**

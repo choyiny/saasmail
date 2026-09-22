@@ -352,6 +352,56 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(enrollment.status).toBe("active");
   });
 
+  it("does not let another mailbox's message id suppress a genuine mirror", async () => {
+    // Gmail message ids are immutable per MAILBOX, not globally unique. An
+    // unscoped echo lookup lets a collision from a second connected mailbox
+    // silently drop a real Sent message — fail-closed, and therefore
+    // invisible.
+    await seedAccount();
+    await seedInbox();
+    await seedPerson("jane@example.com");
+
+    const now = Math.floor(Date.now() / 1000);
+    // A row recorded under a DIFFERENT inbox that happens to carry id "m1".
+    await getDb().insert(sentEmails).values({
+      id: "other-mailbox-row",
+      personId: null,
+      fromAddress: "elsewhere@acme.dev",
+      toAddress: "someone@example.com",
+      subject: "unrelated",
+      status: "sent",
+      gmailMessageId: "m1",
+      sentAt: now,
+      createdAt: now,
+    });
+
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "Jane <jane@example.com>",
+            messageId: "<s-collide@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    const res = await sync();
+    expect(res.mirrored).toBe(1);
+
+    // Two rows now: the pre-existing one and this mailbox's genuine mirror.
+    const rows = await getDb().select().from(sentEmails);
+    expect(rows).toHaveLength(2);
+    expect(
+      rows.some(
+        (r) =>
+          r.fromAddress === "support@acme.dev" && r.gmailMessageId === "m1",
+      ),
+    ).toBe(true);
+  });
+
   it("mirrors a SENT message we did not send from saasmail", async () => {
     await seedAccount();
     await seedInbox();
@@ -374,7 +424,8 @@ describe("syncAccount — mirroring the Sent folder", () => {
     });
 
     const res = await sync();
-    expect(res.ingested).toBe(1);
+    expect(res.mirrored).toBe(1);
+    expect(res.ingested).toBe(0);
     expect(res.failed).toBe(0);
 
     const rows = await getDb().select().from(sentEmails);
@@ -491,7 +542,8 @@ describe("syncAccount — mirroring the Sent folder", () => {
     });
 
     const res = await sync();
-    expect(res.ingested).toBe(1);
+    expect(res.mirrored).toBe(1);
+    expect(res.ingested).toBe(0);
     expect(res.failed).toBe(0);
 
     const rows = await getDb().select().from(sentEmails);
@@ -569,7 +621,8 @@ describe("syncAccount — mirroring the Sent folder", () => {
 
     const before = Math.floor(Date.now() / 1000);
     const res = await sync();
-    expect(res.ingested).toBe(3);
+    expect(res.mirrored).toBe(3);
+    expect(res.ingested).toBe(0);
     expect(res.failed).toBe(0);
 
     const byTo = new Map(
@@ -1112,7 +1165,8 @@ describe("syncAccount — picking the counterparty off the header", () => {
     });
 
     const res = await sync();
-    expect(res.ingested).toBe(3);
+    expect(res.mirrored).toBe(3);
+    expect(res.ingested).toBe(0);
     const addresses = (await getDb().select().from(sentEmails))
       .map((r) => r.toAddress)
       .sort();
@@ -1398,7 +1452,10 @@ describe("syncAccount — the inbound path is untouched", () => {
     });
 
     const res = await sync();
-    expect(res.ingested).toBe(2);
+    // One inbound ingest and one Sent mirror — counted separately, because
+    // our own outgoing mail coming home is not mail that arrived.
+    expect(res.ingested).toBe(1);
+    expect(res.mirrored).toBe(1);
     expect(res.failed).toBe(0);
     expect(await getDb().select().from(emails)).toHaveLength(1);
 

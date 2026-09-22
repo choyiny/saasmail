@@ -642,7 +642,9 @@ describe("syncAccount — skipping", () => {
       fakeCtx(),
       CFG,
     );
-    expect(res.ingested).toBe(1);
+    expect(res.mirrored).toBe(1);
+    // Not an ingest: nothing ARRIVED, we mirrored our own outgoing mail.
+    expect(res.ingested).toBe(0);
     expect(res.skipped).toBe(0);
     // The boundary this test has always guarded, and still does: mail the
     // mailbox SENT must never be ingested as if it had arrived.
