@@ -1,5 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { createEmailSender } from "../lib/email-sender";
+import { maxAttachmentBytesForInbox } from "../lib/email-sender/for-inbox";
 import { json201Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
@@ -272,11 +273,12 @@ const replyEmailRoute = createRoute({
 sendRouter.openapi(replyEmailRoute, async (c) => {
   const db = c.get("db");
   const { emailId } = c.req.valid("param");
-  const sender = createEmailSender(c.env);
-  const parsed = await parseSendBody(
-    c,
-    ReplyEmailSchema,
-    sender.maxAttachmentBytes(),
+  // Budget from the sender that will actually carry this reply, which for a
+  // Gmail-mapped inbox is Gmail — not `createEmailSender(c.env)`, the
+  // configured provider, which never sends a Gmail reply at all. Resolved
+  // from the parsed payload's fromAddress, so it has to be a callback.
+  const parsed = await parseSendBody(c, ReplyEmailSchema, (payload) =>
+    maxAttachmentBytesForInbox(db, c.env, payload.fromAddress),
   );
   if (!parsed.ok) {
     const { status, body } = sendParseErrorResponse(parsed.err);

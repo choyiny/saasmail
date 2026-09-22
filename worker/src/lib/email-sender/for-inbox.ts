@@ -4,7 +4,7 @@ import { schema } from "../../db/schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
 import { getAccessToken, invalidateAccessToken } from "../gmail/token";
 import { createEmailSender } from "./index";
-import { GmailSender } from "./providers/gmail";
+import { GmailSender, GMAIL_MAX_ATTACHMENT_BYTES } from "./providers/gmail";
 import type { EmailSender } from "./types";
 
 type ForInboxEnv = CloudflareBindings & {
@@ -48,19 +48,23 @@ export async function createSenderForInbox(
 }
 
 /**
- * Resolves the identity row, then the account, then the token — returning
- * null (never throwing to its own caller in a way that escapes the outer
- * try/catch) whenever any step comes up short.
+ * The Gmail account id `fromAddress` sends through, or null when this reply
+ * will not go out through Gmail at all — no OAuth secrets, not a Gmail-mapped
+ * identity, or no account behind the mapping.
+ *
+ * Shared by the sender and the attachment-budget lookup so the two can never
+ * disagree about which transport a reply is headed for.
  */
-async function tryGmailSender(
+async function resolveGmailAccountId(
   db: DrizzleD1Database<typeof schema>,
   env: ForInboxEnv,
   fromAddress: string,
-): Promise<GmailSender | null> {
-  const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
-  const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;
-  const encryptionKey = env.TOKEN_ENCRYPTION_KEY;
-  if (!clientId || !clientSecret || !encryptionKey) {
+): Promise<string | null> {
+  if (
+    !env.GOOGLE_OAUTH_CLIENT_ID ||
+    !env.GOOGLE_OAUTH_CLIENT_SECRET ||
+    !env.TOKEN_ENCRYPTION_KEY
+  ) {
     console.error(
       "[createSenderForInbox] Gmail integration is not configured (missing OAuth secrets); falling back to the configured provider",
     );
@@ -84,8 +88,57 @@ async function tryGmailSender(
     );
     return null;
   }
+  return identity.gmailAccountId;
+}
 
-  const accountId = identity.gmailAccountId;
+/**
+ * The attachment budget for a reply from `fromAddress`: the limit of the
+ * sender that will actually carry it.
+ *
+ * Sizing a reply with `createEmailSender(env)` instead — the *configured*
+ * provider — never asks Gmail. On a Gmail-only install, which is the natural
+ * deployment for this feature, that is `NoopSender` and its budget is 0, so
+ * every attachment on a Gmail reply 413s while Gmail would have taken it.
+ *
+ * Decided on the mapping alone, with no token resolved: this runs during
+ * multipart parsing, before the inbox permission check and before any send,
+ * and must not touch Google to answer a question about byte counts.
+ */
+export async function maxAttachmentBytesForInbox(
+  db: DrizzleD1Database<typeof schema>,
+  env: ForInboxEnv,
+  fromAddress: string,
+): Promise<number> {
+  try {
+    if (await resolveGmailAccountId(db, env, fromAddress)) {
+      return GMAIL_MAX_ATTACHMENT_BYTES;
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(
+      `[maxAttachmentBytesForInbox] falling back to the configured provider's limit for ${fromAddress}:`,
+      message,
+    );
+  }
+  return createEmailSender(env).maxAttachmentBytes();
+}
+
+/**
+ * Resolves the identity row, then the account, then the token — returning
+ * null (never throwing to its own caller in a way that escapes the outer
+ * try/catch) whenever any step comes up short.
+ */
+async function tryGmailSender(
+  db: DrizzleD1Database<typeof schema>,
+  env: ForInboxEnv,
+  fromAddress: string,
+): Promise<GmailSender | null> {
+  const accountId = await resolveGmailAccountId(db, env, fromAddress);
+  if (!accountId) return null;
+
+  const clientId = env.GOOGLE_OAUTH_CLIENT_ID!;
+  const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET!;
+  const encryptionKey = env.TOKEN_ENCRYPTION_KEY!;
   const cfg = { clientId, clientSecret, encryptionKey };
 
   // Resolve a token now — this is what surfaces a dangling gmailAccountId
