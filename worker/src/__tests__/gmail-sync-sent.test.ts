@@ -705,81 +705,90 @@ describe("syncAccount — picking the counterparty off the header", () => {
   }
 
   /**
-   * Headers that must yield NOTHING, each paired with the specific answer we
-   * are refusing to give.
+   * Headers that must yield NOTHING.
    *
-   * `refused` is not decoration. Every one of these headers has a
-   * plausible-looking address in it that some earlier version of this code
-   * did, or would, hand back — and a plausible-looking answer to a header we
-   * cannot fully read is how a customer's reply lands on someone else's
-   * timeline. Asserting the row is absent is the same as asserting that
-   * address was not filed, because it is the only address that could have
-   * been filed.
+   * `refused` is the address this header must never put on a row: for the
+   * misattribution cases, the wrong customer an earlier round of this code
+   * actually filed; for the rest, the not-an-address postal-mime hands back
+   * when asked what the header contains. `null` means the header names nobody
+   * and there is no plausible wrong answer to assert against — asserting
+   * `not.toContain("")` would document nothing, so those rows do not.
    *
    * Malformed is not by itself the test — three malformed headers are
    * recovered in the table above. What disqualifies these is that we cannot
    * prove which recipient was written first, or that the one that was is not
    * an address we will file a customer under.
    *
-   * The `gate` column names which of `firstWrittenAddress`'s gates does the
-   * refusing, so that deleting a gate visibly breaks the cases that exist to
-   * cover it rather than quietly leaving the suite green.
+   * Each GATE comment names the check that ACTUALLY refuses the rows under it,
+   * measured by neutering that check and seeing these tests go red — not
+   * reasoned about from the source. Where a row is caught by more than one
+   * check, the comment says so instead of claiming an exclusive.
    */
-  const rejects: Array<[label: string, to: string, refused: string]> = [
-    // GATE: "nothing address-shaped may precede the chosen recipient".
-    // postal-mime reports ONE entry here, `{address: "bob@x.com", name:
-    // "Jane"}` — the missing `>` swallowed Jane into a display name. Taking
-    // that entry files the reply on the LAST-written address, which is the
-    // literal shape of the original wrong-customer defect.
+  const rejects: Array<[label: string, to: string, refused: string | null]> = [
+    // GATE: one-`@`-per-chunk. The headline defect, and the shape the whole
+    // task is named after. postal-mime reports ONE entry, `{address:
+    // "bob@x.com", name: "Jane"}` — the missing `>` swallowed Jane into a
+    // display name — so taking that entry files the reply on the LAST-written
+    // address. Two checks see it: the preceding-`@` line fires first (Jane's
+    // `@` sits ahead of Bob's in the masked header), and the structural gate
+    // catches it again because chunk 0 carries two addresses. Deleting the
+    // preceding-`@` line alone leaves this test green.
     [
       "an unclosed angle bracket ahead of a second recipient",
       "Jane <jane@example.com, Bob <bob@x.com>",
       "bob@x.com",
     ],
-    // GATE: same. This one is the pure case — the header is structurally
-    // perfect, so the cleanliness gate passes and ONLY the preceding-`@` check
-    // refuses it. postal-mime unquotes `"john doe"` to a local part with a
-    // space in it, the addr-spec gate drops that entry, and recipient #2 is
-    // promoted into slot 0.
+    // GATE: the addr-spec check. NOT the preceding-`@` check, and nothing is
+    // "promoted" — promotion was the pre-fix behaviour, when this code read a
+    // FILTERED list and John Doe's unusable entry was deleted out from under
+    // it. `addressParser` is unfiltered, so `entries[0]` IS John Doe's entry:
+    // postal-mime unquotes `"john doe"` into a local part with a space in it,
+    // and a space is a special. `bob@x.com` is what round 4 filed here, which
+    // is why it is the address asserted against, but no gate in the current
+    // code can reach him.
     [
       "a quoted local part the parser unquotes into something unusable",
       '"john doe"@example.com, bob@x.com',
       "bob@x.com",
     ],
-    // GATE: same. An unquoted `@` in a display name is illegal, so we cannot
-    // tell a display name from a dropped first recipient.
+    // GATE: one-`@`-per-chunk, with the preceding-`@` line firing first as
+    // above. An unquoted `@` in a display name is illegal, so we cannot tell a
+    // display name from a first recipient the parser swallowed.
     [
       "a bare address used as a display name",
       "bob@x.com <jane@example.com>",
       "jane@example.com",
     ],
-    // GATE: "the answer must be findable in the header". The one case in this
-    // table that is NOT a misattribution: `a@b.com` really is the
-    // first-written recipient, but the parser RECONSTRUCTED it by unquoting
-    // `"a"`, so that string appears nowhere in the header and its position
-    // cannot be established. The header is otherwise structurally perfect, so
-    // this is the only gate standing between us and an answer we cannot prove.
+    // GATE: findable-in-header, exclusively — this is the only row in the file
+    // that goes red when that check is removed. It is also the one row here
+    // that is NOT a misattribution: `a@b.com` really is the first-written
+    // recipient, but the parser RECONSTRUCTED it by unquoting `"a"`, so that
+    // string appears nowhere in the header text and its position cannot be
+    // established. The header is otherwise structurally perfect.
     [
       "a quoted local part the parser unquotes into a valid address",
       '"a"@b.com, jane@x.com',
       "a@b.com",
     ],
-    // GATE: same, and the nastiest input found while attacking this. RFC 5322
-    // comments nest; postal-mime's do not, so it ends the comment at the inner
-    // `)` and hands back `a@b.com` — an address that is COMMENT TEXT, not a
-    // recipient at all, with the real recipient stuffed into its display name.
-    // Nothing about the entry looks wrong: it is a clean, valid addr-spec.
-    // What gives it away is that it is nowhere in the header outside the
-    // comment we blanked out.
+    // GATE: one-`@`-per-chunk — chunk 0 carries two addresses. NOT
+    // findable-in-header: masking stops at the inner `)`, so `a@b.com` is
+    // sitting in plain view in the masked string and `indexOf` finds it.
+    //
+    // The nastiest input found while attacking this. RFC 5322 comments nest;
+    // postal-mime's do not, so it ends the comment at the inner `)` and hands
+    // back `a@b.com` — an address that is COMMENT TEXT, not a recipient at
+    // all, with the real recipient shoved into its display name. Nothing about
+    // the entry looks wrong: it is a clean, valid addr-spec in slot 0.
     [
       "an address buried in a nested comment",
       "(outer (nested) a@b.com) jane@example.com, bob@x.com",
       "a@b.com",
     ],
-    // GATE: "malformed AND multi-recipient". Each of these three is the
-    // two-recipient variant of a header that IS recovered above. The
-    // difference is the whole policy: recovery is safe when nothing could
-    // have been dropped ahead of the answer, and only then.
+    // GATE: the structural gate — one-`@`-per-chunk for the first and third,
+    // the chunk count for the second. Each is the two-recipient variant of a
+    // header that IS recovered above, which is the whole policy: recovery is
+    // safe when nothing could have been dropped ahead of the answer, and only
+    // then.
     [
       "an unclosed quote ahead of a second recipient",
       'jane@example.com "Bob <bob@x.com>',
@@ -795,20 +804,62 @@ describe("syncAccount — picking the counterparty off the header", () => {
       "Jane <jane@example.com> <bob@x.com>",
       "jane@example.com",
     ],
-    // GATE: same. The round-3 regression — one stray quote suppressed every
-    // delimiter in the hand-rolled scanner, which handed back Bob, the LAST
-    // address written. Two gates refuse it now: postal-mime returns the whole
-    // header text as a single "address", which is neither an addr-spec nor a
-    // clean one-address-per-entry list.
+    // GATE: the addr-spec check, with the structural gate behind it. The
+    // round-3 regression — one stray quote suppressed every delimiter in the
+    // hand-rolled scanner, which handed back Bob, the LAST address written.
+    // postal-mime returns the whole header text as a single "address", which
+    // is neither an addr-spec nor a clean one-address-per-entry list.
     [
       "an unclosed quote around the whole header",
       '"Jane jane@example.com, Bob <bob@x.com>',
       "bob@x.com",
     ],
-    // GATE: the addr-spec check, and nothing else. Each of these is a single
-    // clean entry that the parser reports faithfully and that we still refuse,
-    // so each one fails the moment that clause is relaxed.
-    ["a comma inside the angle brackets", "<jane,x@example.com>", "jane"],
+    //
+    // ── The addr-spec check ───────────────────────────────────────────────
+    //
+    // Each row below is a single clean entry that the parser reports
+    // faithfully and that `isAddrSpec` refuses. Which CLAUSE each row pins was
+    // MEASURED — one clause neutered at a time, this file re-run — rather than
+    // reasoned about from the source. Tests killed per clause:
+    //
+    //   specials regex (whitespace, `,`, `;`)  2  the comma and semicolon rows
+    //   `!domain.includes(".")`            3  both dotless rows, plus
+    //                                         "stops at an unusable To:"
+    //   invisible-character set            2  the ZWSP and RTL rows
+    //   `length > 254`                     1
+    //   leading/trailing domain dot        1
+    //   doubled domain dot                 1
+    //   `!local || !domain`                1  the empty-local-part row
+    //   `at === -1`                        0
+    //   `at !== lastIndexOf("@")`          0
+    //
+    // TWO CLAUSES ARE PINNED BY NOTHING. That is measured, and it is not an
+    // oversight waiting to be tidied away:
+    //
+    //   - The double-`@` clause CANNOT be pinned by any header. For
+    //     `isAddrSpec` to be the check that matters, the address has to have
+    //     survived findable-in-header, i.e. appear verbatim in the masked
+    //     header — and if it carries two `@`, so does its chunk, so the
+    //     structural gate has already refused the header. Measured: neuter the
+    //     double-`@` clause alone and this file stays green; neuter it
+    //     together with one-`@`-per-chunk and `<jane@@example.com>` goes red.
+    //     The row below is kept because the header must be refused, not
+    //     because it covers that clause.
+    //
+    //   - `at === -1` overlaps `!local || !domain`, which in turn overlaps
+    //     `!domain.includes(".")`. Measured: neuter `at === -1` AND
+    //     `!local || !domain` together and only the empty-local-part row goes
+    //     red — the four "names nobody" rows at the bottom stay green, because
+    //     the domain-dot clause refuses `""` too.
+    //
+    // So the four bottom rows pin no clause of their own. They are here for
+    // the OUTCOME — a header naming nobody must skip — not for coverage, and
+    // the comment above them says so.
+    [
+      "a comma inside the angle brackets",
+      "<jane,x@example.com>",
+      "jane,x@example.com",
+    ],
     [
       "a semicolon inside the angle brackets",
       "<jane;x@example.com>",
@@ -832,19 +883,40 @@ describe("syncAccount — picking the counterparty off the header", () => {
       `${"a".repeat(250)}@example.com`,
     ],
     ["two at-signs", "<jane@@example.com>", "jane@@example.com"],
-    // GATE: the addr-spec check again, reached through a first recipient that
-    // is syntactically fine but not one we will file mail under. The danger
+    // An address carrying a character that renders as nothing. The header is
+    // structurally perfect and the address looks, in every UI that will ever
+    // show it, exactly like the real one — but `people.email` will never match
+    // it, so mirroring it would mint a person row that can never merge with
+    // the customer's own. The second is worse than it reads: U+202E makes the
+    // rest of the line render right-to-left.
+    [
+      "a zero-width space welded to the first address",
+      "jane@example.com\u200b, bob@x.com",
+      "jane@example.com\u200b",
+    ],
+    [
+      "a right-to-left override inside the only address",
+      "<jane@ex\u202eample.com>",
+      "jane@ex\u202eample.com",
+    ],
+    // GATE: the addr-spec check, reached through a first recipient that is
+    // syntactically fine but not one we will file mail under. The danger here
     // is not the dotless address — it is bob, sitting behind it in slot 1.
     [
       "a dotless domain ahead of a valid one",
       "jane@localhost, bob@x.com",
       "bob@x.com",
     ],
-    // GATE: there is no first entry to take, or it carries no address.
-    ["a backslash at the very end of a quoted name", '"Jane\\', ""],
-    ["empty angle brackets", "<>", ""],
-    ["only whitespace", "   ", ""],
-    ["no at-sign at all", "Jane Doe", ""],
+    // NO CLAUSE OF THEIR OWN — see the measurement note above. postal-mime
+    // hands back an entry with an empty address (or no entry at all), which
+    // `isAddrSpec` refuses via whichever clause it reaches first; every one of
+    // those is already pinned by a row further up. These four are here for the
+    // outcome: a header that names nobody must skip. They name nobody, so
+    // there is no wrong answer to assert against and `refused` is null.
+    ["a backslash at the very end of a quoted name", '"Jane\\', null],
+    ["empty angle brackets", "<>", null],
+    ["only whitespace", "   ", null],
+    ["no at-sign at all", "Jane Doe", null],
   ];
 
   for (const [label, to, refused] of rejects) {
@@ -867,9 +939,13 @@ describe("syncAccount — picking the counterparty off the header", () => {
       expect(res.failed).toBe(0);
       const rows = await getDb().select().from(sentEmails);
       expect(rows).toHaveLength(0);
-      // Spelled out so the failure message names the customer whose timeline
-      // this header would otherwise have polluted.
-      expect(rows.map((r) => r.toAddress)).not.toContain(refused);
+      // Spelled out so the failure message names the address this header
+      // would otherwise have filed. Skipped where the header names nobody:
+      // `not.toContain(null)` on an empty array asserts nothing at all, and a
+      // test that cannot fail is worse than no test.
+      if (refused !== null) {
+        expect(rows.map((r) => r.toAddress)).not.toContain(refused);
+      }
     });
   }
 

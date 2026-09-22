@@ -168,10 +168,26 @@ function header(
  */
 function isAddrSpec(address: string): boolean {
   // RFC 5321's 254-octet ceiling; also stops a pathological header early.
-  if (address.length === 0 || address.length > 254) return false;
+  // (`""` needs no separate check — it has no `@`, so the test below fails.)
+  if (address.length > 254) return false;
   // No whitespace, and none of RFC 5322's specials: comma, quote, angle
   // brackets, parens, colon, semicolon, backslash, square brackets.
   if (/[\s",<>();:\\[\]]/.test(address)) return false;
+  // Characters that render as NOTHING and that JS `\s` does not cover: zero
+  // widths and joiners, soft hyphen, and the bidi embedding / override /
+  // isolate controls. `alpha@x.com` with a ZWSP welded to the end is a third
+  // outcome \u2014 neither the first-written address nor null \u2014 and it is the worst
+  // KIND of third outcome, because it looks correct everywhere it is displayed
+  // and matches nothing: the `people.email` lookup misses, so the mirror files
+  // a row under an address that can never merge with the real person's.
+  // U+202E would render the whole thing backwards. An address we cannot show a
+  // human truthfully is not one we will file a customer under.
+  if (
+    /[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/.test(
+      address,
+    )
+  )
+    return false;
   const at = address.indexOf("@");
   if (at === -1 || at !== address.lastIndexOf("@")) return false;
   const local = address.slice(0, at);
@@ -302,11 +318,10 @@ function topLevelChunks(masked: string): string[] {
  * — but every input found so far, some two thousand generated headers plus
  * every case in `gmail-sync-sent.test.ts`, is ALSO refused further down, so
  * deleting either leaves the suite green. They are kept because between them
- * they are what
- * makes the argument above SOUND rather than merely true today: they are the
- * two checks that fail closed if postal-mime ever starts silently dropping an
- * entry, which is precisely how this function was wrong before. Nothing else
- * here may be relaxed on the assumption that they will catch it.
+ * they are what makes the argument above SOUND rather than merely true today:
+ * they are the two checks that fail closed if postal-mime ever starts silently
+ * dropping an entry, which is precisely how this function was wrong before.
+ * Nothing else here may be relaxed on the assumption that they will catch it.
  */
 function firstWrittenAddress(rawHeaderValue: string | null): string | null {
   if (rawHeaderValue === null) return null;
