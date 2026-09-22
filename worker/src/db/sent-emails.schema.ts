@@ -24,6 +24,23 @@ export const sentEmails = sqliteTable(
      * migration 0022 for the algorithm + rationale.
      */
     conversationId: text("conversation_id"),
+    /**
+     * Gmail's id for the message it created when we sent this. Null for
+     * Cloudflare-sent mail. This is the echo-suppression key: a later
+     * slice mirrors `SENT` messages from Gmail onto the timeline, and
+     * without this id every reply we send through Gmail would come back
+     * through that mirror and appear twice. Gmail owns this identifier,
+     * not us, so it is NOT unique here — a duplicate API response must
+     * be a no-op, not a hard failure.
+     */
+    gmailMessageId: text("gmail_message_id"),
+    /**
+     * Gmail's thread id for this message. Setting it on send is what
+     * makes a reply thread inside Gmail instead of starting a new
+     * conversation. It repeats by design: every message in a thread
+     * shares the same id, so it is NOT unique here.
+     */
+    gmailThreadId: text("gmail_thread_id"),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
