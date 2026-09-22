@@ -70,6 +70,11 @@ function stubGmail(opts: {
   historyGoneForStartId?: string;
   /** Records per history page; omitted means one page holds everything. */
   pageSize?: number;
+  /**
+   * Mailbox head per page index, for when it moves mid-pagination. Omitted
+   * means every page reports the same head.
+   */
+  pageHistoryIds?: string[];
   /** Message ids whose fetch returns a 500, so processing them throws. */
   failMessageIds?: string[];
 }) {
@@ -149,13 +154,21 @@ function stubGmail(opts: {
         const slice = remaining.slice(offset, offset + size);
         const more = offset + size < remaining.length;
 
+        // Gmail reports the head as it stands per request, so it can move
+        // between pages when mail arrives mid-pagination.
+        const pageIndex = Math.floor(offset / size);
+        const head =
+          opts.pageHistoryIds?.[pageIndex] ??
+          opts.pageHistoryIds?.[opts.pageHistoryIds.length - 1] ??
+          pageHistoryId;
+
         return json({
           history: slice.map((r) => ({
             id: r.id,
             messagesAdded: r.messageIds.map((id) => ({ message: { id } })),
           })),
           ...(more ? { nextPageToken: `p${offset + size}` } : {}),
-          historyId: pageHistoryId,
+          historyId: head,
         });
       }
       if (url.includes("/users/me/messages/")) {
@@ -414,38 +427,6 @@ describe("syncAccount — skipping", () => {
     expect(await getDb().select().from(emails)).toHaveLength(0);
   });
 
-  it("skips a message that resolves to no configured inbox", async () => {
-    await seedAccount();
-    // Only a GROUP mapping, so there is no personal mailbox to route to.
-    // `resolvePersonalInbox` returns null and the message is skipped rather
-    // than guessed at. (The headers below are inert — this slice inspects
-    // none of them, because List-ID and Delivered-To are sender-forgeable.)
-    await seedInbox("support@acme.dev", "team@acme.dev");
-    stubGmail({
-      historyIds: ["m1"],
-      messages: {
-        m1: {
-          raw: rawEmail({
-            from: "jane@example.com",
-            deliveredTo: "nobody@acme.dev",
-            messageId: "<n1@example.com>",
-          }),
-        },
-      },
-    });
-
-    const res = await syncAccount(
-      getDb(),
-      await account(),
-      env as unknown as CloudflareBindings,
-      fakeCtx(),
-      CFG,
-    );
-    expect(res.ingested).toBe(0);
-    expect(res.skipped).toBe(1);
-    expect(await getDb().select().from(emails)).toHaveLength(0);
-  });
-
   it("tolerates a message deleted between the history page and the fetch", async () => {
     await seedAccount();
     await seedInbox("support@acme.dev", null);
@@ -598,6 +579,41 @@ describe("syncAccount — the message cap and the resume cursor", () => {
     expect(String(historyCalls[1][0])).toContain("pageToken=p2");
   });
 
+  it("leaves the cursor at the FIRST page's historyId, not the last", async () => {
+    await seedAccount();
+    await seedInbox("support@acme.dev", null);
+
+    // Mail arrives while we paginate, so page two reports a head far above
+    // anything either page showed us. Trusting it would skip every record
+    // between 10500 and 99999 that we were never given.
+    const records = [
+      { id: "10001", messageIds: ["q1"] },
+      { id: "10002", messageIds: ["q2"] },
+      { id: "10003", messageIds: ["q3"] },
+      { id: "10004", messageIds: ["q4"] },
+    ];
+    const ids = records.flatMap((r) => r.messageIds);
+    stubGmail({
+      records,
+      pageSize: 2,
+      pageHistoryIds: ["10500", "99999"],
+      messages: bulkMessages(ids),
+    });
+
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(res.ingested).toBe(4);
+    const cursor = (await account()).historyId;
+    expect(cursor).toBe("10500");
+    expect(cursor).not.toBe("99999");
+  });
+
   it("never splits a record, even when that means overshooting the cap", async () => {
     await seedAccount();
     await seedInbox("support@acme.dev", null);
@@ -660,6 +676,91 @@ describe("syncAccount — the message cap and the resume cursor", () => {
     expect(res.ingested).toBeGreaterThan(MAX_MESSAGES_PER_RUN);
     // The whole page was consumed, so the cursor reaches the mailbox head.
     expect((await account()).historyId).toBe("30001");
+  });
+});
+
+describe("syncAccount — an unusable inbox mapping stalls", () => {
+  const oneMessage = {
+    historyIds: ["m1"],
+    messages: {
+      m1: {
+        raw: rawEmail({
+          from: "jane@example.com",
+          deliveredTo: "support@acme.dev",
+          messageId: "<n1@example.com>",
+        }),
+      },
+    },
+  };
+
+  it("consumes no history when there is no personal mapping", async () => {
+    await seedAccount();
+    // Only a GROUP mapping, so there is no personal mailbox to route to.
+    await seedInbox("support@acme.dev", "team@acme.dev");
+    stubGmail(oneMessage);
+
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(res.ingested).toBe(0);
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+
+    const row = await account();
+    // The cursor must NOT move. Advancing it would consume the history naming
+    // this message and lose it permanently, over a fixable misconfiguration.
+    expect(row.historyId).toBe("9000");
+    expect(row.lastError).toBe("no_personal_inbox");
+  });
+
+  it("consumes no history when two inboxes claim the same account", async () => {
+    await seedAccount();
+    // Reachable today: the admin PATCH does not enforce one inbox per Gmail
+    // account, and resolvePersonalInbox refuses to pick between them.
+    await seedInbox("support@acme.dev", null);
+    await seedInbox("sales@acme.dev", null);
+    stubGmail(oneMessage);
+
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(res.ingested).toBe(0);
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+
+    const row = await account();
+    expect(row.historyId).toBe("9000");
+    // Distinguished from the none case: the operator must remove a mapping,
+    // not add one.
+    expect(row.lastError).toBe("ambiguous_inbox_mapping");
+  });
+
+  it("does not seed a cursor for an unconfigured account", async () => {
+    await seedAccount(null);
+    await seedInbox("support@acme.dev", "team@acme.dev");
+    stubGmail({ profileHistoryId: "55555" });
+
+    await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    const row = await account();
+    // Seeding would silently set the no-backfill watermark on an account that
+    // cannot receive mail yet, so mail arriving before the fix is lost.
+    expect(row.historyId).toBeNull();
+    expect(row.lastError).toBe("no_personal_inbox");
   });
 });
 

@@ -145,13 +145,45 @@ export async function syncAccount(
   // Resolved once per run, not per message: this slice routes personal
   // mailboxes only (1:1 account -> inbox) and deliberately inspects no
   // header, because List-ID and Delivered-To are both sender-forgeable.
-  // Group mappings are ignored; `resolvePersonalInbox` returns null and each
-  // message is counted as skipped rather than guessed at.
+  // Group mappings are ignored.
   const inbox = resolvePersonalInbox(mappings);
 
   let ingested = 0;
   let skipped = 0;
   let failed = 0;
+
+  // No usable destination — so stall, before touching history at all.
+  //
+  // Skipping each message instead would consume the history that names it and
+  // advance the cursor past it, discarding the mail permanently for a problem
+  // that is pure misconfiguration and trivially fixable. Consuming nothing
+  // leaves it all in Gmail until the mapping is corrected, which is the same
+  // stall-rather-than-drop rule this engine applies everywhere else.
+  //
+  // Reachable in normal operation: the admin PATCH does not enforce one inbox
+  // per Gmail account, so two mappings make `resolvePersonalInbox` return null
+  // by its refuse-to-guess rule.
+  if (!inbox) {
+    // `resolvePersonalInbox` collapses both shapes to null. Recount here only
+    // to tell the operator WHICH one they have — the fixes differ. Mirrors
+    // the `=== null` predicate in route-inbox.ts.
+    const personalCount = mappings.filter(
+      (m) => m.gmailGroupAddress === null,
+    ).length;
+    const reason =
+      personalCount === 0 ? "no_personal_inbox" : "ambiguous_inbox_mapping";
+    console.error(
+      `Gmail sync for ${account.emailAddress}: ${reason} (${personalCount} personal mappings). Not consuming history until the mapping is fixed.`,
+    );
+    const now = nowSeconds();
+    await db
+      .update(gmailAccounts)
+      // No `lastSyncedAt` — nothing was synced — and no `historyId`, so the
+      // cursor stays exactly where it was.
+      .set({ lastError: reason, updatedAt: now })
+      .where(eq(gmailAccounts.id, account.id));
+    return { ingested, skipped, reseeded: false, failed };
+  }
 
   if (!account.historyId) {
     // A first seed skips nothing — there was no cursor — so it leaves no
@@ -162,7 +194,16 @@ export async function syncAccount(
 
   const startHistoryId = account.historyId;
   let pageToken: string | undefined;
-  let latestHistoryId: string | null = null;
+  /**
+   * The FIRST page's historyId, not the last.
+   *
+   * Each page reports the mailbox head as it stands when that page is
+   * fetched, so mail arriving mid-pagination pushes later pages' values above
+   * records we were never shown. The first page's value is the only one that
+   * provably sits at or below everything we went on to read, so it is the
+   * only safe place to leave the cursor after a full drain.
+   */
+  let firstPageHistoryId: string | null = null;
   /** True once we stopped early at MAX_MESSAGES_PER_RUN, mid-history. */
   let truncated = false;
   /** True once Gmail has no further history pages for this cursor. */
@@ -196,7 +237,9 @@ export async function syncAccount(
       throw err;
     }
 
-    if (page.historyId) latestHistoryId = page.historyId;
+    if (firstPageHistoryId === null && page.historyId) {
+      firstPageHistoryId = page.historyId;
+    }
 
     for (const record of groupIntoRecords(page.added)) {
       // Records are processed whole, never partially. Advancing the cursor to
@@ -230,11 +273,6 @@ export async function syncAccount(
           }
 
           if (message.labelIds.some((label) => SKIP_LABELS.has(label))) {
-            skipped++;
-            continue;
-          }
-
-          if (!inbox) {
             skipped++;
             continue;
           }
@@ -325,9 +363,10 @@ export async function syncAccount(
 
   // Three ways to advance, and the distinctions matter.
   //
-  // A run that consumed the whole history range advances to the page-level
-  // historyId — the mailbox's current position, correct because nothing is
-  // left behind.
+  // A run that consumed the whole history range advances to the FIRST page's
+  // historyId. Nothing is left behind, but the mailbox head may have moved
+  // while we paginated, so the last page's value can sit above records we
+  // were never shown; the first page's cannot.
   //
   // A run cut short by the cap advances only to the last record it processed
   // IN FULL. `startHistoryId` is exclusive ("returns history records AFTER
@@ -343,8 +382,8 @@ export async function syncAccount(
   // record, so nothing is skipped.
   if (failedMessageId) {
     if (lastCompleteRecordId) patch.historyId = lastCompleteRecordId;
-  } else if (exhausted && latestHistoryId) {
-    patch.historyId = latestHistoryId;
+  } else if (exhausted && firstPageHistoryId) {
+    patch.historyId = firstPageHistoryId;
   } else if (truncated && lastCompleteRecordId) {
     patch.historyId = lastCompleteRecordId;
     console.warn(
