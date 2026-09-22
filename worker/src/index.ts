@@ -33,6 +33,9 @@ import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { processOutbox } from "./lib/outbox";
+import { syncAllGmailAccounts } from "./lib/gmail/sync";
+import { drizzle } from "drizzle-orm/d1";
+import { schema } from "./db/schema";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -335,6 +338,23 @@ export default {
       handleScheduled(env)
         .catch((err) => console.error("[cron] sequence dispatch failed:", err))
         .then(() => processOutbox(env)),
+    );
+    // Isolated from sequence dispatch / outbox processing above: a Gmail
+    // sync failure must not be able to break either. `syncAllGmailAccounts`
+    // already isolates per-account failures internally (see its own
+    // Promise.allSettled) and no-ops when the integration isn't configured,
+    // so this call either does nothing or runs to completion.
+    //
+    // NOTE: `syncAllGmailAccounts` returns `Promise<void>`, not the
+    // per-account `{ ingested, skipped, failed, reseeded }` counts —
+    // see the task report for why a per-account `failed` count can't be
+    // logged from here without a signature change to that (already
+    // reviewed) function.
+    ctx.waitUntil(
+      (async () => {
+        const db = drizzle(env.DB, { schema });
+        await syncAllGmailAccounts(db, env, ctx);
+      })().catch((err) => console.error("[cron] gmail sync failed:", err)),
     );
   },
   async queue(
