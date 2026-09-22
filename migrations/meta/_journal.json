@@ -253,6 +253,13 @@
       "when": 1790020964201,
       "tag": "0035_overjoyed_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1790084477489,
+      "tag": "0036_futuristic_gunslinger",
+      "breakpoints": true
     }
   ]
 }
