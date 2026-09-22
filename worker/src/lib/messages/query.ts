@@ -1,6 +1,7 @@
 import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { attachments } from "../../db/attachments.schema";
+import { messageMailboxes } from "../../db/message-mailboxes.schema";
 import { escapeFts, escapeLike } from "../helpers";
 import { inboxScopeSql, type AllowedInboxes } from "../inbox-permissions";
 import {
@@ -14,6 +15,20 @@ import type { MessageCursorV1 } from "./cursor";
 import type { AttachmentRow, MessageKind, UnifiedMessage } from "./types";
 
 export type MessageSearchMode = "subject" | "fulltext";
+export type MessageFolder =
+  | "inbox"
+  | "sent"
+  | "archive"
+  | "junk"
+  | "trash"
+  | { mailboxId: string };
+
+export class InvalidQueryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidQueryError";
+  }
+}
 
 export interface MessageQuery {
   inboxes?: string[];
@@ -32,6 +47,15 @@ export interface MessageQuery {
   order?: "desc" | "asc";
   withAttachmentCounts?: boolean;
   withAttachments?: boolean;
+  viewer?: { userId: string };
+  withState?: boolean;
+  folder?: MessageFolder;
+  starred?: true;
+  unseen?: true;
+  includeArchived?: boolean;
+  includeTrashed?: boolean;
+  includeSpam?: boolean;
+  excludeCampaignSends?: boolean;
 }
 
 export interface MessagePage {
@@ -62,6 +86,12 @@ type RawMessageRow = {
   sequence_id: string | null;
   sequence_enrollment_id: string | null;
   delivery_status: string | null;
+  seen_at: number | null;
+  starred_at: number | null;
+  user_state_present: number;
+  archived_at: number | null;
+  spam_at: number | null;
+  trashed_at: number | null;
 };
 
 function normalizeInboxes(inboxes: string[] | undefined): string[] | undefined {
@@ -110,6 +140,101 @@ function blockedScope(enabled: boolean): SQL {
          AND b.value = lower(substr(p.email, instr(p.email, '@') + 1))
        )
   )`;
+}
+
+function personalStateJoin(
+  query: MessageQuery,
+  kind: MessageKind,
+  idColumn: SQL,
+): SQL {
+  if (!query.viewer) return sql``;
+  return sql`LEFT JOIN message_user_state mus
+    ON mus.user_id = ${query.viewer.userId}
+    AND mus.message_kind = ${kind}
+    AND mus.message_id = ${idColumn}`;
+}
+
+function personalStateSelect(query: MessageQuery): SQL {
+  if (!query.viewer) {
+    return sql`NULL AS seen_at, NULL AS starred_at, 0 AS user_state_present`;
+  }
+  return sql`mus.seen_at AS seen_at,
+    mus.starred_at AS starred_at,
+    CASE WHEN mus.message_id IS NULL THEN 0 ELSE 1 END AS user_state_present`;
+}
+
+function mailboxFolderId(
+  folder: MessageFolder | undefined,
+): string | undefined {
+  return typeof folder === "object" ? folder.mailboxId : undefined;
+}
+
+function stateScope(
+  query: MessageQuery,
+  kind: MessageKind,
+  idColumn: SQL,
+  inboxColumn: SQL,
+  readColumn?: SQL,
+): SQL {
+  const folder = query.folder;
+  const mailboxId = mailboxFolderId(folder);
+  let folderScope = sql``;
+
+  if (folder === "inbox") {
+    folderScope = sql`AND mms.trashed_at IS NULL
+      AND mms.spam_at IS NULL
+      AND mms.archived_at IS NULL`;
+  } else if (folder === "sent") {
+    folderScope = sql`AND mms.trashed_at IS NULL`;
+  } else if (folder === "archive") {
+    folderScope = sql`AND mms.archived_at IS NOT NULL
+      AND mms.trashed_at IS NULL
+      AND mms.spam_at IS NULL`;
+  } else if (folder === "junk") {
+    folderScope = sql`AND mms.spam_at IS NOT NULL
+      AND mms.trashed_at IS NULL`;
+  } else if (folder === "trash") {
+    folderScope = sql`AND mms.trashed_at IS NOT NULL`;
+  } else if (mailboxId !== undefined) {
+    folderScope = sql`AND mms.trashed_at IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM message_mailboxes mm
+        JOIN mailboxes mb ON mb.id = mm.mailbox_id
+        WHERE mm.message_kind = ${kind}
+          AND mm.message_id = ${idColumn}
+          AND mm.mailbox_id = ${mailboxId}
+          AND mb.inbox = ${inboxColumn}
+      )`;
+  } else {
+    const archived =
+      query.includeArchived === false
+        ? sql`AND mms.archived_at IS NULL`
+        : sql``;
+    const spam =
+      query.includeSpam === false ? sql`AND mms.spam_at IS NULL` : sql``;
+    const trashed =
+      query.includeTrashed === false ? sql`AND mms.trashed_at IS NULL` : sql``;
+    folderScope = sql`${archived} ${spam} ${trashed}`;
+  }
+
+  const starred =
+    query.starred === true ? sql`AND mus.starred_at IS NOT NULL` : sql``;
+  const unseen =
+    query.unseen === true && kind === "received" && readColumn
+      ? sql`AND (
+          (mus.message_id IS NULL AND ${readColumn} = 0)
+          OR (mus.message_id IS NOT NULL AND mus.seen_at IS NULL)
+        )`
+      : sql``;
+
+  return sql`${folderScope} ${starred} ${unseen}`;
+}
+
+function campaignScope(query: MessageQuery): SQL {
+  return query.excludeCampaignSends === true
+    ? sql`AND se.campaign_id IS NULL`
+    : sql``;
 }
 
 function receivedSearch(
@@ -235,10 +360,17 @@ function receivedArm(
       NULL AS campaign_id,
       NULL AS sequence_id,
       NULL AS sequence_enrollment_id,
-      NULL AS delivery_status
+      NULL AS delivery_status,
+      ${personalStateSelect(query)},
+      mms.archived_at AS archived_at,
+      mms.spam_at AS spam_at,
+      mms.trashed_at AS trashed_at
     FROM emails e
     ${search.join}
     LEFT JOIN people p ON p.id = e.person_id
+    LEFT JOIN mailbox_message_state mms
+      ON mms.message_kind = 'received' AND mms.message_id = e.id
+    ${personalStateJoin(query, "received", sql`e.id`)}
     WHERE 1 = 1
       ${allowedScope}
       ${explicitInboxScope(sql`e.recipient`, requestedInboxes)}
@@ -247,6 +379,13 @@ function receivedArm(
       ${dateScope(sql`e.received_at`, query.after, query.before)}
       ${search.where}
       ${blockedScope(query.excludeBlocked ?? false)}
+      ${stateScope(
+        query,
+        "received",
+        sql`e.id`,
+        sql`e.recipient`,
+        sql`e.is_read`,
+      )}
       ${sourceCursorScope(
         sql`e.received_at`,
         sql`e.id`,
@@ -288,9 +427,16 @@ function sentArm(
       se.campaign_id AS campaign_id,
       se.sequence_id AS sequence_id,
       se.sequence_enrollment_id AS sequence_enrollment_id,
-      se.status AS delivery_status
+      se.status AS delivery_status,
+      ${personalStateSelect(query)},
+      mms.archived_at AS archived_at,
+      mms.spam_at AS spam_at,
+      mms.trashed_at AS trashed_at
     FROM sent_emails se
     LEFT JOIN people p ON p.id = se.person_id
+    LEFT JOIN mailbox_message_state mms
+      ON mms.message_kind = 'sent' AND mms.message_id = se.id
+    ${personalStateJoin(query, "sent", sql`se.id`)}
     WHERE 1 = 1
       ${allowedScope}
       ${explicitInboxScope(sql`se.from_address`, requestedInboxes)}
@@ -299,6 +445,8 @@ function sentArm(
       ${dateScope(sql`se.sent_at`, query.after, query.before)}
       ${sentSearch(query.search, query.searchMode ?? "subject")}
       ${blockedScope(query.excludeBlocked ?? false)}
+      ${stateScope(query, "sent", sql`se.id`, sql`se.from_address`)}
+      ${campaignScope(query)}
       ${sourceCursorScope(
         sql`se.sent_at`,
         sql`se.id`,
@@ -340,7 +488,12 @@ function cursorScope(
   )`;
 }
 
-function toUnified(row: RawMessageRow): UnifiedMessage {
+function toUnified(
+  row: RawMessageRow,
+  withState: boolean,
+  hasViewer: boolean,
+): UnifiedMessage {
+  let message: UnifiedMessage;
   if (row.kind === "received") {
     const selected: ReceivedSelect = {
       id: row.id,
@@ -357,29 +510,50 @@ function toUnified(row: RawMessageRow): UnifiedMessage {
       personEmail: row.from_email,
       personName: row.from_name,
     };
-    return adaptReceived(selected);
+    message = adaptReceived(selected);
+  } else {
+    const selected: SentSelect = {
+      id: row.id,
+      personId: row.person_id,
+      fromAddress: row.inbox,
+      toAddress: row.to_email,
+      subject: row.subject,
+      bodyHtml: row.body_html,
+      bodyText: row.body_text,
+      inReplyTo: row.in_reply_to,
+      messageId: row.message_id,
+      status: row.delivery_status ?? "sent",
+      cc: row.cc,
+      conversationId: row.conversation_id,
+      campaignId: row.campaign_id,
+      sequenceId: row.sequence_id,
+      sequenceEnrollmentId: row.sequence_enrollment_id,
+      sentAt: row.occurred_at,
+      personName: row.to_name,
+    };
+    message = adaptSent(selected);
   }
 
-  const selected: SentSelect = {
-    id: row.id,
-    personId: row.person_id,
-    fromAddress: row.inbox,
-    toAddress: row.to_email,
-    subject: row.subject,
-    bodyHtml: row.body_html,
-    bodyText: row.body_text,
-    inReplyTo: row.in_reply_to,
-    messageId: row.message_id,
-    status: row.delivery_status ?? "sent",
-    cc: row.cc,
-    conversationId: row.conversation_id,
-    campaignId: row.campaign_id,
-    sequenceId: row.sequence_id,
-    sequenceEnrollmentId: row.sequence_enrollment_id,
-    sentAt: row.occurred_at,
-    personName: row.to_name,
-  };
-  return adaptSent(selected);
+  if (withState) {
+    const seen =
+      row.kind === "sent"
+        ? true
+        : hasViewer
+          ? row.user_state_present === 0
+            ? row.is_read === 1
+            : row.seen_at !== null
+          : row.is_read === 1;
+    message.state = {
+      seen,
+      starredAt: hasViewer ? row.starred_at : null,
+      archivedAt: row.archived_at,
+      spamAt: row.spam_at,
+      trashedAt: row.trashed_at,
+      mailboxIds: [],
+    };
+  }
+
+  return message;
 }
 
 function attachmentWhere(messages: UnifiedMessage[]): SQL | undefined {
@@ -480,6 +654,55 @@ async function enrichAttachments(
   }
 }
 
+const STATE_MEMBERSHIP_BATCH_SIZE = 40;
+
+async function enrichMailboxState(
+  db: DrizzleD1Database<any>,
+  messages: UnifiedMessage[],
+): Promise<void> {
+  if (messages.length === 0) return;
+
+  const byKey = new Map<string, string[]>();
+  for (const kind of ["received", "sent"] as const) {
+    const ids = messages
+      .filter((message) => message.ref.kind === kind)
+      .map((message) => message.ref.id);
+    for (
+      let start = 0;
+      start < ids.length;
+      start += STATE_MEMBERSHIP_BATCH_SIZE
+    ) {
+      const batch = ids.slice(start, start + STATE_MEMBERSHIP_BATCH_SIZE);
+      const rows = await db
+        .select({
+          messageKind: messageMailboxes.messageKind,
+          messageId: messageMailboxes.messageId,
+          mailboxId: messageMailboxes.mailboxId,
+        })
+        .from(messageMailboxes)
+        .where(
+          and(
+            eq(messageMailboxes.messageKind, kind),
+            inArray(messageMailboxes.messageId, batch),
+          ),
+        );
+      for (const row of rows) {
+        const key = `${row.messageKind}:${row.messageId}`;
+        const mailboxIds = byKey.get(key) ?? [];
+        mailboxIds.push(row.mailboxId);
+        byKey.set(key, mailboxIds);
+      }
+    }
+  }
+
+  for (const message of messages) {
+    if (!message.state) continue;
+    message.state.mailboxIds = [
+      ...(byKey.get(`${message.ref.kind}:${message.ref.id}`) ?? []),
+    ].sort();
+  }
+}
+
 export type BuiltMessageQuery = {
   statement: SQL;
   limit: number | null;
@@ -498,8 +721,19 @@ export function buildMessageQuerySql(
     return null;
   }
 
+  if ((query.starred === true || query.unseen === true) && !query.viewer) {
+    throw new InvalidQueryError("starred and unseen filters require a viewer");
+  }
+  if (
+    typeof query.folder === "object" &&
+    query.folder.mailboxId.trim().length === 0
+  ) {
+    throw new InvalidQueryError("mailboxId is required");
+  }
   if (query.cursor !== undefined && query.offset !== undefined) {
-    throw new Error("queryMessages accepts cursor or offset, not both");
+    throw new InvalidQueryError(
+      "queryMessages accepts cursor or offset, not both",
+    );
   }
 
   const limit =
@@ -517,10 +751,34 @@ export function buildMessageQuerySql(
   };
 
   const arms: SQL[] = [];
-  if (query.direction !== "outbound") {
+  const folder = query.folder;
+  const forceReceived =
+    folder === "inbox" ||
+    folder === "archive" ||
+    folder === "junk" ||
+    query.unseen === true;
+  const forceSent = folder === "sent";
+  const forceBoth =
+    folder === "trash" || (folder !== undefined && typeof folder === "object");
+  const includeReceived = forceReceived
+    ? true
+    : forceSent
+      ? false
+      : forceBoth
+        ? true
+        : query.direction !== "outbound";
+  const includeSent = forceSent
+    ? true
+    : forceReceived
+      ? false
+      : forceBoth
+        ? true
+        : query.direction !== "inbound";
+
+  if (includeReceived) {
     arms.push(receivedArm(allowed, query, requestedInboxes, armWindow));
   }
-  if (query.direction !== "inbound") {
+  if (includeSent) {
     arms.push(sentArm(allowed, query, requestedInboxes, armWindow));
   }
 
@@ -562,7 +820,9 @@ export async function queryMessages(
 
   const hasMore = limit !== null && rows.length > limit;
   const visibleRows = limit === null ? rows : rows.slice(0, limit);
-  const messages = visibleRows.map(toUnified);
+  const messages = visibleRows.map((row) =>
+    toUnified(row, query.withState ?? false, query.viewer !== undefined),
+  );
 
   await enrichAttachments(
     db,
@@ -570,6 +830,9 @@ export async function queryMessages(
     query.withAttachmentCounts ?? false,
     query.withAttachments ?? false,
   );
+  if (query.withState) {
+    await enrichMailboxState(db, messages);
+  }
 
   const last =
     limit === null ? undefined : rows[Math.min(limit, rows.length) - 1];

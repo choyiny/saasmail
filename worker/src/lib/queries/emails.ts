@@ -138,6 +138,8 @@ export async function listPersonEmails(
     limit: requested,
     withAttachmentCounts: true,
     withAttachments: true,
+    includeTrashed: false,
+    includeSpam: false,
   });
 
   const result: PersonEmailRow[] = pageResult.messages.map((message) => ({

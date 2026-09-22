@@ -73,9 +73,11 @@ Do **not** hand-author `migrations/*.sql` or edit `migrations/meta/_journal.json
 | Auth tables (better-auth)             | change config → `yarn auth:generate` → then `yarn db:generate`               |
 | Data-only backfill (no schema change) | `yarn db:generate --custom --name=<slug>` then paste SQL into the empty file |
 
-(`yarn db:generate` is `drizzle-kit generate`; `--custom` / `--name` are drizzle-kit flags. Plain generate emits nothing for data-only work: "No schema changes, nothing to migrate". `--custom` creates a journaled empty migration **and** the matching `meta/NNNN_snapshot.json`.)
+(`yarn db:generate` is `drizzle-kit generate`; `--custom` / `--name` are drizzle-kit flags. Plain generate emits nothing for data-only work: "No schema changes, nothing to migrate". In this repo, `drizzle-kit --custom` emits the SQL file and journal entry but not a usable chained snapshot, so add the matching `meta/NNNN_snapshot.json` explicitly with its `prevId` chained to the prior snapshot.)
 
 `yarn db:generate` needs a local D1 under `.wrangler/` (run `yarn dev` once, or e2e setup, if it says `D1 directory not found`).
+
+The test database schema in `worker/src/__tests__/helpers.ts` is hand-maintained. Every schema migration must update `applyMigrations()` there in the same change.
 
 Details: [`migrations/README.md`](./migrations/README.md). Apply with `yarn db:migrate:dev` / `yarn db:migrate:prod`.
 
@@ -88,6 +90,11 @@ Backend routes are Hono + Zod OpenAPI under `worker/src/routers/`. Spec is serve
 Use `worker/src/lib/messages/query.ts` / `queryMessages()` for any
 cross-direction mail list, search, timeline, or agent read. Do not add another
 direct `emails ∪ sent_emails` merge in a router or tool.
+
+Message state mutations go through `worker/src/lib/messages/state.ts`. Every
+hard-delete path for received or sent messages must call `deleteMessageState()`
+before deleting the message rows so personal state, shared state, and folder
+memberships cannot become orphans.
 
 ## WebMCP tools
 

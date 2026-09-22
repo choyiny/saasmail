@@ -334,6 +334,71 @@ export async function createMailbox(
   return row;
 }
 
+export async function getMailbox(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  mailboxId: string,
+) {
+  return getMailboxForMutation(db, allowed, mailboxId);
+}
+
+export async function listMailboxes(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  inbox?: string,
+) {
+  const requested = inbox?.trim().toLowerCase();
+  if (requested !== undefined) {
+    if (!requested || !isInboxAllowed(allowed, requested)) {
+      throw new MessageStateAccessError();
+    }
+    return db.select().from(mailboxes).where(eq(mailboxes.inbox, requested));
+  }
+
+  if (allowed.isAdmin) return db.select().from(mailboxes);
+  if (allowed.inboxes.length === 0) return [];
+
+  const rows: (typeof mailboxes.$inferSelect)[] = [];
+  for (
+    let start = 0;
+    start < allowed.inboxes.length;
+    start += LOOKUP_BATCH_SIZE
+  ) {
+    rows.push(
+      ...(await db
+        .select()
+        .from(mailboxes)
+        .where(
+          inArray(
+            mailboxes.inbox,
+            allowed.inboxes.slice(start, start + LOOKUP_BATCH_SIZE),
+          ),
+        )),
+    );
+  }
+  return rows;
+}
+
+export async function updateMailbox(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  _userId: string,
+  mailboxId: string,
+  changes: { name?: string; sortOrder?: number },
+) {
+  const mailbox = await getMailboxForMutation(db, allowed, mailboxId);
+  const updatedAt = Math.floor(Date.now() / 1000);
+  const update: { name?: string; sortOrder?: number; updatedAt: number } = {
+    updatedAt,
+  };
+  if (changes.name !== undefined)
+    update.name = normalizeMailboxName(changes.name);
+  if (changes.sortOrder !== undefined) update.sortOrder = changes.sortOrder;
+
+  await db.update(mailboxes).set(update).where(eq(mailboxes.id, mailboxId));
+  return { ...mailbox, ...update };
+}
+
 export async function renameMailbox(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,

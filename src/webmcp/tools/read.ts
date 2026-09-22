@@ -48,6 +48,7 @@ export interface ReadDeps {
   fetchSequences: () => Promise<any>;
   fetchStats: (recipient?: string) => Promise<any>;
   searchEmails: (p: { q: string; [k: string]: any }) => Promise<any>;
+  fetchMessages?: (p?: any) => Promise<any>;
   getSession: () => Promise<any>;
   fetchLists: (p?: any) => Promise<any>;
   fetchList: (id: string) => Promise<any>;
@@ -218,6 +219,33 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
           );
         }
         return fail("Provide either personId or conversationId.");
+      },
+    },
+    {
+      name: "list_messages",
+      description:
+        "List unified received and sent messages with state, folder filters, cursor pagination, and attachment counts.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          inbox: { type: "string" },
+          folder: {
+            type: "string",
+            enum: ["inbox", "sent", "archive", "junk", "trash"],
+          },
+          mailboxId: { type: "string" },
+          starred: { type: "boolean" },
+          unseen: { type: "boolean" },
+          personId: { type: "string" },
+          q: { type: "string" },
+          cursor: { type: "string" },
+          limit: { type: "number" },
+          excludeCampaignSends: { type: "boolean" },
+        },
+      },
+      execute: async (args) => {
+        if (!deps.fetchMessages) return fail("Message listing is unavailable.");
+        return okJson(await deps.fetchMessages(args));
       },
     },
     {

@@ -8,6 +8,13 @@ export interface ActionDeps {
   fetchPeople: (params: { personId?: string; limit?: number }) => Promise<any>;
   fetchEmail: (id: string) => Promise<any>;
   markEmailRead: (id: string, isRead: boolean) => Promise<void>;
+  setMessageState?: (data: {
+    refs: string[];
+    seen?: boolean;
+    starred?: boolean;
+    archived?: boolean;
+    spam?: boolean;
+  }) => Promise<any>;
   enrollPerson: (
     sequenceId: string,
     data: {
@@ -206,6 +213,40 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
         await deps.markEmailRead(args.emailId, false);
         deps.invalidate();
         return okJson({ emailId: args.emailId, isRead: false });
+      },
+    },
+    {
+      name: "set_message_state",
+      description:
+        "Set seen, starred, archived, or spam state on messages. This tool cannot trash or delete messages.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          refs: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: 500,
+          },
+          seen: { type: "boolean" },
+          starred: { type: "boolean" },
+          archived: { type: "boolean" },
+          spam: { type: "boolean" },
+        },
+        required: ["refs"],
+      },
+      execute: async (args) => {
+        if (!deps.setMessageState) {
+          return fail("Message state updates are unavailable.");
+        }
+        const result = await deps.setMessageState({
+          refs: args.refs,
+          seen: args.seen,
+          starred: args.starred,
+          archived: args.archived,
+          spam: args.spam,
+        });
+        deps.invalidate();
+        return okJson(result);
       },
     },
     {

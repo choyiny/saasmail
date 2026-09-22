@@ -14,6 +14,8 @@ import {
   fetchSequences,
   fetchStats,
   searchEmails,
+  fetchMessages,
+  setMessageState,
   markEmailRead,
   saveDraft,
   enrollPerson,
@@ -31,10 +33,10 @@ import { createActionTools } from "./tools/actions";
 import { withActivity } from "./activity";
 import { WebMcpActivityFeed } from "./WebMcpActivityFeed";
 
-// 16 read tools + 8 action tools. Pinned by
+// 17 read tools + 9 action tools. Pinned by
 // src/webmcp/__tests__/registerTools.test.tsx so this can't silently drift
 // from the tool factories it's built from.
-export const WEBMCP_TOOL_COUNT = 24;
+export const WEBMCP_TOOL_COUNT = 26;
 
 /**
  * Registers every WebMCP read + action tool with the runtime for the
@@ -60,6 +62,7 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchSequences,
       fetchStats,
       searchEmails,
+      fetchMessages,
       getSession: () => authClient.getSession(),
       fetchLists,
       fetchList,
@@ -71,6 +74,7 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchPeople,
       fetchEmail,
       markEmailRead,
+      setMessageState,
       enrollPerson,
       saveDraft,
       fetchTemplate,

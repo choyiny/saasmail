@@ -14,6 +14,15 @@ export interface MailAddress {
 
 export type AttachmentRow = typeof attachments.$inferSelect;
 
+export interface UnifiedMessageState {
+  seen: boolean;
+  starredAt: number | null;
+  archivedAt: number | null;
+  spamAt: number | null;
+  trashedAt: number | null;
+  mailboxIds: string[];
+}
+
 export interface UnifiedMessage {
   ref: MessageRef;
   direction: "inbound" | "outbound";
@@ -40,6 +49,7 @@ export interface UnifiedMessage {
   } | null;
   attachmentCount?: number;
   attachments?: AttachmentRow[];
+  state?: UnifiedMessageState;
 }
 
 export function serializeMessageRef(ref: MessageRef): string {

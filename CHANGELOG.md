@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Message state, folders, and state-aware message APIs.** Received and sent messages now have persistent personal state (seen/starred), shared inbox state (archive/spam/trash), and custom mailbox membership. `GET /api/messages` exposes cursor-paged state-aware reads without changing the visibility-neutral default of `queryMessages()`; system folder definitions are explicit, the Sent folder hides campaign sends by default, and person timelines hide spam/trash while keeping archived mail. New mailbox/state mutation routes are documented in OpenAPI. Remote MCP gains `list_messages` and `set_message_state`; WebMCP gains the same pair but deliberately cannot trash or delete mail.
+
 - **A block editor for newsletter templates.** A template now records how it was authored in a `format` column: `html` is the raw-HTML editor that has always existed, and `block` is a new visual editor built on Tiptap. Seven block types — heading, paragraph, list, quote, image, button, separator — arranged in an editor whose live preview is compiled by the same module the worker runs on save, so the preview is the email rather than an approximation of it. Multi-column layouts are deliberately not supported.
 
   `bodyHtml` remains the single rendering source for every send path. A block template compiles into it server-side on write, so campaign snapshots, sequence steps, the send API, variable analysis and link rewriting are unchanged and never learn that blocks exist. `{{variable}}` tags work inside blocks exactly as they do in HTML templates — including as a whole link target, which is what `{{unsubscribe_url}}` needs.

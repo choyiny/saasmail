@@ -298,6 +298,71 @@ export async function searchEmails(params: {
   return apiFetch(`/api/emails/search?${qs}`);
 }
 
+export interface MessageListResult {
+  messages: Array<Record<string, any>>;
+  nextCursor: string | null;
+}
+
+export async function fetchMessages(params?: {
+  inbox?: string;
+  folder?: "inbox" | "sent" | "archive" | "junk" | "trash";
+  mailboxId?: string;
+  starred?: boolean;
+  unseen?: boolean;
+  personId?: string;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+  excludeCampaignSends?: boolean;
+}): Promise<MessageListResult> {
+  const qs = new URLSearchParams();
+  if (params?.inbox) qs.set("inbox", params.inbox);
+  if (params?.folder) qs.set("folder", params.folder);
+  if (params?.mailboxId) qs.set("mailboxId", params.mailboxId);
+  if (params?.starred !== undefined) qs.set("starred", String(params.starred));
+  if (params?.unseen !== undefined) qs.set("unseen", String(params.unseen));
+  if (params?.personId) qs.set("personId", params.personId);
+  if (params?.q) qs.set("q", params.q);
+  if (params?.cursor) qs.set("cursor", params.cursor);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.excludeCampaignSends !== undefined) {
+    qs.set("excludeCampaignSends", String(params.excludeCampaignSends));
+  }
+  return apiFetch(`/api/messages?${qs}`);
+}
+
+export async function setMessageState(data: {
+  refs: string[];
+  seen?: boolean;
+  starred?: boolean;
+  archived?: boolean;
+  spam?: boolean;
+}): Promise<{ success: boolean }> {
+  if (data.seen !== undefined || data.starred !== undefined) {
+    await apiFetch("/api/messages/user-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refs: data.refs,
+        seen: data.seen,
+        starred: data.starred,
+      }),
+    });
+  }
+  if (data.archived !== undefined || data.spam !== undefined) {
+    await apiFetch("/api/messages/mailbox-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refs: data.refs,
+        archived: data.archived,
+        spam: data.spam,
+      }),
+    });
+  }
+  return { success: true };
+}
+
 export async function markEmailRead(
   id: string,
   isRead: boolean,

@@ -20,6 +20,24 @@ import {
 import { templateVariablesSchema } from "../lib/template-variables-schema";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { searchEmails } from "../lib/queries/search";
+import { InvalidCursorError } from "../lib/messages/cursor";
+import {
+  InvalidQueryError,
+  queryMessages,
+  type MessageFolder,
+} from "../lib/messages/query";
+import {
+  parseMessageRef,
+  serializeMessageRef,
+  type MessageRef,
+} from "../lib/messages/types";
+import {
+  InvalidMessageStateError,
+  MessageStateAccessError,
+  getMailbox,
+  setMailboxState,
+  setUserState,
+} from "../lib/messages/state";
 
 export interface McpUser {
   id: string;
@@ -87,6 +105,14 @@ function guard<Args extends unknown[]>(
       // third-party software the operator never vetted, so log the detail and
       // return an opaque failure.
       if (e instanceof HTTPException) return fail(e.message);
+      if (
+        e instanceof MessageStateAccessError ||
+        e instanceof InvalidMessageStateError ||
+        e instanceof InvalidQueryError ||
+        e instanceof InvalidCursorError
+      ) {
+        return fail(e.message);
+      }
       console.error("[mcp] tool failed:", e);
       return fail("The request could not be completed.");
     }
@@ -98,6 +124,16 @@ function guard<Args extends unknown[]>(
  * probe for the existence of ids outside its inboxes. Mirrors the HTTP API.
  */
 const NOT_FOUND = "Not found, or outside the inboxes you may access.";
+
+function parseRefs(values: string[]): MessageRef[] {
+  return values.map((value) => {
+    const ref = parseMessageRef(value);
+    if (!ref) {
+      throw new InvalidMessageStateError(`Invalid message ref: ${value}`);
+    }
+    return ref;
+  });
+}
 
 const pagination = {
   page: z.number().int().min(1).optional().describe("1-based page. Default 1."),
@@ -226,6 +262,104 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         ),
       ),
     ),
+  );
+
+  server.registerTool(
+    "list_messages",
+    {
+      description:
+        "List unified messages with mailbox state, folder filters, cursor pagination, and attachment counts.",
+      annotations: { readOnlyHint: true, title: "List Messages" },
+      inputSchema: {
+        inbox: z.string().optional(),
+        folder: z
+          .enum(["inbox", "sent", "archive", "junk", "trash"])
+          .optional(),
+        mailboxId: z.string().optional(),
+        starred: z.boolean().optional(),
+        unseen: z.boolean().optional(),
+        personId: z.string().optional(),
+        q: z.string().optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        excludeCampaignSends: z.boolean().optional(),
+      },
+    },
+    guard(ctx, SCOPE_READ, async (input) => {
+      if (input.folder && input.mailboxId) {
+        throw new InvalidQueryError("folder and mailboxId cannot be combined");
+      }
+
+      let folder: MessageFolder | undefined = input.folder;
+      if (input.mailboxId) {
+        await getMailbox(db, allowed, input.mailboxId);
+        folder = { mailboxId: input.mailboxId };
+      }
+
+      const page = await queryMessages(db, allowed, {
+        inboxes: input.inbox ? [input.inbox] : undefined,
+        folder,
+        starred: input.starred ? true : undefined,
+        unseen: input.unseen ? true : undefined,
+        personId: input.personId,
+        search: input.q,
+        searchMode: input.q ? "fulltext" : undefined,
+        cursor: input.cursor,
+        limit: input.limit ?? 50,
+        viewer: { userId: ctx.user.id },
+        withState: true,
+        withAttachmentCounts: true,
+        excludeCampaignSends:
+          input.excludeCampaignSends ??
+          (input.folder === "sent" ? true : undefined),
+      });
+
+      return ok({
+        messages: page.messages.map((message) => ({
+          ...message,
+          ref: serializeMessageRef(message.ref),
+        })),
+        nextCursor: page.nextCursor,
+      });
+    }),
+  );
+
+  server.registerTool(
+    "set_message_state",
+    {
+      description:
+        "Set personal or shared state on one or more messages. Shared archive/spam state applies only to received mail.",
+      annotations: { readOnlyHint: false, title: "Set Message State" },
+      inputSchema: {
+        refs: z.array(z.string()).min(1).max(500),
+        seen: z.boolean().optional(),
+        starred: z.boolean().optional(),
+        archived: z.boolean().optional(),
+        spam: z.boolean().optional(),
+        trashed: z.boolean().optional(),
+      },
+    },
+    guard(ctx, SCOPE_MANAGE, async (input) => {
+      const refs = parseRefs(input.refs);
+      if (
+        input.archived !== undefined ||
+        input.spam !== undefined ||
+        input.trashed !== undefined
+      ) {
+        await setMailboxState(db, allowed, ctx.user.id, refs, {
+          archived: input.archived,
+          spam: input.spam,
+          trashed: input.trashed,
+        });
+      }
+      if (input.seen !== undefined || input.starred !== undefined) {
+        await setUserState(db, ctx.user.id, refs, {
+          seen: input.seen,
+          starred: input.starred,
+        });
+      }
+      return ok({ success: true });
+    }),
   );
 
   server.registerTool(
