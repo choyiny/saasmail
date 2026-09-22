@@ -61,6 +61,8 @@ export interface OutboxSendParams {
   headers?: Record<string, string>;
   attachments?: SendEmailAttachment[];
   transactional?: boolean;
+  /** Gmail thread to reply within; ignored by every other provider. */
+  threadId?: string;
 }
 
 export interface OutboxSendResult {
@@ -93,6 +95,7 @@ export async function sendViaOutbox(
     headers,
     attachments,
     transactional,
+    threadId,
   } = params;
   const now = Math.floor(Date.now() / 1000);
   const outboxId = nanoid();
@@ -141,6 +144,7 @@ export async function sendViaOutbox(
       headers,
       attachments,
       transactional,
+      threadId,
     });
   } catch (err) {
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
