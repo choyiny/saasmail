@@ -29,6 +29,8 @@ export interface SendInput {
   headers?: Record<string, string>;
   attachments?: SendEmailParams["attachments"];
   transactional?: boolean;
+  /** Gmail thread to reply within; ignored by every other provider. */
+  threadId?: string;
 }
 
 export interface SendOutput {
@@ -85,6 +87,7 @@ export async function sendWithSuppressionCheck(
     headers,
     attachments,
     transactional,
+    threadId,
   } = input;
 
   // Partition recipients into delivered vs suppressed. Transactional sends
@@ -137,6 +140,7 @@ export async function sendWithSuppressionCheck(
       ...(text !== undefined ? { text } : {}),
       ...(headers ? { headers } : {}),
       ...(attachments ? { attachments } : {}),
+      ...(threadId ? { threadId } : {}),
     });
 
     renderedHtml = html;

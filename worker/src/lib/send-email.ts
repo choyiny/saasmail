@@ -10,6 +10,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { cancelSequencesForPerson } from "./cancel-sequence";
 import { computeConversationId, externalsOnly } from "./conversation-id";
 import { createEmailSender } from "./email-sender";
+import { createSenderForInbox } from "./email-sender/for-inbox";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
@@ -344,7 +345,6 @@ export async function replyToEmail(
   params: ReplyEmailParams,
 ): Promise<ReplyEmailResult> {
   const { db, env, emailId, payload: raw, files, allowed } = params;
-  const sender = createEmailSender(env);
 
   // Same canonicalization story as the send route — lowercase the
   // inbox + recipient + CC emails before downstream use so stored
@@ -359,6 +359,13 @@ export async function replyToEmail(
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
 
+  // Resolved AFTER fromAddress is canonicalized: sender_identities.email is
+  // stored lowercased, so looking this up before trimming/lowercasing would
+  // silently miss the mapping and fall back to the configured provider with
+  // no error anywhere. createSenderForInbox never throws — every failure
+  // (unmapped address, revoked grant, etc.) degrades to that same fallback.
+  const sender = await createSenderForInbox(db, env, fromAddress);
+
   // Resolve the original across both received and sent tables.
   const receivedRow = await db
     .select()
@@ -370,6 +377,12 @@ export async function replyToEmail(
   let origSubject: string | null;
   let origInReplyToMessageId: string | null;
   let toAddress: string;
+  // The parent's Gmail thread, when it has one — Slice 3 stores this on
+  // inbound `emails` rows, and this task also starts storing it on `sent_emails`
+  // rows below. Passed as `threadId` so the reply lands inside the same Gmail
+  // conversation instead of starting a new one; null (e.g. a Cloudflare-sourced
+  // parent) means Gmail will assign a fresh thread on send.
+  let origGmailThreadId: string | null = null;
 
   if (receivedRow.length > 0) {
     const orig = receivedRow[0];
@@ -392,6 +405,7 @@ export async function replyToEmail(
     origPersonId = orig.personId;
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
+    origGmailThreadId = orig.gmailThreadId ?? null;
     // Canonicalize the recipient — older rows may be mixed-case.
     toAddress = person[0].email.toLowerCase();
   } else {
@@ -418,6 +432,7 @@ export async function replyToEmail(
     origPersonId = orig.personId;
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
+    origGmailThreadId = orig.gmailThreadId ?? null;
     toAddress = orig.toAddress.toLowerCase();
   }
 
@@ -511,6 +526,7 @@ export async function replyToEmail(
           })),
         }
       : {}),
+    ...(origGmailThreadId ? { threadId: origGmailThreadId } : {}),
     transactional: true,
   });
 
@@ -537,6 +553,18 @@ export async function replyToEmail(
     inReplyTo: origInReplyToMessageId,
     messageId,
     resendId: sendResult.result?.id ?? null,
+    // Gmail owns these identifiers — only populate them when Gmail was
+    // actually the transport used, so a Cloudflare-inbox reply leaves both
+    // columns null. A later slice mirrors the Gmail Sent folder onto the
+    // timeline and uses gmailMessageId to recognize saasmail's own send and
+    // skip it; without it, every reply sent through Gmail would come back
+    // through that mirror and appear twice.
+    gmailMessageId:
+      sender.provider === "gmail" ? (sendResult.result?.id ?? null) : null,
+    gmailThreadId:
+      sender.provider === "gmail"
+        ? (sendResult.result?.threadId ?? null)
+        : null,
     status: outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
     conversationId: conversationIdReply,

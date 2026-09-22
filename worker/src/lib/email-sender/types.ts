@@ -33,6 +33,15 @@ export interface SendEmailError {
 
 export interface SendEmailResult {
   id: string | null;
+  /**
+   * Gmail's thread id for the message that was just sent — present on a
+   * successful Gmail send whether or not a `threadId` was supplied on the
+   * request (Gmail assigns a fresh one when it wasn't). Other providers
+   * never set this. A reply to a Cloudflare-sourced message has no known
+   * thread to pass in, so this is how the caller learns the one Gmail
+   * assigned, to persist for later threading.
+   */
+  threadId?: string | null;
   error: SendEmailError | null;
 }
 

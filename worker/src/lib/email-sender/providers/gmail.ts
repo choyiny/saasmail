@@ -162,7 +162,11 @@ export class GmailSender implements EmailSender {
         };
       }
 
-      return { id: data.id, error: null };
+      return {
+        id: data.id,
+        threadId: typeof data.threadId === "string" ? data.threadId : null,
+        error: null,
+      };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error(
