@@ -83,6 +83,12 @@ Details: [`migrations/README.md`](./migrations/README.md). Apply with `yarn db:m
 
 Backend routes are Hono + Zod OpenAPI under `worker/src/routers/`. Spec is served at `/doc` (JSON) and `/swagger-ui` (not `/openapi.json` / `/api/doc`). When changing request/response shapes, update the zod-openapi schemas so `/doc` stays accurate.
 
+### Message reads
+
+Use `worker/src/lib/messages/query.ts` / `queryMessages()` for any
+cross-direction mail list, search, timeline, or agent read. Do not add another
+direct `emails ∪ sent_emails` merge in a router or tool.
+
 ## WebMCP tools
 
 WebMCP tools live in `src/webmcp/` (runtime + hook + `tools/`), registered in `DashboardLayout` via `WebMcpTools`. Read tools call `src/lib/api.ts`; action tools drive the UI through the bridge (`src/webmcp/bridge.tsx`). Add a tool by extending `createReadTools`/`createActionTools` in `src/webmcp/tools/`.

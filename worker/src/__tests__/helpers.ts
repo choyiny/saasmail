@@ -241,6 +241,79 @@ export async function createTestEmail(
   return email;
 }
 
+/** Create a test sent email. */
+export async function createTestSentEmail(
+  opts: {
+    id?: string;
+    personId?: string | null;
+    fromAddress?: string;
+    toAddress?: string;
+    subject?: string;
+    bodyHtml?: string | null;
+    bodyText?: string | null;
+    inReplyTo?: string | null;
+    messageId?: string | null;
+    status?: string;
+    cc?: string | null;
+    conversationId?: string | null;
+    campaignId?: string | null;
+    sentAt?: number;
+  } = {},
+) {
+  const db = getDb();
+  const now = opts.sentAt ?? Math.floor(Date.now() / 1000);
+  const email = {
+    id: opts.id ?? "sent-email-1",
+    personId: opts.personId ?? null,
+    fromAddress: opts.fromAddress ?? "inbox@saasmail.test",
+    toAddress: opts.toAddress ?? "alice@example.com",
+    subject: opts.subject ?? "Test Subject",
+    bodyHtml: opts.bodyHtml ?? "<p>Hello</p>",
+    bodyText: opts.bodyText ?? "Hello",
+    inReplyTo: opts.inReplyTo ?? null,
+    messageId: opts.messageId ?? null,
+    status: opts.status ?? "sent",
+    cc: opts.cc ?? null,
+    conversationId: opts.conversationId ?? null,
+    campaignId: opts.campaignId ?? null,
+    sentAt: now,
+    createdAt: now,
+  };
+  await db.insert(sentEmails).values(email);
+  return email;
+}
+
+/** Create a test attachment for an inbound or sent message. */
+export async function createTestAttachment(
+  opts: {
+    id?: string;
+    emailId?: string;
+    kind?: "inbound" | "sent";
+    filename?: string;
+    contentType?: string;
+    size?: number;
+    r2Key?: string;
+    contentId?: string | null;
+    createdAt?: number;
+  } = {},
+) {
+  const db = getDb();
+  const createdAt = opts.createdAt ?? Math.floor(Date.now() / 1000);
+  const attachment = {
+    id: opts.id ?? "attachment-1",
+    emailId: opts.emailId ?? "email-1",
+    kind: opts.kind ?? "inbound",
+    filename: opts.filename ?? "file.txt",
+    contentType: opts.contentType ?? "text/plain",
+    size: opts.size ?? 1,
+    r2Key: opts.r2Key ?? "attachments/file.txt",
+    contentId: opts.contentId ?? null,
+    createdAt,
+  };
+  await db.insert(attachments).values(attachment);
+  return attachment;
+}
+
 /** Create a test email template. */
 export async function createTestTemplate(
   opts: {

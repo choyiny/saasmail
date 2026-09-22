@@ -29,6 +29,35 @@ operate.
 | **ORM**             | Drizzle                                                                   |
 | **Auth**            | BetterAuth with passkey support                                           |
 
+## Message model
+
+User-visible mail has one application-level read model even though received and
+sent messages stay in separate D1 tables:
+
+```text
+emails (received) ──┐
+                    ├── queryMessages() ── customer timeline / search / conversations
+sent_emails (sent) ─┘
+```
+
+A delivered or received message is the communication primitive. The unified
+stream is exactly `emails ∪ sent_emails`. Operational rows such as
+`outbox_emails`, `campaign_recipients`, `sequence_emails`, and
+`campaign_events` are delivery/workflow state and never become messages on
+their own. Campaign and sequence sends enter history through the
+`sent_emails` rows they already produce.
+
+`worker/src/lib/messages/` owns the `UnifiedMessage` contract, source
+adapters, deterministic ordering, permission-scoped filtering, attachment
+enrichment, and cursor pagination. Existing page/offset HTTP routes remain
+compatibility wrappers over that service. New consumers should use
+`queryMessages()` rather than unioning `emails` and `sent_emails`
+themselves.
+
+The legacy `emails.is_read` field remains shared team state in this stage.
+Mailbox/user state, canonical 1-on-1 conversation identity, and JMAP semantics
+are deliberately separate later changes.
+
 ## Realtime, push, and queues
 
 The diagram above stops at the storage layer. This one adds the per-user Durable

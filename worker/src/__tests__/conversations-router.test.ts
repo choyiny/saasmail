@@ -12,6 +12,7 @@ import {
 } from "./helpers";
 import { sentEmails } from "../db/sent-emails.schema";
 import { emails } from "../db/emails.schema";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
 
 describe("conversations router", () => {
   let apiKey: string;
@@ -119,6 +120,85 @@ describe("conversations router", () => {
       expect(received).toBeDefined();
       expect(received!.type).toBe("received");
       expect(received!.fromAddress).toBe("external@example.com");
+    });
+
+    it("returns conversations longer than 100 messages in one response", async () => {
+      const db = getDb();
+      await createTestPerson({
+        id: "long-thread-person",
+        email: "long-thread@example.com",
+      });
+
+      const rows = Array.from({ length: 125 }, (_, index) => ({
+        id: `long-thread-${String(index).padStart(3, "0")}`,
+        personId: "long-thread-person",
+        recipient: "me@saasmail.test",
+        subject: "Long thread",
+        bodyText: `Message ${index}`,
+        rawHeaders: "{}",
+        messageId: `long-thread-${index}@example.com`,
+        isRead: 0,
+        conversationId: "long-thread",
+        receivedAt: index + 1,
+        createdAt: index + 1,
+      }));
+
+      for (let start = 0; start < rows.length; start += 5) {
+        await db.insert(emails).values(rows.slice(start, start + 5));
+      }
+
+      const res = await authFetch("/api/conversations/long-thread/emails", {
+        apiKey,
+      });
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        emails: Array<{ id: string; timestamp: number }>;
+      };
+      expect(body.emails).toHaveLength(125);
+      expect(body.emails[0].timestamp).toBe(1);
+      expect(body.emails[124].timestamp).toBe(125);
+    });
+
+    it("authorizes mixed-case stored inbox addresses through normalized scoping", async () => {
+      const db = getDb();
+      const { userId, apiKey: memberKey } = await createTestUser({
+        id: "conversation-member",
+        role: "member",
+        email: "conversation-member@example.com",
+      });
+      await db.insert(inboxPermissions).values({
+        userId,
+        email: "support@saasmail.test",
+        createdAt: 1,
+        createdBy: userId,
+      });
+      await createTestPerson({
+        id: "case-person",
+        email: "case@example.com",
+      });
+      await db.insert(emails).values({
+        id: "case-recv",
+        personId: "case-person",
+        recipient: "Support@saasmail.test",
+        subject: "Mixed case inbox",
+        bodyText: "Hello",
+        rawHeaders: "{}",
+        messageId: "case-recv@example.com",
+        isRead: 0,
+        conversationId: "case-conversation",
+        receivedAt: 100,
+        createdAt: 100,
+      });
+
+      const res = await authFetch(
+        "/api/conversations/case-conversation/emails",
+        { apiKey: memberKey },
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { emails: Array<{ id: string }> };
+      expect(body.emails.map((email) => email.id)).toEqual(["case-recv"]);
     });
   });
 });

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Received and sent mail now share one permission-scoped read service.** Customer timelines, message search, and group-conversation detail use the same `UnifiedMessage` contract over `emails ∪ sent_emails`, with deterministic cross-source ordering, cursor pagination for new consumers, and shared attachment enrichment. Existing HTTP response shapes and page/offset behavior remain compatible; operational outbox/campaign/sequence ledger rows never appear as duplicate messages. Conversation reads also inherit case-insensitive inbox scoping instead of a hand-rolled allow check.
+
 - **A campaign now owns its content, and is edited on the campaign page.** Previously a campaign pointed at a template and its body could not be changed after creation, which forced one throwaway template per campaign and left "template" meaning nothing reusable. `campaigns` gains `format`, `body_json` and `body_html`; `template_slug` becomes optional and means _start from this_ — the template's content is copied in once at creation, and the campaign owns it from then on. Editing or deleting that template afterwards cannot reach back into a campaign started from it.
 
   Templates are unchanged for the transactional and sequence paths, where a template genuinely is the content and carries a `{{variable}}` send contract. Creating a campaign now redirects to the campaign itself rather than back to the list, and a campaign with an empty body is refused at send time instead of mailing a blank page.
