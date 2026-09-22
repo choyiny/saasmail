@@ -1,4 +1,5 @@
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { schema } from "./db/schema";
@@ -9,6 +10,7 @@ import { inboxPermissions } from "./db/inbox-permissions.schema";
 import { senderIdentities } from "./db/sender-identities.schema";
 import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
+import type { ParsedEmail } from "./lib/email-parser";
 import { isBlocked } from "./lib/blocklist";
 import { computeConversationId, externalsOnly } from "./lib/conversation-id";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
@@ -23,6 +25,7 @@ import { forwardInbound } from "./lib/inbound-forward";
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
 
+/** Cloudflare Email Worker entry point. */
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
@@ -30,6 +33,26 @@ export async function handleEmail(
 ): Promise<void> {
   const db = drizzle(env.DB, { schema, logger: true });
   const parsed = await parseEmail(message);
+  await ingestParsedEmail(db, parsed, env, ctx);
+}
+
+/**
+ * Store an already-parsed inbound message and run every side effect that
+ * follows: blocklist, dedupe, person matching, conversation grouping,
+ * attachments, notification fan-out, webhooks, forwarding and sequence
+ * cancellation.
+ *
+ * Source-agnostic on purpose. The Cloudflare Email Worker reaches it via
+ * `handleEmail`; a later Gmail sync calls it directly with a `ParsedEmail`
+ * built from `messages.get(format=raw)`, setting `parsed.to` to the inbox
+ * the message should land in.
+ */
+export async function ingestParsedEmail(
+  db: DrizzleD1Database<any>,
+  parsed: ParsedEmail,
+  env: CloudflareBindings,
+  ctx: ExecutionContext,
+): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
 
   // Canonicalize inbox addresses to lowercase before storage so casing
