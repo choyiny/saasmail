@@ -126,4 +126,30 @@ describe("resolveInbox", () => {
       "support@acme.dev",
     );
   });
+
+  it('rejects a quoted display-name attack ("support@acme.dev" <evil@attacker.test> does not match support@acme.dev)', () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
+    expect(
+      resolveInbox(
+        parsed({ to: '"support@acme.dev" <evil@attacker.test>' }),
+        mappings,
+      ),
+    ).toBe("cho@acme.dev");
+  });
+
+  it("rejects an unquoted display-name attack (support@acme.dev <evil@attacker.test> does not match support@acme.dev)", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
+    expect(
+      resolveInbox(
+        parsed({ to: "support@acme.dev <evil@attacker.test>" }),
+        mappings,
+      ),
+    ).toBe("cho@acme.dev");
+  });
 });
