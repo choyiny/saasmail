@@ -36,11 +36,16 @@ export type SendParseError =
  *   - `files`: zero or more file fields.
  *
  * Enforces MAX_ATTACHMENTS and a caller-supplied byte cap.
+ *
+ * `maxBytes` may be a function of the validated payload, because the reply
+ * route's budget depends on `fromAddress` — which only exists once the
+ * payload has been parsed. It is resolved after validation and before any
+ * file is read, so an invalid payload never triggers the lookup.
  */
 export async function parseSendBody<T>(
   c: Context,
   schema: ZodType<T>,
-  maxBytes: number,
+  maxBytes: number | ((payload: T) => number | Promise<number>),
 ): Promise<
   { ok: true; value: ParsedSendBody<T> } | { ok: false; err: SendParseError }
 > {
@@ -91,16 +96,19 @@ export async function parseSendBody<T>(
     };
   }
 
+  const limitBytes =
+    typeof maxBytes === "function" ? await maxBytes(result.data) : maxBytes;
+
   let total = 0;
   const files: ParsedFile[] = [];
   for (const f of rawFiles) {
     total += f.size;
-    if (total > maxBytes) {
+    if (total > limitBytes) {
       return {
         ok: false,
         err: {
           kind: "too-large",
-          limitBytes: maxBytes,
+          limitBytes,
           providedBytes: total,
         },
       };

@@ -231,6 +231,90 @@ describe("send router — Gmail reply routing", () => {
     expect(rows[0].gmailThreadId).toBeNull();
   });
 
+  it("sizes a Gmail reply's attachment with Gmail's budget, not the configured provider's", async () => {
+    // The Gmail-only install, which is the natural deployment for this
+    // feature: no provider configured, so createEmailSender returns
+    // NoopSender and its attachment budget is 0. Sizing the reply with it
+    // 413s every attachment Gmail would have accepted.
+    const originalResend = (env as any).RESEND_API_KEY;
+    (env as any).RESEND_API_KEY = "";
+    try {
+      await seedGmailAccount();
+      await seedGmailIdentity();
+
+      const person = await createTestPerson({
+        id: "p-attach",
+        email: "customer6@example.com",
+      });
+      await createTestEmail({
+        id: "rcv-attach",
+        personId: person.id,
+        recipient: "support@acme.dev",
+        subject: "Question",
+        messageId: "parent-attach@example.com",
+      });
+      // A Cloudflare-side inbox and parent, for the control below.
+      await createTestEmail({
+        id: "rcv-attach-cf",
+        personId: person.id,
+        recipient: "me@saasmail.test",
+        subject: "Question",
+        messageId: "parent-attach-cf@example.com",
+      });
+
+      const fetchMock = stubGmailSend({
+        id: "18attach",
+        threadId: "thread-attach",
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const attachment = {
+        name: "invoice.pdf",
+        type: "application/pdf",
+        bytes: new Uint8Array(4096).fill(7),
+      };
+
+      const res = await authFetch("/api/send/reply/rcv-attach", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm(
+          {
+            fromAddress: "support@acme.dev",
+            bodyHtml: "<p>Attached.</p>",
+          },
+          [attachment],
+        ),
+      });
+      expect(res.status).toBe(201);
+
+      // The attachment really travelled through GmailSender.
+      const body = JSON.parse(
+        (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+      );
+      expect(atob(body.raw.replace(/-/g, "+").replace(/_/g, "/"))).toContain(
+        "invoice.pdf",
+      );
+
+      // CONTROL: the identical attachment on a NON-Gmail inbox still gets
+      // the configured provider's budget (0 here) and is refused. Without
+      // this, a globally-raised limit would pass the assertion above.
+      const cfRes = await authFetch("/api/send/reply/rcv-attach-cf", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm(
+          {
+            fromAddress: "me@saasmail.test",
+            bodyHtml: "<p>Attached.</p>",
+          },
+          [attachment],
+        ),
+      });
+      expect(cfRes.status).toBe(413);
+    } finally {
+      (env as any).RESEND_API_KEY = originalResend;
+    }
+  });
+
   it("a Gmail send that fails transiently returns an error and queues nothing", async () => {
     await seedGmailAccount();
     await seedGmailIdentity();
