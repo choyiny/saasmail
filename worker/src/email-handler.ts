@@ -48,7 +48,7 @@ export async function handleEmail(
  * the message should land in.
  */
 export async function ingestParsedEmail(
-  db: DrizzleD1Database<any>,
+  db: DrizzleD1Database<typeof schema>,
   parsed: ParsedEmail,
   env: CloudflareBindings,
   ctx: ExecutionContext,

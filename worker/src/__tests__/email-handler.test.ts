@@ -8,7 +8,8 @@ import {
   vi,
 } from "vitest";
 import { env } from "cloudflare:workers";
-import { handleEmail } from "../email-handler";
+import { handleEmail, ingestParsedEmail } from "../email-handler";
+import { parseRaw } from "../lib/email-parser";
 import { emails } from "../db/emails.schema";
 import { people } from "../db/people.schema";
 import { attachments } from "../db/attachments.schema";
@@ -485,5 +486,42 @@ describe("handleEmail — webhook delivery", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://hook.example.com/inbound");
+  });
+});
+
+describe("parseRaw + ingestParsedEmail — direct seam usage", () => {
+  /**
+   * Rehearses how Slice 3 (Gmail sync) will call this seam: parse raw bytes
+   * with a provisional envelope, then reassign `parsed.to` before ingesting
+   * — exactly what a Google Group delivery needs, where the real inbox
+   * comes from a `Delivered-To`/`List-ID` header rather than the envelope.
+   * Proves `parsed.to` is the sole inbox determinant for storage.
+   */
+  it("stores the reassigned parsed.to, lowercased, not the original envelope.to", async () => {
+    const raw = buildRawEmail({
+      from: "jane@example.com",
+      to: "envelope-provisional@acme.dev",
+      subject: "Group mail",
+      messageId: "<m1@example.com>",
+    });
+    const rawBytes = await new Response(raw).arrayBuffer();
+
+    const parsed = await parseRaw(rawBytes, {
+      from: "jane@example.com",
+      to: "envelope-provisional@acme.dev",
+    });
+    parsed.to = "Real-Group@Acme.Dev";
+
+    const waitUntilCalls: Promise<unknown>[] = [];
+    await ingestParsedEmail(
+      getDb(),
+      parsed,
+      env as unknown as CloudflareBindings,
+      fakeCtx(waitUntilCalls),
+    );
+    await Promise.allSettled(waitUntilCalls);
+
+    const [row] = await getDb().select().from(emails);
+    expect(row.recipient).toBe("real-group@acme.dev");
   });
 });
