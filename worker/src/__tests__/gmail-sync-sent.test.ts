@@ -14,6 +14,9 @@ import { senderIdentities } from "../db/sender-identities.schema";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
+import { sequences } from "../db/sequences.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
+import { sequenceEmails } from "../db/sequence-emails.schema";
 import { encryptSecret } from "../lib/crypto";
 import { syncAccount } from "../lib/gmail/sync";
 import { getDb, applyMigrations, cleanDb } from "./helpers";
@@ -229,6 +232,126 @@ afterEach(() => {
 });
 
 describe("syncAccount — mirroring the Sent folder", () => {
+  it("cancels the recipient's active sequences, like every other contact path", async () => {
+    // A rep answering a lead from their phone is contact. Inbound mail
+    // cancels sequences (email-handler.ts) and so does every saasmail send;
+    // without this the customer keeps getting automated nudges about a
+    // question a human already answered.
+    await seedAccount();
+    await seedInbox();
+    await seedPerson("jane@example.com");
+
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Nurture",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-1",
+      sequenceId: "seq-1",
+      personId: "person-1",
+      status: "active",
+      variables: "{}",
+      fromAddress: "support@acme.dev",
+      enrolledAt: now,
+    });
+    await db.insert(sequenceEmails).values({
+      id: "se-1",
+      enrollmentId: "enr-1",
+      stepOrder: 1,
+      templateSlug: "welcome",
+      scheduledAt: now + 3600,
+      status: "pending",
+    });
+
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "Jane <jane@example.com>",
+            messageId: "<s-cancel@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    const res = await sync();
+    expect(res.failed).toBe(0);
+
+    const [enrollment] = await db
+      .select()
+      .from(sequenceEnrollments)
+      .where(eq(sequenceEnrollments.id, "enr-1"));
+    expect(enrollment.status).toBe("cancelled");
+    // The queued step is cancelled too — an enrollment marked cancelled with
+    // a live scheduled email would still send the nudge.
+    const [step] = await db
+      .select()
+      .from(sequenceEmails)
+      .where(eq(sequenceEmails.id, "se-1"));
+    expect(step.status).toBe("cancelled");
+  });
+
+  it("leaves sequences alone when the Sent message's recipient is unknown", async () => {
+    // `sent_emails.person_id` is nullable on mirrored rows: mail to an
+    // address we have never heard from resolves no person. The cancellation
+    // must be conditional on that, not blow up or cancel someone else's.
+    await seedAccount();
+    await seedInbox();
+    await seedPerson("jane@example.com");
+
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(sequences).values({
+      id: "seq-2",
+      name: "Nurture",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 0 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(sequenceEnrollments).values({
+      id: "enr-2",
+      sequenceId: "seq-2",
+      personId: "person-1",
+      status: "active",
+      variables: "{}",
+      fromAddress: "support@acme.dev",
+      enrolledAt: now,
+    });
+
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "stranger@example.com",
+            messageId: "<s-stranger@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    const res = await sync();
+    expect(res.failed).toBe(0);
+
+    const [enrollment] = await db
+      .select()
+      .from(sequenceEnrollments)
+      .where(eq(sequenceEnrollments.id, "enr-2"));
+    expect(enrollment.status).toBe("active");
+  });
+
   it("mirrors a SENT message we did not send from saasmail", async () => {
     await seedAccount();
     await seedInbox();
