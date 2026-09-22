@@ -1,0 +1,118 @@
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { listHistory, getMessage, GmailApiError } from "../lib/gmail/api";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function stub(status: number, body: unknown) {
+  const fn = vi.fn(
+    async () =>
+      new Response(typeof body === "string" ? body : JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
+describe("listHistory", () => {
+  it("collects added message ids across a history page", async () => {
+    stub(200, {
+      history: [
+        { messagesAdded: [{ message: { id: "m1" } }] },
+        {
+          messagesAdded: [{ message: { id: "m2" } }, { message: { id: "m3" } }],
+        },
+      ],
+      historyId: "9002",
+    });
+
+    const res = await listHistory("at", { startHistoryId: "9000" });
+    expect(res.addedMessageIds).toEqual(["m1", "m2", "m3"]);
+    expect(res.historyId).toBe("9002");
+    expect(res.nextPageToken).toBeNull();
+  });
+
+  it("returns an empty list when nothing changed", async () => {
+    stub(200, { historyId: "9000" });
+    const res = await listHistory("at", { startHistoryId: "9000" });
+    expect(res.addedMessageIds).toEqual([]);
+  });
+
+  it("surfaces the page token so the caller can continue", async () => {
+    stub(200, { history: [], historyId: "9001", nextPageToken: "tok" });
+    const res = await listHistory("at", { startHistoryId: "9000" });
+    expect(res.nextPageToken).toBe("tok");
+  });
+
+  it("passes startHistoryId and pageToken on the query string", async () => {
+    const fn = stub(200, { historyId: "1" });
+    await listHistory("at", { startHistoryId: "9000", pageToken: "tok" });
+    const url = new URL(String(fn.mock.calls[0][0]));
+    expect(url.searchParams.get("startHistoryId")).toBe("9000");
+    expect(url.searchParams.get("pageToken")).toBe("tok");
+  });
+
+  it("reports an expired cursor as history_gone", async () => {
+    stub(404, { error: { message: "Requested entity was not found." } });
+    const err = await listHistory("at", { startHistoryId: "1" }).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(GmailApiError);
+    expect(err.code).toBe("history_gone");
+    expect(err.status).toBe(404);
+  });
+
+  it("reports a 429 as rate_limited", async () => {
+    stub(429, { error: { message: "Rate Limit Exceeded" } });
+    const err = await listHistory("at", { startHistoryId: "1" }).catch(
+      (e) => e,
+    );
+    expect(err.code).toBe("rate_limited");
+  });
+
+  it("does not let a non-JSON body throw a SyntaxError", async () => {
+    stub(500, "<html>upstream is sad</html>");
+    const err = await listHistory("at", { startHistoryId: "1" }).catch(
+      (e) => e,
+    );
+    expect(err).toBeInstanceOf(GmailApiError);
+    expect(err.code).toBe("http_500");
+  });
+});
+
+describe("getMessage", () => {
+  it("decodes base64url raw bytes and returns labels", async () => {
+    const raw = "From: a@b.test\r\n\r\nhello";
+    const b64url = btoa(raw)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    stub(200, { id: "m1", threadId: "t1", labelIds: ["INBOX"], raw: b64url });
+
+    const msg = await getMessage("at", "m1");
+    expect(msg).not.toBeNull();
+    expect(new TextDecoder().decode(msg!.raw)).toBe(raw);
+    expect(msg!.labelIds).toEqual(["INBOX"]);
+    expect(msg!.threadId).toBe("t1");
+  });
+
+  it("returns null when the message is gone", async () => {
+    stub(404, { error: { message: "Not Found" } });
+    expect(await getMessage("at", "m1")).toBeNull();
+  });
+
+  it("requests format=raw", async () => {
+    const fn = stub(200, { id: "m1", threadId: "t1", labelIds: [], raw: "" });
+    await getMessage("at", "m1");
+    const url = new URL(String(fn.mock.calls[0][0]));
+    expect(url.searchParams.get("format")).toBe("raw");
+  });
+
+  it("throws for a non-404 failure", async () => {
+    stub(500, { error: { message: "boom" } });
+    await expect(getMessage("at", "m1")).rejects.toBeInstanceOf(GmailApiError);
+  });
+});
