@@ -17,13 +17,20 @@ export interface ParsedEmail {
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
   cc: ParsedEmailAddress[];
   /**
-   * The recipient headers as WRITTEN — unparsed, unfiltered, undecoded.
+   * The recipient headers as written — unparsed, unfiltered, undecoded.
    *
-   * Each is the value of the FIRST header of that name in the message, with
-   * folding unwrapped and nothing else done to it. `null` means the message
-   * carried no header of that name at all; an empty string means it carried
-   * an empty one, and the two are not the same thing to a caller that must
-   * decide whether to look at the next header.
+   * Each is the value of the FIRST header of that name in the message. Not
+   * quite byte-for-byte what was on the wire: postal-mime unfolds the header
+   * and then collapses EVERY whitespace run to one space and trims the ends
+   * (`processHeaders`, `mime-node.js`). Tabs, runs of spaces, and the
+   * whitespace JS counts as such — NBSP, U+FEFF — are gone before this value
+   * exists. That does not disturb a caller reading positions out of it, since
+   * it is this same collapsed string that gets masked and indexed, but it is
+   * not the untouched original and should not be described as one.
+   *
+   * `null` means the message carried no header of that name at all; an empty
+   * string means it carried an empty one, and the two are not the same thing
+   * to a caller that must decide whether to look at the next header.
    *
    * Deliberately raw, and deliberately not `ParsedEmailAddress[]`. A caller
    * that needs the FIRST-WRITTEN recipient cannot get it from a parsed list:
@@ -242,7 +249,10 @@ export async function parseRaw(
   const addressList = (list: Address[] | undefined): ParsedEmailAddress[] =>
     flatten(list)
       .filter((c) => {
-        if (!c.address || typeof c.address !== "string") return false;
+        // `Mailbox.address` is a non-optional `string`, so only `""` is worth
+        // testing for here — the old `typeof` guard was left over from when
+        // this function took `unknown`.
+        if (!c.address) return false;
         // Cheap RFC 5322-ish gate. Defers strict validation to downstream
         // schemas; we only need to reject the obviously-not-email cases.
         return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
