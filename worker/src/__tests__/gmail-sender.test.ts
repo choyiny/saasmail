@@ -182,6 +182,34 @@ describe("GmailSender", () => {
     expect(raw).toContain("<p>hi there</p>");
   });
 
+  it("keeps every Cc recipient when several are supplied, not just the last", async () => {
+    // mimetext's setCc() REPLACES the Cc header rather than appending, so
+    // calling it once per address in a loop would silently drop all but
+    // the last recipient. This pins the fix: build the array once, call
+    // setCc once, and every address survives into `raw`.
+    const fetchMock = vi.fn().mockResolvedValue(okResponse({ id: "1" }));
+    const sender = makeSender(fetchMock as unknown as typeof fetch);
+
+    await sender.send({
+      from: "a@b.com",
+      to: "d@d.com",
+      cc: ["one@example.com", "two@example.com", "three@example.com"],
+      subject: "s",
+      html: "<p>h</p>",
+    });
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    // Display names are RFC2047-encoded by mimetext, so assert on the bare
+    // addresses (what actually matters for delivery) rather than a literal
+    // "Name <addr>" string.
+    const raw = decodeMimeEncodedWords(decodeBase64Url(body.raw));
+    expect(raw).toContain("one@example.com");
+    expect(raw).toContain("two@example.com");
+    expect(raw).toContain("three@example.com");
+  });
+
   it("classifies a 429 as transient", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
