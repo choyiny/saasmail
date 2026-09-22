@@ -154,6 +154,37 @@ function header(
 }
 
 /**
+ * The FIRST entry of a comma-separated address list, as written.
+ *
+ * Split before extracting anything, and never across the whole header: a
+ * pattern matched against the entire string finds the LAST-written address
+ * as readily as the first, so `jane@example.com, "Bob" <bob@x.com>` would
+ * yield Bob — filing a reply on the wrong customer's timeline.
+ *
+ * The scan ignores commas inside a quoted display name (`"Smith, Jane"`) and
+ * inside a bracketed address, because neither separates list entries.
+ */
+function firstListEntry(raw: string): string {
+  let inQuotes = false;
+  let inAngles = false;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (inQuotes && c === "\\") {
+      i++; // escaped character inside a quoted string, never a delimiter
+      continue;
+    }
+    if (c === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes && c === "<") inAngles = true;
+    else if (!inQuotes && c === ">") inAngles = false;
+    else if (c === "," && !inQuotes && !inAngles) return raw.slice(0, i);
+  }
+  return raw;
+}
+
+/**
  * The first address on an address-list header, lowercased.
  *
  * Only the first matters here: a mirrored Sent message needs one counterparty
@@ -163,11 +194,11 @@ function header(
  */
 function firstAddress(raw: string | undefined): string | null {
   if (!raw) return null;
-  // Prefer the angle-bracket form: it survives a display name that contains
-  // a comma (`"Doe, Jane" <jane@example.com>`), which splitting would not.
-  const angled = raw.match(/<([^>]+)>/);
-  const candidate = (angled ? angled[1] : raw.split(",")[0]).trim();
-  const address = candidate.toLowerCase();
+  // One entry first, THEN unwrap it. Within a single entry the bracketed
+  // form is unambiguous: `"Bob" <bob@x.com>` has exactly one address.
+  const entry = firstListEntry(raw).trim();
+  const angled = entry.match(/<([^>]*)>/);
+  const address = (angled ? angled[1] : entry).trim().toLowerCase();
   return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(address) ? address : null;
 }
 
@@ -235,13 +266,22 @@ async function mirrorSentMessage(
 
   // The counterparty of a SENT message is its RECIPIENT, not its sender —
   // the sender is us.
-  const toAddress = firstAddress(header(parsed.headers, "to"));
+  //
+  // `To:` first, then `Cc:`, then `Bcc:` — a message in the mailbox's own
+  // Sent folder usually retains the Bcc it was sent with, so the chain
+  // rescues a blind-copied send that would otherwise have no counterparty at
+  // all. Each step reads one header and takes its first entry; they are never
+  // mixed.
+  const toAddress =
+    firstAddress(header(parsed.headers, "to")) ??
+    firstAddress(header(parsed.headers, "cc")) ??
+    firstAddress(header(parsed.headers, "bcc"));
   if (!toAddress) {
-    // Bcc-only or otherwise recipient-less. There is no timeline to put it
-    // on, and `sent_emails.to_address` is NOT NULL, so inventing a value
-    // would be worse than passing over it.
+    // Nothing address-shaped anywhere. There is no timeline to put it on, and
+    // `sent_emails.to_address` is NOT NULL, so inventing a value would be
+    // worse than passing over it.
     console.warn(
-      `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no usable To: recipient (Bcc-only, or a malformed header), and sent_emails.to_address is NOT NULL — not mirrored.`,
+      `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no usable recipient on To:, Cc: or Bcc: (malformed headers, or none at all), and sent_emails.to_address is NOT NULL — not mirrored.`,
     );
     return false;
   }
