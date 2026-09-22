@@ -26,9 +26,17 @@ const GROUPS = [
 ];
 
 describe("resolveInbox", () => {
+  // Must MATCH cases
+
   it("matches a group on Delivered-To", () => {
     expect(
       resolveInbox(parsed({ "delivered-to": "support@acme.dev" }), GROUPS),
+    ).toBe("support@acme.dev");
+  });
+
+  it("is case-insensitive on Delivered-To", () => {
+    expect(
+      resolveInbox(parsed({ "delivered-to": "Support@Acme.DEV" }), GROUPS),
     ).toBe("support@acme.dev");
   });
 
@@ -41,15 +49,24 @@ describe("resolveInbox", () => {
     ).toBe("support@acme.dev");
   });
 
-  it("matches a group on the To header", () => {
+  it("matches a group on List-ID with just angle brackets", () => {
     expect(
-      resolveInbox(parsed({ to: "Sales Team <sales@acme.dev>" }), GROUPS),
-    ).toBe("sales@acme.dev");
+      resolveInbox(parsed({ "list-id": "<support.acme.dev>" }), GROUPS),
+    ).toBe("support@acme.dev");
   });
 
-  it("is case-insensitive", () => {
+  it("matches a group on X-Original-To", () => {
     expect(
-      resolveInbox(parsed({ "delivered-to": "Support@Acme.DEV" }), GROUPS),
+      resolveInbox(parsed({ "x-original-to": "support@acme.dev" }), GROUPS),
+    ).toBe("support@acme.dev");
+  });
+
+  it("matches a group on Delivered-To with comment", () => {
+    expect(
+      resolveInbox(
+        parsed({ "delivered-to": "support@acme.dev (Acme Support)" }),
+        GROUPS,
+      ),
     ).toBe("support@acme.dev");
   });
 
@@ -73,23 +90,47 @@ describe("resolveInbox", () => {
     ).toBe("cho@acme.dev");
   });
 
-  it("returns null when nothing matches and there is no catch-all", () => {
+  // Must NOT MATCH cases
+
+  it("rejects a trailing comment attack (evil@attacker.test followed by comment with target)", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
     expect(
-      resolveInbox(parsed({ "delivered-to": "other@acme.dev" }), GROUPS),
-    ).toBeNull();
+      resolveInbox(
+        parsed({ "delivered-to": "evil@attacker.test (<support@acme.dev>)" }),
+        mappings,
+      ),
+    ).toBe("cho@acme.dev");
   });
 
-  it("returns null for an empty mapping list", () => {
+  it("rejects brackets in Delivered-To (addr-spec before bracket)", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
     expect(
-      resolveInbox(parsed({ "delivered-to": "support@acme.dev" }), []),
-    ).toBeNull();
+      resolveInbox(
+        parsed({ "delivered-to": "evil@attacker.test <support@acme.dev>" }),
+        mappings,
+      ),
+    ).toBe("cho@acme.dev");
   });
 
-  it("ignores a group address that only appears inside the body-less headers it does not scan", () => {
-    // Subject is not a routing header; a group address there must not match.
+  it("rejects quoted display-name attack in Delivered-To", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
     expect(
-      resolveInbox(parsed({ subject: "about support@acme.dev" }), GROUPS),
-    ).toBeNull();
+      resolveInbox(
+        parsed({
+          "delivered-to": '"<support@acme.dev>, Smith" <evil@attacker.test>',
+        }),
+        mappings,
+      ),
+    ).toBe("cho@acme.dev");
   });
 
   it("rejects a partial-match on the left (info-support@acme.dev does not match support@acme.dev)", () => {
@@ -111,45 +152,62 @@ describe("resolveInbox", () => {
       ...GROUPS,
     ];
     expect(
-      resolveInbox(parsed({ to: "support@acme.dev.evil.test" }), mappings),
+      resolveInbox(
+        parsed({ "delivered-to": "support@acme.dev.evil.test" }),
+        mappings,
+      ),
     ).toBe("cho@acme.dev");
   });
 
-  it("matches a group on X-Original-To", () => {
+  it("rejects multiple bracket pairs in List-ID", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
     expect(
-      resolveInbox(parsed({ "x-original-to": "support@acme.dev" }), GROUPS),
-    ).toBe("support@acme.dev");
+      resolveInbox(
+        parsed({ "list-id": "<evil.attacker.test> <support.acme.dev>" }),
+        mappings,
+      ),
+    ).toBe("cho@acme.dev");
   });
 
-  it("matches a group on Cc", () => {
-    expect(resolveInbox(parsed({ cc: "support@acme.dev" }), GROUPS)).toBe(
-      "support@acme.dev",
+  it("rejects the @/. collision (support.acme@dev should not match support@acme.dev)", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
+    expect(
+      resolveInbox(parsed({ "delivered-to": "<support.acme@dev>" }), mappings),
+    ).toBe("cho@acme.dev");
+  });
+
+  it("ignores To header (sender-controlled) and falls back to catch-all", () => {
+    const mappings = [
+      { email: "cho@acme.dev", gmailGroupAddress: null },
+      ...GROUPS,
+    ];
+    expect(resolveInbox(parsed({ to: "support@acme.dev" }), mappings)).toBe(
+      "cho@acme.dev",
     );
   });
 
-  it('rejects a quoted display-name attack ("support@acme.dev" <evil@attacker.test> does not match support@acme.dev)', () => {
-    const mappings = [
-      { email: "cho@acme.dev", gmailGroupAddress: null },
-      ...GROUPS,
-    ];
+  it("returns null when nothing matches and there is no catch-all", () => {
     expect(
-      resolveInbox(
-        parsed({ to: '"support@acme.dev" <evil@attacker.test>' }),
-        mappings,
-      ),
-    ).toBe("cho@acme.dev");
+      resolveInbox(parsed({ "delivered-to": "other@acme.dev" }), GROUPS),
+    ).toBeNull();
   });
 
-  it("rejects an unquoted display-name attack (support@acme.dev <evil@attacker.test> does not match support@acme.dev)", () => {
-    const mappings = [
-      { email: "cho@acme.dev", gmailGroupAddress: null },
-      ...GROUPS,
-    ];
+  it("returns null for an empty mapping list", () => {
     expect(
-      resolveInbox(
-        parsed({ to: "support@acme.dev <evil@attacker.test>" }),
-        mappings,
-      ),
-    ).toBe("cho@acme.dev");
+      resolveInbox(parsed({ "delivered-to": "support@acme.dev" }), []),
+    ).toBeNull();
+  });
+
+  it("ignores a group address that only appears inside the body-less headers it does not scan", () => {
+    // Subject is not a routing header; a group address there must not match.
+    expect(
+      resolveInbox(parsed({ subject: "about support@acme.dev" }), GROUPS),
+    ).toBeNull();
   });
 });
