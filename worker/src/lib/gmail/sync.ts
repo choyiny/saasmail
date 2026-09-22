@@ -164,7 +164,7 @@ function header(
  * The scan ignores commas inside a quoted display name (`"Smith, Jane"`) and
  * inside a bracketed address, because neither separates list entries.
  */
-function firstListEntry(raw: string): string {
+function firstListEntry(raw: string): string | null {
   let inQuotes = false;
   let inAngles = false;
   for (let i = 0; i < raw.length; i++) {
@@ -181,7 +181,67 @@ function firstListEntry(raw: string): string {
     else if (!inQuotes && c === ">") inAngles = false;
     else if (c === "," && !inQuotes && !inAngles) return raw.slice(0, i);
   }
-  return raw;
+  // Ending mid-quote or mid-bracket means the header is malformed, and a
+  // malformed list has no identifiable first entry. Returning the WHOLE
+  // header here would be the wrong-customer bug all over again: one stray
+  // quote suppresses every delimiter, and the extraction below would then
+  // pick up whatever bracketed address appears LAST. Refuse instead.
+  return inQuotes || inAngles ? null : raw;
+}
+
+/**
+ * The entry with its quoted display names removed.
+ *
+ * A display name may legally contain anything, including a complete
+ * address in brackets, so the search for the real address has to ignore it:
+ * `"Bob <bob@x.com>" <jane@example.com>` is a message to JANE.
+ *
+ * Only ever called on an entry `firstListEntry` already accepted, so the
+ * quoting is known to be balanced.
+ */
+function withoutQuotedText(entry: string): string {
+  let out = "";
+  let inQuotes = false;
+  for (let i = 0; i < entry.length; i++) {
+    const c = entry[i];
+    if (inQuotes && c === "\\") {
+      i++;
+      continue;
+    }
+    if (c === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (!inQuotes) out += c;
+  }
+  return out;
+}
+
+/**
+ * Is this a plain addr-spec we are willing to file a customer's mail under?
+ *
+ * Deliberately strict, and applied AFTER extraction: the extractor's job is
+ * to find the candidate, this one's is to refuse anything that is not
+ * actually an address. `<jane,x@example.com>` extracts cleanly and is still
+ * not an address. Prefer null over a guess — a skipped mirror costs one row,
+ * a wrong one puts a customer's reply on someone else's timeline.
+ */
+function isAddrSpec(address: string): boolean {
+  // RFC 5321's 254-octet ceiling; also stops a pathological header early.
+  if (address.length === 0 || address.length > 254) return false;
+  // No whitespace, and none of RFC 5322's specials: comma, quote, angle
+  // brackets, parens, colon, semicolon, backslash, square brackets.
+  if (/[\s",<>();:\\[\]]/.test(address)) return false;
+  const at = address.indexOf("@");
+  if (at === -1 || at !== address.lastIndexOf("@")) return false;
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  if (!local || !domain) return false;
+  // A dot in the domain, and not a leading, trailing or doubled one.
+  if (!domain.includes(".")) return false;
+  if (domain.startsWith(".") || domain.endsWith(".")) return false;
+  if (domain.includes("..")) return false;
+  return true;
 }
 
 /**
@@ -189,17 +249,21 @@ function firstListEntry(raw: string): string {
  *
  * Only the first matters here: a mirrored Sent message needs one counterparty
  * to hang off a timeline, and everyone else on the message is already carried
- * by the Cc column. Null when the header is missing or holds nothing
- * address-shaped — the same cheap RFC 5322-ish gate the parser uses on Cc.
+ * by the Cc column.
+ *
+ * Three steps, in this order, because each one is unsafe without the one
+ * before it: split the list, drop the display names, then VALIDATE what is
+ * left. Null whenever any step cannot answer confidently — a missing header,
+ * a malformed one, or a candidate that is not an address.
  */
 function firstAddress(raw: string | undefined): string | null {
   if (!raw) return null;
-  // One entry first, THEN unwrap it. Within a single entry the bracketed
-  // form is unambiguous: `"Bob" <bob@x.com>` has exactly one address.
-  const entry = firstListEntry(raw).trim();
-  const angled = entry.match(/<([^>]*)>/);
-  const address = (angled ? angled[1] : entry).trim().toLowerCase();
-  return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(address) ? address : null;
+  const entry = firstListEntry(raw);
+  if (entry === null) return null;
+  const unquoted = withoutQuotedText(entry);
+  const angled = unquoted.match(/<([^>]*)>/);
+  const address = (angled ? angled[1] : unquoted).trim().toLowerCase();
+  return isAddrSpec(address) ? address : null;
 }
 
 /**
@@ -272,16 +336,26 @@ async function mirrorSentMessage(
   // rescues a blind-copied send that would otherwise have no counterparty at
   // all. Each step reads one header and takes its first entry; they are never
   // mixed.
+  const toHeader = header(parsed.headers, "to");
+  const ccHeader = header(parsed.headers, "cc");
+  const bccHeader = header(parsed.headers, "bcc");
   const toAddress =
-    firstAddress(header(parsed.headers, "to")) ??
-    firstAddress(header(parsed.headers, "cc")) ??
-    firstAddress(header(parsed.headers, "bcc"));
+    firstAddress(toHeader) ?? firstAddress(ccHeader) ?? firstAddress(bccHeader);
   if (!toAddress) {
-    // Nothing address-shaped anywhere. There is no timeline to put it on, and
-    // `sent_emails.to_address` is NOT NULL, so inventing a value would be
-    // worse than passing over it.
+    // There is no timeline to put it on, and `sent_emails.to_address` is NOT
+    // NULL, so inventing a value would be worse than passing over it.
+    //
+    // The two cases read very differently to an operator: a blind-copied send
+    // with no recipient headers at all is ordinary, while headers that are
+    // present but unusable mean mail IS being skipped and something upstream
+    // is wrong.
+    const anyHeaderPresent = [toHeader, ccHeader, bccHeader].some(
+      (h) => h && h.trim(),
+    );
     console.warn(
-      `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no usable recipient on To:, Cc: or Bcc: (malformed headers, or none at all), and sent_emails.to_address is NOT NULL — not mirrored.`,
+      anyHeaderPresent
+        ? `Gmail sync for ${inbox}: sent message ${gmailMessageId} has MALFORMED recipient headers — To:/Cc:/Bcc: are present but none yields a valid address (unbalanced quotes or brackets, or not an addr-spec). Refusing to guess a counterparty; not mirrored.`
+        : `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no To:, Cc: or Bcc: header at all, so it has no counterparty; not mirrored.`,
     );
     return false;
   }

@@ -501,6 +501,39 @@ describe("syncAccount — picking the counterparty off the header", () => {
       "Jane <jane@example.com>, Bob <bob@x.com>",
       "jane@example.com",
     ],
+    // A display name may legally contain a whole address. The real recipient
+    // is the bracketed one OUTSIDE the quotes.
+    [
+      "a bracketed address hidden inside the display name",
+      '"Bob <bob@x.com>" <jane@example.com>',
+      "jane@example.com",
+    ],
+    ["doubled quotes", '""Jane"" <jane@example.com>', "jane@example.com"],
+    [
+      "a quoted display name with no brackets",
+      '"Jane" jane@example.com',
+      "jane@example.com",
+    ],
+    [
+      "a trailing backslash outside quotes",
+      "Jane <jane@example.com>\\",
+      "jane@example.com",
+    ],
+    // First-written wins, which is the whole contract of this function.
+    [
+      "two bracketed addresses in ONE entry",
+      "Jane <jane@example.com> <bob@x.com>",
+      "jane@example.com",
+    ],
+    ["mixed case", "Jane <JANE@Example.COM>", "jane@example.com"],
+    [
+      "a very long list",
+      Array.from(
+        { length: 200 },
+        (_, i) => `User${i} <u${i}@example.com>`,
+      ).join(", "),
+      "u0@example.com",
+    ],
   ];
 
   for (const [label, to, expected] of cases) {
@@ -521,6 +554,53 @@ describe("syncAccount — picking the counterparty off the header", () => {
       const rows = await getDb().select().from(sentEmails);
       expect(rows).toHaveLength(1);
       expect(rows[0].toAddress).toBe(expected);
+    });
+  }
+
+  /**
+   * Headers that must yield NOTHING. Every one of these once had, or could
+   * have had, a plausible-looking answer — and a plausible-looking answer to
+   * a malformed header is how a customer's reply ends up on someone else's
+   * timeline. A skipped mirror costs one row; a wrong one costs trust.
+   */
+  const rejects: Array<[label: string, to: string]> = [
+    // The round-3 regression: one stray quote suppresses every delimiter, so
+    // a whole-header search would hand back Bob — the LAST address written.
+    ["an unclosed quote", '"Jane jane@example.com, Bob <bob@x.com>'],
+    ["an unclosed angle bracket", "Jane <jane@example.com"],
+    // Isolates the unterminated-state guard specifically: everything before
+    // the stray quote IS a valid address, so without the guard this header
+    // quietly mirrors. Policy is to refuse a malformed list outright.
+    ["an address followed by an unclosed quote", 'jane@example.com "Bob'],
+    ["a comma inside the angle brackets", "<jane,x@example.com>"],
+    ["a backslash at the very end of a quoted name", '"Jane\\'],
+    ["empty angle brackets", "<>"],
+    ["only whitespace", "   "],
+    ["a leading empty entry", ",jane@example.com"],
+    ["two at-signs", "<jane@@example.com>"],
+    ["a dotless domain", "<jane@localhost>"],
+    ["no at-sign at all", "Jane Doe"],
+  ];
+
+  for (const [label, to] of rejects) {
+    it(`refuses to guess a counterparty from ${label}`, async () => {
+      await seedAccount();
+      await seedInbox();
+      stubGmail({
+        historyIds: ["m1"],
+        messages: {
+          m1: {
+            labelIds: ["SENT"],
+            raw: rawSent({ to, messageId: "<r1@acme.dev>" }),
+          },
+        },
+      });
+
+      const res = await sync();
+      expect(res.ingested).toBe(0);
+      expect(res.skipped).toBe(1);
+      expect(res.failed).toBe(0);
+      expect(await getDb().select().from(sentEmails)).toHaveLength(0);
     });
   }
 
