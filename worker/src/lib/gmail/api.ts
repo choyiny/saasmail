@@ -26,11 +26,26 @@ function classify(status: number, isHistory: boolean): string {
   return `http_${status}`;
 }
 
+/**
+ * One message added, tagged with the id of the history record that added it.
+ *
+ * The record id — Gmail's "mailbox sequence ID" — is the only safe cursor for
+ * a partially-processed run. A Message's own `historyId` is documented as "the
+ * ID of the LAST history record that modified this message", so any later
+ * touch (a read, a label, a filter) rewrites it upward and it can sort past
+ * messages this run has not seen yet. Resuming from that would skip mail.
+ */
+export type AddedMessage = {
+  messageId: string;
+  /** The enclosing History record's `id`, ascending and tied to the ADD. */
+  historyId: string;
+};
+
 export async function listHistory(
   accessToken: string,
   opts: { startHistoryId: string; pageToken?: string },
 ): Promise<{
-  addedMessageIds: string[];
+  added: AddedMessage[];
   nextPageToken: string | null;
   historyId: string | null;
 }> {
@@ -54,16 +69,23 @@ export async function listHistory(
   }
 
   const payload = (await readJson(res)) ?? {};
-  const addedMessageIds: string[] = [];
+  const added: AddedMessage[] = [];
   for (const entry of payload.history ?? []) {
-    for (const added of entry.messagesAdded ?? []) {
-      const id = added?.message?.id;
-      if (typeof id === "string") addedMessageIds.push(id);
+    // Without a record id there is no cursor we could resume from, and
+    // inventing one would risk advancing past unprocessed mail. Gmail always
+    // sets it, so this is a defensive drop rather than an expected path.
+    const recordId = entry?.id != null ? String(entry.id) : null;
+    if (!recordId) continue;
+    for (const item of entry.messagesAdded ?? []) {
+      const id = item?.message?.id;
+      if (typeof id === "string") {
+        added.push({ messageId: id, historyId: recordId });
+      }
     }
   }
 
   return {
-    addedMessageIds,
+    added,
     nextPageToken: payload.nextPageToken ?? null,
     historyId: payload.historyId != null ? String(payload.historyId) : null,
   };
