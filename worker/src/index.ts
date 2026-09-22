@@ -345,11 +345,14 @@ export default {
     // Promise.allSettled) and no-ops when the integration isn't configured,
     // so this call either does nothing or runs to completion.
     //
-    // NOTE: `syncAllGmailAccounts` returns `Promise<void>`, not the
-    // per-account `{ ingested, skipped, failed, reseeded }` counts —
-    // see the task report for why a per-account `failed` count can't be
-    // logged from here without a signature change to that (already
-    // reviewed) function.
+    // `syncAllGmailAccounts` returns `Promise<void>` — it does not hand
+    // per-account outcomes back to this handler. It logs them itself
+    // instead: a distinct line for an account that synced but failed to
+    // ingest a message, and another for an account whose history cursor
+    // expired and had to be re-seeded (see its `results.forEach` for both).
+    // The `.catch()` below only covers a hard failure of the whole call
+    // (e.g. thrown before/outside its own per-account isolation) — per
+    // -account failures never reach it, by design.
     ctx.waitUntil(
       (async () => {
         const db = drizzle(env.DB, { schema });
