@@ -62,6 +62,7 @@ export const TEST_IDS = {
   mailCreateFolderInput: "mail-create-folder-input",
   mailCreateFolderButton: "mail-create-folder-button",
   mailMoveFolder: "mail-move-folder",
+  mailBulkArchive: "mail-bulk-archive",
 
   // API keys
   apiKeyRow: "api-key-row",

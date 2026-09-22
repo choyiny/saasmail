@@ -30,7 +30,7 @@ INSERT INTO people (id, email, name, last_email_at, unread_count, total_count, c
 VALUES
   ('p_alice',   'alice@customers.test',   'Alice Anderson', CAST(strftime('%s','now') AS INTEGER), 2, 4, CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)),
   ('p_bob',     'bob@customers.test',     'Bob Brown',      CAST(strftime('%s','now') AS INTEGER), 2, 4, CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)),
-  ('p_mailbox', 'mailbox@customers.test', 'Mailbox Fixture', CAST(strftime('%s','now') AS INTEGER), 1, 2, CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER));
+  ('p_mailbox', 'mailbox@customers.test', 'Mailbox Fixture', CAST(strftime('%s','now') AS INTEGER), 2, 3, CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER));
 
 -- Inbound emails. Two per (person, inbox) so display specs have thread context.
 INSERT INTO emails (id, person_id, recipient, subject, body_html, body_text, message_id, is_read, received_at, created_at)
@@ -43,7 +43,8 @@ VALUES
   ('e_s_a2', 'p_alice', 'support@e2e.test',   'Re: Help with login',             '<p>Tried that, still broken.</p>',                                                                          'still',   'mid_s_a2', 0, CAST(strftime('%s','now') AS INTEGER) - 1800000, CAST(strftime('%s','now') AS INTEGER) - 1800000),
   ('e_s_b1', 'p_bob',     'support@e2e.test', 'Billing question',                '<p>What''s this charge?</p>',                                                                               'charge',  'mid_s_b1', 0, CAST(strftime('%s','now') AS INTEGER) - 7200000, CAST(strftime('%s','now') AS INTEGER) - 7200000),
   ('e_s_b2', 'p_bob',     'support@e2e.test', 'Re: Billing question',            '<p>Thanks, that clears it up.</p>',                                                                         'clears',  'mid_s_b2', 0, CAST(strftime('%s','now') AS INTEGER) - 3600000, CAST(strftime('%s','now') AS INTEGER) - 3600000),
-  ('e_mailbox_1', 'p_mailbox', 'support@e2e.test', 'Mailbox fixture message',     '<p>Mailbox-only received message.</p>',                                                                      'mailbox received', 'mid_mailbox_1', 0, CAST(strftime('%s','now') AS INTEGER) - 1200, CAST(strftime('%s','now') AS INTEGER) - 1200);
+  ('e_mailbox_1', 'p_mailbox', 'support@e2e.test', 'Mailbox fixture message',     '<p>Mailbox-only received message.</p>',                                                                      'mailbox received', 'mid_mailbox_1', 0, CAST(strftime('%s','now') AS INTEGER) - 1200, CAST(strftime('%s','now') AS INTEGER) - 1200),
+  ('e_mailbox_2', 'p_mailbox', 'support@e2e.test', 'Mailbox bulk second',         '<p>Second mailbox-only received message.</p>',                                                               'mailbox bulk second', 'mid_mailbox_2', 0, CAST(strftime('%s','now') AS INTEGER) - 600, CAST(strftime('%s','now') AS INTEGER) - 600);
 
 
 -- One sent message for the conventional mailbox Sent-folder flow.

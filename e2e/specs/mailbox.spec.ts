@@ -119,5 +119,36 @@ test.describe.serial("conventional mailbox", () => {
         .getByTestId(TEST_IDS.mailMessageRow)
         .filter({ hasText: "Mailbox fixture message" }),
     ).toBeVisible();
+
+    await page.getByTestId("mail-folder-inbox").click();
+    const firstBulkRow = page
+      .getByTestId(TEST_IDS.mailMessageRow)
+      .filter({ hasText: "Mailbox fixture message" })
+      .first();
+    const secondBulkRow = page
+      .getByTestId(TEST_IDS.mailMessageRow)
+      .filter({ hasText: "Mailbox bulk second" })
+      .first();
+    await expect(firstBulkRow).toBeVisible();
+    await expect(secondBulkRow).toBeVisible();
+    await firstBulkRow
+      .getByRole("checkbox", { name: "Select message" })
+      .click();
+    await secondBulkRow
+      .getByRole("checkbox", { name: "Select message" })
+      .click();
+    await page.getByTestId(TEST_IDS.mailBulkArchive).click();
+
+    await page.getByTestId("mail-folder-archive").click();
+    await expect(
+      page
+        .getByTestId(TEST_IDS.mailMessageRow)
+        .filter({ hasText: "Mailbox fixture message" }),
+    ).toBeVisible();
+    await expect(
+      page
+        .getByTestId(TEST_IDS.mailMessageRow)
+        .filter({ hasText: "Mailbox bulk second" }),
+    ).toBeVisible();
   });
 });

@@ -161,3 +161,22 @@ dispatch the mailbox refresh event and reload authoritative state.
 Users can choose **Customers** or **Mailbox** as the default home view in
 Settings. The preference is stored as `saasmail.defaultView`; only the exact
 `/` route redirects to `/mail`, so deep links are never rewritten.
+
+Mailbox rows support multi-selection and select-all over the currently loaded
+cursor pages. Bulk state mutations are sent in chunks of at most 500 message
+references per request; if any later chunk fails, the first page is refetched
+instead of rolling back to a stale client snapshot. Archive and spam are only
+offered when the entire selection is received mail. Bulk actions cover
+seen/unseen, star/unstar, archive/unarchive, spam/not-spam, trash/restore,
+snooze, and custom-folder moves.
+
+Custom folders may be created at the root or under another custom folder,
+renamed, or deleted with confirmation. Children are indented beneath their
+parent in the folder rail.
+
+The mailbox also has page-scoped keyboard shortcuts: `j`/`k` move the
+keyboard cursor, `Enter` or `o` opens it, `u` returns to the list, `x`
+toggles selection, `e` archives, `s` stars, `#` trashes, `r` replies,
+and `?` opens the shortcuts dialog. Shortcuts are ignored while focus is in
+an input, textarea, select, or contenteditable element, and for command/control
+modifier combinations.
