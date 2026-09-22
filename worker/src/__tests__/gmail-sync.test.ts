@@ -987,13 +987,31 @@ describe("syncAllGmailAccounts", () => {
       },
     });
 
-    await expect(
-      syncAllGmailAccounts(
-        getDb(),
-        env as unknown as CloudflareBindings,
-        fakeCtx(),
-      ),
-    ).resolves.toBeUndefined();
+    // `syncAllGmailAccounts` logs its own distinct line when a fulfilled
+    // result reports `reseeded: true`, on top of the `console.warn` that
+    // `seedCursor` already logs from inside `syncAccount` — a re-seed is
+    // otherwise durably recorded only on `gmail_accounts.lastGapAt`, never
+    // in cron output.
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        syncAllGmailAccounts(
+          getDb(),
+          env as unknown as CloudflareBindings,
+          fakeCtx(),
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(
+        warnSpy.mock.calls.some((call) =>
+          call.some(
+            (arg) => typeof arg === "string" && arg.includes("stale@acme.dev"),
+          ),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
 
     const all = await getDb().select().from(gmailAccounts);
     const stale = all.find((r) => r.id === "acct-1")!;
@@ -1005,5 +1023,70 @@ describe("syncAllGmailAccounts", () => {
     const rows = await getDb().select().from(emails);
     expect(rows).toHaveLength(1);
     expect(rows[0].recipient).toBe("support2@acme.dev");
+  });
+
+  it("logs a distinct line naming the account when a message fails to ingest", async () => {
+    // A message that fails inside `syncAccount` is caught there, counted in
+    // `failed`, and the promise RESOLVES — so `Promise.allSettled` reports
+    // this account as fulfilled. Without the `result.value.failed` branch in
+    // `syncAllGmailAccounts`, nothing here would ever be visible at the cron
+    // layer, only on `gmail_accounts.lastError`.
+    await seedAccount("9000", {
+      id: "acct-1",
+      emailAddress: "poison@acme.dev",
+    });
+    await seedInbox("support@acme.dev", null, "acct-1");
+    stubGmail({
+      historyIds: ["bad"],
+      messages: {
+        bad: {
+          raw: rawEmail({
+            from: "jane@example.com",
+            deliveredTo: "support@acme.dev",
+            messageId: "<bad1@example.com>",
+          }),
+        },
+      },
+      failMessageIds: ["bad"],
+    });
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(
+        syncAllGmailAccounts(
+          getDb(),
+          env as unknown as CloudflareBindings,
+          fakeCtx(),
+        ),
+      ).resolves.toBeUndefined();
+
+      // Asserts on the account address appearing in the logged output
+      // (not an exact string) — a rejection isolation test elsewhere in
+      // this file already pins the exact wording of the per-message log
+      // `syncAccount` emits; this checks the SEPARATE summary line that
+      // `syncAllGmailAccounts` itself now emits for a fulfilled-but-failed
+      // result.
+      expect(
+        errorSpy.mock.calls.some((call) =>
+          call.some(
+            (arg) =>
+              typeof arg === "string" &&
+              arg.includes("poison@acme.dev") &&
+              /failed/i.test(arg) &&
+              arg.includes("1"),
+          ),
+        ),
+      ).toBe(true);
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    const row = (
+      await getDb()
+        .select()
+        .from(gmailAccounts)
+        .where(eq(gmailAccounts.id, "acct-1"))
+    )[0];
+    expect(row.lastError).toBe("message_failed:bad");
   });
 });
