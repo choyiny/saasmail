@@ -30,3 +30,7 @@ export * from "./campaign-links.schema";
 export * from "./campaign-events.schema";
 export * from "./campaign-unsubscribe-attributions.schema";
 export * from "./schema";
+export * from "./message-user-state.schema";
+export * from "./mailbox-message-state.schema";
+export * from "./mailboxes.schema";
+export * from "./message-mailboxes.schema";

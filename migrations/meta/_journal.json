@@ -281,6 +281,20 @@
       "when": 1790095896925,
       "tag": "0039_backfill_sequence_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1790103305138,
+      "tag": "0040_message_state_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1790103490979,
+      "tag": "0041_message_state_constraints",
+      "breakpoints": true
     }
   ]
 }
