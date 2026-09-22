@@ -36,6 +36,10 @@ export const emails = sqliteTable(
      * See migration 0022.
      */
     conversationId: text("conversation_id"),
+    /** Gmail's own message id. Null for Cloudflare-routed mail. */
+    gmailMessageId: text("gmail_message_id"),
+    /** Gmail's thread id, kept for reply threading in a later slice. */
+    gmailThreadId: text("gmail_thread_id"),
     receivedAt: integer("received_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
