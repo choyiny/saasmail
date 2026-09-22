@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll, beforeEach } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { applyMigrations, cleanDb, createTestPerson, getDb } from "./helpers";
 import { attachments } from "../db/attachments.schema";
 import { blocklist } from "../db/blocklist.schema";
@@ -9,7 +9,7 @@ import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { InvalidCursorError } from "../lib/messages/cursor";
-import { queryMessages } from "../lib/messages/query";
+import { buildMessageQuerySql, queryMessages } from "../lib/messages/query";
 
 describe("queryMessages", () => {
   beforeAll(async () => {
@@ -31,7 +31,7 @@ describe("queryMessages", () => {
     await db.insert(emails).values({
       id: "recv-1",
       personId: "person-1",
-      recipient: "Support@saasmail.test",
+      recipient: "support@saasmail.test",
       subject: "Invoice received",
       bodyHtml: "<p>secret inbound body</p>",
       bodyText: "secret inbound body",
@@ -60,7 +60,7 @@ describe("queryMessages", () => {
     });
   }
 
-  it("merges both directions and scopes stored inbox casing correctly", async () => {
+  it("merges both directions and scopes canonical inbox addresses correctly", async () => {
     await seedPair();
 
     const page = await queryMessages(
@@ -78,6 +78,25 @@ describe("queryMessages", () => {
       name: "Alice",
     });
     expect(page.messages[1].to.name).toBe("Alice");
+  });
+
+  it("uses inbox/timestamp indexes for the real inbox-scoped query", async () => {
+    const db = getDb();
+    const built = buildMessageQuerySql(
+      { isAdmin: false, inboxes: ["support@saasmail.test"] },
+      { inboxes: ["support@saasmail.test"], limit: 10 },
+    );
+    expect(built).not.toBeNull();
+
+    const plan = await db.all<{ detail: string }>(
+      sql`EXPLAIN QUERY PLAN ${built!.statement}`,
+    );
+    const details = plan.map((row) => row.detail).join("\n");
+
+    expect(details).toContain("emails_recipient_received_idx");
+    expect(details).toContain("sent_emails_from_sent_idx");
+    expect(details).not.toMatch(/\bSCAN emails\b/i);
+    expect(details).not.toMatch(/\bSCAN sent_emails\b/i);
   });
 
   it("silently excludes explicitly unauthorized inboxes", async () => {

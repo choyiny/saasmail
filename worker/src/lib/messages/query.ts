@@ -143,15 +143,75 @@ function sentSearch(search: string | undefined, mode: MessageSearchMode): SQL {
     : sql`AND se.subject LIKE ${pattern} ESCAPE '\\'`;
 }
 
+type ArmWindow = {
+  cursor: MessageCursorV1 | null;
+  order: "desc" | "asc";
+  limit: number | null;
+};
+
+function sourceCursorScope(
+  timestampColumn: SQL,
+  idColumn: SQL,
+  kind: MessageKind,
+  cursor: MessageCursorV1 | null,
+  order: "desc" | "asc",
+): SQL {
+  if (!cursor) return sql``;
+
+  if (order === "asc") {
+    return sql`AND (
+      ${timestampColumn} > ${cursor.occurredAt}
+      OR (${timestampColumn} = ${cursor.occurredAt} AND ${idColumn} > ${cursor.id})
+      OR (
+        ${timestampColumn} = ${cursor.occurredAt}
+        AND ${idColumn} = ${cursor.id}
+        AND ${kind} > ${cursor.kind}
+      )
+    )`;
+  }
+
+  return sql`AND (
+    ${timestampColumn} < ${cursor.occurredAt}
+    OR (${timestampColumn} = ${cursor.occurredAt} AND ${idColumn} < ${cursor.id})
+    OR (
+      ${timestampColumn} = ${cursor.occurredAt}
+      AND ${idColumn} = ${cursor.id}
+      AND ${kind} > ${cursor.kind}
+    )
+  )`;
+}
+
+function boundSourceArm(
+  base: SQL,
+  timestampColumn: SQL,
+  idColumn: SQL,
+  window: ArmWindow,
+): SQL {
+  if (window.limit === null) return base;
+
+  const order =
+    window.order === "asc"
+      ? sql`ORDER BY ${timestampColumn} ASC, ${idColumn} ASC`
+      : sql`ORDER BY ${timestampColumn} DESC, ${idColumn} DESC`;
+
+  return sql`
+    SELECT * FROM (
+      ${base}
+      ${order}
+      LIMIT ${window.limit}
+    )
+  `;
+}
+
 function receivedArm(
   allowed: AllowedInboxes,
   query: MessageQuery,
   requestedInboxes: string[] | undefined,
+  window: ArmWindow,
 ): SQL {
   const search = receivedSearch(query.search, query.searchMode ?? "subject");
-  const allowedScope = inboxScopeSql(allowed, sql`lower(e.recipient)`);
-
-  return sql`
+  const allowedScope = inboxScopeSql(allowed, sql`e.recipient`);
+  const base = sql`
     SELECT
       'received' AS kind,
       e.id AS id,
@@ -177,23 +237,32 @@ function receivedArm(
     LEFT JOIN people p ON p.id = e.person_id
     WHERE 1 = 1
       ${allowedScope}
-      ${explicitInboxScope(sql`lower(e.recipient)`, requestedInboxes)}
+      ${explicitInboxScope(sql`e.recipient`, requestedInboxes)}
       ${personScope(sql`e.person_id`, query.personId)}
       ${conversationScope(sql`e.conversation_id`, query.conversationId)}
       ${dateScope(sql`e.received_at`, query.after, query.before)}
       ${search.where}
       ${blockedScope(query.excludeBlocked ?? false)}
+      ${sourceCursorScope(
+        sql`e.received_at`,
+        sql`e.id`,
+        "received",
+        window.cursor,
+        window.order,
+      )}
   `;
+
+  return boundSourceArm(base, sql`e.received_at`, sql`e.id`, window);
 }
 
 function sentArm(
   allowed: AllowedInboxes,
   query: MessageQuery,
   requestedInboxes: string[] | undefined,
+  window: ArmWindow,
 ): SQL {
-  const allowedScope = inboxScopeSql(allowed, sql`lower(se.from_address)`);
-
-  return sql`
+  const allowedScope = inboxScopeSql(allowed, sql`se.from_address`);
+  const base = sql`
     SELECT
       'sent' AS kind,
       se.id AS id,
@@ -218,13 +287,22 @@ function sentArm(
     LEFT JOIN people p ON p.id = se.person_id
     WHERE 1 = 1
       ${allowedScope}
-      ${explicitInboxScope(sql`lower(se.from_address)`, requestedInboxes)}
+      ${explicitInboxScope(sql`se.from_address`, requestedInboxes)}
       ${personScope(sql`se.person_id`, query.personId)}
       ${conversationScope(sql`se.conversation_id`, query.conversationId)}
       ${dateScope(sql`se.sent_at`, query.after, query.before)}
       ${sentSearch(query.search, query.searchMode ?? "subject")}
       ${blockedScope(query.excludeBlocked ?? false)}
+      ${sourceCursorScope(
+        sql`se.sent_at`,
+        sql`se.id`,
+        "sent",
+        window.cursor,
+        window.order,
+      )}
   `;
+
+  return boundSourceArm(base, sql`se.sent_at`, sql`se.id`, window);
 }
 
 function cursorScope(
@@ -394,30 +472,22 @@ async function enrichAttachments(
   }
 }
 
-export async function queryMessages(
-  db: DrizzleD1Database<any>,
+export type BuiltMessageQuery = {
+  statement: SQL;
+  limit: number | null;
+};
+
+export function buildMessageQuerySql(
   allowed: AllowedInboxes,
   query: MessageQuery = {},
-): Promise<MessagePage> {
+): BuiltMessageQuery | null {
   if (!allowed.isAdmin && allowed.inboxes.length === 0) {
-    return { messages: [], nextCursor: null, hasMore: false };
+    return null;
   }
 
   const requestedInboxes = normalizeInboxes(query.inboxes);
   if (requestedInboxes?.length === 0) {
-    return { messages: [], nextCursor: null, hasMore: false };
-  }
-
-  const arms: SQL[] = [];
-  if (query.direction !== "outbound") {
-    arms.push(receivedArm(allowed, query, requestedInboxes));
-  }
-  if (query.direction !== "inbound") {
-    arms.push(sentArm(allowed, query, requestedInboxes));
-  }
-
-  if (arms.length === 0) {
-    return { messages: [], nextCursor: null, hasMore: false };
+    return null;
   }
 
   if (query.cursor !== undefined && query.offset !== undefined) {
@@ -430,6 +500,26 @@ export async function queryMessages(
   const orderDirection = query.order === "asc" ? "asc" : "desc";
   const decodedCursor =
     query.cursor === undefined ? null : decodeCursor(query.cursor);
+  const armLimit =
+    limit === null ? null : decodedCursor ? limit + 1 : offset + limit + 1;
+  const armWindow: ArmWindow = {
+    cursor: decodedCursor,
+    order: orderDirection,
+    limit: armLimit,
+  };
+
+  const arms: SQL[] = [];
+  if (query.direction !== "outbound") {
+    arms.push(receivedArm(allowed, query, requestedInboxes, armWindow));
+  }
+  if (query.direction !== "inbound") {
+    arms.push(sentArm(allowed, query, requestedInboxes, armWindow));
+  }
+
+  if (arms.length === 0) {
+    return null;
+  }
+
   const union = sql.join(arms, sql` UNION ALL `);
   const cursorWhere = cursorScope(decodedCursor, orderDirection);
   const order =
@@ -438,13 +528,29 @@ export async function queryMessages(
       : sql`ORDER BY occurred_at DESC, id DESC, kind ASC`;
 
   const limitClause = limit === null ? sql`LIMIT -1` : sql`LIMIT ${limit + 1}`;
-  const rows = await db.all<RawMessageRow>(sql`
+  const statement = sql`
     SELECT * FROM (${union})
     ${cursorWhere}
     ${order}
     ${limitClause}
     OFFSET ${decodedCursor ? 0 : offset}
-  `);
+  `;
+
+  return { statement, limit };
+}
+
+export async function queryMessages(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  query: MessageQuery = {},
+): Promise<MessagePage> {
+  const built = buildMessageQuerySql(allowed, query);
+  if (!built) {
+    return { messages: [], nextCursor: null, hasMore: false };
+  }
+
+  const rows = await db.all<RawMessageRow>(built.statement);
+  const { limit } = built;
 
   const hasMore = limit !== null && rows.length > limit;
   const visibleRows = limit === null ? rows : rows.slice(0, limit);

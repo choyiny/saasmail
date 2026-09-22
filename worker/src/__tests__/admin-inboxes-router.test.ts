@@ -379,6 +379,41 @@ describe("admin inboxes router", () => {
     expect(userIds).toEqual(["u-m1", "u-m2"]);
   });
 
+  it("PUT assignments canonicalizes a mixed-case inbox path before storage", async () => {
+    const { apiKey } = await createTestUser({
+      id: "u-admin-case",
+      role: "admin",
+      email: "admin-case@x.com",
+    });
+    await createTestUser({
+      id: "u-member-case",
+      role: "member",
+      email: "member-case@x.com",
+    });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent(" Support@X.COM ")}/assignments`,
+      {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({ userIds: ["u-member-case"] }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      email: "support@x.com",
+      assignedUserIds: ["u-member-case"],
+    });
+
+    const rows = await getDb()
+      .select()
+      .from(inboxPermissions)
+      .where(eq(inboxPermissions.userId, "u-member-case"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].email).toBe("support@x.com");
+  });
+
   it("PATCH persists forwardTo and surfaces it in GET", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     await createTestPerson();

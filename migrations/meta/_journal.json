@@ -260,6 +260,13 @@
       "when": 1788622898280,
       "tag": "0036_newsletter_custom_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1790093013515,
+      "tag": "0037_canonicalize_inbox_addresses",
+      "breakpoints": true
     }
   ]
 }

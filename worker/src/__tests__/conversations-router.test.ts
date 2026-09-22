@@ -160,7 +160,7 @@ describe("conversations router", () => {
       expect(body.emails[124].timestamp).toBe(125);
     });
 
-    it("authorizes mixed-case stored inbox addresses through normalized scoping", async () => {
+    it("authorizes canonical stored inbox addresses through scoped queries", async () => {
       const db = getDb();
       const { userId, apiKey: memberKey } = await createTestUser({
         id: "conversation-member",
@@ -180,8 +180,8 @@ describe("conversations router", () => {
       await db.insert(emails).values({
         id: "case-recv",
         personId: "case-person",
-        recipient: "Support@saasmail.test",
-        subject: "Mixed case inbox",
+        recipient: "support@saasmail.test",
+        subject: "Canonical inbox",
         bodyText: "Hello",
         rawHeaders: "{}",
         messageId: "case-recv@example.com",

@@ -230,7 +230,8 @@ const patchInboxRoute = createRoute({
 
 adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   const db = c.get("db");
-  const { email } = c.req.valid("param");
+  const { email: rawEmail } = c.req.valid("param");
+  const email = rawEmail.trim().toLowerCase();
   const body = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
@@ -274,7 +275,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
   // this again at send time (and also catches forwards aimed at *other* inboxes
   // on this instance, which may not exist yet when the rule is saved).
-  if (nextForwardTo !== null && nextForwardTo === email.trim().toLowerCase()) {
+  if (nextForwardTo !== null && nextForwardTo === email) {
     return c.json(
       { error: "Forward destination cannot be the inbox itself" },
       400,
@@ -362,7 +363,8 @@ const putAssignmentsRoute = createRoute({
 adminInboxesRouter.openapi(putAssignmentsRoute, async (c) => {
   const db = c.get("db");
   const currentUser = c.get("user");
-  const { email } = c.req.valid("param");
+  const { email: rawEmail } = c.req.valid("param");
+  const email = rawEmail.trim().toLowerCase();
   const { userIds } = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
@@ -404,7 +406,8 @@ const deleteInboxRoute = createRoute({
 
 adminInboxesRouter.openapi(deleteInboxRoute, async (c) => {
   const db = c.get("db");
-  const { email } = c.req.valid("param");
+  const { email: rawEmail } = c.req.valid("param");
+  const email = rawEmail.trim().toLowerCase();
 
   const existing = await db
     .select({ email: senderIdentities.email })
