@@ -7,7 +7,8 @@ import { senderIdentities } from "../../db/sender-identities.schema";
 import { emails } from "../../db/emails.schema";
 import { people } from "../../db/people.schema";
 import { sentEmails } from "../../db/sent-emails.schema";
-import { parseRaw, type ParsedEmailAddress } from "../email-parser";
+import { addressParser } from "postal-mime";
+import { parseRaw } from "../email-parser";
 import { computeConversationId, externalsOnly } from "../conversation-id";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
@@ -184,19 +185,149 @@ function isAddrSpec(address: string): boolean {
 }
 
 /**
- * The first usable address on one of postal-mime's parsed header lists.
+ * Blank out every TERMINATED quoted string and comment, offsets preserved.
  *
- * FIRST, not any: a mirrored Sent message needs one counterparty to hang off
- * a timeline, and the first-written recipient is the one the sender meant.
- * Everyone else on the message is already carried by the Cc column.
+ * Both can legally contain anything, including text that looks like an
+ * address (`"Bob <bob@x.com>" <jane@example.com>`), so neither may be read as
+ * naming a recipient. What they cannot contain is an addr-spec's own `@`:
+ * that sits between the local part and the domain, outside any quoting. So
+ * after masking, every recipient the header names still contributes exactly
+ * one `@`, and nothing else does.
  *
- * The list is already ordered, filtered and lowercased by `parseRaw`; all
- * that is left is to refuse a parsed "address" that is not one.
+ * An UNTERMINATED quote or paren is left as written from that point on, on
+ * purpose. An unterminated quote means we do not know where the display name
+ * was meant to end, so we refuse to assume it swallowed the rest of the line
+ * — anything address-shaped after it still counts against the header.
+ *
+ * A comment ends at its first unescaped `)`, so a NESTED comment is masked
+ * only up to the inner close. That is deliberately the same reading
+ * postal-mime itself applies, which keeps this function and the entry list it
+ * is compared against from disagreeing about where a comment ended. Tracking
+ * nesting properly was tried and changed the verdict on no input at all: the
+ * unmasked tail either contains no `@`, or it makes the header look dirtier
+ * and the answer is refused, which is the safe direction anyway.
  */
-function firstAddress(list: ParsedEmailAddress[]): string | null {
-  const first = list[0];
-  if (!first) return null;
-  return isAddrSpec(first.email) ? first.email : null;
+function maskQuotedAndComments(value: string): string {
+  const out = value.split("");
+  let i = 0;
+  while (i < value.length) {
+    if (value[i] === '"') {
+      let j = i + 1;
+      while (j < value.length && value[j] !== '"') {
+        j += value[j] === "\\" ? 2 : 1;
+      }
+      if (j >= value.length) break; // unterminated: leave the remainder alone
+      for (let k = i; k <= j; k++) out[k] = " ";
+      i = j + 1;
+    } else if (value[i] === "(") {
+      let j = i + 1;
+      while (j < value.length && value[j] !== ")") {
+        j += value[j] === "\\" ? 2 : 1;
+      }
+      if (j >= value.length) break; // unterminated: leave the remainder alone
+      for (let k = i; k <= j; k++) out[k] = " ";
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+/**
+ * Split a masked header on the commas that separate RECIPIENTS.
+ *
+ * Commas inside `<...>` do not (`<jane,x@example.com>` is one broken entry,
+ * not two). Commas inside a group's `:` … `;` do — a group's members are
+ * recipients in their own right and each gets its own chunk, which is what
+ * makes the chunk count comparable with the parser's flattened entry count.
+ */
+function topLevelChunks(masked: string): string[] {
+  const chunks: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < masked.length; i++) {
+    const ch = masked[i];
+    if (ch === "<") depth++;
+    else if (ch === ">" && depth > 0) depth--;
+    else if (ch === "," && depth === 0) {
+      chunks.push(masked.slice(start, i));
+      start = i + 1;
+    }
+  }
+  chunks.push(masked.slice(start));
+  return chunks;
+}
+
+/**
+ * The FIRST-WRITTEN recipient of one recipient header, or null.
+ *
+ * There is no third outcome, and that is the whole point of this function. A
+ * mirrored Sent message needs one counterparty to hang off a timeline, and the
+ * only defensible choice is the person the sender put first; everyone else is
+ * already carried by the Cc column. Returning a later recipient because an
+ * earlier one was unreadable files a customer's reply on a DIFFERENT
+ * customer's timeline, which is the worst thing this subsystem can do.
+ *
+ * Why the raw header and not a parsed list: postal-mime drops entries it
+ * cannot make sense of, so the first entry of any parsed list is the first
+ * SURVIVING recipient. Those differ precisely when recipient #1 is malformed
+ * — i.e. exactly in the case this function exists to get right. The header
+ * text is the only thing that can answer "was anyone ahead of this one?".
+ *
+ * Four gates, each of which can only ever turn an answer into null:
+ *
+ *  1. postal-mime must produce a first entry (groups flattened in place, so a
+ *     group's first member counts as written where the group stands).
+ *  2. `isAddrSpec` must accept it — the parser reports what the header says,
+ *     not whether it is an address.
+ *  3. It must be FINDABLE in the masked header. An address the parser
+ *     RECONSTRUCTED rather than copied — an unquoted local part like
+ *     `"a"@b.com`, a decoded encoded-word — is not in the text anywhere, so
+ *     its position cannot be established and it is refused.
+ *  4. Either the header names exactly ONE address — masking guarantees every
+ *     recipient contributes exactly one `@` and nothing else does, so a single
+ *     `@` means a single recipient, there is nobody to confuse them with, and
+ *     a recovered-from-garbage answer is still the only answer the header
+ *     admits — or the header is structurally clean: one chunk per parsed
+ *     entry, each chunk carrying exactly one address. A header that is BOTH
+ *     malformed and multi-recipient has separators we cannot trust, so we
+ *     cannot claim to know which recipient came first.
+ *
+ * TWO of the lines below are not killed by any test in this suite, and the
+ * honest thing is to say so rather than let a future maintainer credit them
+ * with work they are not observably doing. They are "no `@` may precede the
+ * answer" and "one chunk per parsed entry". Every input found so far — some
+ * two thousand generated headers plus every case in `gmail-sync-sent.test.ts`
+ * — is refused by one of the other checks first, so deleting either leaves
+ * the suite green. They are kept anyway, because between them they are what
+ * makes the argument above SOUND rather than merely true today: they are the
+ * two checks that fail closed if postal-mime ever starts silently dropping an
+ * entry, which is precisely how this function was wrong before. Nothing else
+ * here may be relaxed on the assumption that they will catch it.
+ */
+function firstWrittenAddress(rawHeaderValue: string | null): string | null {
+  if (rawHeaderValue === null) return null;
+
+  const entries = addressParser(rawHeaderValue, { flatten: true });
+  const address = entries[0]?.address?.trim().toLowerCase() ?? "";
+  if (!isAddrSpec(address)) return null;
+
+  const masked = maskQuotedAndComments(rawHeaderValue).toLowerCase();
+  const at = masked.indexOf(address);
+  if (at === -1) return null;
+  // Untested by construction — see the docstring. Do not lean on it.
+  if (masked.slice(0, at).includes("@")) return null;
+
+  const addressCount = (masked.match(/@/g) ?? []).length;
+  if (addressCount === 1) return address;
+
+  const chunks = topLevelChunks(masked);
+  const clean =
+    // Untested by construction — see the docstring. Do not lean on it.
+    chunks.length === entries.length &&
+    chunks.every((chunk) => (chunk.match(/@/g) ?? []).length === 1);
+  return clean ? address : null;
 }
 
 /**
@@ -264,41 +395,42 @@ async function mirrorSentMessage(
   // The counterparty of a SENT message is its RECIPIENT, not its sender —
   // the sender is us.
   //
-  // `To:` first, then `Cc:`, then `Bcc:` — a message in the mailbox's own
-  // Sent folder usually retains the Bcc it was sent with, so the chain
-  // rescues a blind-copied send that would otherwise have no counterparty at
-  // all. Each step reads one header and takes its first entry; they are never
-  // mixed.
-  // Straight off postal-mime's parsed lists. Quoting, escaping, embedded
-  // commas and display names that contain whole addresses are its problem,
-  // and it is a library that does nothing else — three rounds of review
-  // found three distinct defects in the hand-rolled scanner this replaces.
-  const toAddress =
-    firstAddress(parsed.headerTo) ??
-    firstAddress(parsed.cc) ??
-    firstAddress(parsed.headerBcc);
+  // `To:`, else `Cc:`, else `Bcc:`. A message in the mailbox's own Sent folder
+  // usually retains the Bcc it was sent with, so the chain rescues a
+  // blind-copied send that would otherwise have no counterparty at all.
+  //
+  // The `??`s choose a HEADER, never an address: the chain moves on only when
+  // the message carried no header of that name at all. A `To:` that is present
+  // but yields nothing usable ends the search — falling through to `Cc:` there
+  // would file the reply on a third party who was copied, while the person it
+  // was actually addressed to sits unread on the To: line.
+  const recipientHeader =
+    parsed.recipientHeaders.to ??
+    parsed.recipientHeaders.cc ??
+    parsed.recipientHeaders.bcc;
+  const toAddress = firstWrittenAddress(recipientHeader);
   if (!toAddress) {
     // There is no timeline to put it on, and `sent_emails.to_address` is NOT
     // NULL, so inventing a value would be worse than passing over it.
     //
-    // The two cases read very differently to an operator: a blind-copied send
-    // with no recipient headers at all is ordinary, while headers that are
-    // present but unusable mean mail IS being skipped and something upstream
-    // is wrong.
-    const anyHeaderPresent = ["to", "cc", "bcc"].some((name) =>
-      header(parsed.headers, name)?.trim(),
-    );
+    // Says what happened, not what caused it. Plenty of headers land here
+    // while being perfectly legal RFC 5322 — `undisclosed-recipients:;` names
+    // nobody, `<jane@localhost>` is an address we will not file a customer
+    // under, and a header that is both malformed and multi-recipient is one
+    // whose first recipient we decline to guess at. None of those means
+    // something upstream is broken, and telling an operator it does sends
+    // them looking for a fault that is not there.
     console.warn(
-      anyHeaderPresent
-        ? `Gmail sync for ${inbox}: sent message ${gmailMessageId} has MALFORMED recipient headers — To:/Cc:/Bcc: are present but none yields a valid address (unbalanced quotes or brackets, or not an addr-spec). Refusing to guess a counterparty; not mirrored.`
-        : `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no To:, Cc: or Bcc: header at all, so it has no counterparty; not mirrored.`,
+      recipientHeader === null
+        ? `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no To:, Cc: or Bcc: header at all, so it has no counterparty; not mirrored.`
+        : `Gmail sync for ${inbox}: sent message ${gmailMessageId} yielded no usable counterparty from its first recipient header (${JSON.stringify(recipientHeader.slice(0, 120))}) — it names nobody, or its first-written recipient is not an address we can file mail under. Not mirrored, and deliberately not guessing at a later recipient.`,
     );
     return false;
   }
 
   // Person matching follows the inbound path: look the person up by the
-  // canonical (trimmed, lowercased) address — `firstAddress` already did
-  // both — so casing variants resolve to the same row.
+  // canonical (trimmed, lowercased) address, which is the form
+  // `firstWrittenAddress` returns, so casing variants resolve to the same row.
   //
   // Unlike the inbound path this never CREATES a person. Inbound mail is
   // proof someone exists and wants to be on the timeline; our own outgoing
