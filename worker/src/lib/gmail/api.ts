@@ -107,6 +107,41 @@ export async function listHistory(
   };
 }
 
+/**
+ * Every address this account may put in a From: header — its own mailbox plus
+ * each verified "Send mail as" alias — lowercased and trimmed so callers can
+ * compare against a stored address without re-normalising.
+ *
+ * Mapping an inbox to an account that cannot send as it produces a mapping
+ * that only fails when a real reply goes out, so the mapping route checks this
+ * up front. The thrown message never carries the token: an error from here is
+ * shown to an admin and written to logs.
+ */
+export async function listSendAs(accessToken: string): Promise<string[]> {
+  const res = await fetch(new URL(`${BASE}/settings/sendAs`), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    throw new GmailApiError(
+      res.status,
+      classify(res.status, false),
+      `Gmail settings.sendAs.list returned ${res.status}`,
+    );
+  }
+
+  const payload = (await readJson(res)) ?? {};
+  const entries = Array.isArray(payload.sendAs) ? payload.sendAs : [];
+  const addresses: string[] = [];
+  for (const entry of entries) {
+    const address = entry?.sendAsEmail;
+    if (typeof address !== "string") continue;
+    const normalized = address.trim().toLowerCase();
+    if (normalized) addresses.push(normalized);
+  }
+  return addresses;
+}
+
 function base64UrlToArrayBuffer(b64url: string): ArrayBuffer {
   const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
   const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
