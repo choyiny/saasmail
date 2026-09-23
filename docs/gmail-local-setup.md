@@ -58,7 +58,9 @@ that far.
 
 5. Scopes: saasmail requests `gmail.modify` and `gmail.send`, and nothing
    else. You do not add them in the console — they are in the consent URL
-   saasmail builds.
+   saasmail builds. `gmail.modify` is also what authorises the `settings/sendAs`
+   read used to verify a mapping, so you do not need to add
+   `gmail.settings.basic` on top of it.
 
 ## Step 2 — Secrets and env
 
