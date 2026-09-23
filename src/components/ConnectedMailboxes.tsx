@@ -63,11 +63,15 @@ function nonAuthGuidance(lastError: string): string {
 }
 
 /**
- * "N minutes ago" for a past epoch-ms timestamp. Deliberately coarse — the
- * exact second is noise; what an admin wants is "is this mailbox stale?".
+ * "N minutes ago" for a past timestamp in **unix seconds** — the unit the
+ * worker writes (`nowSeconds` in worker/src/lib/gmail/sync.ts) and that
+ * `GET /api/admin/gmail` returns verbatim. Treating it as milliseconds is not
+ * a rounding error: it renders every live mailbox as "20698 days ago".
+ * Deliberately coarse — the exact second is noise; what an admin wants is
+ * "is this mailbox stale?".
  */
-function relativeTime(ts: number): string {
-  const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
+function relativeTime(unixSeconds: number): string {
+  const seconds = Math.max(0, Math.round(Date.now() / 1000 - unixSeconds));
   if (seconds < 45) return "just now";
   const plural = (n: number, unit: string) =>
     `${n} ${unit}${n === 1 ? "" : "s"} ago`;

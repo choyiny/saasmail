@@ -33,8 +33,13 @@ const mNavigate = vi.mocked(navigateExternal);
 const CONSENT_URL =
   "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc123.apps.googleusercontent.com&state=signed-state";
 
-/** Relative to real "now" so the component's own clock agrees with ours. */
-const minutesAgo = (n: number) => Date.now() - n * 60_000;
+/**
+ * Relative to real "now", in **unix seconds** — the unit the worker stores
+ * and `GET /api/admin/gmail` returns (`nowSeconds` in lib/gmail/sync.ts).
+ * A millisecond fixture here would agree with a millisecond bug in the
+ * component and assert nothing; it has to state the server's contract.
+ */
+const minutesAgo = (n: number) => Math.floor(Date.now() / 1000) - n * 60;
 
 const account = (over: Partial<GmailAccount> = {}): GmailAccount => ({
   id: "acct_1",
@@ -81,7 +86,11 @@ describe("ConnectedMailboxes", () => {
 
     expect(await screen.findByText("ops@example.com")).toBeTruthy();
     const row = screen.getByTestId("gmail-account-acct_1");
-    expect(row.textContent).toContain("5 minutes ago");
+    expect(row.textContent).toContain("Synced 5 minutes ago");
+    // Reading the seconds the server sends as milliseconds puts every live
+    // mailbox ~20698 days in the past, which is what shipped. Any "days ago"
+    // at all is wrong for a fixture five minutes old.
+    expect(row.textContent).not.toMatch(/days? ago/);
     // "Never synced" is a different, explicit state — not this one.
     expect(row.textContent).not.toContain("Not synced yet");
   });
@@ -130,6 +139,21 @@ describe("ConnectedMailboxes", () => {
     const row = await screen.findByTestId("gmail-account-acct_1");
     expect(row.textContent).toMatch(/never synced/i);
     expect(row.textContent).toMatch(/cannot be recovered/i);
+  });
+
+  it("dates the sync gap from lastGapAt, not from the last sync", async () => {
+    // The gap's AGE is the signal (gmail-accounts.schema.ts): "10 minutes ago"
+    // means mail is probably still missing, "3 months ago" is history. The two
+    // timestamps are deliberately far apart, so printing the wrong one — or
+    // reading either as milliseconds — cannot produce this string.
+    mFetch.mockResolvedValue([
+      account({ lastSyncedAt: minutesAgo(5), lastGapAt: minutesAgo(60) }),
+    ]);
+    renderAt();
+
+    const row = await screen.findByTestId("gmail-account-acct_1");
+    expect(row.textContent).toContain("Sync gap 1 hour ago");
+    expect(row.textContent).not.toContain("Sync gap 5 minutes ago");
   });
 
   it("shows no gap warning when lastGapAt is null", async () => {

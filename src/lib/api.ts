@@ -930,15 +930,18 @@ export async function fetchAdminUsers(): Promise<AdminUser[]> {
 export interface GmailAccount {
   id: string;
   emailAddress: string;
-  /** Epoch ms of the last successful sync; null = never synced yet. */
+  /** Unix **seconds** of the last successful sync; null = never synced yet. */
   lastSyncedAt: number | null;
   /** Last sync failure. Non-null means this mailbox has stopped syncing. */
   lastError: string | null;
   /**
-   * Epoch ms of the last history-cursor expiry. Mail that arrived during
-   * that window was never synced and cannot be recovered.
+   * Unix **seconds** of the last sync-cursor re-seed — an expired history
+   * cursor, or a reconnect. Mail that arrived during that window was never
+   * synced and cannot be recovered. The worker stores and returns these
+   * columns in seconds, not milliseconds; render them accordingly.
    */
   lastGapAt: number | null;
+  /** Unix **seconds** of the connection, like the two fields above. */
   createdAt: number;
 }
 
