@@ -101,8 +101,15 @@ export default function ConnectedMailboxes() {
   // for this visit but a refresh does not resurrect a stale one.
   const [searchParams, setSearchParams] = useSearchParams();
   const [connectResult, setConnectResult] = useState<
-    "connected" | "error" | null
+    "connected" | "error" | "wrong_account" | null
   >(null);
+  // Which mailbox a refused reconnect was aimed at, and which one Google
+  // actually granted. Naming both is the point of the message: without it the
+  // operator cannot tell what went wrong or what to do differently.
+  const [wrongAccount, setWrongAccount] = useState<{
+    expected: string;
+    granted: string;
+  } | null>(null);
   // Failure of the consent-URL fetch itself, distinct from the callback's
   // `?gmail=error`: this one carries the server's own message.
   const [connectError, setConnectError] = useState<string | null>(null);
@@ -110,12 +117,26 @@ export default function ConnectedMailboxes() {
 
   useEffect(() => {
     const outcome = searchParams.get("gmail");
-    if (outcome !== "connected" && outcome !== "error") return;
+    if (
+      outcome !== "connected" &&
+      outcome !== "error" &&
+      outcome !== "wrong_account"
+    ) {
+      return;
+    }
     setConnectResult(outcome);
+    if (outcome === "wrong_account") {
+      setWrongAccount({
+        expected: searchParams.get("gmail_expected") ?? "",
+        granted: searchParams.get("gmail_granted") ?? "",
+      });
+    }
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
         next.delete("gmail");
+        next.delete("gmail_expected");
+        next.delete("gmail_granted");
         return next;
       },
       { replace: true },
@@ -150,14 +171,21 @@ export default function ConnectedMailboxes() {
    * redirecting, so the consent flow only starts if we navigate ourselves.
    * A failure — 503 on an instance with no OAuth secrets being the one that
    * matters — is shown here instead of navigating anywhere.
+   *
+   * `reconnectFor` is the address of the mailbox a per-account **Reconnect**
+   * belongs to. Without it the flow grants whichever Google account happens to
+   * be signed in, and the callback upserts on the address it gets back — so a
+   * reconnect aimed at one mailbox lands on another and resets *that* one's
+   * sync cursor. Passing the address is what makes the grant targeted, and
+   * what the callback refuses to write anything else against.
    */
-  async function handleStartConnect() {
+  async function handleStartConnect(reconnectFor?: string) {
     if (connecting) return;
     setConnecting(true);
     setConnectResult(null);
     setConnectError(null);
     try {
-      const { authUrl } = await startGmailConnect();
+      const { authUrl } = await startGmailConnect(reconnectFor);
       navigateExternal(authUrl);
     } catch (err) {
       setConnectError(
@@ -203,7 +231,10 @@ export default function ConnectedMailboxes() {
         </div>
         <button
           type="button"
-          onClick={handleStartConnect}
+          // Wrapped, not passed by reference: React would hand the click
+          // event straight to `reconnectFor` and ask Google to pre-select a
+          // mailbox called "[object Object]".
+          onClick={() => handleStartConnect()}
           disabled={connecting}
           data-testid="gmail-connect-button"
           className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[6px] bg-text-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:opacity-50"
@@ -240,6 +271,28 @@ export default function ConnectedMailboxes() {
               here, because the underlying error can carry the access token.
             </span>
           )}
+        </div>
+      )}
+
+      {connectResult === "wrong_account" && wrongAccount !== null && (
+        <div
+          data-testid="gmail-wrong-account"
+          className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
+        >
+          <AlertTriangle size={14} className="mt-px shrink-0" />
+          <span>
+            <span className="font-medium">
+              That was a different mailbox, so nothing was changed.
+            </span>{" "}
+            You were reconnecting{" "}
+            <span className="font-mono">{wrongAccount.expected}</span>, but you
+            granted access as{" "}
+            <span className="font-mono">{wrongAccount.granted}</span>. Saving it
+            would have replaced the wrong mailbox&apos;s credentials and skipped
+            its unsynced mail, so it was refused. Sign in to Google as{" "}
+            <span className="font-mono">{wrongAccount.expected}</span> — or pick
+            it at Google&apos;s account chooser — and try again.
+          </span>
         </div>
       )}
 
@@ -324,7 +377,9 @@ export default function ConnectedMailboxes() {
                         isReconnectable(account.lastError) && (
                           <button
                             type="button"
-                            onClick={handleStartConnect}
+                            onClick={() =>
+                              handleStartConnect(account.emailAddress)
+                            }
                             disabled={connecting}
                             data-testid={`gmail-reconnect-${account.id}`}
                             className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-black/[0.03] disabled:opacity-50"
@@ -404,10 +459,11 @@ export default function ConnectedMailboxes() {
                         <span className="font-medium">
                           Sync gap {relativeTime(account.lastGapAt)}.
                         </span>{" "}
-                        Gmail expired the history cursor, so sync re-seeded from
-                        the present. Mail that arrived during that window was
-                        never synced and cannot be recovered here — it is still
-                        in Gmail.
+                        The sync cursor was re-seeded from the present — either
+                        Gmail expired it, or this mailbox was reconnected. Mail
+                        that arrived before that point and had not been fetched
+                        yet was never synced and cannot be recovered here — it
+                        is still in Gmail.
                       </span>
                     </div>
                   )}

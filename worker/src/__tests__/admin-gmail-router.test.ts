@@ -13,7 +13,7 @@ import { gmailAccounts } from "../db/gmail-accounts.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { emails } from "../db/emails.schema";
 import { decryptSecret } from "../lib/crypto";
-import { signState } from "../lib/gmail/state";
+import { signState, verifyState } from "../lib/gmail/state";
 import {
   getDb,
   applyMigrations,
@@ -75,6 +75,33 @@ describe("GET /api/admin/gmail/connect", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(
       "http://localhost:8080/api/admin/gmail/callback",
     );
+  });
+
+  it("targets the named mailbox in both login_hint and the signed state", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      "/api/admin/gmail/connect?email=ops%40example.com",
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { authUrl: string };
+    const url = new URL(body.authUrl);
+    expect(url.searchParams.get("login_hint")).toBe("ops@example.com");
+    // And the same address inside the state, which is the half Google cannot
+    // override: the hint alone is only a suggestion.
+    const verified = await verifyState(url.searchParams.get("state")!, KEY);
+    expect(verified.expectedEmail).toBe("ops@example.com");
+  });
+
+  it("carries no expected mailbox for a plain connect", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch("/api/admin/gmail/connect", { apiKey });
+    const body = (await res.json()) as { authUrl: string };
+    const url = new URL(body.authUrl);
+    expect(url.searchParams.has("login_hint")).toBe(false);
+    const verified = await verifyState(url.searchParams.get("state")!, KEY);
+    expect(verified.expectedEmail).toBeNull();
   });
 
   it("returns 503 when the integration is unconfigured", async () => {
@@ -202,6 +229,170 @@ describe("GET /api/admin/gmail/callback", () => {
     expect(rows[0].lastError).toBeNull();
     expect(await decryptSecret(rows[0].refreshTokenEncrypted, KEY)).toBe(
       "rt-new",
+    );
+  });
+
+  it("records a sync gap when a reconnect re-seeds the cursor", async () => {
+    // Reconnecting moves historyId to the mailbox's current head, so mail
+    // between the old cursor and now is never fetched. That is the same loss
+    // an expired cursor causes, and it must leave the same durable record —
+    // otherwise it happens under a green "Mailbox connected" banner.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-old",
+        emailAddress: "collector@xyspace.dev",
+        refreshTokenEncrypted: "stale-sealed",
+        historyId: "1",
+        lastSyncedAt: now - 86_400,
+        lastError: "invalid_grant",
+        lastGapAt: null,
+        connectedBy: userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    stubGoogle({
+      access_token: "at-2",
+      refresh_token: "rt-new",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    // The cursor really did jump to head — that is what makes the gap real.
+    expect(rows[0].historyId).toBe("4242");
+    expect(rows[0].lastGapAt).not.toBeNull();
+    expect(rows[0].lastGapAt).toBeGreaterThanOrEqual(now);
+    expect(rows[0].lastGapAt).toBeLessThanOrEqual(
+      Math.floor(Date.now() / 1000),
+    );
+  });
+
+  it("records no sync gap on a first connection", async () => {
+    // Nothing was skipped: there was no earlier cursor to jump past. An
+    // unconditional stamp would put a permanent "mail was lost" notice on
+    // every freshly connected mailbox.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastGapAt).toBeNull();
+  });
+
+  it("refuses a grant for a mailbox other than the one being reconnected", async () => {
+    // The operator clicks Reconnect on desk@, but the browser is signed in as
+    // jane@ and the chooser is skipped. Upserting on the returned address
+    // would reset *jane's* healthy cursor to head — silent mail loss on a
+    // mailbox that was working, while desk@ stays broken.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-jane",
+        emailAddress: "jane@example.com",
+        refreshTokenEncrypted: "jane-sealed",
+        accessToken: "jane-at",
+        historyId: "111",
+        lastSyncedAt: now - 300,
+        lastError: null,
+        lastGapAt: null,
+        connectedBy: userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    stubGoogle(
+      { access_token: "at-9", refresh_token: "rt-9", expires_in: 3599 },
+      { emailAddress: "jane@example.com", historyId: "999" },
+    );
+
+    const state = await signState(
+      userId,
+      KEY,
+      Math.floor(Date.now() / 1000),
+      "desk@example.com",
+    );
+    const res = await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("gmail=wrong_account");
+    // Both addresses, so the operator can tell what happened.
+    expect(decodeURIComponent(location)).toContain("desk@example.com");
+    expect(decodeURIComponent(location)).toContain("jane@example.com");
+    expect(location).not.toContain("gmail=connected");
+
+    // Nothing written: no new row, and jane's row byte-for-byte as it was.
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].emailAddress).toBe("jane@example.com");
+    expect(rows[0].historyId).toBe("111");
+    expect(rows[0].lastGapAt).toBeNull();
+    expect(rows[0].refreshTokenEncrypted).toBe("jane-sealed");
+    expect(rows[0].lastSyncedAt).toBe(now - 300);
+  });
+
+  it("accepts the reconnect when the granted mailbox is the expected one", async () => {
+    // The mismatch guard must not refuse the case it exists to protect, and
+    // the comparison is case-insensitive — Gmail echoes the address with the
+    // casing the account was created with.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-desk",
+      emailAddress: "desk@example.com",
+      refreshTokenEncrypted: "stale-sealed",
+      historyId: "111",
+      lastError: "invalid_grant",
+      connectedBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    stubGoogle(
+      { access_token: "at-9", refresh_token: "rt-9", expires_in: 3599 },
+      { emailAddress: "Desk@Example.com", historyId: "999" },
+    );
+
+    const state = await signState(
+      userId,
+      KEY,
+      Math.floor(Date.now() / 1000),
+      "desk@example.com",
+    );
+    const res = await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    expect(res.headers.get("location")).toContain("gmail=connected");
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastError).toBeNull();
+    expect(await decryptSecret(rows[0].refreshTokenEncrypted, KEY)).toBe(
+      "rt-9",
     );
   });
 });

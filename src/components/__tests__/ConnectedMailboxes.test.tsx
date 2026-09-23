@@ -381,4 +381,103 @@ describe("ConnectedMailboxes — starting the consent flow", () => {
       expect(row.textContent).toContain(lastError);
     },
   );
+
+  /**
+   * Hiding Reconnect is only half the fix: what replaces it is the operator's
+   * only instruction, and each of these four codes needs a *different* one.
+   * Without these, deleting `nonAuthGuidance` outright leaves the suite green.
+   */
+  it.each([
+    ["no_personal_inbox", /map one below/i, /no inbox is mapped/i],
+    ["ambiguous_inbox_mapping", /leave exactly one/i, /more than one inbox/i],
+    ["history_gap", /re-seeded from the present/i, /next successful sync/i],
+    ["message_failed:18c2f0a1b2c3", /the next run retries it/i, /cursor/i],
+  ])(
+    "tells the operator what to do instead for %s",
+    async (lastError, action, cause) => {
+      mFetch.mockResolvedValue([account({ lastError })]);
+      renderAt();
+
+      const row = await screen.findByTestId("gmail-account-acct_1");
+      expect(row.textContent).toMatch(action);
+      expect(row.textContent).toMatch(cause);
+      // And never the auth advice, which is the whole point of the branch.
+      expect(row.textContent).not.toMatch(/until you reconnect it/i);
+    },
+  );
+});
+
+/**
+ * Reconnect is per-account, so the flow it starts must be per-account too.
+ * A reconnect that does not name its mailbox grants whichever Google account
+ * is signed in, and the callback upserts on the address it gets back — which
+ * resets a *different*, healthy mailbox's sync cursor and loses its mail.
+ */
+describe("ConnectedMailboxes — a reconnect names its mailbox", () => {
+  it("starts the consent flow for the account whose button was clicked", async () => {
+    // Two accounts, and the second one's button: a single-account fixture
+    // cannot tell "the right address" from "the first address".
+    mFetch.mockResolvedValue([
+      account({
+        id: "acct_1",
+        emailAddress: "first@example.com",
+        lastError: "invalid_grant",
+      }),
+      account({
+        id: "acct_2",
+        emailAddress: "second@example.com",
+        lastError: "invalid_grant",
+      }),
+    ]);
+    renderAt();
+
+    fireEvent.click(await screen.findByTestId("gmail-reconnect-acct_2"));
+
+    await waitFor(() => expect(mStartConnect).toHaveBeenCalledTimes(1));
+    expect(mStartConnect).toHaveBeenCalledWith("second@example.com");
+    expect(mStartConnect).not.toHaveBeenCalledWith("first@example.com");
+  });
+
+  it("asks for no particular mailbox on a first connection", async () => {
+    // Any account is a valid answer here, and pinning one would refuse the
+    // mailbox the operator actually wants to add.
+    mFetch.mockResolvedValue([]);
+    renderAt();
+
+    fireEvent.click(await screen.findByTestId("gmail-connect-button"));
+
+    await waitFor(() => expect(mStartConnect).toHaveBeenCalledTimes(1));
+    expect(mStartConnect).toHaveBeenCalledWith(undefined);
+  });
+
+  it("names both mailboxes when the callback refused a mis-aimed reconnect", async () => {
+    mFetch.mockResolvedValue([account()]);
+    renderAt(
+      "/inboxes?gmail=wrong_account&gmail_expected=desk%40example.com&gmail_granted=jane%40example.com",
+    );
+
+    const banner = await screen.findByTestId("gmail-wrong-account");
+    // Which one was meant, and which one was granted. Either alone leaves the
+    // operator unable to tell what happened.
+    expect(banner.textContent).toContain("desk@example.com");
+    expect(banner.textContent).toContain("jane@example.com");
+    // And it must not read as a success or a generic failure.
+    expect(screen.queryByTestId("gmail-connect-success")).toBeNull();
+    expect(screen.queryByTestId("gmail-connect-error")).toBeNull();
+    // Nothing was written, and the operator needs to know that.
+    expect(banner.textContent).toMatch(/nothing was changed/i);
+  });
+
+  it("clears every gmail param after a refused reconnect", async () => {
+    mFetch.mockResolvedValue([account()]);
+    renderAt(
+      "/inboxes?gmail=wrong_account&gmail_expected=desk%40example.com&gmail_granted=jane%40example.com&q=ops",
+    );
+
+    await screen.findByTestId("gmail-wrong-account");
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search").textContent).toBe("?q=ops"),
+    );
+    expect(screen.getByTestId("gmail-wrong-account")).toBeTruthy();
+  });
 });
