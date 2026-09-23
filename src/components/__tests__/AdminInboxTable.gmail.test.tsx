@@ -54,7 +54,8 @@ const gmailAccount = (
   lastSyncedAt: null,
   lastError: null,
   lastGapAt: null,
-  createdAt: 1_700_000_000_000,
+  // Unix seconds, like the worker writes — not milliseconds.
+  createdAt: 1_700_000_000,
   ...over,
 });
 
