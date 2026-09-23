@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { sql } from "drizzle-orm";
 import { users } from "../db/auth.schema";
-import { APIError } from "better-auth/api";
+import { publicAuthFailure } from "../lib/public-error";
 import { createAuth } from "../auth";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
@@ -141,16 +141,13 @@ setupRouter.openapi(createRouteDef, async (c) => {
       body: { name, email, password, role: "admin" },
     });
   } catch (err) {
-    // Public route, same rule as the invite acceptance: better-auth's own
-    // APIError text is meant for the person filling the form; any other
-    // exception is internal and its message can carry bound query
-    // parameters, which here include the credentials being registered.
-    if (err instanceof APIError) {
-      return c.json({ error: err.message }, 400);
+    // Public route, same rule as the invite acceptance — and the same code,
+    // so the two cannot drift. See lib/public-error.ts.
+    const failure = publicAuthFailure(err, "Signup failed. Please try again.");
+    if (failure.internal !== null) {
+      console.error(`[setup] admin creation failed: ${failure.internal}`);
     }
-    const reason = err instanceof Error ? err.message : "unknown error";
-    console.error(`[setup] admin creation failed: ${reason}`);
-    return c.json({ error: "Signup failed. Please try again." }, 400);
+    return c.json({ error: failure.body }, 400);
   }
 
   return c.json({ success: true }, 200);

@@ -2,7 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { users } from "../db/auth.schema";
 import { invitations } from "../db/invitations.schema";
-import { APIError } from "better-auth/api";
+import { publicAuthFailure } from "../lib/public-error";
 import { createAuth } from "../auth";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
@@ -128,17 +128,16 @@ invitesRouter.openapi(acceptInviteRoute, async (c) => {
     });
   } catch (err) {
     // This route is public — the visitor is not signed in — so only
-    // better-auth's own APIError text is safe to forward: it is written for
-    // the person filling the form ("User already exists", "Password too
-    // short"). Anything else is an internal failure, and a D1 error's message
-    // can carry bound query parameters, which on this path include the
-    // credentials being registered. Those go to the log only.
-    if (err instanceof APIError) {
-      return c.json({ error: err.message }, 400);
+    // better-auth's own form-facing text may be forwarded. See
+    // lib/public-error.ts for what that means and why.
+    const failure = publicAuthFailure(
+      err,
+      "Account creation failed. Please try again.",
+    );
+    if (failure.internal !== null) {
+      console.error(`[invites] account creation failed: ${failure.internal}`);
     }
-    const reason = err instanceof Error ? err.message : "unknown error";
-    console.error(`[invites] account creation failed: ${reason}`);
-    return c.json({ error: "Account creation failed. Please try again." }, 400);
+    return c.json({ error: failure.body }, 400);
   }
 
   await db
