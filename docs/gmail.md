@@ -95,7 +95,14 @@ all done through the endpoints below.
      `PATCH /api/admin/inboxes/{email}`, body
      `{ "source": "gmail", "gmailAccountId": "<id from the list above>" }`.
      `{email}` is the saasmail inbox address that should receive this
-     mailbox's mail — it does not need to already exist. Until an inbox is
+     mailbox's mail — it does not need to already exist. The mapping is
+     verified before it is saved: saasmail asks Gmail for the connected
+     account's "Send mail as" list and refuses the mapping unless `{email}`
+     is on it, answering `400`. If Gmail cannot be reached to check, the
+     mapping is refused with a `502` rather than saved unverified — nothing
+     is written in either case. A rejected address usually just needs adding
+     under **Send mail as** in that account's Gmail settings, and verifying,
+     before you map it here. Until an inbox is
      mapped this way, syncing for that mailbox is paused: the engine will not
      guess a destination, so it does not fetch or consume any history for the
      account. This is a safe, recoverable state, not data loss — the mail
