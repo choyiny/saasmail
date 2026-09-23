@@ -29,6 +29,7 @@ import {
   type CcEntry,
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
+import { serverErrorMessage } from "@/lib/error-message";
 import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
@@ -287,8 +288,11 @@ export default function ReplyComposer({
       });
       onSent();
       onClose();
-    } catch {
-      setError("Failed to send reply");
+    } catch (e) {
+      // The server's own words when it has any: a Gmail reply it refused was
+      // *not* queued, so the user has to send it again — a generic "failed"
+      // would leave them waiting for a retry that isn't coming.
+      setError(serverErrorMessage(e) ?? "Failed to send reply");
     } finally {
       setSending(false);
     }
