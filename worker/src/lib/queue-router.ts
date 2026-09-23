@@ -13,6 +13,7 @@ import {
   type CampaignFanOutMessage,
   type CampaignSendMessage,
 } from "./campaign-sender";
+import { runSuggestedReply } from "./agent/suggest-reply";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -24,17 +25,24 @@ import {
  * predates this union and its producer enqueued a bare `{ sequenceEmailId }`.
  * See `classifyQueueMessage`.
  */
+export type SuggestReplyMessage = {
+  type: "suggest_reply";
+  emailId: string;
+};
+
 export type QueueMessageBody =
   | SequenceEmailMessage
   | ListImportMessage
   | CampaignFanOutMessage
-  | CampaignSendMessage;
+  | CampaignSendMessage
+  | SuggestReplyMessage;
 
 export type QueueMessageKind =
   | "sequence_email"
   | "list_import"
   | "campaign_fan_out"
   | "campaign_send"
+  | "suggest_reply"
   | "unknown";
 
 /**
@@ -72,6 +80,9 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
       typeof b.campaignRecipientId === "string"
       ? "campaign_send"
       : "unknown";
+  }
+  if (b.type === "suggest_reply") {
+    return typeof b.emailId === "string" ? "suggest_reply" : "unknown";
   }
   return "unknown";
 }
@@ -121,9 +132,12 @@ export async function handleQueueBatch(
       } else if (kind === "campaign_fan_out") {
         const body = msg.body as CampaignFanOutMessage;
         await runCampaignFanOutPage(db, env, body.campaignId, body.jobId);
-      } else {
+      } else if (kind === "campaign_send") {
         const body = msg.body as CampaignSendMessage;
         await sendCampaignRecipient(db, env, sender, body.campaignRecipientId);
+      } else {
+        const body = msg.body as SuggestReplyMessage;
+        await runSuggestedReply(db, env, body.emailId);
       }
       msg.ack();
     } catch (err) {

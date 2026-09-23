@@ -36,6 +36,30 @@ If no Anthropic key, OpenAI key, or Workers AI binding is available, the panel
 stays usable for session management but disables chat input and shows the
 provider-configuration hint described below.
 
+## Suggested replies
+
+Suggested replies are opt-in per inbox. An admin enables **Auto-suggest replies**
+on the **Inboxes** page; disabled inboxes never enqueue this work.
+
+For each eligible received message, saasmail makes one model call to screen the
+message for prompt injection and, only when that call returns exactly
+`SAFE`, one model call to draft a reply. Mail that is already Junk, carries
+automated/list headers, arrives after the setting was disabled, or has no
+configured model provider is skipped. The consumer re-checks the message,
+inbox setting, spam/trash state, and existing suggestion before generating, so
+stale or duplicate queue deliveries are harmless.
+
+The drafting call has no tools. The current message and up to 10 recent messages
+from the same person in the same inbox are quoted as untrusted data, and each
+body is truncated to 4000 characters. Inbox **Agent instructions**, when set,
+are included as trusted administrator guidance. The result is stored as plain
+text for a human to review, use, edit, or dismiss. **Nothing is ever sent by
+this feature.**
+
+Cost per eligible message is therefore one screening call plus one generation
+call. A screening flag, error, timeout, or any output other than exactly
+`SAFE` creates no suggestion.
+
 ## Provider selection
 
 The agent selects exactly one provider per turn, in this order:

@@ -28,6 +28,7 @@ import ReassignPersonModal from "@/components/ReassignPersonModal";
 import SequenceStatus from "@/components/SequenceStatus";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import ReplyComposer from "@/components/ReplyComposer";
+import SuggestedReplyCard from "@/components/SuggestedReplyCard";
 import ThreadInboxSection, {
   type ThreadInboxGroup,
 } from "@/components/ThreadInboxSection";
@@ -136,6 +137,7 @@ export default function PersonDetail({
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
   const [reassignEmail, setReassignEmail] = useState<Email | null>(null);
   const [replyToEmailId, setReplyToEmailId] = useState<string | null>(null);
+  const [replyComposerKey, setReplyComposerKey] = useState(0);
   const [expandedOlder, setExpandedOlder] = useState<Record<string, boolean>>(
     {},
   );
@@ -421,6 +423,8 @@ export default function PersonDetail({
 
   const activeGroup =
     inboxGroups.find((g) => g.inbox === activeInbox) ?? inboxGroups[0] ?? null;
+  const latestReceived =
+    activeGroup?.emails.find((email) => email.type === "received") ?? null;
 
   const replyInboxForEmail = (email: Email) => {
     const ib = inboxOf(email);
@@ -568,6 +572,17 @@ export default function PersonDetail({
 
       {/* Active inbox section — fills remaining height */}
       <div className="flex min-h-0 flex-1 flex-col">
+        {latestReceived && (
+          <div className="shrink-0 border-b border-border bg-card px-4 py-3">
+            <SuggestedReplyCard
+              emailId={latestReceived.id}
+              onUse={() => {
+                setReplyComposerKey((key) => key + 1);
+                setReplyToEmailId(latestReceived.id);
+              }}
+            />
+          </div>
+        )}
         {activeGroup ? (
           (() => {
             const mode = inboxModeMap.get(activeGroup.inbox) ?? "chat";
@@ -618,6 +633,7 @@ export default function PersonDetail({
         {/* Reply composer (thread mode) */}
         {replyToEmailId && (
           <ReplyComposer
+            key={`${replyToEmailId}:${replyComposerKey}`}
             emailId={replyToEmailId}
             personName={person.name}
             personEmail={person.email}

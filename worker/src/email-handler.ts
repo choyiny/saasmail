@@ -21,9 +21,55 @@ import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
 import { forwardInbound } from "./lib/inbound-forward";
 import { wakeConversation } from "./lib/messages/conversation-state";
 import { setSystemSpamState } from "./lib/messages/state";
+import { selectModel } from "./lib/agent/provider";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+
+function headerValue(
+  headers: Record<string, string>,
+  name: string,
+): string | undefined {
+  const target = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return undefined;
+}
+
+export function isAutomatedInbound(headers: Record<string, string>): boolean {
+  const autoSubmitted = headerValue(headers, "auto-submitted");
+  if (
+    autoSubmitted !== undefined &&
+    autoSubmitted.trim().toLowerCase() !== "no"
+  ) {
+    return true;
+  }
+
+  const precedence = headerValue(headers, "precedence")?.trim().toLowerCase();
+  if (precedence === "bulk" || precedence === "list" || precedence === "junk") {
+    return true;
+  }
+
+  return (
+    headerValue(headers, "list-id") !== undefined ||
+    headerValue(headers, "list-unsubscribe") !== undefined
+  );
+}
+
+export function shouldEnqueueSuggestedReply(options: {
+  agentAutodraft: number | null | undefined;
+  autoFiledSpam: boolean;
+  modelConfigured: boolean;
+  headers: Record<string, string>;
+}): boolean {
+  return (
+    options.agentAutodraft === 1 &&
+    !options.autoFiledSpam &&
+    options.modelConfigured &&
+    !isAutomatedInbound(options.headers)
+  );
+}
 
 export async function handleEmail(
   message: ForwardableEmailMessage,
@@ -173,6 +219,7 @@ export async function handleEmail(
       displayName: senderIdentities.displayName,
       forwardTo: senderIdentities.forwardTo,
       spamThreshold: senderIdentities.spamThreshold,
+      agentAutodraft: senderIdentities.agentAutodraft,
     })
     .from(senderIdentities);
 
@@ -235,6 +282,23 @@ export async function handleEmail(
     } catch (error) {
       console.warn("Failed to auto-file inbound message as spam:", error);
     }
+  }
+
+  if (
+    shouldEnqueueSuggestedReply({
+      agentAutodraft: inboxIdentity?.agentAutodraft,
+      autoFiledSpam,
+      modelConfigured: selectModel(env).ok,
+      headers: parsed.headers,
+    })
+  ) {
+    ctx.waitUntil(
+      env.EMAIL_QUEUE.send({ type: "suggest_reply", emailId }).catch(
+        (error) => {
+          console.warn("Failed to enqueue suggested reply:", error);
+        },
+      ),
+    );
   }
 
   if (!autoFiledSpam) {

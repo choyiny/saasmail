@@ -8,6 +8,7 @@ import { messageUserState } from "../../db/message-user-state.schema";
 import { mailboxMessageState } from "../../db/mailbox-message-state.schema";
 import { mailboxes } from "../../db/mailboxes.schema";
 import { messageMailboxes } from "../../db/message-mailboxes.schema";
+import { suggestedReplies } from "../../db/suggested-replies.schema";
 import {
   isInboxAllowed,
   resolveAllowedInboxes,
@@ -565,6 +566,11 @@ export async function deleteMessageState(
       await db.delete(messageUserState).where(userWhere);
       await db.delete(mailboxMessageState).where(mailboxWhere);
       await db.delete(messageMailboxes).where(membershipWhere);
+      if (kind === "received") {
+        await db
+          .delete(suggestedReplies)
+          .where(inArray(suggestedReplies.emailId, batch));
+      }
     }
   }
 }

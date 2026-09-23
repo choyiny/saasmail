@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import ReplyComposer from "@/components/ReplyComposer";
+import SuggestedReplyCard from "@/components/SuggestedReplyCard";
 import SnoozeMenu, {
   snoozeInHours,
   toLocalDateTimeInput,
@@ -103,6 +104,7 @@ export default function MailReadingPane({
   onRefresh,
 }: MailReadingPaneProps) {
   const [replyOpen, setReplyOpen] = useState(false);
+  const [replyComposerKey, setReplyComposerKey] = useState(0);
   const [customSnoozeOpen, setCustomSnoozeOpen] = useState(false);
   const [customSnoozeValue, setCustomSnoozeValue] = useState("");
   const lastReplyRequestKey = useRef(0);
@@ -397,6 +399,18 @@ export default function MailReadingPane({
                     </div>
                   </div>
 
+                  {selectedMessage.direction === "inbound" && (
+                    <div className="pt-5">
+                      <SuggestedReplyCard
+                        emailId={selectedMessage.ref.slice("received:".length)}
+                        onUse={() => {
+                          setReplyComposerKey((key) => key + 1);
+                          setReplyOpen(true);
+                        }}
+                      />
+                    </div>
+                  )}
+
                   <div className="py-6">
                     {selectedMessage.bodyHtml ? (
                       <div
@@ -433,6 +447,7 @@ export default function MailReadingPane({
         selectedMessage?.direction === "inbound" &&
         selectedMessage.from && (
           <ReplyComposer
+            key={`${selectedMessage.ref}:${replyRequestKey}:${replyComposerKey}`}
             emailId={selectedMessage.ref.slice("received:".length)}
             personName={selectedMessage.from.name ?? null}
             personEmail={selectedMessage.from.email}

@@ -206,6 +206,34 @@ export default function AdminInboxTable() {
     );
   }
 
+  async function commitAgentAutodraft(inbox: AdminInbox, value: boolean) {
+    if (value === inbox.agentAutodraft) return;
+    const before = inbox.agentAutodraft;
+    setInboxes((prev) =>
+      prev.map((row) =>
+        row.email === inbox.email ? { ...row, agentAutodraft: value } : row,
+      ),
+    );
+    try {
+      const res = await updateInboxSettings(inbox.email, {
+        agentAutodraft: value,
+      });
+      setInboxes((prev) =>
+        prev.map((row) =>
+          row.email === inbox.email
+            ? { ...row, agentAutodraft: res.agentAutodraft }
+            : row,
+        ),
+      );
+    } catch {
+      setInboxes((prev) =>
+        prev.map((row) =>
+          row.email === inbox.email ? { ...row, agentAutodraft: before } : row,
+        ),
+      );
+    }
+  }
+
   async function commitSignature(inbox: AdminInbox, html: string) {
     // Treat an empty Tiptap doc as "no signature" so admins can clear it
     // without remembering the canonical empty form.
@@ -577,14 +605,47 @@ export default function AdminInboxTable() {
                         />
                       </td>
 
-                      {/* Agent instructions */}
+                      {/* Agent suggested replies + instructions */}
                       <td className="px-3 py-2.5 align-top">
-                        <AgentInstructionsInput
-                          inbox={inbox}
-                          onCommit={(value) =>
-                            commitAgentInstructions(inbox, value)
-                          }
-                        />
+                        <div className="min-w-[260px] space-y-2">
+                          <label className="flex items-center gap-2 text-[11px] font-medium text-text-secondary">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={inbox.agentAutodraft}
+                              aria-label={`Auto-suggest replies for ${inbox.email}`}
+                              data-testid="inbox-agent-autodraft"
+                              onClick={() =>
+                                void commitAgentAutodraft(
+                                  inbox,
+                                  !inbox.agentAutodraft,
+                                )
+                              }
+                              className={cn(
+                                "relative h-5 w-9 rounded-full transition-colors",
+                                inbox.agentAutodraft
+                                  ? "bg-text-primary"
+                                  : "bg-bg-muted ring-1 ring-border",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "absolute top-0.5 h-4 w-4 rounded-full bg-card shadow-sm transition-transform",
+                                  inbox.agentAutodraft
+                                    ? "translate-x-4"
+                                    : "translate-x-0.5",
+                                )}
+                              />
+                            </button>
+                            Auto-suggest replies
+                          </label>
+                          <AgentInstructionsInput
+                            inbox={inbox}
+                            onCommit={(value) =>
+                              commitAgentInstructions(inbox, value)
+                            }
+                          />
+                        </div>
                       </td>
 
                       {/* Members — inline chip toggles */}

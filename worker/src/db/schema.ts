@@ -35,6 +35,7 @@ import { mailboxes } from "./mailboxes.schema";
 import { messageMailboxes } from "./message-mailboxes.schema";
 import { inboxConversationState } from "./inbox-conversation-state.schema";
 import { agentSessions } from "./agent-sessions.schema";
+import { suggestedReplies } from "./suggested-replies.schema";
 
 export const schema = {
   ...authSchema,
@@ -74,4 +75,5 @@ export const schema = {
   messageMailboxes,
   inboxConversationState,
   agentSessions,
+  suggestedReplies,
 } as const;

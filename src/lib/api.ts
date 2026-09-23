@@ -149,6 +149,40 @@ export interface AgentSession {
   instanceName: string;
 }
 
+export interface SuggestedReply {
+  id: string;
+  emailId: string;
+  inbox: string;
+  bodyText: string;
+  model: string;
+  status: "pending" | "used" | "dismissed";
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchSuggestedReply(
+  emailId: string,
+): Promise<SuggestedReply | null> {
+  const result = await apiFetch<{ suggestion: SuggestedReply | null }>(
+    `/api/suggested-replies?emailId=${encodeURIComponent(emailId)}`,
+  );
+  return result.suggestion;
+}
+
+export async function useSuggestedReply(id: string): Promise<SuggestedReply> {
+  return apiFetch(`/api/suggested-replies/${encodeURIComponent(id)}/use`, {
+    method: "POST",
+  });
+}
+
+export async function dismissSuggestedReply(
+  id: string,
+): Promise<SuggestedReply> {
+  return apiFetch(`/api/suggested-replies/${encodeURIComponent(id)}/dismiss`, {
+    method: "POST",
+  });
+}
+
 export async function fetchAgentStatus(): Promise<AgentStatus> {
   return apiFetch("/api/agent/status");
 }
@@ -1121,6 +1155,8 @@ export interface AdminInbox {
   spamThreshold: number | null;
   /** Optional per-inbox instructions appended to the native agent prompt. */
   agentInstructions: string | null;
+  /** Whether eligible inbound messages get AI-generated suggested replies. */
+  agentAutodraft: boolean;
   assignedUserIds: string[];
 }
 
@@ -1149,6 +1185,7 @@ export async function updateInboxSettings(
     forwardTo?: string | null;
     spamThreshold?: number | null;
     agentInstructions?: string;
+    agentAutodraft?: boolean;
   },
 ): Promise<{
   email: string;
@@ -1158,6 +1195,7 @@ export async function updateInboxSettings(
   forwardTo: string | null;
   spamThreshold: number | null;
   agentInstructions: string | null;
+  agentAutodraft: boolean;
 }> {
   return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
     method: "PATCH",

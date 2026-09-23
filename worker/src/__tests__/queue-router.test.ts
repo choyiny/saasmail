@@ -49,6 +49,16 @@ describe("classifyQueueMessage", () => {
     ).toBe("sequence_email");
   });
 
+  it("recognises a suggested reply message with a string email id", () => {
+    expect(
+      classifyQueueMessage({ type: "suggest_reply", emailId: "email-1" }),
+    ).toBe("suggest_reply");
+    expect(classifyQueueMessage({ type: "suggest_reply" })).toBe("unknown");
+    expect(classifyQueueMessage({ type: "suggest_reply", emailId: 123 })).toBe(
+      "unknown",
+    );
+  });
+
   it("recognises a list import coordinator message", () => {
     expect(classifyQueueMessage({ type: "list_import", jobId: "j-1" })).toBe(
       "list_import",

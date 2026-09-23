@@ -3,6 +3,7 @@
 
 -- Clean tables (idempotent for repeated runs)
 DELETE FROM agent_sessions;
+DELETE FROM suggested_replies;
 DELETE FROM drafts;
 DELETE FROM sequence_emails;
 DELETE FROM sequence_enrollments;
@@ -26,7 +27,8 @@ INSERT INTO sender_identities (email, display_name, display_mode, created_at, up
 VALUES
   ('marketing@e2e.test', 'Marketing', 'thread', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)),
   ('support@e2e.test',   'Support',   'chat',   CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)),
-  ('agent-ui@e2e.test',  'Agent UI Fixture', 'chat', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER));
+  ('agent-ui@e2e.test',  'Agent UI Fixture', 'chat', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)),
+  ('agent-autodraft-ui@e2e.test', 'Agent Autodraft UI Fixture', 'chat', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER));
 
 -- People
 INSERT INTO people (id, email, name, last_email_at, unread_count, total_count, created_at, updated_at)

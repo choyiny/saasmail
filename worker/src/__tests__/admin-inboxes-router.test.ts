@@ -130,6 +130,54 @@ describe("admin inboxes router", () => {
     expect((await clear.json()).agentInstructions).toBeNull();
   });
 
+  it("PATCH persists agent autodraft and keeps the row until it returns to default", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+
+    const enabled = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentAutodraft: true }),
+      },
+    );
+    expect(enabled.status).toBe(200);
+    expect((await enabled.json()).agentAutodraft).toBe(true);
+
+    let rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].agentAutodraft).toBe(1);
+
+    const listed = await authFetch("/api/admin/inboxes", { apiKey });
+    const row = (
+      (await listed.json()) as Array<{
+        email: string;
+        agentAutodraft: boolean;
+      }>
+    ).find((item) => item.email === "a@x.com");
+    expect(row?.agentAutodraft).toBe(true);
+
+    const disabled = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentAutodraft: false }),
+      },
+    );
+    expect(disabled.status).toBe(200);
+    expect((await disabled.json()).agentAutodraft).toBe(false);
+
+    rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(0);
+  });
+
   it("PATCH rejects agent instructions over 4000 characters", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     const res = await authFetch(

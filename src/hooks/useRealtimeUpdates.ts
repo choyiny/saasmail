@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { dispatchSuggestedReplyReady } from "@/lib/suggested-reply-events";
 
 const INITIAL_RECONNECT_MS = 1_000;
 const MAX_RECONNECT_MS = 60_000;
@@ -60,6 +61,15 @@ export function useRealtimeUpdates(
               inbox: typeof data.inbox === "string" ? data.inbox : undefined,
             });
             promptRef.current?.();
+          } else if (
+            data.type === "suggested_reply" &&
+            typeof data.inbox === "string" &&
+            typeof data.emailId === "string"
+          ) {
+            dispatchSuggestedReplyReady({
+              inbox: data.inbox,
+              emailId: data.emailId,
+            });
           }
         } catch {}
       };

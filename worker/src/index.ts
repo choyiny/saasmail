@@ -45,6 +45,7 @@ import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
 import { agentSessionsRouter } from "./routers/agent-sessions-router";
 import { agentStatusRouter } from "./routers/agent-status-router";
+import { suggestedRepliesRouter } from "./routers/suggested-replies-router";
 import { listsRouter } from "./routers/lists-router";
 import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
 import { campaignsRouter } from "./routers/campaigns-router";
@@ -233,6 +234,7 @@ app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
 app.route("/api/agent/status", agentStatusRouter);
 app.route("/api/agent/sessions", agentSessionsRouter);
+app.route("/api/suggested-replies", suggestedRepliesRouter);
 app.route("/api/lists", listsRouter);
 
 // Subscribe forms are admin-only per the Authorization Matrix: a form is a

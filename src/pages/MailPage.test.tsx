@@ -13,7 +13,9 @@ const api = vi.hoisted(() => ({
   createMailbox: vi.fn(),
   deleteDraft: vi.fn(),
   deleteMailbox: vi.fn(),
+  fetchDraft: vi.fn(),
   fetchDraftList: vi.fn(),
+  fetchSuggestedReply: vi.fn(),
   fetchMailboxes: vi.fn(),
   fetchMessages: vi.fn(),
   fetchStats: vi.fn(),
@@ -21,6 +23,9 @@ const api = vi.hoisted(() => ({
   setMailboxMembership: vi.fn(),
   setMessageState: vi.fn(),
   snoozeMessages: vi.fn(),
+  saveDraft: vi.fn(),
+  useSuggestedReply: vi.fn(),
+  dismissSuggestedReply: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => api);
@@ -156,7 +161,9 @@ describe("MailPage", () => {
         },
       ],
     });
+    api.fetchDraft.mockResolvedValue(null);
     api.fetchDraftList.mockResolvedValue({ drafts: [] });
+    api.fetchSuggestedReply.mockResolvedValue(null);
     api.fetchMailboxes.mockResolvedValue([]);
     api.fetchMessages.mockResolvedValue({ messages: [], nextCursor: null });
     api.createMailbox.mockResolvedValue(mailbox("mailbox-1", "Projects"));
@@ -169,6 +176,9 @@ describe("MailPage", () => {
     api.setMailboxMembership.mockResolvedValue({ success: true });
     api.setMessageState.mockResolvedValue({ success: true });
     api.snoozeMessages.mockResolvedValue({ conversations: 1 });
+    api.saveDraft.mockResolvedValue({});
+    api.useSuggestedReply.mockResolvedValue({});
+    api.dismissSuggestedReply.mockResolvedValue({});
   });
 
   it("clears published agent context when navigating away", async () => {

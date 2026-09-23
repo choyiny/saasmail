@@ -31,6 +31,10 @@ export class NotificationsHub implements DurableObject {
       return this.handleDeliver(request);
     }
 
+    if (url.pathname === "/realtime" && request.method === "POST") {
+      return this.handleRealtime(request);
+    }
+
     // Back-compat: /notify falls through to WS-only delivery. Remove once the
     // email-handler is fully migrated (Task 9) and no callers remain.
     if (url.pathname === "/notify" && request.method === "POST") {
@@ -44,6 +48,37 @@ export class NotificationsHub implements DurableObject {
     }
 
     return new Response("Not found", { status: 404 });
+  }
+
+  private async handleRealtime(request: Request): Promise<Response> {
+    const payload = (await request.json()) as {
+      type?: string;
+      inbox?: string;
+      emailId?: string;
+    };
+    if (
+      payload.type !== "suggested_reply" ||
+      typeof payload.inbox !== "string" ||
+      typeof payload.emailId !== "string"
+    ) {
+      return new Response("invalid realtime event", { status: 400 });
+    }
+
+    const frame = JSON.stringify({
+      type: "suggested_reply",
+      inbox: payload.inbox,
+      emailId: payload.emailId,
+    });
+    const sockets = this.ctx.getWebSockets();
+    for (const ws of sockets) {
+      try {
+        ws.send(frame);
+      } catch {}
+    }
+    return Response.json({
+      via: sockets.length > 0 ? "ws" : "none",
+      wsCount: sockets.length,
+    });
   }
 
   private async handleDeliver(request: Request): Promise<Response> {

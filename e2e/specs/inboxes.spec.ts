@@ -90,6 +90,31 @@ test.describe.serial("inboxes CRUD", () => {
     ).toHaveValue(text);
   });
 
+  test("auto-suggest replies toggle persists after reload", async ({
+    page,
+  }) => {
+    await page.goto("/inboxes");
+
+    const row = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-autodraft-ui@e2e.test"]`,
+    );
+    await expect(row).toBeVisible();
+
+    const toggle = row.getByTestId("inbox-agent-autodraft");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await page.reload();
+
+    const reloadedRow = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-autodraft-ui@e2e.test"]`,
+    );
+    await expect(
+      reloadedRow.getByTestId("inbox-agent-autodraft"),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
   // ── 3. Toggle thread → chat mode persists after reload ───────────────────────
 
   test("toggle thread to chat mode persists after reload", async ({ page }) => {
