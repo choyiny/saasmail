@@ -46,6 +46,45 @@ describe("OAuth state", () => {
     ).rejects.toThrow(/signature/i);
   });
 
+  it("treats an empty mailbox as no mailbox, not as one nothing can match", async () => {
+    // Signing "" would produce a state whose expected mailbox no Gmail
+    // profile can equal, so every callback using it would refuse — a lockout
+    // minted by a caller that meant "no particular mailbox".
+    const state = await signState("user-42", SECRET, 1_000_000, "");
+    expect(state.split(".")).toHaveLength(3);
+    expect((await verifyState(state, SECRET, 1_000_060)).expectedEmail).toBe(
+      null,
+    );
+  });
+
+  it("rejects state issued further in the future than clock skew allows", async () => {
+    // The age check only bounds one end. Without the other, a state stamped
+    // far ahead never expires and stays replayable indefinitely.
+    const state = await signState("user-42", SECRET, 2_000_000);
+    await expect(verifyState(state, SECRET, 1_000_000)).rejects.toThrow(
+      /not yet valid/i,
+    );
+  });
+
+  it("bounds the future by skew, not by the ten-minute age window", async () => {
+    // Two minutes ahead is well inside MAX_AGE_SECONDS and well outside any
+    // real clock skew. Reusing the age constant here would accept it, which
+    // is the wrong-argument mistake this pins.
+    const state = await signState("user-42", SECRET, 1_000_120);
+    await expect(verifyState(state, SECRET, 1_000_000)).rejects.toThrow(
+      /not yet valid/i,
+    );
+  });
+
+  it("tolerates a minute of skew", async () => {
+    // Signing and verifying happen on different clocks; a state stamped a
+    // few seconds ahead is ordinary, not an attack.
+    const state = await signState("user-42", SECRET, 1_000_030);
+    expect((await verifyState(state, SECRET, 1_000_000)).userId).toBe(
+      "user-42",
+    );
+  });
+
   it("does not carry a mailbox when none was asked for", async () => {
     const state = await signState("user-42", SECRET, 1_000_000, null);
     expect(state.split(".")).toHaveLength(3);

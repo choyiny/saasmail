@@ -544,6 +544,42 @@ describe("ConnectedMailboxes — a reconnect names its mailbox", () => {
     expect(banner.textContent).toMatch(/nothing was changed/i);
   });
 
+  it.each([
+    ["no addresses at all", "/inboxes?gmail=wrong_account"],
+    [
+      "prose in place of an address",
+      "/inboxes?gmail=wrong_account&gmail_expected=desk%40example.com&gmail_granted=Contact%20support%20at%20555-0100",
+    ],
+    [
+      "one side missing",
+      "/inboxes?gmail=wrong_account&gmail_granted=jane%40example.com",
+    ],
+    [
+      "text that is not an address at all",
+      "/inboxes?gmail=wrong_account&gmail_expected=desk%40example.com&gmail_granted=call-555-0100-immediately",
+    ],
+    [
+      "something wearing two addresses",
+      "/inboxes?gmail=wrong_account&gmail_expected=desk%40example.com&gmail_granted=jane%40example.com%40evil.test",
+    ],
+  ])(
+    "does not read a hand-made URL back to the admin — %s",
+    async (_case, path) => {
+      // The banner is a red verdict from the server, and these values come
+      // from the query string. Anything that is not an address means the URL
+      // was made by hand, so the generic failure is shown instead of
+      // whatever the link says — or a sentence with two blanks in it.
+      mFetch.mockResolvedValue([account()]);
+      renderAt(path);
+
+      await screen.findByTestId("gmail-connect-error");
+      expect(screen.queryByTestId("gmail-wrong-account")).toBeNull();
+      expect(screen.getByTestId("gmail-connect-error").textContent).not.toMatch(
+        /555-0100|evil.test/,
+      );
+    },
+  );
+
   it("clears every gmail param after a refused reconnect", async () => {
     mFetch.mockResolvedValue([account()]);
     renderAt(

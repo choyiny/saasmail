@@ -94,6 +94,24 @@ describe("GET /api/admin/gmail/connect", () => {
     expect(verified.expectedEmail).toBe("ops@example.com");
   });
 
+  it("lowercases the reconnect target on the way in", async () => {
+    // Both sides have to agree: the callback compares against Gmail's own
+    // lowercase address, so an address typed with capitals must be folded
+    // here or a legitimate reconnect refuses itself with wrong_account.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      "/api/admin/gmail/connect?email=Ops%40Example.COM",
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { authUrl: string };
+    const url = new URL(body.authUrl);
+    const verified = await verifyState(url.searchParams.get("state")!, KEY);
+    expect(verified.expectedEmail).toBe("ops@example.com");
+    expect(url.searchParams.get("login_hint")).toBe("ops@example.com");
+  });
+
   it("carries no expected mailbox for a plain connect", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     const res = await authFetch("/api/admin/gmail/connect", { apiKey });
@@ -164,6 +182,39 @@ describe("GET /api/admin/gmail/callback", () => {
     expect(await decryptSecret(row.refreshTokenEncrypted, KEY)).toBe(
       "rt-secret",
     );
+  });
+
+  it("attributes the connection to the admin who completed it", async () => {
+    // Two admins: the state was signed when the first started the flow, but
+    // the browser that came back from Google is the second one's session.
+    // connectedBy records who acted, and the session is the authority on
+    // that — the state payload is only evidence of what was asked for.
+    const { userId: starter } = await createTestUser({
+      id: "admin-starter",
+      role: "admin",
+      email: "starter@example.com",
+    });
+    const { apiKey } = await createTestUser({
+      id: "admin-finisher",
+      role: "admin",
+      email: "finisher@example.com",
+    });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const state = await signState(starter, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].connectedBy).toBe("admin-finisher");
+    expect(rows[0].connectedBy).not.toBe("admin-starter");
   });
 
   it("refuses a grant that returns no refresh token", async () => {
