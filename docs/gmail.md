@@ -194,15 +194,23 @@ With no mailbox connected the dropdown is disabled and reads "Connect a Google
 mailbox first" — or "Couldn't load connected mailboxes" if that list failed to
 load, which is not the same thing.
 
-A row whose mapping does not match any connected mailbox says which of those
-two it is, because the wrong one would talk you into unmapping a working
-inbox:
+A mapped row says which of three things is true, because confusing them would
+talk you into unmapping a working inbox:
 
+- **The mailbox's address** — the list is current and the mapping resolves.
+  Normal.
 - **"Mailbox no longer connected"** — the list loaded and this mapping's
   mailbox is genuinely not in it. Pick another mailbox, or Cloudflare.
 - **"Couldn't check — still mapped to `<id>`"** — the list could not be
-  loaded, so nothing is known about this mapping. The dropdown is locked;
-  reload before changing anything. The mapping is probably fine.
+  loaded at all, so this mapping cannot even be named. The mapping is
+  probably fine.
+
+**Whenever the mailbox list failed to load, every mapped row is locked** —
+including one the last good list can still name, which keeps showing its
+address rather than an opaque id. Changing a mapping is a real `PATCH`, and a
+list we know to be out of date cannot tell a live mapping from a dead one.
+Reload before changing anything. The list is re-read after a connect or a
+disconnect as well as on first load, so a blip on either can produce this.
 
 ### A mapping is verified before it is saved
 

@@ -323,17 +323,57 @@ describe("AdminInboxTable — a mapping we could not verify", () => {
     expect(select.disabled).toBe(false);
   });
 
-  it("does not lock an unmapped row when the list failed to load", async () => {
-    // Nothing is at stake on a Cloudflare row: there is no mapping to lose.
+  it("locks an unmapped row and says why the list is empty", async () => {
+    // Nothing to pick, so nothing to pick from: the row stays on Cloudflare
+    // and is locked, with the reason readable in the dropdown rather than
+    // silently offering an empty list.
     mInboxes.mockResolvedValue([inbox({ email: BILLING })]);
     mAccounts.mockRejectedValue(new Error("API error: 500"));
     render(<AdminInboxTable />);
 
     const select = await sourceSelectFor(BILLING);
     expect(selectedLabel(select)).toBe("Cloudflare");
+    expect(select.disabled).toBe(true);
     const labels = Array.from(select.options).map((o) => o.textContent?.trim());
     expect(
       labels.some((l) => /could ?n.t load connected mailboxes/i.test(l ?? "")),
     ).toBe(true);
+  });
+
+  /**
+   * The case the first-load-fails tests cannot reach: the list loaded once,
+   * then a re-fetch — the one every disconnect fires — failed. `accounts` is
+   * still populated, so "the list is empty" no longer implies "the list is
+   * unknown", and the lock has to come from the failure itself.
+   */
+  it("keeps naming the mailbox, and locks the row, when a re-fetch fails", async () => {
+    seed();
+    const { rerender } = render(<AdminInboxTable gmailVersion={0} />);
+
+    const before = await sourceSelectFor(SALES);
+    expect(selectedLabel(before)).toBe(ACCT_DESK.emailAddress);
+    expect(before.disabled).toBe(false);
+
+    mAccounts.mockRejectedValue(new Error("API error: 500"));
+    rerender(<AdminInboxTable gmailVersion={1} />);
+    await waitFor(() => expect(mAccounts).toHaveBeenCalledTimes(2));
+
+    const after = await sourceSelectFor(SALES);
+    // We can still resolve this id from the last good list, so say the
+    // address. Falling back to "Couldn't check — still mapped to <id>" shows
+    // an opaque nanoid for a mapping we can perfectly well name.
+    await waitFor(() =>
+      expect(selectedLabel(after)).toBe(ACCT_DESK.emailAddress),
+    );
+    expect(selectedLabel(after)).not.toMatch(/could ?n.t check/i);
+    // But the list is out of date, so changing the mapping — a real PATCH —
+    // is refused until it is reloaded. This is the I4 hazard: an enabled
+    // control here is one an operator unmaps a working inbox with.
+    expect(after.disabled).toBe(true);
+    // And exactly one option per value: a second option sharing the mapped
+    // id would win the controlled select and decide the label.
+    const values = Array.from(after.options).map((o) => o.value);
+    expect(values.filter((v) => v === ACCT_DESK.id)).toHaveLength(1);
+    expect(new Set(values).size).toBe(values.length);
   });
 });

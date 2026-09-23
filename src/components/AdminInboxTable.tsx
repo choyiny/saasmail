@@ -831,11 +831,19 @@ function SourceSelect({
   // labelling an unchecked mapping "no longer connected" invites the operator
   // to unmap a working inbox because of a network blip — and switching back
   // to Cloudflare is a real PATCH that really unmaps it.
-  const unverifiable = mappedId !== null && accountsFailed;
-  const orphaned =
-    mappedId !== null &&
-    !accountsFailed &&
-    !accounts.some((a) => a.id === mappedId);
+  //
+  // `known` matters on its own because a failed *re*-fetch keeps the rows from
+  // the last good load: the list is out of date, but it can still name this
+  // mapping, and showing an opaque id instead would be worse than the id-less
+  // truth. Only a mapping the list cannot resolve at all is "Couldn't check".
+  const known = mappedId !== null && accounts.some((a) => a.id === mappedId);
+  const unverifiable = mappedId !== null && accountsFailed && !known;
+  const orphaned = mappedId !== null && !accountsFailed && !known;
+  // Every mapped row is locked while the list is known to be out of date,
+  // named or not: changing it is a real PATCH, and a stale list cannot tell a
+  // live mapping from a dead one. `accounts.length === 0` does NOT imply this
+  // any more — the first load can succeed and a later one fail.
+  const staleMapping = mappedId !== null && accountsFailed;
   const value = mappedId ?? "cloudflare";
 
   return (
@@ -843,11 +851,9 @@ function SourceSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.currentTarget.value)}
-        // A failed load leaves `accounts` empty and `orphaned` false, so an
-        // unverifiable mapping is locked by the same clause that locks a row
-        // with nothing to pick: every choice here is a real PATCH, and while
-        // the list is unknown we cannot tell a live mapping from a dead one.
-        disabled={saving || (accounts.length === 0 && !orphaned)}
+        disabled={
+          saving || staleMapping || (accounts.length === 0 && !orphaned)
+        }
         aria-label={`Mail source for ${inbox.email}`}
         aria-invalid={error ? true : undefined}
         data-testid="inbox-source-select"
