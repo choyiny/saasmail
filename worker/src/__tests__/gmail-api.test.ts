@@ -222,6 +222,46 @@ describe("listSendAs", () => {
     );
   });
 
+  it("drops an alias whose verification is still pending", async () => {
+    // Gmail returns a half-set-up "Send mail as" alias in this list but
+    // refuses to send from it, so treating it as usable would let a mapping
+    // pass the check and then fail on the first real reply.
+    stub(200, {
+      sendAs: [
+        { sendAsEmail: "collector@acme.dev", isPrimary: true },
+        { sendAsEmail: "confirmed@acme.dev", verificationStatus: "accepted" },
+        { sendAsEmail: "unconfirmed@acme.dev", verificationStatus: "pending" },
+      ],
+    });
+
+    expect(await listSendAs("at")).toEqual([
+      "collector@acme.dev",
+      "confirmed@acme.dev",
+    ]);
+  });
+
+  it("keeps an address Gmail reports no verification status for", async () => {
+    // The field is only populated for custom from-aliases. The account's own
+    // address and Workspace-managed aliases come back unspecified (or without
+    // the field) and are sendable — requiring a literal "accepted" would
+    // reject the primary address of every connected mailbox.
+    stub(200, {
+      sendAs: [
+        {
+          sendAsEmail: "collector@acme.dev",
+          isPrimary: true,
+          verificationStatus: "verificationStatusUnspecified",
+        },
+        { sendAsEmail: "domain-alias@acme.dev" },
+      ],
+    });
+
+    expect(await listSendAs("at")).toEqual([
+      "collector@acme.dev",
+      "domain-alias@acme.dev",
+    ]);
+  });
+
   it("throws a GmailApiError on a non-2xx without echoing the token", async () => {
     stub(403, { error: { message: "insufficient permissions" } });
     const err = await listSendAs("super-secret-token").catch((e) => e);
