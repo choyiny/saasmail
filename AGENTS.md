@@ -96,6 +96,15 @@ hard-delete path for received or sent messages must call `deleteMessageState()`
 before deleting the message rows so personal state, shared state, and folder
 memberships cannot become orphans.
 
+## Native agent runtime dependencies
+
+The native agent stack is intentionally **exact-pinned** in `package.json`:
+`agents`, `@cloudflare/ai-chat`, AI SDK/provider packages, and the MCP peer
+packages required by the Agents SDK. These APIs are pre-1.0 or otherwise
+fast-moving. Do not loosen those pins or upgrade them opportunistically while
+working on another feature. Upgrade the agent dependency set together in a
+dedicated PR, regenerate `yarn.lock`, and rerun the full worker/web/e2e suite.
+
 ## WebMCP tools
 
 WebMCP tools live in `src/webmcp/` (runtime + hook + `tools/`), registered in `DashboardLayout` via `WebMcpTools`. Read tools call `src/lib/api.ts`; action tools drive the UI through the bridge (`src/webmcp/bridge.tsx`). Add a tool by extending `createReadTools`/`createActionTools` in `src/webmcp/tools/`.

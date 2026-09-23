@@ -1,13 +1,12 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { routeAgentRequest } from "agents";
 import { swaggerUI } from "@hono/swagger-ui";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { injectDb } from "./db/middleware";
 import { createAuth } from "./auth";
-import { apiKeys } from "./db/api-keys.schema";
 import { users } from "./db/auth.schema";
 import { eq } from "drizzle-orm";
-import { hashKey } from "./lib/crypto";
 import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
 import { emailsRouter } from "./routers/emails-router";
@@ -44,6 +43,7 @@ import { publicTrackRouter } from "./routers/public-track-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
+import { agentSessionsRouter } from "./routers/agent-sessions-router";
 import { listsRouter } from "./routers/lists-router";
 import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
 import { campaignsRouter } from "./routers/campaigns-router";
@@ -52,6 +52,7 @@ import { newsletterAssetsRouter } from "./routers/newsletter-assets-router";
 import { publicAssetsRouter } from "./routers/public-assets-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
+export { MailAgent } from "./agent/mail-agent";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
@@ -64,6 +65,8 @@ import {
   bearerAuthSecurityScheme,
   openapiInfoDescription,
 } from "./lib/openapi-auth";
+import { resolveRequestAuth } from "./lib/request-auth";
+import { authorizeMailAgentRequest } from "./agent/auth";
 
 const app = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -166,50 +169,20 @@ app.all("/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
 
-// Session resolution for all API routes
+// Session/API-key resolution for all API routes. The same resolver is reused by
+// the MailAgent routing hooks so agent traffic cannot drift onto a second auth
+// implementation.
 app.use("/api/*", async (c, next) => {
   if (isUnauthenticatedPath(c.req.path)) return next();
 
-  // Try session cookie first
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({
-    headers: c.req.raw.headers,
-  });
-  if (session) {
-    c.set("user", session.user);
-    c.set("authMethod", "session");
-    return next();
+  const resolved = await resolveRequestAuth(c.req.raw, c.env, c.get("db"));
+  if (!resolved) {
+    return c.json({ error: "Unauthorized" }, 401);
   }
 
-  // Try Bearer token (API key)
-  const authHeader = c.req.header("Authorization");
-  if (authHeader?.startsWith("Bearer sk_")) {
-    const token = authHeader.slice(7); // Remove "Bearer "
-    const tokenHash = await hashKey(token);
-
-    const db = c.get("db");
-    const rows = await db
-      .select({ userId: apiKeys.userId })
-      .from(apiKeys)
-      .where(eq(apiKeys.keyHash, tokenHash))
-      .limit(1);
-
-    if (rows.length > 0) {
-      const userRows = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, rows[0].userId))
-        .limit(1);
-
-      if (userRows.length > 0) {
-        c.set("user", userRows[0]);
-        c.set("authMethod", "apiKey");
-        return next();
-      }
-    }
-  }
-
-  return c.json({ error: "Unauthorized" }, 401);
+  c.set("user", resolved.user);
+  c.set("authMethod", resolved.authMethod);
+  return next();
 });
 
 // Enforce passkey registration for session-cookie users. Runs before
@@ -257,6 +230,7 @@ app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
+app.route("/api/agent/sessions", agentSessionsRouter);
 app.route("/api/lists", listsRouter);
 
 // Subscribe forms are admin-only per the Authorization Matrix: a form is a
@@ -331,6 +305,24 @@ app.route("/api", bootstrapRouter);
 // bearer tokens via mcpHandler rather than the session/API-key pipeline, and
 // it sits outside `/api/*` so that middleware never applies to it.
 registerMcpRoutes(app);
+
+// Native agent traffic lives outside /api/* but uses the exact same
+// session/API-key resolver in both SDK auth hooks. Scope this route to the
+// MailAgent binding so other Durable Objects are never exposed by the generic
+// Agents SDK router.
+app.all("/agents/mail-agent/*", async (c) => {
+  const authorize = (
+    request: Request,
+    route: { className: string; name: string },
+  ) => authorizeMailAgentRequest(request, route, c.env, c.get("db"));
+
+  const response = await routeAgentRequest(c.req.raw, c.env, {
+    onBeforeConnect: authorize,
+    onBeforeRequest: authorize,
+  });
+
+  return response ?? c.json({ error: "Not found" }, 404);
+});
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));

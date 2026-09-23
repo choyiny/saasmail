@@ -309,6 +309,13 @@
       "when": 1790122426243,
       "tag": "0043_tiresome_warlock",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1790130000000,
+      "tag": "0044_agent_sessions",
+      "breakpoints": true
     }
   ]
 }

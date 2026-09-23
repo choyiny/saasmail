@@ -36,6 +36,7 @@ export interface MessageQuery {
   inboxes?: string[];
   personId?: string;
   conversationId?: string;
+  messageRef?: MessageRef;
   direction?: "inbound" | "outbound";
   after?: number;
   before?: number;
@@ -125,6 +126,16 @@ function conversationScope(
   return conversationId === undefined
     ? sql``
     : sql`AND ${column} = ${conversationId}`;
+}
+
+function messageRefScope(
+  kind: MessageKind,
+  idColumn: SQL,
+  ref: MessageRef | undefined,
+): SQL {
+  if (!ref) return sql``;
+  if (ref.kind !== kind) return sql`AND 0`;
+  return sql`AND ${idColumn} = ${ref.id}`;
 }
 
 function dateScope(
@@ -468,6 +479,7 @@ function receivedArm(
       ${explicitInboxScope(sql`e.recipient`, requestedInboxes)}
       ${personScope(sql`e.person_id`, query.personId)}
       ${conversationScope(sql`e.conversation_id`, query.conversationId)}
+      ${messageRefScope("received", sql`e.id`, query.messageRef)}
       ${dateScope(sql`e.received_at`, query.after, query.before)}
       ${search.where}
       ${blockedScope(query.excludeBlocked ?? false)}
@@ -547,6 +559,7 @@ function sentArm(
       ${explicitInboxScope(sql`se.from_address`, requestedInboxes)}
       ${personScope(sql`se.person_id`, query.personId)}
       ${conversationScope(sql`se.conversation_id`, query.conversationId)}
+      ${messageRefScope("sent", sql`se.id`, query.messageRef)}
       ${dateScope(sql`se.sent_at`, query.after, query.before)}
       ${sentSearch(query.search, query.searchMode ?? "subject")}
       ${blockedScope(query.excludeBlocked ?? false)}

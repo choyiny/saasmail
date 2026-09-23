@@ -20,6 +20,7 @@
       "database_id": "<your-d1-database-id>"
     }
   ],
+  "ai": { "binding": "AI" },
   "r2_buckets": [
     {
       "binding": "R2",
@@ -65,6 +66,10 @@
       {
         "name": "NOTIFICATIONS_HUB",
         "class_name": "NotificationsHub"
+      },
+      {
+        "name": "MAIL_AGENT",
+        "class_name": "MailAgent"
       }
     ]
   },
@@ -72,6 +77,10 @@
     {
       "tag": "v1",
       "new_classes": ["NotificationsHub"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MailAgent"]
     }
   ],
   "triggers": {

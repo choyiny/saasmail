@@ -49,7 +49,7 @@
     "@hono/swagger-ui": "^0.6.1",
     "@hono/zod-openapi": "^1.3.0",
     "@mcp-b/global": "^5.0.1",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "1.30.0",
     "@opentelemetry/api": "^1.9.1",
     "@paper-design/shaders-react": "^0.0.76",
     "@radix-ui/react-avatar": "^1.2.6",
@@ -83,7 +83,15 @@
     "react-router-dom": "^6.30.1",
     "resend": "^6.12.4",
     "tailwind-merge": "^3.0.2",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "agents": "0.24.0",
+    "@cloudflare/ai-chat": "0.12.0",
+    "ai": "7.0.109",
+    "@ai-sdk/anthropic": "4.0.58",
+    "@ai-sdk/openai": "4.0.72",
+    "workers-ai-provider": "4.0.0",
+    "@modelcontextprotocol/client": "2.0.0",
+    "@modelcontextprotocol/server": "2.0.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.54.1",

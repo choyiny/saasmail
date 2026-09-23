@@ -13,6 +13,7 @@
       "database_id": "00000000-0000-0000-0000-000000000000"
     }
   ],
+  "ai": { "binding": "AI" },
   "r2_buckets": [
     {
       "binding": "R2",
@@ -54,6 +55,10 @@
       {
         "name": "NOTIFICATIONS_HUB",
         "class_name": "NotificationsHub"
+      },
+      {
+        "name": "MAIL_AGENT",
+        "class_name": "MailAgent"
       }
     ]
   },
@@ -61,6 +66,10 @@
     {
       "tag": "v1",
       "new_classes": ["NotificationsHub"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MailAgent"]
     }
   ],
   "vars": {

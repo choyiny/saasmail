@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
-import { nanoid } from "nanoid";
 import { drafts } from "../db/drafts.schema";
+import { upsertDraft } from "../lib/drafts";
 import { json200Response } from "../lib/helpers";
 import { bearerSecurity } from "../lib/openapi-auth";
 import type { Variables } from "../variables";
@@ -189,47 +189,8 @@ draftsRouter.openapi(saveDraftRoute, async (c) => {
   const db = c.get("db");
   const user = c.get("user");
   const body = c.req.valid("json");
-  const now = Math.floor(Date.now() / 1000);
-  const cc = body.cc ? JSON.stringify(body.cc) : null;
-
-  await db
-    .insert(drafts)
-    .values({
-      id: nanoid(),
-      userId: user.id,
-      contextKey: body.contextKey,
-      fromAddress: body.fromAddress ?? null,
-      toAddress: body.to ?? null,
-      cc,
-      subject: body.subject ?? null,
-      bodyHtml: body.bodyHtml ?? null,
-      bodyText: body.bodyText ?? null,
-      replyToEmailId: body.replyToEmailId ?? null,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [drafts.userId, drafts.contextKey],
-      set: {
-        fromAddress: body.fromAddress ?? null,
-        toAddress: body.to ?? null,
-        cc,
-        subject: body.subject ?? null,
-        bodyHtml: body.bodyHtml ?? null,
-        bodyText: body.bodyText ?? null,
-        replyToEmailId: body.replyToEmailId ?? null,
-        updatedAt: now,
-      },
-    });
-
-  const rows = await db
-    .select()
-    .from(drafts)
-    .where(
-      and(eq(drafts.userId, user.id), eq(drafts.contextKey, body.contextKey)),
-    )
-    .limit(1);
-  return c.json({ draft: toDraft(rows[0]) }, 200);
+  const draft = await upsertDraft(db, user.id, body);
+  return c.json({ draft: toDraft(draft) }, 200);
 });
 
 // DELETE /api/drafts?contextKey=… — discard a draft (on send or clear).

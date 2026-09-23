@@ -35,3 +35,4 @@ export * from "./mailbox-message-state.schema";
 export * from "./mailboxes.schema";
 export * from "./message-mailboxes.schema";
 export * from "./inbox-conversation-state.schema";
+export * from "./agent-sessions.schema";

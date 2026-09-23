@@ -12,6 +12,10 @@ export default defineConfig({
     // job timeout so a genuine hang still fails rather than hanging the run.
     testTimeout: 20_000,
     pool: cloudflarePool({
+      // Workers AI is remote-only in Miniflare. Keep the production/CI
+      // wrangler binding, but don't open a remote Cloudflare session just to
+      // start local unit tests; agent provider tests inject their own fake AI.
+      remoteBindings: false,
       wrangler: {
         configPath: "./wrangler.jsonc",
       },

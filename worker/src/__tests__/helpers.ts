@@ -103,6 +103,8 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS outbox_status_retry_idx ON outbox_emails(status, next_retry_at)`,
     `CREATE INDEX IF NOT EXISTS outbox_from_idx ON outbox_emails(from_address)`,
     `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, context_key TEXT NOT NULL, from_address TEXT, to_address TEXT, cc TEXT, subject TEXT, body_html TEXT, body_text TEXT, reply_to_email_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS agent_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, title TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER)`,
+    `CREATE INDEX IF NOT EXISTS agent_sessions_user_updated_idx ON agent_sessions(user_id, updated_at)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS drafts_user_context_idx ON drafts(user_id, context_key)`,
     // Newsletter module (migration 0035).
     `CREATE TABLE IF NOT EXISTS async_jobs (id TEXT PRIMARY KEY, job_type TEXT NOT NULL, ref_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'running', cursor TEXT, storage_key TEXT, total_rows INTEGER, processed_rows INTEGER NOT NULL DEFAULT 0, imported_count INTEGER NOT NULL DEFAULT 0, skipped_count INTEGER NOT NULL DEFAULT 0, error_summary TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -423,6 +425,7 @@ export async function cleanDb() {
     DELETE FROM lists;
     DELETE FROM contacts;
     DELETE FROM async_jobs;
+    DELETE FROM agent_sessions;
     DELETE FROM drafts;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;
