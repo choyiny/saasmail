@@ -173,8 +173,8 @@ export default function AdminInboxTable() {
     const next = trimmed === "" ? null : trimmed;
     if (next === inbox.forwardTo) return;
 
-    // Validate client-side so the admin gets a specific message — apiFetch
-    // collapses error responses to "API error: 400".
+    // Validate client-side so the admin is told before a round trip; the
+    // server's own wording is kept either way.
     if (next !== null) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
         setForwardErrors((p) => ({

@@ -8,6 +8,7 @@ import {
   type CcEntry,
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
+import { serverErrorMessage } from "@/lib/error-message";
 import AttachmentPicker from "@/components/AttachmentPicker";
 import AttachmentChips from "@/components/AttachmentChips";
 
@@ -163,7 +164,9 @@ export default function ChatQuickReply({
       setFiles([]);
       onSent();
     } catch (e) {
-      setError("Failed to send message");
+      // Prefer what the server said — a Gmail reply it refused was *not*
+      // queued and has to be sent again, which the generic string hides.
+      setError(serverErrorMessage(e) ?? "Failed to send message");
       console.error(e);
     } finally {
       setSending(false);

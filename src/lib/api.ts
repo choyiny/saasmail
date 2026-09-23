@@ -1,3 +1,5 @@
+import { statusFallbackMessage } from "@/lib/error-message";
+
 export interface Person {
   id: string;
   email: string;
@@ -110,27 +112,14 @@ export interface Stats {
   }>;
 }
 
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    credentials: "include",
-    ...options,
-  });
-  if (!res.ok) {
-    throw new Error(`API error: ${res.status}`);
-  }
-  return res.json();
-}
-
 /**
- * Like `apiFetch`, but throws the server's own `{ error }` message when it
- * sends one. Use it where the response body is actionable — a 400 naming the
- * address that can't be sent from, a 503 saying the integration is
- * unconfigured — and a bare status code would strip the only useful part.
+ * Throws the server's own `{ error }` message whenever it sends one, and the
+ * bare status code only when it doesn't. The body is the actionable part —
+ * a 400 naming the address that can't be sent from, a 502 saying a Gmail
+ * reply was rejected *and not queued for retry* — and a UI handed only
+ * "API error: 502" has nothing left to tell the user to do.
  */
-async function apiFetchKeepingServerMessage<T>(
-  path: string,
-  options?: RequestInit,
-): Promise<T> {
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
     ...options,
@@ -146,7 +135,7 @@ async function apiFetchKeepingServerMessage<T>(
     } catch {
       // Non-JSON or empty body — fall back to the status code below.
     }
-    throw new Error(message ?? `API error: ${res.status}`);
+    throw new Error(message ?? statusFallbackMessage(res.status));
   }
   return res.json();
 }
@@ -891,17 +880,14 @@ export async function updateInboxSettings(
   source: "cloudflare" | "gmail";
   gmailAccountId: string | null;
 }> {
-  // Server errors are kept verbatim: a rejected Gmail mapping answers with the
-  // one sentence that tells the operator how to fix it ("add it under Gmail's
-  // Send mail as…"), which `apiFetch` would flatten to "API error: 400".
-  return apiFetchKeepingServerMessage(
-    `/api/admin/inboxes/${encodeURIComponent(email)}`,
-    {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    },
-  );
+  // The failure body is the whole point here: a rejected Gmail mapping answers
+  // with the one sentence that tells the operator how to fix it ("add it under
+  // Gmail's Send mail as…"). `apiFetch` throws it verbatim.
+  return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
 }
 
 export async function deleteInbox(
