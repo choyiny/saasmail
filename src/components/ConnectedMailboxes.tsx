@@ -12,12 +12,55 @@ import {
 import {
   disconnectGmailAccount,
   fetchGmailAccounts,
-  gmailConnectUrl,
+  startGmailConnect,
   type GmailAccount,
 } from "@/lib/api";
+import { navigateExternal } from "@/lib/navigate-external";
 
 /** How often the backend cron sweeps every connected mailbox. */
 const SYNC_INTERVAL_LABEL = "every 15 minutes";
+
+/**
+ * `lastError` values a fresh grant cannot fix, so Reconnect is not offered
+ * for them. Offering an action that cannot help is worse than offering none:
+ * the operator burns a consent round trip and the error comes straight back.
+ *
+ * A denylist rather than an allowlist, because the two sets differ in kind.
+ * The auth codes are whatever Google puts in its `error` field, plus the
+ * local `refresh_failed` fallback — open-ended, so a code we have never seen
+ * should still get the affordance. These are generated in this repo and the
+ * list is closed:
+ *   - `history_gap`            (lib/gmail/sync.ts)
+ *   - `no_personal_inbox`      (lib/gmail/sync.ts — inbox mapping)
+ *   - `ambiguous_inbox_mapping` (same)
+ *   - `message_failed:<id>`    (lib/gmail/sync.ts — one message threw)
+ */
+const NON_AUTH_ERRORS = new Set([
+  "history_gap",
+  "no_personal_inbox",
+  "ambiguous_inbox_mapping",
+]);
+const MESSAGE_FAILED_PREFIX = "message_failed:";
+
+function isReconnectable(lastError: string): boolean {
+  if (NON_AUTH_ERRORS.has(lastError)) return false;
+  if (lastError.startsWith(MESSAGE_FAILED_PREFIX)) return false;
+  return true;
+}
+
+/** What to do instead, for the errors Reconnect cannot fix. */
+function nonAuthGuidance(lastError: string): string {
+  if (lastError === "history_gap") {
+    return "Sync re-seeded from the present after Gmail expired the history cursor. The next successful sync clears this.";
+  }
+  if (lastError === "no_personal_inbox") {
+    return "No inbox is mapped to this mailbox's personal mail, so nothing can be routed. Map one below — reconnecting will not help.";
+  }
+  if (lastError === "ambiguous_inbox_mapping") {
+    return "More than one inbox is mapped to this mailbox's personal mail. Leave exactly one — reconnecting will not help.";
+  }
+  return "A message failed to sync. The cursor did not move, so the next run retries it — reconnecting will not help.";
+}
 
 /**
  * "N minutes ago" for a past epoch-ms timestamp. Deliberately coarse — the
@@ -60,6 +103,10 @@ export default function ConnectedMailboxes() {
   const [connectResult, setConnectResult] = useState<
     "connected" | "error" | null
   >(null);
+  // Failure of the consent-URL fetch itself, distinct from the callback's
+  // `?gmail=error`: this one carries the server's own message.
+  const [connectError, setConnectError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
     const outcome = searchParams.get("gmail");
@@ -98,6 +145,32 @@ export default function ConnectedMailboxes() {
     };
   }, []);
 
+  /**
+   * The connect endpoint answers `{ authUrl }` with a 200 rather than
+   * redirecting, so the consent flow only starts if we navigate ourselves.
+   * A failure — 503 on an instance with no OAuth secrets being the one that
+   * matters — is shown here instead of navigating anywhere.
+   */
+  async function handleStartConnect() {
+    if (connecting) return;
+    setConnecting(true);
+    setConnectResult(null);
+    setConnectError(null);
+    try {
+      const { authUrl } = await startGmailConnect();
+      navigateExternal(authUrl);
+    } catch (err) {
+      setConnectError(
+        err instanceof Error
+          ? err.message
+          : "Couldn't start the Google consent flow.",
+      );
+      setConnecting(false);
+    }
+    // On success the browser is leaving this page, so `connecting` stays true
+    // and the button stays disabled until it does.
+  }
+
   async function handleDisconnect(account: GmailAccount) {
     setDisconnectingId(account.id);
     setDisconnectError(null);
@@ -128,30 +201,45 @@ export default function ConnectedMailboxes() {
             a freshly connected mailbox can look idle for a quarter of an hour.
           </p>
         </div>
-        <a
-          href={gmailConnectUrl()}
+        <button
+          type="button"
+          onClick={handleStartConnect}
+          disabled={connecting}
           data-testid="gmail-connect-button"
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[6px] bg-text-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[6px] bg-text-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:opacity-50"
         >
-          <Plus size={14} />
+          {connecting ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : (
+            <Plus size={14} />
+          )}
           Connect a Google mailbox
-        </a>
+        </button>
       </div>
 
-      {connectResult === "error" && (
+      {(connectResult === "error" || connectError !== null) && (
         <div
           data-testid="gmail-connect-error"
           className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
         >
           <AlertTriangle size={14} className="mt-px shrink-0" />
-          <span>
-            <span className="font-medium">
-              Couldn&apos;t connect that mailbox.
-            </span>{" "}
-            The connection did not complete, so nothing was added — try again.
-            The reason is in the server log; it is deliberately not shown here,
-            because the underlying error can carry the access token.
-          </span>
+          {connectError !== null ? (
+            <span>
+              <span className="font-medium">
+                Couldn&apos;t start the Google consent flow.
+              </span>{" "}
+              {connectError}
+            </span>
+          ) : (
+            <span>
+              <span className="font-medium">
+                Couldn&apos;t connect that mailbox.
+              </span>{" "}
+              The connection did not complete, so nothing was added — try again.
+              The reason is in the server log; it is deliberately not shown
+              here, because the underlying error can carry the access token.
+            </span>
+          )}
         </div>
       )}
 
@@ -232,16 +320,23 @@ export default function ConnectedMailboxes() {
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2">
-                      {account.lastError && (
-                        <a
-                          href={gmailConnectUrl()}
-                          data-testid={`gmail-reconnect-${account.id}`}
-                          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-black/[0.03]"
-                        >
-                          <RefreshCw size={12} />
-                          Reconnect
-                        </a>
-                      )}
+                      {account.lastError !== null &&
+                        isReconnectable(account.lastError) && (
+                          <button
+                            type="button"
+                            onClick={handleStartConnect}
+                            disabled={connecting}
+                            data-testid={`gmail-reconnect-${account.id}`}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-black/[0.03] disabled:opacity-50"
+                          >
+                            {connecting ? (
+                              <Loader2 size={12} className="animate-spin" />
+                            ) : (
+                              <RefreshCw size={12} />
+                            )}
+                            Reconnect
+                          </button>
+                        )}
                       {confirming ? (
                         <>
                           <button
@@ -282,19 +377,23 @@ export default function ConnectedMailboxes() {
 
                   {confirming && (
                     <p className="mt-2 text-xs font-light text-text-tertiary">
-                      Disconnecting stops this mailbox syncing and revokes
-                      saasmail&apos;s access. Mail already synced stays; nothing
-                      new arrives.
+                      This deletes the stored credentials for this mailbox and
+                      stops it syncing. Mail already synced stays; nothing new
+                      arrives. It does <span className="font-medium">not</span>{" "}
+                      revoke saasmail&apos;s access at Google — to do that,
+                      remove it from third-party access in your Google account.
                     </p>
                   )}
 
-                  {account.lastError && (
+                  {account.lastError !== null && (
                     <div className="mt-2 rounded-[6px] bg-destructive/10 px-3 py-2 text-xs text-destructive">
                       <span className="font-medium">
                         This mailbox has stopped syncing.
                       </span>{" "}
-                      It will not resume until you reconnect it. Google said:{" "}
-                      {account.lastError}
+                      {isReconnectable(account.lastError)
+                        ? "It will not resume until you reconnect it. Google said:"
+                        : nonAuthGuidance(account.lastError)}{" "}
+                      <span className="font-mono">{account.lastError}</span>
                     </div>
                   )}
 
