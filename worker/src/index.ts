@@ -44,6 +44,7 @@ import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
 import { agentSessionsRouter } from "./routers/agent-sessions-router";
+import { agentStatusRouter } from "./routers/agent-status-router";
 import { listsRouter } from "./routers/lists-router";
 import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
 import { campaignsRouter } from "./routers/campaigns-router";
@@ -230,6 +231,7 @@ app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
+app.route("/api/agent/status", agentStatusRouter);
 app.route("/api/agent/sessions", agentSessionsRouter);
 app.route("/api/lists", listsRouter);
 

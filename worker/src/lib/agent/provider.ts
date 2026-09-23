@@ -69,3 +69,27 @@ export function selectModel(env: AgentModelEnv): SelectedAgentModel {
 
   return { ok: false, error: AGENT_NOT_CONFIGURED_MESSAGE };
 }
+
+export type AgentStatus =
+  | {
+      configured: true;
+      provider: AgentProvider;
+      model: string;
+    }
+  | {
+      configured: false;
+      provider: null;
+      model: null;
+    };
+
+export function getAgentStatus(env: AgentModelEnv): AgentStatus {
+  const selected = selectModel(env);
+  if (!selected.ok) {
+    return { configured: false, provider: null, model: null };
+  }
+  return {
+    configured: true,
+    provider: selected.provider,
+    model: selected.modelId,
+  };
+}

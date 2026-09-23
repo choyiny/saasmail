@@ -19,6 +19,7 @@ export const senderIdentities = sqliteTable("sender_identities", {
    */
   forwardTo: text("forward_to"),
   spamThreshold: real("spam_threshold"),
+  agentInstructions: text("agent_instructions"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

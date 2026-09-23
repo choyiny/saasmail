@@ -18,6 +18,7 @@ import {
   Menu,
   User,
   LogOut,
+  Bot,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { fetchOutboxCount, fetchStats } from "@/lib/api";
@@ -50,7 +51,22 @@ const PRIMARY_NAV: NavItem[] = [
   { label: "Campaigns", path: "/campaigns", icon: Megaphone },
 ];
 
-export default function TopNav() {
+interface TopNavProps {
+  agentOpen?: boolean;
+  onAgentToggle?: () => void;
+}
+
+export function isMacPlatform(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /Mac|iPhone|iPad|iPod/i.test(
+    `${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`,
+  );
+}
+
+export default function TopNav({
+  agentOpen = false,
+  onAgentToggle,
+}: TopNavProps) {
   const { data: session } = useSession();
   const { brandName, webmcpEnabled } = useBranding();
   const navigate = useNavigate();
@@ -87,6 +103,7 @@ export default function TopNav() {
   }, [location.pathname]);
 
   const isAdmin = session?.user?.role === "admin";
+  const agentShortcut = isMacPlatform() ? "⌘J" : "Ctrl+J";
 
   return (
     <div className="fixed left-0 right-0 top-0 z-50 flex justify-center px-4 pt-2 md:px-6">
@@ -145,6 +162,25 @@ export default function TopNav() {
 
           {/* Right cluster */}
           <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              aria-label={`Toggle mail agent (${agentShortcut})`}
+              title={`Toggle mail agent (${agentShortcut})`}
+              aria-pressed={agentOpen}
+              onClick={onAgentToggle}
+              className={`flex items-center gap-1.5 rounded-[6px] px-2 py-1.5 text-xs font-medium transition-colors ${
+                agentOpen
+                  ? "bg-white/[0.12] text-white"
+                  : "text-white/60 hover:bg-white/[0.08] hover:text-white"
+              }`}
+            >
+              <Bot className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Agent</span>
+              <span className="hidden text-[9px] text-white/40 lg:inline">
+                {agentShortcut}
+              </span>
+            </button>
+
             {webmcpEnabled && (
               <WebMcpStatusBadge toolCount={WEBMCP_TOOL_COUNT} />
             )}

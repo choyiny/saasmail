@@ -37,6 +37,7 @@ import type { ComposePrefill } from "@/pages/ComposeModal";
 import { onEmailSent } from "@/lib/email-events";
 import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { useAgentContext } from "@/agent/AgentContext";
 
 interface PersonDetailProps {
   person: GroupedPerson;
@@ -125,6 +126,8 @@ export default function PersonDetail({
   onBlock,
 }: PersonDetailProps) {
   const navigate = useNavigate();
+  const { publish: publishAgentContext, clear: clearAgentContext } =
+    useAgentContext();
   const [emails, setEmails] = useState<Email[]>([]);
   const [loading, setLoading] = useState(true);
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
@@ -316,6 +319,28 @@ export default function PersonDetail({
   // the bubble. Fires once per (person, hash) pair so paging or
   // re-renders don't keep yanking the scroll position.
   const location = useLocation();
+  const linkedMessageId = readMessageHash(location.hash);
+  const linkedMessage = linkedMessageId
+    ? emails.find((email) => email.id === linkedMessageId)
+    : undefined;
+
+  useEffect(() => {
+    publishAgentContext({
+      inbox: activeInbox ?? undefined,
+      selectedMessageRef: linkedMessage
+        ? `${linkedMessage.type}:${linkedMessage.id}`
+        : undefined,
+      personId: person.id,
+    });
+    return clearAgentContext;
+  }, [
+    activeInbox,
+    clearAgentContext,
+    linkedMessage,
+    person.id,
+    publishAgentContext,
+  ]);
+
   const lastHashHandled = useRef<string | null>(null);
   useEffect(() => {
     if (emails.length === 0) return;

@@ -1,5 +1,5 @@
 // e2e/specs/inboxes.spec.ts
-// Covers: inbox CRUD + mode toggle + member scoping via the admin UI.
+// Covers: inbox CRUD + mode toggle + agent instructions + member scoping via the admin UI.
 import { test, expect } from "../fixtures/test";
 import { truncateAndReseed } from "../support/reset-db";
 import { TEST_IDS } from "../support/selectors";
@@ -60,6 +60,34 @@ test.describe.serial("inboxes CRUD", () => {
     await expect(
       reloadedRow.getByTestId(TEST_IDS.inboxDisplayNameInput),
     ).toHaveValue("Support Renamed");
+  });
+
+  test("agent instructions persist with a character counter", async ({
+    page,
+  }) => {
+    await page.goto("/inboxes");
+
+    const agentRow = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-ui@e2e.test"]`,
+    );
+    await expect(agentRow).toBeVisible();
+
+    const instructions = agentRow.getByTestId(TEST_IDS.inboxAgentInstructions);
+    const text = "Prefer concise replies and preserve customer terminology.";
+    await instructions.fill(text);
+    await expect(
+      agentRow.getByTestId(TEST_IDS.inboxAgentInstructionsCount),
+    ).toHaveText(`${text.length}/4000`);
+    await instructions.press("Tab");
+
+    await page.reload();
+
+    const reloadedRow = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-ui@e2e.test"]`,
+    );
+    await expect(
+      reloadedRow.getByTestId(TEST_IDS.inboxAgentInstructions),
+    ).toHaveValue(text);
   });
 
   // ── 3. Toggle thread → chat mode persists after reload ───────────────────────

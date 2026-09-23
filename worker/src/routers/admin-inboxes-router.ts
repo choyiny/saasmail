@@ -22,6 +22,7 @@ const InboxRowSchema = z.object({
   signatureHtml: z.string().nullable(),
   forwardTo: z.string().nullable(),
   spamThreshold: z.number().nullable(),
+  agentInstructions: z.string().nullable(),
   assignedUserIds: z.array(z.string()),
 });
 
@@ -45,6 +46,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     signatureHtml: string | null;
     forwardTo: string | null;
     spamThreshold: number | null;
+    agentInstructions: string | null;
     assignedUserIds: string | null;
   };
   const rows = await db.all<Row>(sql`
@@ -60,6 +62,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       s.signature_html AS signatureHtml,
       s.forward_to AS forwardTo,
       s.spam_threshold AS spamThreshold,
+      s.agent_instructions AS agentInstructions,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -81,6 +84,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       signatureHtml: r.signatureHtml,
       forwardTo: r.forwardTo,
       spamThreshold: r.spamThreshold,
+      agentInstructions: r.agentInstructions,
       assignedUserIds: r.assignedUserIds ? JSON.parse(r.assignedUserIds) : [],
     })),
     200,
@@ -115,6 +119,7 @@ const createInboxRoute = createRoute({
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
         spamThreshold: z.number().nullable(),
+        agentInstructions: z.string().nullable(),
         assignedUserIds: z.array(z.string()),
       }),
       "Created inbox",
@@ -163,6 +168,7 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
       signatureHtml: null,
       forwardTo: null,
       spamThreshold: null,
+      agentInstructions: null,
       assignedUserIds: [],
     },
     201,
@@ -187,6 +193,7 @@ const PatchInboxBodySchema = z
       .union([z.string().email(), z.literal(""), z.null()])
       .optional(),
     spamThreshold: z.number().min(0).max(100).nullable().optional(),
+    agentInstructions: z.string().max(4000).optional(),
   })
   .refine(
     (b) =>
@@ -194,7 +201,8 @@ const PatchInboxBodySchema = z
       b.displayMode !== undefined ||
       b.signatureHtml !== undefined ||
       b.forwardTo !== undefined ||
-      b.spamThreshold !== undefined,
+      b.spamThreshold !== undefined ||
+      b.agentInstructions !== undefined,
     "must update at least one field",
   );
 
@@ -203,7 +211,7 @@ const patchInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Update display name, display mode, signature HTML, forward destination, and/or spam threshold for an inbox. Row is deleted only when all fields are at defaults.",
+    "Update display name, display mode, signature HTML, forward destination, spam threshold, and/or agent instructions for an inbox. Row is deleted only when all fields are at defaults.",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -223,6 +231,7 @@ const patchInboxRoute = createRoute({
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
         spamThreshold: z.number().nullable(),
+        agentInstructions: z.string().nullable(),
       }),
       "Updated",
     ),
@@ -283,6 +292,12 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     body.spamThreshold !== undefined
       ? body.spamThreshold
       : (currentRow?.spamThreshold ?? null);
+  const nextAgentInstructions =
+    body.agentInstructions !== undefined
+      ? body.agentInstructions.trim() === ""
+        ? null
+        : body.agentInstructions
+      : (currentRow?.agentInstructions ?? null);
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
@@ -301,7 +316,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextDisplayMode === "chat" &&
     nextSignatureHtml === null &&
     nextForwardTo === null &&
-    nextSpamThreshold === null
+    nextSpamThreshold === null &&
+    nextAgentInstructions === null
   ) {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
     return c.json(
@@ -312,6 +328,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         signatureHtml: null,
         forwardTo: null,
         spamThreshold: null,
+        agentInstructions: null,
       },
       200,
     );
@@ -326,6 +343,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       signatureHtml: nextSignatureHtml,
       forwardTo: nextForwardTo,
       spamThreshold: nextSpamThreshold,
+      agentInstructions: nextAgentInstructions,
       createdAt: now,
       updatedAt: now,
     })
@@ -337,6 +355,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         signatureHtml: nextSignatureHtml,
         forwardTo: nextForwardTo,
         spamThreshold: nextSpamThreshold,
+        agentInstructions: nextAgentInstructions,
         updatedAt: now,
       },
     });
@@ -349,6 +368,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       signatureHtml: nextSignatureHtml,
       forwardTo: nextForwardTo,
       spamThreshold: nextSpamThreshold,
+      agentInstructions: nextAgentInstructions,
     },
     200,
   );

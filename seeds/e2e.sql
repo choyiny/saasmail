@@ -2,6 +2,7 @@
 -- Users are created via HTTP APIs in e2e/global-setup.ts.
 
 -- Clean tables (idempotent for repeated runs)
+DELETE FROM agent_sessions;
 DELETE FROM drafts;
 DELETE FROM sequence_emails;
 DELETE FROM sequence_enrollments;
@@ -24,7 +25,8 @@ DELETE FROM sender_identities;
 INSERT INTO sender_identities (email, display_name, display_mode, created_at, updated_at)
 VALUES
   ('marketing@e2e.test', 'Marketing', 'thread', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)),
-  ('support@e2e.test',   'Support',   'chat',   CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER));
+  ('support@e2e.test',   'Support',   'chat',   CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER)),
+  ('agent-ui@e2e.test',  'Agent UI Fixture', 'chat', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER));
 
 -- People
 INSERT INTO people (id, email, name, last_email_at, unread_count, total_count, created_at, updated_at)

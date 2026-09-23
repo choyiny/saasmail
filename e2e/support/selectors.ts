@@ -13,6 +13,8 @@ export const TEST_IDS = {
   inboxCreateEmail: "inbox-create-email",
   inboxCreateDisplayName: "inbox-create-display-name",
   inboxDisplayNameInput: "inbox-display-name-input",
+  inboxAgentInstructions: "inbox-agent-instructions",
+  inboxAgentInstructionsCount: "inbox-agent-instructions-count",
   inboxModeToggle: "inbox-mode-toggle",
   inboxDeleteButton: "inbox-delete-button",
   inboxMemberToggle: "inbox-member-toggle",

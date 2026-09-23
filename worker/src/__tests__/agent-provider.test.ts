@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { selectModel, type AgentModelEnv } from "../lib/agent/provider";
+import {
+  getAgentStatus,
+  selectModel,
+  type AgentModelEnv,
+} from "../lib/agent/provider";
 import {
   AGENT_NOT_CONFIGURED_MESSAGE,
   DEFAULT_AGENT_MODELS,
@@ -48,6 +52,23 @@ describe("agent provider selection", () => {
       expect(selected.ok).toBe(true);
       if (selected.ok) expect(selected.modelId).toBe(env.AGENT_MODEL);
     }
+  });
+
+  it("reports configured and unconfigured status without exposing secrets", () => {
+    const secret = "anthropic-secret-that-must-not-leak";
+    expect(getAgentStatus({})).toEqual({
+      configured: false,
+      provider: null,
+      model: null,
+    });
+
+    const configured = getAgentStatus({ ANTHROPIC_API_KEY: secret });
+    expect(configured).toEqual({
+      configured: true,
+      provider: "anthropic",
+      model: DEFAULT_AGENT_MODELS.anthropic,
+    });
+    expect(JSON.stringify(configured)).not.toContain(secret);
   });
 
   it("returns a clear not-configured result instead of throwing", () => {

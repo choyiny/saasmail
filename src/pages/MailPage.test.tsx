@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
+import { AgentContextProvider, useAgentContext } from "@/agent/AgentContext";
 
 const api = vi.hoisted(() => ({
   createMailbox: vi.fn(),
@@ -33,6 +34,13 @@ vi.mock("@/components/ReplyComposer", () => ({
 import MailPage from "@/pages/MailPage";
 
 const onCompose = vi.fn();
+
+function AgentContextProbe() {
+  const { context } = useAgentContext();
+  return (
+    <output data-testid="agent-context-probe">{JSON.stringify(context)}</output>
+  );
+}
 
 const baseState = {
   seen: false,
@@ -108,16 +116,26 @@ function renderMail(path = "/mail/support%40e2e.test/inbox") {
   const router = createMemoryRouter(
     [
       {
-        element: <Outlet context={{ onCompose }} />,
+        element: (
+          <>
+            <AgentContextProbe />
+            <Outlet context={{ onCompose }} />
+          </>
+        ),
         children: [
           { path: "/mail/:inbox/:folder", element: <MailPage /> },
           { path: "/mail/:inbox/f/:mailboxId", element: <MailPage /> },
+          { path: "/settings", element: <div>Settings page</div> },
         ],
       },
     ],
     { initialEntries: [path] },
   );
-  render(<RouterProvider router={router} />);
+  render(
+    <AgentContextProvider>
+      <RouterProvider router={router} />
+    </AgentContextProvider>,
+  );
   return router;
 }
 
@@ -151,6 +169,24 @@ describe("MailPage", () => {
     api.setMailboxMembership.mockResolvedValue({ success: true });
     api.setMessageState.mockResolvedValue({ success: true });
     api.snoozeMessages.mockResolvedValue({ conversations: 1 });
+  });
+
+  it("clears published agent context when navigating away", async () => {
+    const router = renderMail(
+      "/mail/support%40e2e.test/inbox?m=received%3Aone",
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-context-probe").textContent).toContain(
+        "support@e2e.test",
+      ),
+    );
+    await router.navigate("/settings");
+    await screen.findByText("Settings page");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-context-probe").textContent).toBe("{}"),
+    );
   });
 
   it("lists inbox drafts and opens compose and draft contexts", async () => {
@@ -545,15 +581,22 @@ describe("MailPage", () => {
     await screen.findByText("Keyboard guard");
     fireEvent.keyDown(window, { key: "j" });
 
+    const agentInput = document.createElement("textarea");
+    const agentPanel = document.createElement("div");
+    agentPanel.setAttribute("data-agent-panel", "");
+    agentPanel.appendChild(agentInput);
+    document.body.appendChild(agentPanel);
+
     const editableElements: HTMLElement[] = [
       screen.getByLabelText("Search mail"),
       document.createElement("textarea"),
       document.createElement("select"),
       document.createElement("div"),
+      agentInput,
     ];
     editableElements[3]!.setAttribute("contenteditable", "true");
 
-    for (const element of editableElements.slice(1)) {
+    for (const element of editableElements.slice(1, 4)) {
       document.body.appendChild(element);
     }
 
@@ -565,6 +608,7 @@ describe("MailPage", () => {
 
     expect(api.setMessageState).not.toHaveBeenCalled();
 
-    for (const element of editableElements.slice(1)) element.remove();
+    for (const element of editableElements.slice(1, 4)) element.remove();
+    agentPanel.remove();
   });
 });

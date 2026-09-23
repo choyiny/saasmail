@@ -2,15 +2,39 @@
 
 # Native mail agent
 
-Stage 2 adds a backend runtime for a native in-app mail agent. The runtime is
-implemented as a Cloudflare Durable Object using the Cloudflare `agents` SDK
-and `@cloudflare/ai-chat`; chat transcripts live in that Durable Object's
-SQLite storage. Mail data remains in D1, and every mail read or mutation goes
-through the same permission-scoped services used elsewhere in saasmail.
+Stage 2 adds a native in-app mail agent. The runtime is implemented as a
+Cloudflare Durable Object using the Cloudflare `agents` SDK and
+`@cloudflare/ai-chat`; chat transcripts live in that Durable Object's SQLite
+storage. Mail data remains in D1, and every mail read or mutation goes through
+the same permission-scoped services used elsewhere in saasmail. Stage 2b adds
+the authenticated side-panel UI on top of that runtime.
 
-There is no native agent UI in Stage 2a. This page covers the backend runtime,
-provider setup, sessions, authentication, and the capability boundary that
-future UI work connects to.
+## In-app panel
+
+The **Agent** button in the top navigation opens a side panel from any
+authenticated page. The keyboard shortcut is **⌘J** on macOS and **Ctrl+J** on
+other platforms; pressing it again closes the panel. The open/closed preference
+is stored locally in the browser.
+
+The panel lists the caller's agent sessions and supports creating, renaming,
+archiving/restoring, and deleting them. A session's transcript stays in its
+Durable Object while the D1 `agent_sessions` row is the permission-scoped
+directory entry used to find it.
+
+Assistant text is rendered as sanitized Markdown. Markdown images are
+intentionally not rendered: model output and quoted mail are untrusted, and an
+`<img>` would make the browser automatically fetch a remote URL (including
+tracking pixels) without an explicit user action. Links remain clickable after
+sanitization.
+
+Admins can set up to 4000 characters of **Agent instructions** for each inbox on
+the **Inboxes** admin page. When the current navigation context identifies that
+inbox, those instructions are appended to the agent prompt. They guide behavior
+only; they never grant inbox access or override the runtime's permission checks.
+
+If no Anthropic key, OpenAI key, or Workers AI binding is available, the panel
+stays usable for session management but disables chat input and shows the
+provider-configuration hint described below.
 
 ## Provider selection
 

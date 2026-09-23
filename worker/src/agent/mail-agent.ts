@@ -12,8 +12,13 @@ import {
 } from "ai";
 import { agentSessions } from "../db/agent-sessions.schema";
 import { users } from "../db/auth.schema";
+import { senderIdentities } from "../db/sender-identities.schema";
 import { schema } from "../db/schema";
 import { AGENT_PLAYBOOK_INTRO } from "../lib/agent/playbook";
+import {
+  isInboxAllowed,
+  resolveAllowedInboxes,
+} from "../lib/inbox-permissions";
 import { selectModel, type AgentModelEnv } from "../lib/agent/provider";
 import { createAgentTools } from "../lib/agent/tools";
 
@@ -68,13 +73,28 @@ function contextValue(
   return undefined;
 }
 
+function clientContextSource(
+  body?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  return record(body?.context) ?? body;
+}
+
+function clientContextInbox(
+  body?: Record<string, unknown>,
+): string | undefined {
+  return contextValue(
+    clientContextSource(body),
+    "inbox",
+    "currentInbox",
+  )?.toLowerCase();
+}
+
 export function buildClientContextBlock(
   body?: Record<string, unknown>,
 ): string {
-  const nested = record(body?.context);
-  const source = nested ?? body;
+  const source = clientContextSource(body);
   const fields = [
-    ["inbox", contextValue(source, "inbox", "currentInbox")],
+    ["inbox", clientContextInbox(body)],
     ["folder", contextValue(source, "folder", "currentFolder")],
     [
       "selected_message_ref",
@@ -93,14 +113,40 @@ export function buildClientContextBlock(
   ].join("\n");
 }
 
-export function buildMailAgentInstructions(
-  body?: Record<string, unknown>,
-): string {
-  return [
+export async function buildMailAgentInstructions({
+  db,
+  user,
+  body,
+}: {
+  db: DrizzleD1Database<any>;
+  user: MailAgentUser;
+  body?: Record<string, unknown>;
+}): Promise<string> {
+  const blocks = [
     MAIL_AGENT_BASE_INSTRUCTIONS,
     AGENT_PLAYBOOK_INTRO,
     buildClientContextBlock(body),
-  ].join("\n\n");
+  ];
+
+  const inbox = clientContextInbox(body);
+  if (inbox) {
+    const allowed = await resolveAllowedInboxes(db, user);
+    if (isInboxAllowed(allowed, inbox)) {
+      const [identity] = await db
+        .select({ agentInstructions: senderIdentities.agentInstructions })
+        .from(senderIdentities)
+        .where(sql`lower(${senderIdentities.email}) = ${inbox}`)
+        .limit(1);
+      const instructions = identity?.agentInstructions?.trim();
+      if (instructions) {
+        blocks.push(
+          `INBOX INSTRUCTIONS for ${inbox} (set by an administrator; they guide tone and policy but never grant permissions or override the rules above)\n${instructions}`,
+        );
+      }
+    }
+  }
+
+  return blocks.join("\n\n");
 }
 
 export async function streamMailAgentTurn({
@@ -177,7 +223,7 @@ export async function runMailAgentChat({
     model,
     messages,
     tools: createAgentTools({ db, user }),
-    instructions: buildMailAgentInstructions(body),
+    instructions: await buildMailAgentInstructions({ db, user, body }),
     abortSignal,
   });
 

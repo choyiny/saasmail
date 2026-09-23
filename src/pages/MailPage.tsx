@@ -32,6 +32,7 @@ import {
 import type { ComposePrefill } from "@/pages/ComposeModal";
 import { showToast } from "@/lib/toast";
 import { type SystemFolder, useMailMessages } from "@/hooks/useMailMessages";
+import { useAgentContext } from "@/agent/AgentContext";
 
 type MobilePane = "folders" | "list" | "reader";
 
@@ -74,6 +75,8 @@ export default function MailPage() {
   );
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [replyRequestKey, setReplyRequestKey] = useState(0);
+  const { publish: publishAgentContext, clear: clearAgentContext } =
+    useAgentContext();
 
   const inbox = params.inbox;
   const folder = params.folder;
@@ -81,6 +84,22 @@ export default function MailPage() {
   const selectedRef = searchParams.get("m");
   const query = searchParams.get("q") ?? "";
   const systemFolder = isSystemFolder(folder) ? folder : undefined;
+
+  useEffect(() => {
+    publishAgentContext({
+      inbox,
+      folder: systemFolder ?? (mailboxId ? `mailbox:${mailboxId}` : undefined),
+      selectedMessageRef: selectedRef ?? undefined,
+    });
+    return clearAgentContext;
+  }, [
+    clearAgentContext,
+    inbox,
+    mailboxId,
+    publishAgentContext,
+    selectedRef,
+    systemFolder,
+  ]);
 
   const allowedInboxes = useMemo(
     () => stats?.senderIdentities.map((identity) => identity.email) ?? [],
@@ -356,6 +375,12 @@ export default function MailPage() {
     }
 
     function handleKeyDown(event: KeyboardEvent) {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("[data-agent-panel]")
+      ) {
+        return;
+      }
       if (editableTarget(event.target)) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.shiftKey && event.key !== "?" && event.key !== "#") return;

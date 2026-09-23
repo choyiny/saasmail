@@ -20,6 +20,7 @@ there and link it from the index rather than growing `README.md`.
 ## Tooling
 
 - Use **yarn**, not npm (`yarn install --frozen-lockfile` in CI).
+- **Lockfile integrity:** after dependency changes, run `yarn install --update-checksums`; CI rejects any `yarn.lock` resolved entry without an integrity hash.
 - **Format:** `yarn format` before push. Husky runs `lint-staged` → Prettier on staged `*.{js,jsx,ts,tsx,json,css,md,html}` at commit; CI runs full-tree `yarn format:check` (so husky alone is not enough if you skip staging a dirty file).
 - **Typecheck:** `yarn tsc --noEmit`
 - **Unit tests:** `yarn test` (invokes `vitest run --config vitest.config.test.ts` — bare `vitest run` hits the wrong pool config and fails to start).

@@ -70,6 +70,79 @@ describe("admin inboxes router", () => {
     expect(rows[0].displayName).toBe("Alpha");
   });
 
+  it("PATCH lets admins set and clear agent instructions, but rejects members", async () => {
+    const adminUser = await createTestUser({
+      id: "u-agent-admin",
+      role: "admin",
+      email: "agent-admin@x.com",
+    });
+    const member = await createTestUser({
+      id: "u-agent-member",
+      role: "member",
+      email: "agent-member@x.com",
+    });
+
+    const set = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey: adminUser.apiKey,
+        method: "PATCH",
+        body: JSON.stringify({
+          agentInstructions: "Keep replies concise and friendly.",
+        }),
+      },
+    );
+    expect(set.status).toBe(200);
+    expect((await set.json()).agentInstructions).toBe(
+      "Keep replies concise and friendly.",
+    );
+
+    const denied = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey: member.apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentInstructions: "Member override" }),
+      },
+    );
+    expect(denied.status).toBe(403);
+
+    const listed = await authFetch("/api/admin/inboxes", {
+      apiKey: adminUser.apiKey,
+    });
+    const row = (
+      (await listed.json()) as Array<{
+        email: string;
+        agentInstructions: string | null;
+      }>
+    ).find((item) => item.email === "a@x.com");
+    expect(row?.agentInstructions).toBe("Keep replies concise and friendly.");
+
+    const clear = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey: adminUser.apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentInstructions: "" }),
+      },
+    );
+    expect(clear.status).toBe(200);
+    expect((await clear.json()).agentInstructions).toBeNull();
+  });
+
+  it("PATCH rejects agent instructions over 4000 characters", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentInstructions: "x".repeat(4001) }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("PATCH persists and clears a 0..100 spam threshold", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
 

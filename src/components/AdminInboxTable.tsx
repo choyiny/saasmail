@@ -192,6 +192,20 @@ export default function AdminInboxTable() {
     );
   }
 
+  async function commitAgentInstructions(inbox: AdminInbox, value: string) {
+    if (value === (inbox.agentInstructions ?? "")) return;
+    const res = await updateInboxSettings(inbox.email, {
+      agentInstructions: value,
+    });
+    setInboxes((prev) =>
+      prev.map((row) =>
+        row.email === inbox.email
+          ? { ...row, agentInstructions: res.agentInstructions }
+          : row,
+      ),
+    );
+  }
+
   async function commitSignature(inbox: AdminInbox, html: string) {
     // Treat an empty Tiptap doc as "no signature" so admins can clear it
     // without remembering the canonical empty form.
@@ -432,6 +446,9 @@ export default function AdminInboxTable() {
                   <th className="px-3 py-2.5 font-semibold">Mode</th>
                   <th className="px-3 py-2.5 font-semibold">Forward to</th>
                   <th className="px-3 py-2.5 font-semibold">Spam threshold</th>
+                  <th className="px-3 py-2.5 font-semibold">
+                    Agent instructions
+                  </th>
                   <th className="px-3 py-2.5 font-semibold">Members</th>
                   <th className="w-16 px-3 py-2.5 text-right font-semibold">
                     {/* actions */}
@@ -556,6 +573,16 @@ export default function AdminInboxTable() {
                           inbox={inbox}
                           onCommit={(value) =>
                             commitSpamThreshold(inbox, value)
+                          }
+                        />
+                      </td>
+
+                      {/* Agent instructions */}
+                      <td className="px-3 py-2.5 align-top">
+                        <AgentInstructionsInput
+                          inbox={inbox}
+                          onCommit={(value) =>
+                            commitAgentInstructions(inbox, value)
                           }
                         />
                       </td>
@@ -793,6 +820,50 @@ function SpamThresholdInput({ inbox, onCommit }: SpamThresholdInputProps) {
       data-testid="inbox-spam-threshold-input"
       className="h-8 w-28 rounded-[6px] border border-transparent bg-transparent px-2 font-mono text-xs text-text-primary placeholder:font-sans placeholder:font-light placeholder:italic placeholder:text-text-tertiary hover:border-border focus:border-border focus:bg-card focus:outline-none focus:ring-2 focus:ring-text-primary/15"
     />
+  );
+}
+
+interface AgentInstructionsInputProps {
+  inbox: AdminInbox;
+  onCommit: (value: string) => Promise<void>;
+}
+
+function AgentInstructionsInput({
+  inbox,
+  onCommit,
+}: AgentInstructionsInputProps) {
+  const [value, setValue] = useState(inbox.agentInstructions ?? "");
+
+  useEffect(() => {
+    setValue(inbox.agentInstructions ?? "");
+  }, [inbox.agentInstructions]);
+
+  return (
+    <div className="min-w-[260px]">
+      <textarea
+        value={value}
+        maxLength={4000}
+        rows={3}
+        onChange={(event) => setValue(event.currentTarget.value)}
+        onBlur={() => void onCommit(value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setValue(inbox.agentInstructions ?? "");
+            event.currentTarget.blur();
+          }
+        }}
+        placeholder="Guidance for the mail agent…"
+        aria-label={`Agent instructions for ${inbox.email}`}
+        data-testid="inbox-agent-instructions"
+        className="w-full resize-y rounded-[6px] border border-border bg-card px-2 py-1.5 text-xs leading-relaxed text-text-primary placeholder:font-light placeholder:italic placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/15"
+      />
+      <div
+        data-testid="inbox-agent-instructions-count"
+        className="mt-1 text-right text-[10px] tabular-nums text-text-tertiary"
+      >
+        {value.length}/4000
+      </div>
+    </div>
   );
 }
 
