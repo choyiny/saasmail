@@ -888,6 +888,44 @@ export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
 }
 
+// --- Admin Gmail ---
+
+/** A Google mailbox connected via OAuth, as the admin API reports it. */
+export interface GmailAccount {
+  id: string;
+  emailAddress: string;
+  /** Epoch ms of the last successful sync; null = never synced yet. */
+  lastSyncedAt: number | null;
+  /** Last sync failure. Non-null means this mailbox has stopped syncing. */
+  lastError: string | null;
+  /**
+   * Epoch ms of the last history-cursor expiry. Mail that arrived during
+   * that window was never synced and cannot be recovered.
+   */
+  lastGapAt: number | null;
+  createdAt: number;
+}
+
+export async function fetchGmailAccounts(): Promise<GmailAccount[]> {
+  // The endpoint wraps the list: { accounts: [...] }.
+  const res = await apiFetch<{ accounts: GmailAccount[] }>("/api/admin/gmail/");
+  return res.accounts;
+}
+
+export async function disconnectGmailAccount(
+  id: string,
+): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(
+    `/api/admin/gmail/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** Full-page navigation target — the worker redirects to Google's consent screen. */
+export function gmailConnectUrl(): string {
+  return "/api/admin/gmail/connect";
+}
+
 // --- Suppressions ---
 
 export interface Suppression {
