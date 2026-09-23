@@ -20,14 +20,18 @@ export class CloudflareSender implements EmailSender {
       msg.setSender(name ? { name, addr: address } : { addr: address });
       msg.setRecipient(params.to);
       if (params.cc && params.cc.length > 0) {
-        for (const c of params.cc) {
-          const parsed = parseFrom(c);
-          msg.setCc(
-            parsed.name
+        // setCc REPLACES the Cc header rather than appending to it, so
+        // calling it once per address (as a loop would) keeps only the
+        // last one — silently dropping every earlier recipient. Build the
+        // full array first and call it exactly once.
+        msg.setCc(
+          params.cc.map((c) => {
+            const parsed = parseFrom(c);
+            return parsed.name
               ? { name: parsed.name, addr: parsed.address }
-              : { addr: parsed.address },
-          );
-        }
+              : { addr: parsed.address };
+          }),
+        );
       }
       msg.setSubject(params.subject);
       if (params.text) {

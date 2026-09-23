@@ -170,6 +170,44 @@ describe("CloudflareSender", () => {
     expect(result.id).toBeNull();
     expect(result.error?.message).toBe("sender not allowed");
   });
+
+  it("keeps every Cc recipient", async () => {
+    // Regression: mimetext's setCc REPLACES the Cc header rather than
+    // appending, so calling it once per recipient (as a loop would) leaves
+    // only the last one. See providers/gmail.ts for the identical bug fixed
+    // during the previous slice.
+    const fakeBinding = {
+      send: vi.fn().mockResolvedValue({ messageId: "msg-cc" }),
+    };
+    const sender = createEmailSender({
+      EMAIL: fakeBinding,
+    } as unknown as CloudflareBindings);
+
+    const result = await sender.send({
+      from: "Support <support@example.com>",
+      to: "jane@example.com",
+      cc: ["a@x.com", "Bob <b@y.com>", "c@z.com"],
+      subject: "Hi",
+      html: "<p>Hi</p>",
+    });
+
+    expect(result.error).toBeNull();
+    const sent = fakeBinding.send.mock.calls[0][0] as Record<string, string>;
+    const raw = sent["EmailMessage::raw"];
+    const lines = raw.split(/\r?\n/);
+    const ccIndex = lines.findIndex((l) => l.toLowerCase().startsWith("cc:"));
+    expect(ccIndex).toBeGreaterThanOrEqual(0);
+    // A long Cc header is RFC 822 "folded" across multiple lines, each
+    // continuation starting with whitespace — join them back together
+    // before asserting on the full recipient list.
+    let ccBlock = lines[ccIndex];
+    for (let i = ccIndex + 1; i < lines.length && /^\s/.test(lines[i]); i++) {
+      ccBlock += lines[i];
+    }
+    expect(ccBlock).toContain("a@x.com");
+    expect(ccBlock).toContain("b@y.com");
+    expect(ccBlock).toContain("c@z.com");
+  });
 });
 
 describe("maxAttachmentBytes", () => {
