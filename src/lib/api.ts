@@ -121,6 +121,36 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/**
+ * Like `apiFetch`, but throws the server's own `{ error }` message when it
+ * sends one. Use it where the response body is actionable — a 400 naming the
+ * address that can't be sent from, a 503 saying the integration is
+ * unconfigured — and a bare status code would strip the only useful part.
+ */
+async function apiFetchKeepingServerMessage<T>(
+  path: string,
+  options?: RequestInit,
+): Promise<T> {
+  const res = await fetch(path, {
+    credentials: "include",
+    ...options,
+  });
+  if (!res.ok) {
+    let message: string | null = null;
+    try {
+      const body: unknown = await res.json();
+      const candidate = (body as { error?: unknown } | null)?.error;
+      if (typeof candidate === "string" && candidate.trim() !== "") {
+        message = candidate;
+      }
+    } catch {
+      // Non-JSON or empty body — fall back to the status code below.
+    }
+    throw new Error(message ?? `API error: ${res.status}`);
+  }
+  return res.json();
+}
+
 export interface PaginatedPeople {
   data: Person[];
   total: number;
@@ -814,17 +844,26 @@ export interface AdminInbox {
   /** Destination address for per-inbox forwarding; null = forwarding off. */
   forwardTo: string | null;
   assignedUserIds: string[];
+  /** Where this inbox's mail comes from. */
+  source: "cloudflare" | "gmail";
+  /** Connected mailbox id when source is "gmail"; null otherwise. */
+  gmailAccountId: string | null;
 }
 
 export async function fetchAdminInboxes(): Promise<AdminInbox[]> {
   return apiFetch("/api/admin/inboxes");
 }
 
+/**
+ * POST /inboxes answers without `source`/`gmailAccountId` — a freshly created
+ * inbox is always a Cloudflare one. The caller fills the defaults in rather
+ * than pretending the server sent them.
+ */
 export async function createInbox(data: {
   email: string;
   displayName?: string | null;
   displayMode?: InboxDisplayMode;
-}): Promise<AdminInbox> {
+}): Promise<Omit<AdminInbox, "source" | "gmailAccountId">> {
   return apiFetch("/api/admin/inboxes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -839,6 +878,9 @@ export async function updateInboxSettings(
     displayMode?: InboxDisplayMode;
     signatureHtml?: string | null;
     forwardTo?: string | null;
+    source?: "cloudflare" | "gmail";
+    /** Pass null to clear the mapping; omit to leave it unchanged. */
+    gmailAccountId?: string | null;
   },
 ): Promise<{
   email: string;
@@ -846,12 +888,20 @@ export async function updateInboxSettings(
   displayMode: InboxDisplayMode;
   signatureHtml: string | null;
   forwardTo: string | null;
+  source: "cloudflare" | "gmail";
+  gmailAccountId: string | null;
 }> {
-  return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch),
-  });
+  // Server errors are kept verbatim: a rejected Gmail mapping answers with the
+  // one sentence that tells the operator how to fix it ("add it under Gmail's
+  // Send mail as…"), which `apiFetch` would flatten to "API error: 400".
+  return apiFetchKeepingServerMessage(
+    `/api/admin/inboxes/${encodeURIComponent(email)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
 }
 
 export async function deleteInbox(
