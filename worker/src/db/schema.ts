@@ -37,6 +37,7 @@ import { inboxConversationState } from "./inbox-conversation-state.schema";
 import { agentSessions } from "./agent-sessions.schema";
 import { suggestedReplies } from "./suggested-replies.schema";
 import { rules } from "./rules.schema";
+import { autoReplyLog } from "./auto-reply-log.schema";
 
 export const schema = {
   ...authSchema,
@@ -78,4 +79,5 @@ export const schema = {
   agentSessions,
   suggestedReplies,
   rules,
+  autoReplyLog,
 } as const;

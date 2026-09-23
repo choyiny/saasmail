@@ -17,6 +17,15 @@ export async function validateRuleActions(
   input: { inbox: string | null; actions: RuleAction[] },
 ): Promise<void> {
   const inbox = input.inbox?.trim().toLowerCase() ?? null;
+  const autoReplies = input.actions.filter(
+    (action) => action.type === "auto_reply",
+  );
+  if (autoReplies.length > 1) {
+    throw new InvalidRuleError("A rule may have at most one auto_reply action");
+  }
+  if (autoReplies.length > 0 && !inbox) {
+    throw new InvalidRuleError("auto_reply requires an inbox-scoped rule");
+  }
 
   for (const action of input.actions) {
     if (action.type === "move_to_folder") {

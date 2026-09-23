@@ -168,7 +168,41 @@ describe("AutomationsPage", () => {
       ).disabled,
     ).toBe(true);
     expect(
-      screen.getByText(/Move to folder and Assign are unavailable/),
+      (
+        within(actionType).getByRole("option", {
+          name: "Auto-reply",
+        }) as HTMLOptionElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      screen.getByText(
+        /Move to folder, Assign, and Auto-reply are unavailable/,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("renders auto-reply subject, body counter, and guard note", async () => {
+    await openNew();
+    fireEvent.change(screen.getByLabelText("Scope"), {
+      target: { value: "support@e2e.test" },
+    });
+    fireEvent.change(screen.getByLabelText("Action 1 type"), {
+      target: { value: "auto_reply" },
+    });
+
+    const subject = screen.getByLabelText("Action 1 subject");
+    const body = screen.getByLabelText("Action 1 body");
+    expect((subject as HTMLInputElement).maxLength).toBe(200);
+    expect((body as HTMLTextAreaElement).maxLength).toBe(5000);
+
+    fireEvent.change(subject, { target: { value: "Thanks" } });
+    fireEvent.change(body, { target: { value: "Hello there" } });
+
+    expect(screen.getByText("11/5000")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Won't reply to automated mail, your own addresses, blocked/suppressed senders, or the same sender more than once per 24h.",
+      ),
     ).toBeTruthy();
   });
 

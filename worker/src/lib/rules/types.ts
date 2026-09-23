@@ -58,6 +58,11 @@ export const RuleActionSchema = z.discriminatedUnion("type", [
     type: z.literal("assign"),
     userId: textValue,
   }),
+  z.object({
+    type: z.literal("auto_reply"),
+    subject: z.string().min(1).max(200).optional(),
+    bodyText: z.string().min(1).max(5000),
+  }),
 ]);
 
 export const RuleActionsSchema = z.array(RuleActionSchema).min(1).max(5);

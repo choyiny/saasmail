@@ -22,41 +22,13 @@ import { forwardInbound } from "./lib/inbound-forward";
 import { wakeConversation } from "./lib/messages/conversation-state";
 import { setSystemSpamState } from "./lib/messages/state";
 import { selectModel } from "./lib/agent/provider";
+import { isAutomatedInbound } from "./lib/automated-inbound";
 import { evaluateRules } from "./lib/rules/evaluate";
+
+export { isAutomatedInbound } from "./lib/automated-inbound";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
-
-function headerValue(
-  headers: Record<string, string>,
-  name: string,
-): string | undefined {
-  const target = name.toLowerCase();
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() === target) return value;
-  }
-  return undefined;
-}
-
-export function isAutomatedInbound(headers: Record<string, string>): boolean {
-  const autoSubmitted = headerValue(headers, "auto-submitted");
-  if (
-    autoSubmitted !== undefined &&
-    autoSubmitted.trim().toLowerCase() !== "no"
-  ) {
-    return true;
-  }
-
-  const precedence = headerValue(headers, "precedence")?.trim().toLowerCase();
-  if (precedence === "bulk" || precedence === "list" || precedence === "junk") {
-    return true;
-  }
-
-  return (
-    headerValue(headers, "list-id") !== undefined ||
-    headerValue(headers, "list-unsubscribe") !== undefined
-  );
-}
 
 export function shouldEnqueueSuggestedReply(options: {
   agentAutodraft: number | null | undefined;
@@ -288,18 +260,22 @@ export async function handleEmail(
   let ruleSnoozed = false;
   if (!autoFiledSpam) {
     try {
-      const ruleResult = await evaluateRules(db, {
-        emailId,
-        inbox: recipientCanonical,
-        fromAddress: fromAddressCanonical,
-        subject: parsed.subject,
-        bodyText: parsed.bodyText,
-        bodyHtml,
-        hasAttachments: cappedAttachments.length > 0,
-        spamScore: parsed.spamScore,
-        headers: parsed.headers,
-        now,
-      });
+      const ruleResult = await evaluateRules(
+        db,
+        {
+          emailId,
+          inbox: recipientCanonical,
+          fromAddress: fromAddressCanonical,
+          subject: parsed.subject,
+          bodyText: parsed.bodyText,
+          bodyHtml,
+          hasAttachments: cappedAttachments.length > 0,
+          spamScore: parsed.spamScore,
+          headers: parsed.headers,
+          now,
+        },
+        { env, ctx },
+      );
       autoFiledSpam ||= ruleResult.markedSpam;
       ruleSnoozed = ruleResult.snoozed;
     } catch (error) {

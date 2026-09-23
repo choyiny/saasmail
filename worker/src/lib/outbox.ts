@@ -58,6 +58,8 @@ export interface OutboxSendParams {
   headers?: Record<string, string>;
   attachments?: SendEmailAttachment[];
   transactional?: boolean;
+  /** When false, provider failures are terminal and the outbox row is deleted. */
+  retryOnFailure?: boolean;
   /**
    * Caller-minted unsubscribe URL (campaigns use a per-list v2 token). Passed
    * straight through; the retry path recovers it from the stored
@@ -102,6 +104,7 @@ export async function sendViaOutbox(
     headers,
     attachments,
     transactional,
+    retryOnFailure,
     unsubscribeContext,
   } = params;
   const now = Math.floor(Date.now() / 1000);
@@ -184,6 +187,11 @@ export async function sendViaOutbox(
       await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
     }
     return { outcome: "sent", send, outboxId };
+  }
+
+  if (retryOnFailure === false) {
+    await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
+    return { outcome: "failed", send, outboxId };
   }
 
   if (result.error.transient) {

@@ -9,7 +9,7 @@ import { senderIdentities } from "../db/sender-identities.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { cancelSequencesForPerson } from "./cancel-sequence";
 import { computeConversationId, externalsOnly } from "./conversation-id";
-import { createEmailSender } from "./email-sender";
+import { createEmailSender, type EmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
@@ -77,6 +77,14 @@ export type ReplyEmailParams = {
   payload: ReplyEmailPayload;
   files: ParsedFile[];
   allowed: AllowedInboxes;
+  /** Internal automation override; HTTP callers never set this. */
+  subjectOverride?: string;
+  /** Internal headers added to the transport payload. */
+  extraHeaders?: Record<string, string>;
+  /** Internal policy for one-shot sends that must never enter retry state. */
+  retryOnFailure?: boolean;
+  /** Test seam for automation sends. */
+  sender?: EmailSender;
 };
 
 export type ReplyEmailSuccess = {
@@ -344,7 +352,7 @@ export async function replyToEmail(
   params: ReplyEmailParams,
 ): Promise<ReplyEmailResult> {
   const { db, env, emailId, payload: raw, files, allowed } = params;
-  const sender = createEmailSender(env);
+  const sender = params.sender ?? createEmailSender(env);
 
   // Same canonicalization story as the send route — lowercase the
   // inbox + recipient + CC emails before downstream use so stored
@@ -475,6 +483,10 @@ export async function replyToEmail(
     };
   }
 
+  if (params.subjectOverride !== undefined) {
+    finalSubject = params.subjectOverride.replace(/[\r\n]+/g, " ");
+  }
+
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
   // Replies are 1:1 conversational responses to an inbound — the recipient
@@ -496,9 +508,13 @@ export async function replyToEmail(
     html: finalBodyHtml,
     ...(bodyText !== undefined ? { text: bodyText } : {}),
     headers: {
+      ...(params.extraHeaders ?? {}),
       "Message-ID": messageId,
       ...(origInReplyToMessageId
-        ? { "In-Reply-To": origInReplyToMessageId }
+        ? {
+            "In-Reply-To": origInReplyToMessageId,
+            References: origInReplyToMessageId,
+          }
         : {}),
       ...(replyTo ? { "Reply-To": replyTo } : {}),
     },
@@ -512,6 +528,9 @@ export async function replyToEmail(
         }
       : {}),
     transactional: true,
+    ...(params.retryOnFailure === undefined
+      ? {}
+      : { retryOnFailure: params.retryOnFailure }),
   });
 
   // Compute conversation_id for this reply.

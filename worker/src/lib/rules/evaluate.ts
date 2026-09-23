@@ -6,6 +6,7 @@ import {
   snoozeConversations,
 } from "../messages/conversation-state";
 import { setMailboxMembership, setMailboxState } from "../messages/state";
+import { runAutoReply } from "./auto-reply";
 import { matchConditions, type RuleMessage } from "./match";
 import {
   RuleActionsSchema,
@@ -24,10 +25,17 @@ export type RuleEvaluationResult = {
   snoozed: boolean;
 };
 
+export type RuleEvaluationRuntime = {
+  env: CloudflareBindings;
+  ctx: Pick<ExecutionContext, "waitUntil">;
+};
+
 async function runAction(
   db: DrizzleD1Database<any>,
   input: RuleEvaluationInput,
   action: RuleAction,
+  ruleId: string,
+  runtime?: RuleEvaluationRuntime,
 ): Promise<Partial<RuleEvaluationResult>> {
   const inbox = input.inbox.trim().toLowerCase();
   const allowed = { isAdmin: false as const, inboxes: [inbox] };
@@ -59,12 +67,36 @@ async function runAction(
     case "assign":
       await assignConversations(db, allowed, null, refs, action.userId);
       return {};
+    case "auto_reply":
+      if (!runtime) {
+        console.log(
+          `[auto-reply] skipped rule ${ruleId} for ${input.emailId}: runtime unavailable`,
+        );
+        return {};
+      }
+      runtime.ctx.waitUntil(
+        runAutoReply(db, runtime.env, {
+          ruleId,
+          emailId: input.emailId,
+          inbox,
+          subject: action.subject,
+          bodyText: action.bodyText,
+          now: input.now,
+        }).catch((error) => {
+          console.warn(
+            `[auto-reply] failed rule ${ruleId} for ${input.emailId}:`,
+            error,
+          );
+        }),
+      );
+      return {};
   }
 }
 
 export async function evaluateRules(
   db: DrizzleD1Database<any>,
   input: RuleEvaluationInput,
+  runtime?: RuleEvaluationRuntime,
 ): Promise<RuleEvaluationResult> {
   const inbox = input.inbox.trim().toLowerCase();
   const matchingRules = await db
@@ -98,7 +130,13 @@ export async function evaluateRules(
 
     for (const action of parsedActions.data) {
       try {
-        const actionResult = await runAction(db, input, action);
+        const actionResult = await runAction(
+          db,
+          input,
+          action,
+          rule.id,
+          runtime,
+        );
         result.markedSpam ||= actionResult.markedSpam === true;
         result.snoozed ||= actionResult.snoozed === true;
       } catch (error) {

@@ -32,10 +32,11 @@ Supported conditions:
 - `header`: a header `name` plus `equals` or `contains`
 
 Supported actions are `archive`, `mark_spam`, `move_to_folder`,
-`snooze`, and `assign`. Snooze accepts 1–720 hours. Folder moves require
-an inbox-scoped rule and a folder in that same inbox. Assignment also requires
-an inbox-scoped rule, and the assignee must have access to that inbox; admins
-have access to every inbox.
+`snooze`, `assign`, and `auto_reply`. Snooze accepts 1–720 hours. Folder
+moves require an inbox-scoped rule and a folder in that same inbox. Assignment
+also requires an inbox-scoped rule, and the assignee must have access to that
+inbox; admins have access to every inbox. Auto-reply also requires a specific
+inbox scope, and a rule may contain at most one auto-reply action.
 
 Each action is best-effort. A failed action is logged and later actions still
 run, so a routing failure never rejects inbound delivery. Match counts and
@@ -57,13 +58,31 @@ The caller must be allowed to access every referenced inbox. Message reads can
 filter by `assignedTo=me` or a user id, and state-aware responses expose
 `state.assignedUserId`.
 
+## Auto-replies
+
+An `auto_reply` action sends a one-shot reply from the rule's scoped inbox.
+The body is stored as plain text and escaped before it is used as HTML; inbox
+signatures are appended with the same signature marker as manual freeform
+replies. An optional subject can be supplied, otherwise the normal reply subject
+(`Re: <original subject>`) is used. The outbound message is threaded with the
+original Message-ID where available, includes `Auto-Submitted: auto-replied`,
+and is recorded in Sent through the normal send/outbox path.
+
+Before scheduling a send, saasmail skips automated/list mail, mail from any
+configured sender identity, blocked or suppressed senders, messages already in
+Junk, and a sender already auto-replied to by the same rule in the previous
+24 hours. The rate-limit row is written before the provider call, so a failed
+attempt still consumes the 24-hour window. Auto-replies are never retried after
+a provider failure. The actual send runs through `ctx.waitUntil`, so inbound
+delivery never waits for it and cannot fail because the reply fails.
+
 ## Web UI
 
 Admins manage rules at \`/automations\`. The list follows evaluation order and
 shows each rule's name, scope, condition/action summary, enabled state, match
 count, and relative last-match time. Move controls send the complete ordered id
 list to the reorder endpoint. Creating and editing rules uses the same condition
-and action limits as the API; folder moves and assignments are disabled until a
+and action limits as the API; folder moves, assignments, and auto-replies are disabled until a
 specific inbox scope is selected. Server validation errors stay inline in the
 editor, and a zero-condition rule is explicitly called out as matching every
 message in its scope.

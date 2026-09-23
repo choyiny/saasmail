@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Reply threading.** Manual replies now include a `References` header equal to `In-Reply-To` when the original Message-ID is available, improving standards-based thread reconstruction.
+
 - **Sequence sends now carry durable provenance in sent mail.** New sequence-created `sent_emails` rows record `sequence_id` and `sequence_enrollment_id`, and the unified message contract exposes both alongside `campaignId`. Historical rows are backfilled best-effort from durable sequence-step links and surviving outbox rows; older failed/suppressed sends without a backlink remain un-attributed. Initial suppression still creates no sent-mail row.
 
 - **Received and sent mail now share one permission-scoped read service.** Customer timelines, message search, and group-conversation detail use the same `UnifiedMessage` contract over `emails ∪ sent_emails`, with deterministic cross-source ordering, cursor pagination for new consumers, and shared attachment enrichment. Existing HTTP response shapes and page/offset behavior remain compatible; operational outbox/campaign/sequence ledger rows never appear as duplicate messages. Conversation reads also inherit case-insensitive inbox scoping instead of a hand-rolled allow check.
@@ -18,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Templates are unchanged for the transactional and sequence paths, where a template genuinely is the content and carries a `{{variable}}` send contract. Creating a campaign now redirects to the campaign itself rather than back to the list, and a campaign with an empty body is refused at send time instead of mailing a blank page.
 
 ### Added
+
+- **Rule auto-replies.** Inbox-scoped automation rules can send a plain-text, threaded reply through the normal outbox and Sent history, with the inbox signature and `Auto-Submitted: auto-replied`. Automated mail, own identities, blocked/suppressed senders, Junk, and repeat senders within 24 hours are skipped; attempts are rate-limited before send and never retried after failure.
 
 - **Automations and assignment UI.** Admins can now manage ordered inbound rules from `/automations`, build and dry-run conditions/actions, reorder, enable/disable, and delete rules with inline validation. Mail adds permission-scoped assignment menus, assignee chips, bulk assignment, and an **Assigned to me** view.
 

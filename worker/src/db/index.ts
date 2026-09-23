@@ -39,3 +39,4 @@ export * from "./agent-sessions.schema";
 export * from "./suggested-replies.schema";
 
 export * from "./rules.schema";
+export * from "./auto-reply-log.schema";

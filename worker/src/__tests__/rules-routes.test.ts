@@ -252,6 +252,45 @@ describe("admin rule routes", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects all-inboxes and duplicate auto-reply actions", async () => {
+    const admin = await createTestUser({
+      id: "auto-reply-validation-admin",
+      role: "admin",
+    });
+
+    let res = await authFetch("/api/admin/rules", {
+      apiKey: admin.apiKey,
+      method: "POST",
+      body: JSON.stringify(
+        ruleBody({
+          inbox: null,
+          actions: [{ type: "auto_reply", bodyText: "Hello" }],
+        }),
+      ),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "auto_reply requires an inbox-scoped rule",
+    });
+
+    res = await authFetch("/api/admin/rules", {
+      apiKey: admin.apiKey,
+      method: "POST",
+      body: JSON.stringify(
+        ruleBody({
+          actions: [
+            { type: "auto_reply", bodyText: "First" },
+            { type: "auto_reply", bodyText: "Second" },
+          ],
+        }),
+      ),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "A rule may have at most one auto_reply action",
+    });
+  });
+
   it("rejects more than ten conditions", async () => {
     const admin = await createTestUser({ id: "limit-admin", role: "admin" });
     const conditions = Array.from({ length: 11 }, () => ({

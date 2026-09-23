@@ -1295,7 +1295,8 @@ export type RuleAction =
   | { type: "mark_spam" }
   | { type: "move_to_folder"; mailboxId: string }
   | { type: "snooze"; hours: number }
-  | { type: "assign"; userId: string };
+  | { type: "assign"; userId: string }
+  | { type: "auto_reply"; subject?: string; bodyText: string };
 
 export interface AutomationRule {
   id: string;

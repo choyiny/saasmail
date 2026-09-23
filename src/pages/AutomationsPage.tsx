@@ -55,6 +55,7 @@ const ACTION_TYPES: Array<{ value: RuleAction["type"]; label: string }> = [
   { value: "move_to_folder", label: "Move to folder" },
   { value: "snooze", label: "Snooze" },
   { value: "assign", label: "Assign" },
+  { value: "auto_reply", label: "Auto-reply" },
 ];
 
 const OPERATORS: Record<RuleCondition["field"], string[]> = {
@@ -96,6 +97,7 @@ function actionFor(
   }
   if (type === "snooze") return { type, hours: 24 };
   if (type === "assign") return { type, userId: users[0]?.id ?? "" };
+  if (type === "auto_reply") return { type, bodyText: "" };
   return { type };
 }
 
@@ -137,6 +139,7 @@ function actionSummary(action: RuleAction): string {
   if (action.type === "mark_spam") return "mark as spam";
   if (action.type === "move_to_folder") return "move to folder";
   if (action.type === "snooze") return "snooze " + String(action.hours) + "h";
+  if (action.type === "auto_reply") return "auto-reply";
   return action.type;
 }
 
@@ -286,7 +289,9 @@ export default function AutomationsPage() {
       actions:
         inbox === null
           ? current.actions.map((action) =>
-              action.type === "move_to_folder" || action.type === "assign"
+              action.type === "move_to_folder" ||
+              action.type === "assign" ||
+              action.type === "auto_reply"
                 ? ({ type: "archive" } as const)
                 : action,
             )
@@ -799,8 +804,8 @@ export default function AutomationsPage() {
 
               {!draft.inbox && (
                 <p className="mb-3 rounded-[6px] bg-bg-subtle px-3 py-2 text-xs text-text-tertiary">
-                  Move to folder and Assign are unavailable for All inboxes.
-                  Choose a specific inbox to use those actions.
+                  Move to folder, Assign, and Auto-reply are unavailable for All
+                  inboxes. Choose a specific inbox to use those actions.
                 </p>
               )}
 
@@ -831,7 +836,8 @@ export default function AutomationsPage() {
                           disabled={
                             !draft.inbox &&
                             (type.value === "move_to_folder" ||
-                              type.value === "assign")
+                              type.value === "assign" ||
+                              type.value === "auto_reply")
                           }
                         >
                           {type.label}
@@ -911,6 +917,58 @@ export default function AutomationsPage() {
                             </option>
                           ))}
                         </select>
+                      )}
+                      {action.type === "auto_reply" && (
+                        <div className="space-y-2">
+                          <input
+                            aria-label={
+                              "Action " + String(index + 1) + " subject"
+                            }
+                            maxLength={200}
+                            placeholder="Subject (optional)"
+                            value={action.subject ?? ""}
+                            onChange={(event) =>
+                              updateAction(index, (current) =>
+                                current.type === "auto_reply"
+                                  ? {
+                                      ...current,
+                                      subject: event.target.value || undefined,
+                                    }
+                                  : current,
+                              )
+                            }
+                            className="w-full rounded-[6px] border border-border bg-card px-2 py-1.5 text-xs text-text-primary"
+                          />
+                          <div>
+                            <textarea
+                              aria-label={
+                                "Action " + String(index + 1) + " body"
+                              }
+                              maxLength={5000}
+                              rows={5}
+                              value={action.bodyText}
+                              onChange={(event) =>
+                                updateAction(index, (current) =>
+                                  current.type === "auto_reply"
+                                    ? {
+                                        ...current,
+                                        bodyText: event.target.value,
+                                      }
+                                    : current,
+                                )
+                              }
+                              className="w-full resize-y rounded-[6px] border border-border bg-card px-2 py-1.5 text-xs text-text-primary"
+                            />
+                            <p className="mt-1 text-right text-[10px] text-text-tertiary">
+                              {action.bodyText.length}/5000
+                            </p>
+                          </div>
+                          <p className="text-[11px] leading-4 text-text-tertiary">
+                            Won&apos;t reply to automated mail, your own
+                            addresses, blocked/suppressed senders, or the same
+                            sender more than once per 24h.
+                          </p>
+                        </div>
                       )}
                       {(action.type === "archive" ||
                         action.type === "mark_spam") && (

@@ -87,6 +87,8 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS inbox_conversation_state_inbox_snoozed_idx ON inbox_conversation_state(inbox, snoozed_until)`,
     `CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, inbox TEXT, trigger TEXT NOT NULL DEFAULT 'message.received', conditions TEXT NOT NULL, actions TEXT NOT NULL, position INTEGER NOT NULL, stop_processing INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, match_count INTEGER NOT NULL DEFAULT 0, last_matched_at INTEGER, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS rules_enabled_position_idx ON rules(enabled, position)`,
+    `CREATE TABLE IF NOT EXISTS auto_reply_log (rule_id TEXT NOT NULL REFERENCES rules(id) ON DELETE CASCADE, sender TEXT NOT NULL, sent_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS auto_reply_log_rule_sender_sent_idx ON auto_reply_log(rule_id, sender, sent_at)`,
     `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_insert BEFORE INSERT ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
     `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_update BEFORE UPDATE OF message_kind ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
     `CREATE TRIGGER IF NOT EXISTS mailbox_message_state_kind_insert BEFORE INSERT ON mailbox_message_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
@@ -413,6 +415,7 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM auto_reply_log;
     DELETE FROM rules;
     DELETE FROM inbox_conversation_state;
     DELETE FROM message_mailboxes;
