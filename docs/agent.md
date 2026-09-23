@@ -183,6 +183,9 @@ Read tools:
 - identify the caller and list allowed inboxes
 - list, read, and search received/sent messages through `queryMessages()`
 - read a customer timeline
+- list sequences with step/active-enrollment counts
+- list permission-scoped subscriber lists with member counts
+- read the linked customer identity for a person
 - list templates visible to the caller
 - read the native-agent playbook
 
@@ -200,6 +203,22 @@ Draft tools:
 - save a reply draft under `reply:<emailId>`
 - save a new-message draft under `draft:<id>`
 
+CRM actions with approval:
+
+- enroll a person in a sequence
+- cancel a person's active sequence enrollment
+- add a person to a subscriber list the caller may edit
+- assign or unassign a conversation
+- link two person/email rows as one customer
+
+These five tools use the AI SDK's human-in-the-loop approval state. The tool
+request pauses at `approval-requested`; the UI renders a D1-derived,
+permission-checked summary and the user chooses **Approve** or **Deny**.
+Execution happens only after approval and re-reads the user's current role and
+inbox permissions, so access revoked while the card is waiting is enforced.
+At most five approved CRM actions execute in one user turn; further calls return
+a guard error instructing the model to ask the user before doing more.
+
 A reply draft never overwrites a non-empty human autosave. If a user already has
 content in `reply:<emailId>`, the agent returns
 `{ saved: false, reason: "existing_draft", ... }` and leaves that draft
@@ -211,7 +230,7 @@ Stage 2 deliberately exposes no tool to:
 
 - send email
 - trash or permanently delete mail
-- enroll a contact into a sequence
+- bypass approval for CRM actions
 - bypass inbox permissions
 - treat client-supplied context as authorization
 

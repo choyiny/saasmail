@@ -1,19 +1,36 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { users } from "../../db/auth.schema";
+import { listMembers } from "../../db/list-members.schema";
+import { lists } from "../../db/lists.schema";
+import { sequenceEnrollments } from "../../db/sequence-enrollments.schema";
+import { sequences } from "../../db/sequences.schema";
 import { emailTemplates } from "../../db/email-templates.schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
+import { cancelSequencesForPerson } from "../cancel-sequence";
+import { findOrCreateContact } from "../contacts";
+import {
+  getCustomerByPerson,
+  linkPeople,
+  resolveCustomerScope,
+} from "../customers";
 import { getDraft, upsertDraft } from "../drafts";
+import { enrollPersonInSequence } from "../enroll-sequence";
+import { isSuppressed } from "../suppressions";
 import {
   assertInboxAllowed,
+  inboxFilter,
   isInboxAllowed,
   resolveAllowedInboxes,
   type AllowedInboxes,
 } from "../inbox-permissions";
-import { snoozeConversations } from "../messages/conversation-state";
+import {
+  assignConversations,
+  snoozeConversations,
+} from "../messages/conversation-state";
 import {
   getMailbox,
   setMailboxMembership,
@@ -29,7 +46,18 @@ import {
   type MessageRef,
   type UnifiedMessage,
 } from "../messages/types";
+import { latestAllowedInboxForPerson } from "./crm";
 import { AGENT_PLAYBOOK_INTRO, AGENT_PLAYBOOKS } from "./playbook";
+
+export const AGENT_APPROVAL_TOOL_NAMES = [
+  "enroll_in_sequence",
+  "cancel_sequence_enrollment",
+  "add_to_list",
+  "assign_conversation",
+  "link_customer",
+] as const;
+
+export const MAX_AGENT_APPROVAL_ACTIONS_PER_TURN = 5;
 
 export const AGENT_TOOL_NAMES = [
   "whoami",
@@ -38,6 +66,9 @@ export const AGENT_TOOL_NAMES = [
   "read_message",
   "search_messages",
   "customer_timeline",
+  "list_sequences",
+  "list_lists",
+  "get_customer",
   "list_templates",
   "get_playbook",
   "set_seen",
@@ -48,6 +79,7 @@ export const AGENT_TOOL_NAMES = [
   "move_to_folder",
   "draft_reply",
   "draft_message",
+  ...AGENT_APPROVAL_TOOL_NAMES,
 ] as const;
 
 export const UNTRUSTED_MAIL_NOTICE =
@@ -62,7 +94,9 @@ type AgentUser = {
 
 export type AgentToolContext = {
   db: DrizzleD1Database<any>;
+  env?: CloudflareBindings;
   user: AgentUser;
+  gatedCallsAlready?: number;
 };
 
 const MessageRefSchema = z.string().min(3);
@@ -109,7 +143,14 @@ async function listAllowedTemplates(
   );
 }
 
-export function createAgentTools({ db, user }: AgentToolContext): ToolSet {
+export function createAgentTools({
+  db,
+  env,
+  user,
+  gatedCallsAlready = 0,
+}: AgentToolContext): ToolSet {
+  let gatedCalls = gatedCallsAlready;
+
   const currentUserForCall = async (): Promise<AgentUser> => {
     const [current] = await db
       .select({
@@ -130,6 +171,40 @@ export function createAgentTools({ db, user }: AgentToolContext): ToolSet {
 
   const allowedForCall = async () =>
     resolveAllowedInboxes(db, await currentUserForCall());
+
+  const runApprovedAction = async <T>(action: () => Promise<T>) => {
+    if (gatedCalls >= MAX_AGENT_APPROVAL_ACTIONS_PER_TURN) {
+      return {
+        success: false,
+        error:
+          "Approval limit reached: this turn already used 5 CRM actions. Ask the user before requesting more actions.",
+      };
+    }
+    gatedCalls += 1;
+    return action();
+  };
+
+  const visiblePerson = async (personId: string) => {
+    const allowed = await allowedForCall();
+    const person = await getPersonScoped(db, personId, allowed);
+    if (!person) throw new Error("Person not found or no longer visible");
+    return { allowed, person };
+  };
+
+  const visibleList = async (listId: string, allowed: AllowedInboxes) => {
+    const [row] = await db
+      .select()
+      .from(lists)
+      .where(eq(lists.id, listId))
+      .limit(1);
+    if (!row || !isInboxAllowed(allowed, row.fromAddress)) {
+      throw new Error(
+        "List not found or you no longer have permission to edit it",
+      );
+    }
+    if (row.archivedAt !== null) throw new Error("List is archived");
+    return row;
+  };
 
   return {
     whoami: tool({
@@ -304,6 +379,95 @@ export function createAgentTools({ db, user }: AgentToolContext): ToolSet {
       },
     }),
 
+    list_sequences: tool({
+      description:
+        "List sequences available for CRM enrollment, including step count and permission-scoped active enrollment count.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const allowed = await allowedForCall();
+        const [sequenceRows, activeRows] = await Promise.all([
+          db.select().from(sequences).orderBy(sequences.createdAt),
+          db
+            .select({
+              sequenceId: sequenceEnrollments.sequenceId,
+              count: sql<number>`count(*)`,
+            })
+            .from(sequenceEnrollments)
+            .where(
+              and(
+                eq(sequenceEnrollments.status, "active"),
+                inboxFilter(allowed, sequenceEnrollments.fromAddress),
+              ),
+            )
+            .groupBy(sequenceEnrollments.sequenceId),
+        ]);
+        const activeBySequence = new Map(
+          activeRows.map((row) => [row.sequenceId, Number(row.count)]),
+        );
+        return {
+          sequences: sequenceRows.map((sequence) => {
+            let steps: unknown[] = [];
+            try {
+              const parsed = JSON.parse(sequence.steps);
+              if (Array.isArray(parsed)) steps = parsed;
+            } catch {
+              steps = [];
+            }
+            return {
+              id: sequence.id,
+              name: sequence.name,
+              stepCount: steps.length,
+              active: activeBySequence.get(sequence.id) ?? 0,
+            };
+          }),
+        };
+      },
+    }),
+
+    list_lists: tool({
+      description:
+        "List active subscriber lists the signed-in user may edit, with current member counts.",
+      inputSchema: z.object({}),
+      execute: async () => {
+        const allowed = await allowedForCall();
+        const rows = await db.select().from(lists).orderBy(lists.createdAt);
+        const visible = rows.filter(
+          (row) =>
+            row.archivedAt === null && isInboxAllowed(allowed, row.fromAddress),
+        );
+        const result = [];
+        for (const row of visible) {
+          const [countRow] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(listMembers)
+            .where(
+              and(
+                eq(listMembers.listId, row.id),
+                sql`${listMembers.status} != 'unsubscribed'`,
+              ),
+            );
+          result.push({
+            id: row.id,
+            name: row.name,
+            memberCount: Number(countRow?.count ?? 0),
+          });
+        }
+        return { lists: result };
+      },
+    }),
+
+    get_customer: tool({
+      description:
+        "Get the linked customer identity for a visible person. Returns null when the person is not linked.",
+      inputSchema: z.object({ personId: z.string().min(1) }),
+      execute: async ({ personId }) => {
+        const allowed = await allowedForCall();
+        return {
+          customer: await getCustomerByPerson(db, allowed, personId),
+        };
+      },
+    }),
+
     list_templates: tool({
       description:
         "List saved email templates visible to the signed-in user's inboxes.",
@@ -324,6 +488,208 @@ export function createAgentTools({ db, user }: AgentToolContext): ToolSet {
         await allowedForCall();
         return workflow ? AGENT_PLAYBOOKS[workflow] : AGENT_PLAYBOOK_INTRO;
       },
+    }),
+
+    enroll_in_sequence: tool({
+      description:
+        "Enroll a visible person in a sequence. Requires explicit user approval before it executes.",
+      inputSchema: z.object({
+        personId: z.string().min(1),
+        sequenceId: z.string().min(1),
+      }),
+      needsApproval: true,
+      execute: async ({ personId, sequenceId }) =>
+        runApprovedAction(async () => {
+          if (!env) throw new Error("Agent environment unavailable");
+          const { allowed } = await visiblePerson(personId);
+          const fromAddress = await latestAllowedInboxForPerson(
+            db,
+            personId,
+            allowed,
+          );
+          const result = await enrollPersonInSequence({
+            db,
+            env,
+            sequenceId,
+            allowed,
+            input: {
+              personId,
+              fromAddress,
+              variables: {},
+              skipSteps: [],
+              delayOverrides: {},
+            },
+          });
+          if (!result.ok) throw new Error(result.message);
+          return {
+            success: true,
+            enrollmentId: result.enrollment.id,
+            sequenceId,
+            personId,
+            fromAddress,
+          };
+        }),
+    }),
+
+    cancel_sequence_enrollment: tool({
+      description:
+        "Cancel a visible person's active sequence enrollment. Requires explicit user approval before it executes.",
+      inputSchema: z.object({ personId: z.string().min(1) }),
+      needsApproval: true,
+      execute: async ({ personId }) =>
+        runApprovedAction(async () => {
+          const { allowed } = await visiblePerson(personId);
+          const cancelled = await cancelSequencesForPerson(
+            db,
+            personId,
+            allowed,
+          );
+          return { success: true, cancelled };
+        }),
+    }),
+
+    add_to_list: tool({
+      description:
+        "Add a visible person to a subscriber list the caller may edit. Requires explicit user approval before it executes.",
+      inputSchema: z.object({
+        personId: z.string().min(1),
+        listId: z.string().min(1),
+      }),
+      needsApproval: true,
+      execute: async ({ personId, listId }) =>
+        runApprovedAction(async () => {
+          const { allowed, person } = await visiblePerson(personId);
+          const list = await visibleList(listId, allowed);
+          const now = Math.floor(Date.now() / 1000);
+          const normalizedEmail = person.email.trim().toLowerCase();
+          const [existing] = await db
+            .select()
+            .from(listMembers)
+            .where(
+              and(
+                eq(listMembers.listId, listId),
+                eq(listMembers.email, normalizedEmail),
+              ),
+            )
+            .limit(1);
+
+          if (existing?.status === "unsubscribed") {
+            throw new Error(
+              `This person unsubscribed from '${list.name}'; the agent can't re-subscribe them`,
+            );
+          }
+          if (await isSuppressed(db, normalizedEmail)) {
+            throw new Error(
+              `This person is suppressed; the agent can't subscribe them to '${list.name}'`,
+            );
+          }
+          if (existing) {
+            return {
+              success: true,
+              alreadyMember: true,
+              listId: list.id,
+              personId,
+              memberId: existing.id,
+            };
+          }
+
+          const contact = await findOrCreateContact(
+            db,
+            normalizedEmail,
+            person.name,
+            now,
+          );
+          const [countRow] = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(listMembers)
+            .where(
+              and(
+                eq(listMembers.listId, listId),
+                sql`${listMembers.status} != 'unsubscribed'`,
+              ),
+            );
+          if (Number(countRow?.count ?? 0) >= 10_000) {
+            throw new Error("List has reached the 10000 member limit");
+          }
+
+          const memberId = nanoid();
+          await db.insert(listMembers).values({
+            id: memberId,
+            listId,
+            contactId: contact.id,
+            email: contact.email,
+            status: "subscribed",
+            source: "api",
+            formId: null,
+            submittedIp: null,
+            consentSource: "api",
+            consentAt: now,
+            importJobId: null,
+            subscribedAt: now,
+            confirmedAt: null,
+            unsubscribedAt: null,
+            unsubscribeReason: null,
+            createdAt: now,
+          });
+          return {
+            success: true,
+            alreadyMember: false,
+            listId: list.id,
+            personId,
+            memberId,
+          };
+        }),
+    }),
+
+    assign_conversation: tool({
+      description:
+        "Assign or unassign a visible conversation. Requires explicit user approval before it executes.",
+      inputSchema: z.object({
+        ref: MessageRefSchema,
+        userId: z.string().min(1).nullable(),
+      }),
+      needsApproval: true,
+      execute: async ({ ref: value, userId }) =>
+        runApprovedAction(async () => {
+          const currentUser = await currentUserForCall();
+          const allowed = await resolveAllowedInboxes(db, currentUser);
+          const ref = parseMessageRef(value);
+          if (!ref) throw new Error(`Invalid message ref: ${value}`);
+          const conversations = await assignConversations(
+            db,
+            allowed,
+            currentUser.id,
+            [ref],
+            userId,
+          );
+          return { success: true, conversations };
+        }),
+    }),
+
+    link_customer: tool({
+      description:
+        "Link two visible person records as one customer identity. Requires explicit user approval before it executes.",
+      inputSchema: z.object({
+        personId: z.string().min(1),
+        otherPersonId: z.string().min(1),
+      }),
+      needsApproval: true,
+      execute: async ({ personId, otherPersonId }) =>
+        runApprovedAction(async () => {
+          const currentUser = await currentUserForCall();
+          const allowed = await resolveAllowedInboxes(db, currentUser);
+          await linkPeople(
+            db,
+            allowed,
+            currentUser.id,
+            personId,
+            otherPersonId,
+          );
+          return {
+            success: true,
+            customer: await getCustomerByPerson(db, allowed, personId),
+          };
+        }),
     }),
 
     set_seen: tool({

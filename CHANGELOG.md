@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Approval-gated CRM actions for the native agent.** The in-app agent can now list sequences/lists/customer identity and request sequence enrollment or cancellation, list membership, conversation assignment, and customer linking. Every CRM write pauses for an explicit Approve/Deny decision, shows a permission-checked D1-derived summary, re-checks role/inbox access at execution time, and is capped at five approved CRM actions per user turn. Sending, trash, and delete remain unavailable.
+
 - **Customer identity graph.** Multiple person/email rows can now be linked as one customer without collapsing the underlying people. Linked customer timelines, the native agent, suggested replies, the customer UI, and read-only MCP customer lookup share the identity graph while retaining the existing inbox permission boundary.
 
 - **Rule auto-replies.** Inbox-scoped automation rules can send a plain-text, threaded reply through the normal outbox and Sent history, with the inbox signature and `Auto-Submitted: auto-replied`. Automated mail, own identities, blocked/suppressed senders, Junk, and repeat senders within 24 hours are skipped; attempts are rate-limited before send and never retried after failure.

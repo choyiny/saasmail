@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgent } from "agents/react";
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
@@ -6,7 +6,11 @@ import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { ChevronDown, ChevronRight, RotateCcw, Square } from "lucide-react";
 import { AgentMarkdown } from "@/agent/AgentMarkdown";
 import { useAgentContext } from "@/agent/AgentContext";
-import { fetchDraft, type AgentSession } from "@/lib/api";
+import {
+  fetchAgentApprovalSummary,
+  fetchDraft,
+  type AgentSession,
+} from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import type { ComposePrefill } from "@/pages/ComposeModal";
 
@@ -48,9 +52,11 @@ function record(value: unknown): Record<string, unknown> | null {
 function ToolBadge({
   part,
   onOpenCompose,
+  onApproval,
 }: {
   part: UIMessage["parts"][number];
   onOpenCompose: OpenCompose;
+  onApproval: (response: { id: string; approved: boolean }) => void;
 }) {
   const navigate = useNavigate();
   const { context } = useAgentContext();
@@ -63,14 +69,45 @@ function ToolBadge({
   const input = (part as { input?: unknown }).input;
   const output = (part as { output?: unknown }).output;
   const errorText = (part as { errorText?: string }).errorText;
+  const approval = record((part as { approval?: unknown }).approval);
+  const approvalId = typeof approval?.id === "string" ? approval.id : null;
+  const approvalDecision =
+    typeof approval?.approved === "boolean" ? approval.approved : null;
+  const hasApproval = approvalId !== null;
+  const needsApproval = state === "approval-requested" && approvalId !== null;
   const status =
     state === "output-available"
       ? "done"
       : state === "output-error" || state === "output-denied"
         ? "error"
-        : "running";
+        : state === "approval-requested"
+          ? "approval"
+          : state === "approval-responded"
+            ? approvalDecision
+              ? "approved"
+              : "denied"
+            : "running";
   const outputRecord = record(output);
   const inputRecord = record(input);
+  const [approvalSummary, setApprovalSummary] = useState<string | null>(null);
+  const approvalBlocked = approvalSummary?.startsWith("Can't ") ?? false;
+
+  useEffect(() => {
+    if (!approvalId) return;
+
+    let cancelled = false;
+    setApprovalSummary(null);
+    void fetchAgentApprovalSummary(toolName, inputRecord ?? {})
+      .then(({ summary }) => {
+        if (!cancelled) setApprovalSummary(summary);
+      })
+      .catch(() => {
+        if (!cancelled) setApprovalSummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [approvalId, inputRecord, toolName]);
 
   const draftMessageContext =
     toolName === "draft_message" && typeof outputRecord?.contextKey === "string"
@@ -128,6 +165,43 @@ function ToolBadge({
           {status}
         </span>
       </button>
+
+      {hasApproval && (
+        <div
+          data-testid={`agent-approval-${toolName}`}
+          className="space-y-2 border-t border-border px-2.5 py-2"
+        >
+          <p className="text-sm text-text-primary">
+            {approvalSummary ??
+              `${toolName} ${jsonForDisplay(inputRecord ?? {})}`}
+          </p>
+          {needsApproval && approvalId && (
+            <div className="flex gap-2">
+              {!approvalBlocked && (
+                <button
+                  type="button"
+                  onClick={() => onApproval({ id: approvalId, approved: true })}
+                  className="rounded-[6px] bg-text-primary px-2.5 py-1 font-medium text-bg"
+                >
+                  Approve
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => onApproval({ id: approvalId, approved: false })}
+                className="rounded-[6px] border border-border bg-card px-2.5 py-1 font-medium text-text-primary"
+              >
+                {approvalBlocked ? "Dismiss" : "Deny"}
+              </button>
+            </div>
+          )}
+          {!needsApproval && approvalDecision !== null && (
+            <p className="font-medium text-text-secondary">
+              {approvalDecision ? "Approved" : "Denied"}
+            </p>
+          )}
+        </div>
+      )}
 
       {existingDraft && (
         <div className="border-t border-border px-2.5 py-2 text-text-secondary">
@@ -198,6 +272,7 @@ export default function AgentChatSession({
     error,
     status,
     isStreaming,
+    addToolApprovalResponse,
   } = useAgentChat({
     agent,
     body: () => ({ context: contextRef.current }),
@@ -264,6 +339,7 @@ export default function AgentChatSession({
                       }
                       part={part}
                       onOpenCompose={onOpenCompose}
+                      onApproval={addToolApprovalResponse}
                     />
                   );
                 }

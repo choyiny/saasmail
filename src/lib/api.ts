@@ -150,6 +150,17 @@ export interface AgentSession {
   instanceName: string;
 }
 
+export async function fetchAgentApprovalSummary(
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<{ summary: string }> {
+  return apiFetch("/api/agent/approval-summary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ toolName, input }),
+  });
+}
+
 export interface SuggestedReply {
   id: string;
   emailId: string;

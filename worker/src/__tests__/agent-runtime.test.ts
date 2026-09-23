@@ -9,13 +9,17 @@ import { senderIdentities } from "../db/sender-identities.schema";
 import { z } from "zod";
 import {
   buildMailAgentInstructions,
+  countCompletedApprovalActions,
   runMailAgentChat,
   streamMailAgentTurn,
 } from "../agent/mail-agent";
+import { createAgentTools } from "../lib/agent/tools";
 import {
   applyMigrations,
   authFetch,
   cleanDb,
+  createTestEmail,
+  createTestPerson,
   createTestUser,
   getDb,
 } from "./helpers";
@@ -331,6 +335,386 @@ describe("agent session runtime", () => {
 });
 
 describe("agent model loop", () => {
+  it("pauses an approval-gated tool without executing it", async () => {
+    const executions: string[] = [];
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          {
+            type: "tool-call" as const,
+            toolCallId: "crm-approval-1",
+            toolName: "crm_action",
+            input: JSON.stringify({ value: "change" }),
+          },
+          {
+            type: "finish" as const,
+            finishReason: {
+              unified: "tool-calls" as const,
+              raw: "tool-calls",
+            },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+
+    const result = await streamMailAgentTurn({
+      model,
+      messages: [
+        {
+          id: "approval-user",
+          role: "user",
+          parts: [{ type: "text", text: "Make the CRM change" }],
+        },
+      ],
+      tools: {
+        crm_action: tool({
+          inputSchema: z.object({ value: z.string() }),
+          needsApproval: true,
+          execute: async ({ value }) => {
+            executions.push(value);
+            return { success: true };
+          },
+        }),
+      },
+      instructions: "Test instructions",
+    });
+
+    const parts: Array<{ type: string }> = [];
+    for await (const part of result.stream) {
+      parts.push(part as { type: string });
+    }
+    expect(parts.some((part) => part.type === "tool-approval-request")).toBe(
+      true,
+    );
+    expect(executions).toEqual([]);
+  });
+
+  it("executes an approved gated tool and skips a denied one", async () => {
+    const executions: string[] = [];
+    const finalModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: "text-start" as const, id: "approval-result" },
+          {
+            type: "text-delta" as const,
+            id: "approval-result",
+            delta: "Handled.",
+          },
+          { type: "text-end" as const, id: "approval-result" },
+          {
+            type: "finish" as const,
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+    const approvalTool = tool({
+      inputSchema: z.object({ value: z.string() }),
+      needsApproval: true,
+      execute: async ({ value }) => {
+        executions.push(value);
+        return { success: true };
+      },
+    });
+
+    const approved = await streamMailAgentTurn({
+      model: finalModel,
+      messages: [
+        {
+          id: "approved-user",
+          role: "user",
+          parts: [{ type: "text", text: "Do it" }],
+        },
+        {
+          id: "approved-assistant",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-crm_action",
+              toolCallId: "approved-call",
+              state: "approval-responded",
+              input: { value: "approved" },
+              approval: { id: "approval-approved", approved: true },
+            } as any,
+          ],
+        },
+      ],
+      tools: { crm_action: approvalTool },
+      instructions: "Test instructions",
+    });
+    await approved.consumeStream();
+    expect(executions).toEqual(["approved"]);
+
+    executions.length = 0;
+    const denied = await streamMailAgentTurn({
+      model: finalModel,
+      messages: [
+        {
+          id: "denied-user",
+          role: "user",
+          parts: [{ type: "text", text: "Do it" }],
+        },
+        {
+          id: "denied-assistant",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-crm_action",
+              toolCallId: "denied-call",
+              state: "approval-responded",
+              input: { value: "denied" },
+              approval: { id: "approval-denied", approved: false },
+            } as any,
+          ],
+        },
+      ],
+      tools: { crm_action: approvalTool },
+      instructions: "Test instructions",
+    });
+    await denied.consumeStream();
+    expect(executions).toEqual([]);
+  });
+
+  it("fails cleanly when inbox permission is revoked before approval executes", async () => {
+    const member = await createTestUser({
+      id: "approval-revoked-user",
+      role: "member",
+      email: "approval-revoked-user@example.com",
+    });
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(inboxPermissions).values({
+      userId: member.userId,
+      email: "approval@example.com",
+      createdAt: now,
+      createdBy: null,
+    });
+    const person = await createTestPerson({
+      id: "approval-revoked-person",
+      email: "customer@example.net",
+    });
+    await createTestEmail({
+      id: "approval-revoked-email",
+      personId: person.id,
+      recipient: "approval@example.com",
+      messageId: "approval-revoked@example.net",
+    });
+
+    const agentTools = createAgentTools({
+      db,
+      user: {
+        id: member.userId,
+        name: "Approval Member",
+        email: "approval-revoked-user@example.com",
+        role: "member",
+      },
+    });
+    const requestModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          {
+            type: "tool-call" as const,
+            toolCallId: "revoked-call",
+            toolName: "cancel_sequence_enrollment",
+            input: JSON.stringify({ personId: person.id }),
+          },
+          {
+            type: "finish" as const,
+            finishReason: {
+              unified: "tool-calls" as const,
+              raw: "tool-calls",
+            },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+
+    const pending = await streamMailAgentTurn({
+      model: requestModel,
+      messages: [
+        {
+          id: "revoked-user-message",
+          role: "user",
+          parts: [{ type: "text", text: "Cancel the sequence" }],
+        },
+      ],
+      tools: agentTools,
+      instructions: "Test instructions",
+    });
+    let approvalId: string | null = null;
+    for await (const part of pending.stream) {
+      if (part.type === "tool-approval-request") {
+        approvalId = part.approvalId;
+      }
+    }
+    expect(approvalId).toBeTruthy();
+
+    await db.delete(inboxPermissions);
+
+    const finalModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: "text-start" as const, id: "revoked-result" },
+          {
+            type: "text-delta" as const,
+            id: "revoked-result",
+            delta: "The action could not be completed.",
+          },
+          { type: "text-end" as const, id: "revoked-result" },
+          {
+            type: "finish" as const,
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+    const resumed = await streamMailAgentTurn({
+      model: finalModel,
+      messages: [
+        {
+          id: "revoked-user-message",
+          role: "user",
+          parts: [{ type: "text", text: "Cancel the sequence" }],
+        },
+        {
+          id: "revoked-assistant-message",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-cancel_sequence_enrollment",
+              toolCallId: "revoked-call",
+              state: "approval-responded",
+              input: { personId: person.id },
+              approval: { id: approvalId!, approved: true },
+            } as any,
+          ],
+        },
+      ],
+      tools: agentTools,
+      instructions: "Test instructions",
+    });
+
+    const resumedParts: any[] = [];
+    for await (const part of resumed.stream) resumedParts.push(part);
+    expect(
+      resumedParts.some(
+        (part) =>
+          part.type === "tool-error" &&
+          /not found|visible|permission/i.test(String(part.error)),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns the five-action guard error when an approved sixth call resumes", async () => {
+    const guardedTools = createAgentTools({
+      db: getDb(),
+      user: {
+        id: "guard-user",
+        name: "Guard User",
+        email: "guard@example.com",
+        role: "admin",
+      },
+      gatedCallsAlready: 5,
+    });
+    const finalModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: "text-start" as const, id: "guard-result" },
+          {
+            type: "text-delta" as const,
+            id: "guard-result",
+            delta: "I need to ask before doing more.",
+          },
+          { type: "text-end" as const, id: "guard-result" },
+          {
+            type: "finish" as const,
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+
+    const result = await streamMailAgentTurn({
+      model: finalModel,
+      messages: [
+        {
+          id: "guard-user-message",
+          role: "user",
+          parts: [{ type: "text", text: "Do six changes" }],
+        },
+        {
+          id: "guard-assistant-message",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-cancel_sequence_enrollment",
+              toolCallId: "guard-sixth",
+              state: "approval-responded",
+              input: { personId: "person-6" },
+              approval: { id: "approval-sixth", approved: true },
+            } as any,
+          ],
+        },
+      ],
+      tools: guardedTools,
+      instructions: "Test instructions",
+    });
+
+    const parts: any[] = [];
+    for await (const part of result.stream) parts.push(part);
+    const toolResult = parts.find(
+      (part) =>
+        part.type === "tool-result" && part.toolCallId === "guard-sixth",
+    );
+    expect(toolResult?.output).toMatchObject({
+      success: false,
+      error: expect.stringMatching(/5 CRM actions.*Ask the user/i),
+    });
+  });
+
+  it("counts completed gated calls in the current user turn for the guard", () => {
+    expect(
+      countCompletedApprovalActions([
+        {
+          id: "guard-user",
+          role: "user",
+          parts: [{ type: "text", text: "Make changes" }],
+        },
+        {
+          id: "guard-assistant",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool-add_to_list",
+              toolCallId: "guard-1",
+              state: "output-available",
+              input: {},
+              output: { success: true },
+            } as any,
+            {
+              type: "tool-link_customer",
+              toolCallId: "guard-2",
+              state: "output-error",
+              input: {},
+              errorText: "permission revoked",
+            } as any,
+            {
+              type: "tool-assign_conversation",
+              toolCallId: "guard-3",
+              state: "output-denied",
+              input: {},
+            } as any,
+          ],
+        },
+      ]),
+    ).toBe(2);
+  });
+
   it("executes a read tool then continues to the model answer", async () => {
     const reads: string[] = [];
     let call = 0;
