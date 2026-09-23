@@ -241,3 +241,99 @@ describe("AdminInboxTable — Gmail source mapping", () => {
     ).toBe(true);
   });
 });
+
+describe("AdminInboxTable — re-reading after a mailbox changed", () => {
+  it("re-reads both lists when the page signals a change", async () => {
+    // The section above this table disconnects a mailbox in place, which also
+    // unmaps the inboxes that read from it. Without the re-read the operator
+    // keeps being offered a mailbox that no longer exists.
+    seed();
+    const { rerender } = render(<AdminInboxTable gmailVersion={0} />);
+    await sourceSelectFor(SALES);
+    expect(mAccounts).toHaveBeenCalledTimes(1);
+    expect(mInboxes).toHaveBeenCalledTimes(1);
+
+    mAccounts.mockResolvedValue([ACCT_OPS]);
+    mInboxes.mockResolvedValue([
+      inbox({ email: BILLING }),
+      inbox({ email: SUPPORT }),
+      inbox({ email: SALES }),
+    ]);
+    rerender(<AdminInboxTable gmailVersion={1} />);
+
+    await waitFor(() => expect(mAccounts).toHaveBeenCalledTimes(2));
+    expect(mInboxes).toHaveBeenCalledTimes(2);
+    // The disconnected mailbox is gone from the options, and the row that
+    // pointed at it now reads Cloudflare rather than a dangling id.
+    await waitFor(async () =>
+      expect(selectedLabel(await sourceSelectFor(SALES))).toBe("Cloudflare"),
+    );
+    const labels = Array.from((await sourceSelectFor(SUPPORT)).options).map(
+      (o) => o.textContent?.trim(),
+    );
+    expect(labels).not.toContain(ACCT_DESK.emailAddress);
+    expect(labels).toContain(ACCT_OPS.emailAddress);
+  });
+
+  it("does not re-read the inboxes on first mount", async () => {
+    // The initial load already fetched them; a second round trip on every
+    // mount is the cost this signal exists to avoid.
+    seed();
+    render(<AdminInboxTable gmailVersion={0} />);
+    await sourceSelectFor(SALES);
+    expect(mInboxes).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * "The mailbox is gone" and "we could not ask" look identical on a closed
+ * <select>, and the first one talks the operator into unmapping a working
+ * inbox. They must not share a label.
+ */
+describe("AdminInboxTable — a mapping we could not verify", () => {
+  it("does not claim a mapped mailbox is disconnected when the list failed to load", async () => {
+    mInboxes.mockResolvedValue([
+      inbox({ email: SALES, source: "gmail", gmailAccountId: ACCT_DESK.id }),
+    ]);
+    mAccounts.mockRejectedValue(new Error("API error: 500"));
+    render(<AdminInboxTable />);
+
+    const select = await sourceSelectFor(SALES);
+    // The visible label — the only text on a closed select — must not assert
+    // a disconnection nobody observed.
+    expect(selectedLabel(select)).not.toMatch(/no longer connected/i);
+    expect(selectedLabel(select)).toMatch(/could ?n.t check/i);
+    // And the control is locked, because switching it is a real PATCH that
+    // would unmap an inbox that is probably fine.
+    expect(select.disabled).toBe(true);
+  });
+
+  it("still says a mapping is orphaned when the list loaded without it", async () => {
+    // The list came back, and this mapping's mailbox is genuinely not in it.
+    mInboxes.mockResolvedValue([
+      inbox({ email: SALES, source: "gmail", gmailAccountId: "acct_gone" }),
+    ]);
+    mAccounts.mockResolvedValue([ACCT_OPS]);
+    render(<AdminInboxTable />);
+
+    const select = await sourceSelectFor(SALES);
+    expect(selectedLabel(select)).toMatch(/no longer connected/i);
+    expect(selectedLabel(select)).not.toMatch(/could ?n.t check/i);
+    // This one the operator can and should act on.
+    expect(select.disabled).toBe(false);
+  });
+
+  it("does not lock an unmapped row when the list failed to load", async () => {
+    // Nothing is at stake on a Cloudflare row: there is no mapping to lose.
+    mInboxes.mockResolvedValue([inbox({ email: BILLING })]);
+    mAccounts.mockRejectedValue(new Error("API error: 500"));
+    render(<AdminInboxTable />);
+
+    const select = await sourceSelectFor(BILLING);
+    expect(selectedLabel(select)).toBe("Cloudflare");
+    const labels = Array.from(select.options).map((o) => o.textContent?.trim());
+    expect(
+      labels.some((l) => /could ?n.t load connected mailboxes/i.test(l ?? "")),
+    ).toBe(true);
+  });
+});
