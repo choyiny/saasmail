@@ -24,12 +24,23 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+interface AdminInboxTableProps {
+  /**
+   * Bumped by the page when a Google mailbox is connected or disconnected.
+   * A change re-reads both lists: the mailbox options here, and the inboxes
+   * themselves, since disconnecting unmaps the inboxes that read from it.
+   */
+  gmailVersion?: number;
+}
+
 /**
  * Admin "Inboxes" table. Real table layout with bulk select + bulk
  * actions, inline display-name editing (blur-to-save), mode toggle
  * per row, and inline member-assignment chips.
  */
-export default function AdminInboxTable() {
+export default function AdminInboxTable({
+  gmailVersion = 0,
+}: AdminInboxTableProps = {}) {
   const [inboxes, setInboxes] = useState<AdminInbox[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,12 +76,19 @@ export default function AdminInboxTable() {
   }, []);
 
   // Separate from the load above: a Gmail outage must not stop the table
-  // rendering, it just means no mailbox can be picked right now.
+  // rendering, it just means no mailbox can be picked right now. Re-runs when
+  // the page signals that the connected set changed, so the options here do
+  // not go on offering a mailbox that was just disconnected.
   useEffect(() => {
     let cancelled = false;
     fetchGmailAccounts()
       .then((rows) => {
-        if (!cancelled) setGmailAccounts(rows);
+        if (!cancelled) {
+          setGmailAccounts(rows);
+          // A later success has to clear an earlier failure, or one blip
+          // would lock every mapped row until a reload.
+          setGmailAccountsFailed(false);
+        }
       })
       .catch(() => {
         if (!cancelled) setGmailAccountsFailed(true);
@@ -78,7 +96,24 @@ export default function AdminInboxTable() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [gmailVersion]);
+
+  // A disconnect unmaps inboxes server-side, so the rows themselves are stale
+  // too. Only on a change, never on first mount — the load above covers that.
+  useEffect(() => {
+    if (gmailVersion === 0) return;
+    let cancelled = false;
+    fetchAdminInboxes()
+      .then((rows) => {
+        if (!cancelled) setInboxes(rows);
+      })
+      .catch(() => {
+        /* The table keeps what it has; the next action reports its own error. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gmailVersion]);
 
   const members = useMemo(
     () => users.filter((u) => u.role !== "admin"),
@@ -790,10 +825,17 @@ function SourceSelect({
 }: SourceSelectProps) {
   const mappedId =
     inbox.source === "gmail" ? (inbox.gmailAccountId ?? null) : null;
-  // A mapping can outlive the mailbox it points at (disconnected, or the list
-  // failed to load). Say so rather than silently snapping back to Cloudflare.
+  // A mapping can outlive the mailbox it points at, but "the mailbox is gone"
+  // and "we could not ask" are different facts and must not share a label.
+  // The option text is the only thing visible on a closed <select>, so
+  // labelling an unchecked mapping "no longer connected" invites the operator
+  // to unmap a working inbox because of a network blip — and switching back
+  // to Cloudflare is a real PATCH that really unmaps it.
+  const unverifiable = mappedId !== null && accountsFailed;
   const orphaned =
-    mappedId !== null && !accounts.some((a) => a.id === mappedId);
+    mappedId !== null &&
+    !accountsFailed &&
+    !accounts.some((a) => a.id === mappedId);
   const value = mappedId ?? "cloudflare";
 
   return (
@@ -801,6 +843,10 @@ function SourceSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.currentTarget.value)}
+        // A failed load leaves `accounts` empty and `orphaned` false, so an
+        // unverifiable mapping is locked by the same clause that locks a row
+        // with nothing to pick: every choice here is a real PATCH, and while
+        // the list is unknown we cannot tell a live mapping from a dead one.
         disabled={saving || (accounts.length === 0 && !orphaned)}
         aria-label={`Mail source for ${inbox.email}`}
         aria-invalid={error ? true : undefined}
@@ -814,6 +860,11 @@ function SourceSelect({
         )}
       >
         <option value="cloudflare">Cloudflare</option>
+        {unverifiable && mappedId !== null && (
+          <option value={mappedId}>
+            Couldn&apos;t check — still mapped to {mappedId}
+          </option>
+        )}
         {orphaned && mappedId !== null && (
           <option value={mappedId}>Mailbox no longer connected</option>
         )}
@@ -831,9 +882,13 @@ function SourceSelect({
         )}
       </select>
       {error && (
+        // The server's rejection runs to ~220 characters and names the exact
+        // Gmail setting to change, so it has to be read, not squinted at: it
+        // gets body-sized text and a width of its own rather than the 170px
+        // the column is sized to.
         <div
           data-testid="inbox-source-error"
-          className="mt-1 text-[10px] font-light leading-snug text-destructive"
+          className="mt-1 w-[260px] max-w-[60vw] rounded-[6px] bg-destructive/10 px-2 py-1.5 text-xs font-light leading-relaxed text-destructive"
         >
           {error}
         </div>

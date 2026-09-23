@@ -82,6 +82,14 @@ function relativeTime(unixSeconds: number): string {
   return plural(Math.round(hours / 24), "day");
 }
 
+interface ConnectedMailboxesProps {
+  /**
+   * Called when the set of connected mailboxes has changed, so the rest of
+   * the page can re-read it. Optional: this section works standalone.
+   */
+  onMailboxesChanged?: () => void;
+}
+
 /**
  * Admin section listing the Google mailboxes connected over OAuth, with
  * their sync health, plus connect/disconnect.
@@ -90,7 +98,9 @@ function relativeTime(unixSeconds: number): string {
  * it is stated plainly rather than reassuringly: a broken grant means the
  * mailbox has stopped syncing, and a history gap means mail is gone for good.
  */
-export default function ConnectedMailboxes() {
+export default function ConnectedMailboxes({
+  onMailboxesChanged,
+}: ConnectedMailboxesProps = {}) {
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -210,6 +220,9 @@ export default function ConnectedMailboxes() {
       await disconnectGmailAccount(account.id);
       setAccounts((prev) => prev.filter((a) => a.id !== account.id));
       setConfirmingId(null);
+      // Disconnecting also unmaps every inbox that read from this mailbox,
+      // server-side, so the table below is now out of date in two ways.
+      onMailboxesChanged?.();
     } catch (err) {
       setDisconnectError(
         err instanceof Error

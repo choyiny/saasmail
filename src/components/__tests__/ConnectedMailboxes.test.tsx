@@ -203,6 +203,58 @@ describe("ConnectedMailboxes", () => {
     expect(screen.getByText("first@example.com")).toBeTruthy();
   });
 
+  it("tells the page the mailbox set changed, only once the disconnect succeeded", async () => {
+    // Disconnecting also unmaps inboxes server-side, so the rest of the page
+    // is stale afterwards. Firing before the call returns — or when it fails
+    // — would make the table re-read a change that never happened.
+    const onMailboxesChanged = vi.fn();
+    mFetch.mockResolvedValue([account()]);
+    render(
+      <MemoryRouter initialEntries={["/inboxes"]}>
+        <Routes>
+          <Route
+            path="/inboxes"
+            element={
+              <ConnectedMailboxes onMailboxesChanged={onMailboxesChanged} />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByTestId("gmail-disconnect-acct_1"));
+    expect(onMailboxesChanged).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("gmail-confirm-disconnect-acct_1"));
+    await waitFor(() => expect(onMailboxesChanged).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not claim a change when the disconnect failed", async () => {
+    const onMailboxesChanged = vi.fn();
+    mFetch.mockResolvedValue([account()]);
+    mDisconnect.mockRejectedValue(new Error("API error: 500"));
+    render(
+      <MemoryRouter initialEntries={["/inboxes"]}>
+        <Routes>
+          <Route
+            path="/inboxes"
+            element={
+              <ConnectedMailboxes onMailboxesChanged={onMailboxesChanged} />
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByTestId("gmail-disconnect-acct_1"));
+    fireEvent.click(screen.getByTestId("gmail-confirm-disconnect-acct_1"));
+
+    await waitFor(() => expect(mDisconnect).toHaveBeenCalledTimes(1));
+    expect(onMailboxesChanged).not.toHaveBeenCalled();
+    // And the row is still there, because nothing was disconnected.
+    expect(screen.getByTestId("gmail-account-acct_1")).toBeTruthy();
+  });
+
   it("explains what connecting does when no mailbox is connected", async () => {
     mFetch.mockResolvedValue([]);
     renderAt();
