@@ -1,5 +1,14 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Loader2, Mail, Plus, RefreshCw, X } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  Mail,
+  Plus,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import {
   disconnectGmailAccount,
   fetchGmailAccounts,
@@ -43,6 +52,28 @@ export default function ConnectedMailboxes() {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+
+  // The OAuth callback redirects back here as /inboxes?gmail=connected|error.
+  // Read the outcome into state, then strip the param, so the banner survives
+  // for this visit but a refresh does not resurrect a stale one.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [connectResult, setConnectResult] = useState<
+    "connected" | "error" | null
+  >(null);
+
+  useEffect(() => {
+    const outcome = searchParams.get("gmail");
+    if (outcome !== "connected" && outcome !== "error") return;
+    setConnectResult(outcome);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("gmail");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +137,37 @@ export default function ConnectedMailboxes() {
           Connect a Google mailbox
         </a>
       </div>
+
+      {connectResult === "error" && (
+        <div
+          data-testid="gmail-connect-error"
+          className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
+        >
+          <AlertTriangle size={14} className="mt-px shrink-0" />
+          <span>
+            <span className="font-medium">
+              Couldn&apos;t connect that mailbox.
+            </span>{" "}
+            The connection did not complete, so nothing was added — try again.
+            The reason is in the server log; it is deliberately not shown here,
+            because the underlying error can carry the access token.
+          </span>
+        </div>
+      )}
+
+      {connectResult === "connected" && (
+        <div
+          data-testid="gmail-connect-success"
+          className="flex gap-2 rounded-[8px] bg-emerald-500/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-400"
+        >
+          <CheckCircle2 size={14} className="mt-px shrink-0" />
+          <span>
+            <span className="font-medium">Mailbox connected.</span> It is in the
+            list below. The first sync runs within 15 minutes, and only mail
+            that arrives from now on is pulled in.
+          </span>
+        </div>
+      )}
 
       {loading && (
         <p className="text-sm font-light text-text-tertiary">Loading…</p>
