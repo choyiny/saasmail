@@ -5,6 +5,8 @@ import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
+import { resolveCustomerScope } from "../lib/customers";
+import { getPersonScoped } from "../lib/queries/people";
 import { json200Response } from "../lib/helpers";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { isInboxAllowed } from "../lib/inbox-permissions";
@@ -146,6 +148,7 @@ const listPersonEmailsRoute = createRoute({
         .openapi({ description: "Filter by recipient address" }),
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(50),
+      allAddresses: z.enum(["true", "false"]).optional(),
     }),
   },
   responses: {
@@ -159,13 +162,21 @@ const listPersonEmailsRoute = createRoute({
 emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
   const db = c.get("db");
   const { personId } = c.req.valid("param");
-  const { q, recipient, page, limit } = c.req.valid("query");
+  const { q, recipient, page, limit, allAddresses } = c.req.valid("query");
   const allowed = c.get("allowedInboxes")!;
+  let customerId: string | undefined;
+  if (
+    allAddresses === "true" &&
+    (await getPersonScoped(db, personId, allowed))
+  ) {
+    const scope = await resolveCustomerScope(db, personId);
+    customerId = scope.customerId ?? undefined;
+  }
 
   const result = await listPersonEmails(
     db,
     personId,
-    { q, recipient, page, limit },
+    { q, recipient, page, limit, customerId },
     allowed,
   );
 

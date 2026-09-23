@@ -13,6 +13,7 @@ import { sequences } from "../db/sequences.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { users } from "../db/auth.schema";
 import { emails } from "../db/emails.schema";
+import { customerPeople, customers } from "../db/customers.schema";
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import {
@@ -128,6 +129,7 @@ describe("MCP tools", () => {
         [
           "delete_email",
           "enroll_sequence",
+          "get_customer",
           "get_person",
           "list_emails",
           "list_messages",
@@ -202,6 +204,51 @@ describe("MCP tools", () => {
       });
       expect(out.isError).toBe(true);
       expect(out.text).toContain("Not found");
+    });
+  });
+
+  describe("get_customer", () => {
+    it("is read-only and returns only linked people visible to the caller", async () => {
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      await db.insert(customers).values({
+        id: "mcp-customer",
+        displayName: "Acme",
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.insert(customerPeople).values([
+        {
+          customerId: "mcp-customer",
+          personId: "p-mine",
+          linkedBy: null,
+          linkedAt: now,
+        },
+        {
+          customerId: "mcp-customer",
+          personId: "p-other",
+          linkedBy: null,
+          linkedAt: now,
+        },
+      ]);
+
+      const member = await callTool(memberToken, "get_customer", {
+        personId: "p-mine",
+      });
+      expect(member.isError, member.text).toBe(false);
+      expect(member.data.customer.displayName).toBe("Acme");
+      expect(member.data.customer.people.map((p: any) => p.id)).toEqual([
+        "p-mine",
+      ]);
+
+      const admin = await callTool(adminToken, "get_customer", {
+        personId: "p-mine",
+      });
+      expect(admin.data.customer.people.map((p: any) => p.id).sort()).toEqual([
+        "p-mine",
+        "p-other",
+      ]);
     });
   });
 

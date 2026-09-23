@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ShieldBan } from "lucide-react";
+import { Link2, ShieldBan, X } from "lucide-react";
 import {
   fetchPersonEmails,
   markEmailRead,
@@ -9,6 +9,12 @@ import {
   fetchPersonEnrollment,
   fetchStats,
   addBlock,
+  fetchCustomerByPerson,
+  fetchPeople,
+  linkCustomerPeople,
+  unlinkCustomerPerson,
+  type Customer,
+  type Person,
   type GroupedPerson,
   type Email,
   type PersonEnrollmentInfo,
@@ -148,6 +154,12 @@ export default function PersonDetail({
     Array<{ email: string; displayName: string | null }>
   >([]);
   const [activeInbox, setActiveInbox] = useState<string | null>(null);
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [allAddresses, setAllAddresses] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkQuery, setLinkQuery] = useState("");
+  const [linkResults, setLinkResults] = useState<Person[]>([]);
+  const [linking, setLinking] = useState(false);
 
   async function handleBlock(type: "email" | "domain") {
     const email = person.email.toLowerCase();
@@ -184,28 +196,46 @@ export default function PersonDetail({
     }
   }
 
-  function refetchEmails() {
-    fetchPersonEmails(person.id).then((res) => {
-      setEmails(res.emails);
-      setInboxModeMap(
-        new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
-      );
+  async function refetchEmails(useAllAddresses = allAddresses) {
+    const res = await fetchPersonEmails(person.id, {
+      allAddresses: useAllAddresses,
     });
+    setEmails(res.emails);
+    setInboxModeMap(new Map(res.inboxes.map((i) => [i.email, i.displayMode])));
   }
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setReplyToEmailId(null);
     setExpandedOlder({});
     setActiveInbox(null);
-    fetchPersonEmails(person.id)
-      .then((res) => {
+    setLinkOpen(false);
+    setLinkQuery("");
+
+    void (async () => {
+      try {
+        const identity = await fetchCustomerByPerson(person.id);
+        if (cancelled) return;
+        setCustomer(identity.customer);
+        const useAllAddresses = identity.customer !== null;
+        setAllAddresses(useAllAddresses);
+        const res = await fetchPersonEmails(person.id, {
+          allAddresses: useAllAddresses,
+        });
+        if (cancelled) return;
         setEmails(res.emails);
         setInboxModeMap(
           new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
         );
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [person.id]);
 
   useEffect(() => {
@@ -221,6 +251,63 @@ export default function PersonDetail({
       setSenderIdentities(stats.senderIdentities ?? []);
     });
   }, []);
+
+  useEffect(() => {
+    if (!linkOpen) {
+      setLinkResults([]);
+      return;
+    }
+    let cancelled = false;
+    const linkedIds = new Set(customer?.people.map((entry) => entry.id) ?? []);
+    linkedIds.add(person.id);
+    fetchPeople({ q: linkQuery.trim() || undefined, limit: 20 })
+      .then((result) => {
+        if (!cancelled) {
+          setLinkResults(
+            result.data.filter((entry) => !linkedIds.has(entry.id)),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLinkResults([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer, linkOpen, linkQuery, person.id]);
+
+  async function handleLink(otherPersonId: string) {
+    setLinking(true);
+    try {
+      const next = await linkCustomerPeople(person.id, otherPersonId);
+      setCustomer(next);
+      setAllAddresses(true);
+      setLinkOpen(false);
+      setLinkQuery("");
+      await refetchEmails(true);
+    } finally {
+      setLinking(false);
+    }
+  }
+
+  async function handleUnlink(personId: string) {
+    await unlinkCustomerPerson(personId);
+    const identity = await fetchCustomerByPerson(person.id);
+    setCustomer(identity.customer);
+    const useAllAddresses = identity.customer !== null;
+    setAllAddresses(useAllAddresses);
+    await refetchEmails(useAllAddresses);
+  }
+
+  async function handleAllAddressesChange(value: boolean) {
+    setAllAddresses(value);
+    setLoading(true);
+    try {
+      await refetchEmails(value);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function refreshEnrollment() {
     fetchPersonEnrollment(person.id).then(setEnrollmentInfo);
@@ -425,6 +512,10 @@ export default function PersonDetail({
     inboxGroups.find((g) => g.inbox === activeInbox) ?? inboxGroups[0] ?? null;
   const latestReceived =
     activeGroup?.emails.find((email) => email.type === "received") ?? null;
+  const activePersonEmail =
+    latestReceived?.fromAddress ??
+    activeGroup?.emails.find((email) => email.type === "sent")?.toAddress ??
+    person.email;
 
   const replyInboxForEmail = (email: Email) => {
     const ib = inboxOf(email);
@@ -509,6 +600,103 @@ export default function PersonDetail({
             </DropdownMenu>
           </div>
         </div>
+
+        <div
+          data-testid="linked-addresses"
+          className="mt-2 flex flex-wrap items-center gap-1.5"
+        >
+          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+            Linked addresses
+          </span>
+          {(
+            customer?.people ?? [
+              { id: person.id, email: person.email, name: person.name },
+            ]
+          ).map((entry) => (
+            <span
+              key={entry.id}
+              className="inline-flex items-center gap-1 rounded-full bg-bg-muted px-2 py-1 text-[11px] text-text-secondary"
+              title={entry.name ?? entry.email}
+            >
+              {entry.email}
+              {customer && (
+                <button
+                  type="button"
+                  data-testid={`unlink-address-${entry.id}`}
+                  aria-label={`Unlink ${entry.email}`}
+                  onClick={() => void handleUnlink(entry.id)}
+                  className="rounded-full p-0.5 hover:bg-border"
+                >
+                  <X size={10} />
+                </button>
+              )}
+            </span>
+          ))}
+          <button
+            type="button"
+            data-testid="link-address-button"
+            onClick={() => setLinkOpen((open) => !open)}
+            className="inline-flex items-center gap-1 rounded-[6px] border border-border bg-card px-2 py-1 text-[11px] font-medium text-text-secondary hover:bg-bg-muted"
+          >
+            <Link2 size={11} />
+            Link
+          </button>
+          {customer && (
+            <label className="ml-1 inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-medium text-text-secondary">
+              <input
+                data-testid="all-addresses-toggle"
+                type="checkbox"
+                checked={allAddresses}
+                onChange={(event) =>
+                  void handleAllAddressesChange(event.target.checked)
+                }
+              />
+              All addresses
+            </label>
+          )}
+        </div>
+
+        {linkOpen && (
+          <div
+            data-testid="link-address-picker"
+            className="mt-2 rounded-[8px] border border-border bg-bg-subtle p-2"
+          >
+            <input
+              autoFocus
+              aria-label="Search people to link"
+              value={linkQuery}
+              onChange={(event) => setLinkQuery(event.target.value)}
+              placeholder="Search people by name or email"
+              className="w-full rounded-[6px] border border-border bg-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-text-tertiary"
+            />
+            <div className="mt-1 max-h-36 overflow-y-auto">
+              {linkResults.map((candidate) => (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  disabled={linking}
+                  data-testid={`link-candidate-${candidate.id}`}
+                  onClick={() => void handleLink(candidate.id)}
+                  className="flex w-full items-center justify-between rounded-[5px] px-2 py-1.5 text-left text-xs hover:bg-bg-muted disabled:opacity-50"
+                >
+                  <span className="truncate text-text-primary">
+                    {candidate.name || candidate.email}
+                  </span>
+                  {candidate.name && (
+                    <span className="ml-2 truncate text-text-tertiary">
+                      {candidate.email}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {linkResults.length === 0 && (
+                <p className="px-2 py-1.5 text-[11px] text-text-tertiary">
+                  No people found.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Inbox tabs — short label (local-part only), counts + mode dot.
@@ -591,7 +779,7 @@ export default function PersonDetail({
                 <ChatInboxSection
                   key={activeGroup.inbox}
                   group={activeGroup}
-                  personEmail={person.email}
+                  personEmail={activePersonEmail}
                   internalDomains={internalDomains}
                   onOpenHtml={setHtmlPreviewEmail}
                   onMarkRead={handleMarkRead}
@@ -606,7 +794,7 @@ export default function PersonDetail({
               <ThreadPaneScroller key={activeGroup.inbox}>
                 <ThreadInboxSection
                   group={activeGroup}
-                  personEmail={person.email}
+                  personEmail={activePersonEmail}
                   internalDomains={internalDomains}
                   isOlderExpanded={!!expandedOlder[activeGroup.inbox]}
                   onToggleOlder={() =>

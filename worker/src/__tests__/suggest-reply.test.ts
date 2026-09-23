@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { MockLanguageModelV4 } from "ai/test";
 import { emails } from "../db/emails.schema";
+import { customerPeople, customers } from "../db/customers.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { suggestedReplies } from "../db/suggested-replies.schema";
 import { runSuggestedReply } from "../lib/agent/suggest-reply";
@@ -209,6 +210,65 @@ describe("suggested reply consumer", () => {
     expect(model.doGenerateCalls).toHaveLength(2);
     expect(getSpy).toHaveBeenCalled();
     getSpy.mockRestore();
+  });
+
+  it("uses linked-address history but keeps it scoped to the inbound inbox", async () => {
+    const { emailId, inbox } = await seed("linked-history-email");
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await createTestPerson({
+      id: "suggest-alias",
+      email: "customer.alias@example.com",
+    });
+    await createTestEmail({
+      id: "suggest-alias-allowed",
+      personId: "suggest-alias",
+      recipient: inbox,
+      subject: "Earlier linked question",
+      bodyText: "linked-history-visible-token",
+      messageId: "suggest-alias-allowed@example.test",
+    });
+    await createTestEmail({
+      id: "suggest-alias-denied",
+      personId: "suggest-alias",
+      recipient: "private@example.com",
+      subject: "Private linked question",
+      bodyText: "linked-history-denied-token",
+      messageId: "suggest-alias-denied@example.test",
+    });
+    await db.insert(customers).values({
+      id: "suggest-customer",
+      displayName: null,
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(customerPeople).values([
+      {
+        customerId: "suggest-customer",
+        personId: "suggest-person",
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "suggest-customer",
+        personId: "suggest-alias",
+        linkedBy: null,
+        linkedAt: now,
+      },
+    ]);
+
+    const model = textModel(["SAFE", "A linked-context reply."]);
+    await runSuggestedReply(
+      db,
+      env as unknown as CloudflareBindings,
+      emailId,
+      model,
+    );
+
+    const generationCall = JSON.stringify(model.doGenerateCalls[1]);
+    expect(generationCall).toContain("linked-history-visible-token");
+    expect(generationCall).not.toContain("linked-history-denied-token");
   });
 
   it("is idempotent on redelivery", async () => {

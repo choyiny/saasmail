@@ -21,6 +21,8 @@ import {
   setUserState,
 } from "../messages/state";
 import { queryMessages, type MessageFolder } from "../messages/query";
+import { resolveCustomerScope } from "../customers";
+import { getPersonScoped } from "../queries/people";
 import {
   parseMessageRef,
   serializeMessageRef,
@@ -277,8 +279,17 @@ export function createAgentTools({ db, user }: AgentToolContext): ToolSet {
       }),
       execute: async (input) => {
         const allowed = await allowedForCall();
+        const visiblePerson = await getPersonScoped(
+          db,
+          input.personId,
+          allowed,
+        );
+        const scope = visiblePerson
+          ? await resolveCustomerScope(db, input.personId)
+          : { customerId: null };
         const page = await queryMessages(db, allowed, {
-          personId: input.personId,
+          personId: scope.customerId ? undefined : input.personId,
+          customerId: scope.customerId ?? undefined,
           inboxes: input.inbox ? [input.inbox] : undefined,
           cursor: input.cursor,
           limit: input.limit ?? 50,

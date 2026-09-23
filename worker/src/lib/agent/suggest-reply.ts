@@ -11,6 +11,7 @@ import { users } from "../../db/auth.schema";
 import { htmlToText } from "../html-to-text";
 import { MAX_ADMIN_FANOUT, computeFanoutTargets } from "../notification-fanout";
 import { queryMessages } from "../messages/query";
+import { resolveCustomerScope } from "../customers";
 import { selectModel, type AgentModelEnv } from "./provider";
 
 const BODY_LIMIT = 4000;
@@ -225,9 +226,11 @@ export async function runSuggestedReply(
     occurredAt: number;
   }> = [];
   if (email.personId) {
+    const customerScope = await resolveCustomerScope(db, email.personId);
     const historyPage = await queryMessages(db, scoped, {
       inboxes: [email.inbox],
-      personId: email.personId,
+      personId: customerScope.customerId ? undefined : email.personId,
+      customerId: customerScope.customerId ?? undefined,
       limit: 11,
       order: "desc",
     });

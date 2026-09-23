@@ -44,6 +44,7 @@ export type PersonEmailRow = {
 export type ListPersonEmailsOptions = {
   q?: string;
   recipient?: string;
+  customerId?: string;
   page: number;
   limit: number;
 };
@@ -125,12 +126,13 @@ export async function listPersonEmails(
   opts: ListPersonEmailsOptions,
   allowed: AllowedInboxes,
 ): Promise<ListPersonEmailsResult> {
-  const { q, recipient, page, limit } = opts;
+  const { q, recipient, customerId, page, limit } = opts;
   const requested = Math.max(Math.floor(limit), 0);
   if (requested === 0) return { emails: [], inboxes: [] };
 
   const pageResult = await queryMessages(db, allowed, {
-    personId,
+    personId: customerId ? undefined : personId,
+    customerId,
     inboxes: recipient !== undefined ? [recipient] : undefined,
     search: q,
     searchMode: "subject",

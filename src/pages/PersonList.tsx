@@ -378,6 +378,15 @@ export default function PersonList({
                               </span>
                             )}
                           </span>
+                          {person.linkedCount > 0 && (
+                            <span
+                              data-testid="linked-count-badge"
+                              className="ml-1.5 shrink-0 rounded-full bg-bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-text-secondary"
+                              title={`${person.linkedCount} linked address${person.linkedCount === 1 ? "" : "es"}`}
+                            >
+                              +{person.linkedCount}
+                            </span>
+                          )}
                           <span className="shrink-0 text-[11px] font-light text-text-tertiary">
                             {formatTime(person.lastEmailAt)}
                           </span>

@@ -38,6 +38,7 @@ import { agentSessions } from "./agent-sessions.schema";
 import { suggestedReplies } from "./suggested-replies.schema";
 import { rules } from "./rules.schema";
 import { autoReplyLog } from "./auto-reply-log.schema";
+import { customerPeople, customers } from "./customers.schema";
 
 export const schema = {
   ...authSchema,
@@ -80,4 +81,6 @@ export const schema = {
   suggestedReplies,
   rules,
   autoReplyLog,
+  customers,
+  customerPeople,
 } as const;

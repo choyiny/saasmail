@@ -51,6 +51,9 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS oauth_consents (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, scopes TEXT NOT NULL, created_at INTEGER, updated_at INTEGER)`,
     `CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT, last_email_at INTEGER NOT NULL, unread_count INTEGER NOT NULL DEFAULT 0, total_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS people_last_email_at_idx ON people(last_email_at)`,
+    `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, display_name TEXT, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS customer_people (customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE, person_id TEXT NOT NULL UNIQUE REFERENCES people(id) ON DELETE CASCADE, linked_by TEXT REFERENCES users(id) ON DELETE SET NULL, linked_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS customer_people_customer_idx ON customer_people(customer_id)`,
     `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT UNIQUE, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
@@ -417,6 +420,8 @@ export async function cleanDb() {
   await db.exec(`
     DELETE FROM auto_reply_log;
     DELETE FROM rules;
+    DELETE FROM customer_people;
+    DELETE FROM customers;
     DELETE FROM inbox_conversation_state;
     DELETE FROM message_mailboxes;
     DELETE FROM mailboxes;

@@ -35,6 +35,7 @@ export class InvalidQueryError extends Error {
 export interface MessageQuery {
   inboxes?: string[];
   personId?: string;
+  customerId?: string;
   conversationId?: string;
   messageRef?: MessageRef;
   direction?: "inbound" | "outbound";
@@ -119,6 +120,14 @@ function explicitInboxScope(column: SQL, inboxes: string[] | undefined): SQL {
 
 function personScope(column: SQL, personId: string | undefined): SQL {
   return personId === undefined ? sql`` : sql`AND ${column} = ${personId}`;
+}
+
+function customerScope(column: SQL, customerId: string | undefined): SQL {
+  return customerId === undefined
+    ? sql``
+    : sql`AND ${column} IN (
+        SELECT person_id FROM customer_people WHERE customer_id = ${customerId}
+      )`;
 }
 
 function conversationScope(
@@ -500,6 +509,7 @@ function receivedArm(
       ${allowedScope}
       ${explicitInboxScope(sql`e.recipient`, requestedInboxes)}
       ${personScope(sql`e.person_id`, query.personId)}
+      ${customerScope(sql`e.person_id`, query.customerId)}
       ${conversationScope(sql`e.conversation_id`, query.conversationId)}
       ${messageRefScope("received", sql`e.id`, query.messageRef)}
       ${dateScope(sql`e.received_at`, query.after, query.before)}
@@ -586,6 +596,7 @@ function sentArm(
       ${allowedScope}
       ${explicitInboxScope(sql`se.from_address`, requestedInboxes)}
       ${personScope(sql`se.person_id`, query.personId)}
+      ${customerScope(sql`se.person_id`, query.customerId)}
       ${conversationScope(sql`se.conversation_id`, query.conversationId)}
       ${messageRefScope("sent", sql`se.id`, query.messageRef)}
       ${dateScope(sql`se.sent_at`, query.after, query.before)}

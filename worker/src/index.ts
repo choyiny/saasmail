@@ -9,6 +9,7 @@ import { users } from "./db/auth.schema";
 import { eq } from "drizzle-orm";
 import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
+import { customersRouter } from "./routers/customers-router";
 import { emailsRouter } from "./routers/emails-router";
 import { conversationsRouter } from "./routers/conversations-router";
 import { messagesRouter } from "./routers/messages-router";
@@ -216,6 +217,7 @@ const requireAdmin: MiddlewareHandler<{
 
 // API Routes
 app.route("/api/people", peopleRouter);
+app.route("/api/customers", customersRouter);
 app.route("/api/emails", emailsRouter);
 app.route("/api/conversations", conversationsRouter);
 app.route("/api/messages", messagesRouter);

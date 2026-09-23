@@ -10,6 +10,7 @@ import { sendTemplate } from "../lib/send-template";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
 import { sendEmail, replyToEmail } from "../lib/send-email";
 import { listPeople, getPersonScoped } from "../lib/queries/people";
+import { getCustomerByPerson } from "../lib/customers";
 import {
   listPersonEmails,
   getEmailById,
@@ -259,6 +260,28 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     guard(ctx, SCOPE_READ, async ({ personId }) => {
       const person = await getPersonScoped(db, personId, allowed);
       return person ? ok(person) : fail(NOT_FOUND);
+    }),
+  );
+
+  server.registerTool(
+    "get_customer",
+    {
+      description:
+        "Return the linked customer identity for a person, including visible email addresses connected to the same customer.",
+      annotations: { readOnlyHint: true, title: "Get Customer" },
+      inputSchema: {
+        personId: z.string().describe("Person id, from list_people."),
+      },
+    },
+    guard(ctx, SCOPE_READ, async ({ personId }) => {
+      try {
+        return ok({
+          customer: await getCustomerByPerson(db, allowed, personId),
+        });
+      } catch (error: any) {
+        if (error?.status === 404) return fail(NOT_FOUND);
+        throw error;
+      }
     }),
   );
 

@@ -22,6 +22,7 @@ export interface GroupedPerson {
   recipientCount: number;
   recipients: string[];
   hasAttachment: number;
+  linkedCount: number;
 }
 
 /**
@@ -222,6 +223,50 @@ export async function deleteAgentSession(
   });
 }
 
+export interface Customer {
+  id: string;
+  displayName: string | null;
+  people: Array<{ id: string; email: string; name: string | null }>;
+}
+
+export async function fetchCustomerByPerson(
+  personId: string,
+): Promise<{ customer: Customer | null }> {
+  return apiFetch(`/api/customers/by-person/${encodeURIComponent(personId)}`);
+}
+
+export async function linkCustomerPeople(
+  personId: string,
+  otherPersonId: string,
+): Promise<Customer> {
+  return apiFetch("/api/customers/link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ personId, otherPersonId }),
+  });
+}
+
+export async function unlinkCustomerPerson(
+  personId: string,
+): Promise<{ success: true }> {
+  return apiFetch("/api/customers/unlink", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ personId }),
+  });
+}
+
+export async function updateCustomer(
+  id: string,
+  displayName: string | null,
+): Promise<Customer> {
+  return apiFetch(`/api/customers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName }),
+  });
+}
+
 export interface PaginatedPeople {
   data: Person[];
   total: number;
@@ -341,13 +386,20 @@ export async function fetchConversationEmails(
 
 export async function fetchPersonEmails(
   personId: string,
-  params?: { q?: string; recipient?: string; page?: number; limit?: number },
+  params?: {
+    q?: string;
+    recipient?: string;
+    page?: number;
+    limit?: number;
+    allAddresses?: boolean;
+  },
 ): Promise<PersonEmailsResponse> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set("q", params.q);
   if (params?.recipient) qs.set("recipient", params.recipient);
   if (params?.page) qs.set("page", params.page.toString());
   if (params?.limit) qs.set("limit", params.limit.toString());
+  if (params?.allAddresses) qs.set("allAddresses", "true");
   return apiFetch(`/api/emails/by-person/${personId}?${qs}`);
 }
 

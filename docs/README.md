@@ -21,6 +21,7 @@ Everything that used to live in one very long README. Start at
 | Page                                            | What's in it                                                                  |
 | ----------------------------------------------- | ----------------------------------------------------------------------------- |
 | [Inboxes and timelines](inboxes.md)             | One timeline per customer, team permissions, thread-vs-chat mode, forwarding  |
+| [Customers and linked addresses](customers.md)  | Link multiple email addresses to one customer without widening permissions    |
 | [Mailbox state](mailbox-state.md)               | Seen/starred state, archive/junk/trash, custom folders, APIs, and agent tools |
 | [Automations](automations.md)                   | Inbound routing rules, assignment, conditions, actions, APIs, and MCP         |
 | [Email templates](templates.md)                 | The `{{variable}}` grammar, sections, escaping, and the send contract         |

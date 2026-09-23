@@ -4,6 +4,7 @@ import { users } from "../db/auth.schema";
 import { drafts } from "../db/drafts.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
+import { customerPeople, customers } from "../db/customers.schema";
 import { mailboxes } from "../db/mailboxes.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { createAgentTools, AGENT_TOOL_NAMES } from "../lib/agent/tools";
@@ -251,6 +252,61 @@ describe("agent tools", () => {
     expect(templates).not.toContain("agent-denied");
 
     expect(await execute(tools, "get_playbook")).toContain("saasmail");
+  });
+
+  it("uses customer scope in the timeline without widening inbox access", async () => {
+    const { db, tools, allowedPerson } = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    const alias = await createTestPerson({
+      id: "agent-person-alias",
+      email: "alias-customer@example.net",
+    });
+    await createTestEmail({
+      id: "agent-alias-allowed",
+      personId: alias.id,
+      recipient: ALLOWED,
+      subject: "Alias allowed",
+      bodyText: "linked allowed history",
+      messageId: "agent-alias-allowed@example.net",
+    });
+    await createTestEmail({
+      id: "agent-alias-denied",
+      personId: alias.id,
+      recipient: DENIED,
+      subject: "Alias denied",
+      bodyText: "linked denied history",
+      messageId: "agent-alias-denied@example.net",
+    });
+    await db.insert(customers).values({
+      id: "agent-customer",
+      displayName: null,
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(customerPeople).values([
+      {
+        customerId: "agent-customer",
+        personId: allowedPerson.id,
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "agent-customer",
+        personId: alias.id,
+        linkedBy: null,
+        linkedAt: now,
+      },
+    ]);
+
+    const timeline = JSON.stringify(
+      await execute(tools, "customer_timeline", {
+        personId: allowedPerson.id,
+      }),
+    );
+    expect(timeline).toContain("agent-email-allowed");
+    expect(timeline).toContain("agent-alias-allowed");
+    expect(timeline).not.toContain("agent-alias-denied");
   });
 
   it("re-reads role before every tool call so demotion narrows scope immediately", async () => {
