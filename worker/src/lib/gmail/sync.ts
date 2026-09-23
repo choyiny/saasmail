@@ -89,9 +89,12 @@ export type SyncResult = {
   /**
    * Messages from the mailbox's own Sent folder written to `sent_emails`.
    *
-   * Counted apart from `ingested` because it is not an ingest: an operator
-   * reading these numbers is asking how much mail ARRIVED, and folding our
-   * own outgoing mail into that answer inflates it.
+   * Separate from `ingested` because it is a different outcome: mail that
+   * ARRIVED and mail of ours that came home are not the same event, and one
+   * counter cannot answer for both. Nothing surfaces either number today —
+   * `syncAllGmailAccounts` logs only `failed` and `reseeded`, and returns
+   * void — so this is internal bookkeeping and a correct signal for whatever
+   * reads it first, not a number an operator is looking at right now.
    */
   mirrored: number;
   skipped: number;
@@ -415,6 +418,13 @@ async function mirrorSentMessage(
   // per MAILBOX, not globally unique, so with two connected mailboxes an
   // unscoped match could let one mailbox's id suppress the other's genuine
   // Sent message. The index still carries the lookup.
+  //
+  // `inbox` is a safe scope ONLY while one Gmail account maps to exactly one
+  // personal inbox — which is what `resolvePersonalInbox` enforces and what
+  // `admin-inboxes-router.ts` guarantees by rejecting Google Group mappings
+  // outright. If a later slice enables group routing, several accounts could
+  // write `sent_emails` rows under the same `from_address` and this predicate
+  // stops distinguishing them; scope it by `gmail_accounts.id` then.
   const echo = await db
     .select({ id: sentEmails.id })
     .from(sentEmails)
@@ -530,8 +540,25 @@ async function mirrorSentMessage(
   // Conditional because `sent_emails.person_id` is nullable on mirrored rows:
   // a message to an address we have never heard from has no timeline and no
   // enrollments to cancel.
+  //
+  // Guarded, unlike the identical call on the inbound path, because the
+  // consequence of a throw differs here. The row above is already committed,
+  // so an escaping error would stop the run AND leave the echo check at the
+  // top of this function matching on the next attempt — the message would be
+  // skipped forever and the cancellation lost permanently, rather than
+  // retried. A sequence that keeps running is worth an operator's attention;
+  // it is not worth discarding the mirror that is already on the timeline.
   const personId = personRow[0]?.id;
-  if (personId) await cancelSequencesForPerson(db, personId);
+  if (personId) {
+    try {
+      await cancelSequencesForPerson(db, personId);
+    } catch (err) {
+      console.error(
+        `Gmail sync for ${inbox}: mirrored sent message ${gmailMessageId}, but cancelling sequences for ${toAddress} failed; that person may keep receiving automated follow-ups:`,
+        err,
+      );
+    }
+  }
 
   return true;
 }

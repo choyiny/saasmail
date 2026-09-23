@@ -380,6 +380,65 @@ describe("send router — Gmail reply routing", () => {
     }
   });
 
+  it("refuses an unauthorized inbox before the attachment budget can reveal anything about it", async () => {
+    // The budget is Gmail's for a Gmail-mapped inbox and the configured
+    // provider's otherwise, so a 413's limitBytes says which. Resolving it
+    // before the permission check would make that a pre-auth oracle: a
+    // scoped member could learn which addresses are connected to Gmail by
+    // sending an oversized attachment at each one.
+    const originalResend = (env as any).RESEND_API_KEY;
+    (env as any).RESEND_API_KEY = "";
+    try {
+      await seedGmailAccount();
+      await seedGmailIdentity();
+
+      // A member who owns no inboxes at all.
+      const { apiKey: memberKey } = await createTestUser({
+        id: "u-outsider",
+        role: "member",
+        email: "outsider@x.com",
+      });
+
+      const person = await createTestPerson({
+        id: "p-oracle",
+        email: "customer7@example.com",
+      });
+      await createTestEmail({
+        id: "rcv-oracle",
+        personId: person.id,
+        recipient: "support@acme.dev",
+        subject: "Question",
+        messageId: "parent-oracle@example.com",
+      });
+
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      // Over NoopSender's budget of 0 and well under Gmail's, so the two
+      // budgets give different statuses — which is precisely the leak.
+      const probe = (from: string) =>
+        authFetch("/api/send/reply/rcv-oracle", {
+          apiKey: memberKey,
+          method: "POST",
+          body: buildSendForm({ fromAddress: from, bodyHtml: "<p>a</p>" }, [
+            { name: "probe.pdf", bytes: new Uint8Array(4096).fill(1) },
+          ]),
+        });
+
+      const gmailMapped = await probe("support@acme.dev");
+      const notMapped = await probe("me@saasmail.test");
+
+      // Identical refusals. Without the check the unmapped address answers
+      // 413 (NoopSender's budget of 0) and the mapped one does not — one
+      // request each and the caller knows which inboxes are on Gmail.
+      expect(gmailMapped.status).toBe(403);
+      expect(notMapped.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      (env as any).RESEND_API_KEY = originalResend;
+    }
+  });
+
   it("a Gmail send that fails transiently returns an error and queues nothing", async () => {
     await seedGmailAccount();
     await seedGmailIdentity();

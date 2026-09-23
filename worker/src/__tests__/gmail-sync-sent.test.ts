@@ -300,6 +300,48 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(step.status).toBe("cancelled");
   });
 
+  it("still completes the mirror when cancelling sequences fails", async () => {
+    // The row is already committed by the time the cancel runs, and the echo
+    // check at the top of mirrorSentMessage matches on it — so an escaping
+    // error would stop the run AND make the next attempt skip this message,
+    // losing the cancellation permanently rather than retrying it.
+    //
+    // The failure is real, not mocked: dropping the table makes the cancel's
+    // own SELECT throw the way a genuine database fault would.
+    await seedAccount();
+    await seedInbox();
+    await seedPerson("jane@example.com");
+
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "Jane <jane@example.com>",
+            messageId: "<s-cancelfail@acme.dev>",
+          }),
+        },
+      },
+    });
+
+    await env.DB.exec("DROP TABLE sequence_enrollments");
+    try {
+      const res = await sync();
+      // Not counted as a failed message, and not left for a retry that can
+      // never happen.
+      expect(res.failed).toBe(0);
+      expect(res.mirrored).toBe(1);
+      const rows = await getDb().select().from(sentEmails);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].gmailMessageId).toBe("m1");
+    } finally {
+      // Every statement is CREATE TABLE IF NOT EXISTS, so this just puts the
+      // dropped table back for the rest of the file.
+      await applyMigrations();
+    }
+  });
+
   it("leaves sequences alone when the Sent message's recipient is unknown", async () => {
     // `sent_emails.person_id` is nullable on mirrored rows: mail to an
     // address we have never heard from resolves no person. The cancellation
