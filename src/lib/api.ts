@@ -964,12 +964,20 @@ export async function disconnectGmailAccount(
  * Linking an anchor straight at it lands the operator on a page of raw JSON,
  * so the caller must fetch the URL and navigate to `authUrl` itself.
  *
+ * `email` names the mailbox being *re*connected. It becomes Google's
+ * `login_hint` and is sealed into the OAuth state, so the callback refuses a
+ * grant for any other mailbox rather than re-seeding that one's sync cursor.
+ * Omit it for a first connection, where any account is a valid answer.
+ *
  * On an instance with no OAuth secrets it answers 503 with
  * `{ error: "Gmail integration is not configured" }`, which `apiFetch`
  * rethrows verbatim — show it rather than navigating.
  */
-export async function startGmailConnect(): Promise<{ authUrl: string }> {
-  return apiFetch<{ authUrl: string }>("/api/admin/gmail/connect");
+export async function startGmailConnect(
+  email?: string,
+): Promise<{ authUrl: string }> {
+  const qs = email ? `?email=${encodeURIComponent(email)}` : "";
+  return apiFetch<{ authUrl: string }>(`/api/admin/gmail/connect${qs}`);
 }
 
 // --- Suppressions ---
