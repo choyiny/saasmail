@@ -76,6 +76,9 @@ async function seedIdentity(overrides: Record<string, unknown> = {}) {
 
 type SendAsReply =
   | { addresses: string[] }
+  // Raw entries, for the fields beyond the address itself (verificationStatus,
+  // isPrimary) that decide whether Gmail would actually send from an address.
+  | { entries: Array<Record<string, unknown>> }
   | { status: number }
   | { networkError: true };
 
@@ -101,12 +104,14 @@ function stubSendAs(reply: SendAsReply) {
         headers: { "content-type": "application/json" },
       });
     }
-    return new Response(
-      JSON.stringify({
-        sendAs: reply.addresses.map((a) => ({ sendAsEmail: a })),
-      }),
-      { status: 200, headers: { "content-type": "application/json" } },
-    );
+    const sendAs =
+      "entries" in reply
+        ? reply.entries
+        : reply.addresses.map((a) => ({ sendAsEmail: a }));
+    return new Response(JSON.stringify({ sendAs }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
   });
   vi.stubGlobal("fetch", fn);
   return fn;
@@ -171,6 +176,78 @@ describe("admin inboxes router — Gmail mapping", () => {
     expect(rows[0].gmailAccountId).toBe("acct-1");
   });
 
+  it("accepts an alias whose verification has completed", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await seedGmailAccount();
+    stubSendAs({
+      entries: [
+        { sendAsEmail: "collector@acme.dev", isPrimary: true },
+        { sendAsEmail: "a@x.com", verificationStatus: "accepted" },
+      ],
+    });
+
+    const res = await patchInbox(apiKey, "a@x.com", {
+      source: "gmail",
+      gmailAccountId: "acct-1",
+    });
+    expect(res.status).toBe(200);
+    expect((await rowsFor("a@x.com"))[0].gmailAccountId).toBe("acct-1");
+  });
+
+  it("accepts an address Gmail never asks to be verified", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await seedGmailAccount();
+    // Gmail populates verificationStatus only for custom from-aliases: the
+    // account's own address and Workspace-managed aliases report
+    // "verificationStatusUnspecified" and are perfectly sendable. Rejecting
+    // anything that is not literally "accepted" would refuse those.
+    stubSendAs({
+      entries: [
+        {
+          sendAsEmail: "a@x.com",
+          isPrimary: true,
+          verificationStatus: "verificationStatusUnspecified",
+        },
+      ],
+    });
+
+    const res = await patchInbox(apiKey, "a@x.com", {
+      source: "gmail",
+      gmailAccountId: "acct-1",
+    });
+    expect(res.status).toBe(200);
+    expect((await rowsFor("a@x.com"))[0].gmailAccountId).toBe("acct-1");
+  });
+
+  it("rejects with 400 an alias whose verification is still pending, leaving the row untouched", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await seedGmailAccount();
+    await seedIdentity();
+    // Gmail refuses to put a pending alias in a From: header, so accepting the
+    // mapping would hand the operator a green light that dies on the first
+    // reply — and the rejection message tells them to verify it first.
+    const fetchMock = stubSendAs({
+      entries: [
+        { sendAsEmail: "collector@acme.dev", isPrimary: true },
+        { sendAsEmail: "a@x.com", verificationStatus: "pending" },
+      ],
+    });
+
+    const res = await patchInbox(apiKey, "a@x.com", {
+      source: "gmail",
+      gmailAccountId: "acct-1",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/a@x\.com/);
+    expect(calledSendAs(fetchMock)).toBe(true);
+
+    const rows = await rowsFor("a@x.com");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe("cloudflare");
+    expect(rows[0].gmailAccountId).toBeNull();
+  });
+
   it("rejects with 400 when the address is not in the account's sendAs list, leaving the row untouched", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     await seedGmailAccount();
@@ -199,6 +276,54 @@ describe("admin inboxes router — Gmail mapping", () => {
     expect(rows[0].gmailAccountId).toBeNull();
   });
 
+  it("checks again when an already-mapped inbox is re-pointed at a different account", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await seedGmailAccount();
+    await seedGmailAccount({
+      id: "acct-2",
+      emailAddress: "other@acme.dev",
+    });
+    await seedIdentity({ source: "gmail", gmailAccountId: "acct-1" });
+    // Swapping the connected mailbox is a normal admin operation, and the new
+    // account may not be able to send as this inbox even though the old one
+    // could.
+    const fetchMock = stubSendAs({ addresses: ["other@acme.dev"] });
+
+    const res = await patchInbox(apiKey, "a@x.com", {
+      gmailAccountId: "acct-2",
+    });
+    expect(res.status).toBe(400);
+    expect(calledSendAs(fetchMock)).toBe(true);
+
+    const rows = await rowsFor("a@x.com");
+    expect(rows[0].source).toBe("gmail");
+    expect(rows[0].gmailAccountId).toBe("acct-1");
+  });
+
+  it("normalises the inbox address before checking it against the sendAs list", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await seedGmailAccount();
+    // Only the Gmail side of the comparison is normalised by listSendAs; a
+    // mixed-case route param must be normalised too, or a valid mapping is
+    // rejected — and, worse, a row is stored under a key the send path (which
+    // lowercases) can never find.
+    stubSendAs({ addresses: ["support@acme.dev"] });
+
+    const res = await patchInbox(apiKey, "Support@Acme.Dev", {
+      source: "gmail",
+      gmailAccountId: "acct-1",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { email: string };
+    expect(body.email).toBe("support@acme.dev");
+
+    const rows = await rowsFor("support@acme.dev");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].gmailAccountId).toBe("acct-1");
+    // And nothing was written under the un-normalised key.
+    expect(await rowsFor("Support@Acme.Dev")).toHaveLength(0);
+  });
+
   it("does not create a row at all when an unmapped inbox fails the sendAs check", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     await seedGmailAccount();
@@ -222,12 +347,16 @@ describe("admin inboxes router — Gmail mapping", () => {
       source: "gmail",
       gmailAccountId: "acct-1",
     });
+    const raw = await res.text();
     expect(res.status).toBe(502);
-    const body = (await res.json()) as { error: string };
+    const body = JSON.parse(raw) as { error: string };
     expect(body.error).toMatch(/could not.*verif/i);
     expect(body.error).toMatch(/try again/i);
-    // No token material may ride along on the failure.
-    expect(body.error).not.toMatch(/cached-at/);
+    // No token material may ride along on the failure — not the cached access
+    // token, not the sealed refresh token, not an Authorization header, and
+    // not a stray extra field carrying any of them.
+    expect(raw).not.toMatch(/cached-at|rt-1|bearer|token/i);
+    expect(Object.keys(body)).toEqual(["error"]);
     expect(calledSendAs(fetchMock)).toBe(true);
 
     // An unverifiable mapping must never be saved.
@@ -282,28 +411,48 @@ describe("admin inboxes router — Gmail mapping", () => {
     await seedIdentity();
     stubSendAs({ addresses: ["a@x.com"] });
 
-    const saved = (env as Record<string, unknown>).GOOGLE_OAUTH_CLIENT_ID;
-    delete (env as Record<string, unknown>).GOOGLE_OAUTH_CLIENT_ID;
-    try {
-      const res = await patchInbox(apiKey, "a@x.com", {
-        source: "gmail",
-        gmailAccountId: "acct-1",
-      });
-      expect(res.status).toBe(503);
-      const body = (await res.json()) as { error: string };
-      expect(body.error).toMatch(/not configured/i);
-    } finally {
-      (env as Record<string, unknown>).GOOGLE_OAUTH_CLIENT_ID = saved;
-    }
+    // Each of the three secrets on its own: without any one of them there is
+    // no token to check with, and "try again" would be the wrong advice.
+    const secrets = [
+      "GOOGLE_OAUTH_CLIENT_ID",
+      "GOOGLE_OAUTH_CLIENT_SECRET",
+      "TOKEN_ENCRYPTION_KEY",
+    ];
+    for (const secret of secrets) {
+      const bindings = env as Record<string, unknown>;
+      const saved = bindings[secret];
+      delete bindings[secret];
+      try {
+        const res = await patchInbox(apiKey, "a@x.com", {
+          source: "gmail",
+          gmailAccountId: "acct-1",
+        });
+        expect(res.status, `unset ${secret}`).toBe(503);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toMatch(/not configured/i);
+      } finally {
+        bindings[secret] = saved;
+      }
 
-    const rows = await rowsFor("a@x.com");
-    expect(rows[0].source).toBe("cloudflare");
-    expect(rows[0].gmailAccountId).toBeNull();
+      const rows = await rowsFor("a@x.com");
+      expect(rows[0].source, `unset ${secret}`).toBe("cloudflare");
+      expect(rows[0].gmailAccountId).toBeNull();
+    }
   });
 
-  it("GET list returns source and gmailAccountId for a mapped inbox", async () => {
+  it("GET list returns source and gmailAccountId for an inbox mapped through PATCH", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
-    await seedIdentity({ source: "gmail", gmailAccountId: "acct-1" });
+    await seedGmailAccount();
+    stubSendAs({ addresses: ["a@x.com"] });
+
+    // A real round trip: the mapping is written by PATCH and read back by the
+    // list route, so a write that lands somewhere the list does not read is
+    // caught here.
+    const patched = await patchInbox(apiKey, "a@x.com", {
+      source: "gmail",
+      gmailAccountId: "acct-1",
+    });
+    expect(patched.status).toBe(200);
 
     const list = await authFetch("/api/admin/inboxes", { apiKey });
     expect(list.status).toBe(200);

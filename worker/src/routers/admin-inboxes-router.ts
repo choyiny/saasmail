@@ -291,9 +291,16 @@ const patchInboxRoute = createRoute({
 
 adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   const db = c.get("db");
-  const { email } = c.req.valid("param");
+  const { email: emailParam } = c.req.valid("param");
   const body = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
+
+  // Normalise the address the way every other site does (`POST /` above, the
+  // send path's inbox lookup, forwardTo below). Without this a PATCH to
+  // `Support@Acme.dev` writes a row the send path — which lowercases before
+  // looking up — can never find, so a mapping could pass the sendAs check
+  // below and still be dead on arrival.
+  const email = emailParam.trim().toLowerCase();
 
   // Google Group routing was attempted in this slice and withdrawn after
   // adversarial review found List-ID and Delivered-To are both
@@ -398,7 +405,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
   // this again at send time (and also catches forwards aimed at *other* inboxes
   // on this instance, which may not exist yet when the rule is saved).
-  if (nextForwardTo !== null && nextForwardTo === email.trim().toLowerCase()) {
+  if (nextForwardTo !== null && nextForwardTo === email) {
     return c.json(
       { error: "Forward destination cannot be the inbox itself" },
       400,
@@ -449,7 +456,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       );
     }
 
-    if (!sendAs.includes(email.trim().toLowerCase())) {
+    // Both sides are normalised: `listSendAs` lowercases Gmail's, and `email`
+    // was normalised at the top of this handler.
+    if (!sendAs.includes(email)) {
       return c.json(
         {
           error: `The connected Google account cannot send as ${email}, so the mapping was not saved. Add ${email} under "Send mail as" in that account's Gmail settings, verify it, then map this inbox again.`,
