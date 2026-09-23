@@ -575,6 +575,73 @@ describe("DELETE /api/admin/gmail/{id}", () => {
     expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
   });
 
+  it("unmaps the inboxes that read from it, and leaves other inboxes alone", async () => {
+    // A mapping left pointing at a deleted account is an inbox that claims
+    // Gmail, names a mailbox that does not exist, and silently receives
+    // nothing. Two accounts and three inboxes: unmapping "all gmail rows"
+    // rather than "this account's rows" would pass a single-account fixture.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values([
+        {
+          id: "acct-gone",
+          emailAddress: "gone@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "acct-stays",
+          emailAddress: "stays@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    await getDb()
+      .insert(senderIdentities)
+      .values([
+        {
+          email: "mapped@acme.dev",
+          displayName: "Mapped",
+          source: "gmail",
+          gmailAccountId: "acct-gone",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          email: "other@acme.dev",
+          source: "gmail",
+          gmailAccountId: "acct-stays",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          email: "plain@acme.dev",
+          source: "cloudflare",
+          gmailAccountId: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+
+    await authFetch("/api/admin/gmail/acct-gone", { method: "DELETE", apiKey });
+
+    const rows = await getDb().select().from(senderIdentities);
+    const byEmail = Object.fromEntries(rows.map((r) => [r.email, r]));
+    expect(byEmail["mapped@acme.dev"].source).toBe("cloudflare");
+    expect(byEmail["mapped@acme.dev"].gmailAccountId).toBeNull();
+    // The unmap must not take the rest of the row with it.
+    expect(byEmail["mapped@acme.dev"].displayName).toBe("Mapped");
+    // The other account's inbox is untouched.
+    expect(byEmail["other@acme.dev"].source).toBe("gmail");
+    expect(byEmail["other@acme.dev"].gmailAccountId).toBe("acct-stays");
+  });
+
   it("forgets the disconnected mailbox's Gmail threads, and only those", async () => {
     // The mailbox that issued these thread ids is gone, so replying on one
     // would hand a stranger's id to whatever account the inbox is mapped to

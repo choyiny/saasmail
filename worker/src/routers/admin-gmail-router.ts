@@ -327,6 +327,19 @@ adminGmailRouter.openapi(disconnectRoute, async (c) => {
     .from(senderIdentities)
     .where(eq(senderIdentities.gmailAccountId, id));
 
+  // Unmap every inbox that read from this mailbox, first. Leaving the
+  // foreign key behind would leave rows claiming source "gmail" while
+  // pointing at an account that no longer exists: the inbox silently stops
+  // receiving, and the UI can only show it as an orphan after a reload.
+  // Cloudflare is the honest fallback — it is what an unmapped inbox is.
+  await db
+    .update(senderIdentities)
+    .set({
+      source: "cloudflare",
+      gmailAccountId: null,
+      updatedAt: Math.floor(Date.now() / 1000),
+    })
+    .where(eq(senderIdentities.gmailAccountId, id));
   await db.delete(gmailAccounts).where(eq(gmailAccounts.id, id));
 
   // Those inboxes' stored Gmail thread ids were issued by the mailbox that
