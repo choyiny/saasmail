@@ -88,21 +88,18 @@ controls are unchanged and still usable directly — see
 **Connected Google mailboxes** sits at the top of the **Inboxes** page. With
 nothing connected it explains that connecting does not backfill; otherwise it
 lists each connected mailbox with its address and when it last synced, plus
-**Disconnect** and — only when that mailbox has an error — **Reconnect**.
+**Disconnect** and — only when that mailbox has an error a fresh grant could
+fix — **Reconnect**.
 
-**Connect a Google mailbox** starts the OAuth flow. It is a plain link to
-`GET /api/admin/gmail/connect`, and that endpoint answers with JSON rather
-than redirecting, so the browser lands on
+**Connect a Google mailbox** starts the OAuth flow. The button asks
+`GET /api/admin/gmail/connect` for a consent URL — that endpoint answers
+`{ "authUrl": … }` with a `200` rather than redirecting — and then sends the
+browser to it. If that call fails, the page says so and stays put rather than
+navigating; on an instance with no OAuth secrets that reads "Gmail
+integration is not configured".
 
-```json
-{ "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?..." }
-```
-
-Open that `authUrl` in the same browser to reach Google's consent screen.
-(This is a rough edge, not a broken flow: the button and the endpoint disagree
-about who follows the URL. Everything after it works as described.) Use a
-browser that is signed in to saasmail as an admin — Google redirects back to
-the callback from step 3, which sits behind the same admin guard as every
+Use a browser that is signed in to saasmail as an admin — Google redirects
+back to the callback from step 3, which sits behind the same admin guard as every
 other `/api/admin/*` route, and a browser navigation carries cookies rather
 than an `Authorization` header, so an API key cannot stand in for the session
 here. Without one the callback answers `403` and the mailbox is never
@@ -116,6 +113,9 @@ shows a banner for it:
 - `?gmail=error` — nothing was added, try again. The banner deliberately does
   not print the reason; it is in the Worker log, because the underlying error
   can carry the access token.
+- `?gmail=wrong_account` — you were reconnecting one mailbox and granted
+  access as another, so nothing was written. Only a per-mailbox **Reconnect**
+  can produce this; see [What a Reconnect prompt means](#what-a-reconnect-prompt-means).
 
 The parameter is stripped from the URL once read, so a refresh does not
 resurrect a stale banner.
@@ -123,25 +123,42 @@ resurrect a stale banner.
 ### What a Reconnect prompt means
 
 A mailbox with a non-null `lastError` gets a red note — _"This mailbox has
-stopped syncing… Google said: `<lastError>`"_ — and a **Reconnect** link next
-to it. It means sync has stopped for that mailbox and will not resume on its
-own. Read the error text before clicking, because **Reconnect appears for
-every error, and it is only the right fix for some of them**:
+stopped syncing…"_ — and the error's own code, printed verbatim. Sync has
+stopped for that mailbox and will not resume on its own.
 
-- a revoked or broken grant (a token-refresh failure) — reconnect;
-- `no_personal_inbox` — no saasmail inbox is mapped to this mailbox yet;
-  reconnecting changes nothing. Map one (below).
+**Reconnect is offered only for the errors a fresh grant can actually fix**:
+a revoked or broken grant, and anything else Google reports, since that set
+is open-ended. For the four codes saasmail raises itself the button is hidden
+and the note says what to do instead, because a consent round trip would
+change nothing:
+
+- `no_personal_inbox` — no saasmail inbox is mapped to this mailbox yet. Map
+  one (below).
 - `ambiguous_inbox_mapping` — more than one saasmail inbox is mapped to this
-  mailbox, and the engine refuses to pick. Remove the extra mapping.
+  mailbox, and the engine refuses to pick. Leave exactly one.
 - `history_gap` — sync already recovered by re-seeding from the present; the
-  next successful run clears this. Mail from inside the gap is gone — see
+  next successful sync clears this. Mail from inside the gap is gone — see
   [Sync gaps](#sync-gaps).
+- `message_failed:<id>` — one message threw. The cursor did not move, so the
+  next run retries it.
 
-Reconnecting runs the same OAuth flow and replaces the mailbox's stored
-credentials. It clears `lastError`, and it re-seeds the sync cursor at the
-mailbox's _current_ position — so mail that arrived while the mailbox was
-broken is not fetched afterwards, exactly as a first connection does not
-backfill. It does **not** clear the sync-gap notice; see below.
+Reconnecting runs the OAuth flow again **for that specific mailbox**: its
+address is sent to Google as a `login_hint` so the right account is
+pre-selected, and it is sealed into the signed `state`. If you end up
+granting access as a different Google account anyway — easy to do when the
+browser is signed in as someone else — the callback **writes nothing** and
+returns to `/inboxes?gmail=wrong_account`, naming the mailbox you were
+reconnecting and the one you granted. That refusal matters: upserting the
+grant you actually gave would replace a different, possibly healthy
+mailbox's credentials and reset _its_ sync cursor.
+
+A successful reconnect replaces the mailbox's stored credentials, clears
+`lastError`, and re-seeds the sync cursor at the mailbox's _current_ position
+— so mail that arrived while the mailbox was broken is not fetched
+afterwards, exactly as a first connection does not backfill. Because that
+mail is unrecoverable, **a reconnect records a sync gap** (`lastGapAt`) and
+the mailbox's row shows the amber notice from then on. It does not clear an
+earlier gap either; see below.
 
 While a mailbox is unmapped or ambiguously mapped, sync is _paused_ rather
 than lossy: the engine does not fetch or consume any history for the account,
@@ -154,7 +171,9 @@ check its mapping first.
 **Disconnect** arms an inline confirm rather than acting immediately.
 Confirming deletes saasmail's stored row, including the encrypted refresh
 token, so saasmail can no longer reach the mailbox; mail already synced stays
-on the timeline.
+on the timeline. Any inbox that read from that mailbox is switched back to
+**Cloudflare** in the same request, since a mapping pointing at a deleted
+mailbox is an inbox that silently receives nothing.
 
 It does **not** revoke the grant at Google — saasmail makes no revocation
 call, whatever the confirm text says. The refresh token stays valid on
@@ -173,9 +192,17 @@ immediately.
 
 With no mailbox connected the dropdown is disabled and reads "Connect a Google
 mailbox first" — or "Couldn't load connected mailboxes" if that list failed to
-load, which is not the same thing. A row still mapped to a mailbox that has
-since been disconnected shows "Mailbox no longer connected" rather than
-quietly reverting to Cloudflare.
+load, which is not the same thing.
+
+A row whose mapping does not match any connected mailbox says which of those
+two it is, because the wrong one would talk you into unmapping a working
+inbox:
+
+- **"Mailbox no longer connected"** — the list loaded and this mapping's
+  mailbox is genuinely not in it. Pick another mailbox, or Cloudflare.
+- **"Couldn't check — still mapped to `<id>`"** — the list could not be
+  loaded, so nothing is known about this mapping. The dropdown is locked;
+  reload before changing anything. The mapping is probably fine.
 
 ### A mapping is verified before it is saved
 
@@ -212,7 +239,10 @@ admin:
 
 - `GET /api/admin/gmail/connect` → `{ "authUrl": "..." }`. You can call this
   with an admin API key, but the `authUrl` must then be opened in a browser
-  signed in to saasmail — see [above](#connecting-a-mailbox).
+  signed in to saasmail — see [above](#connecting-a-mailbox). Pass
+  `?email=<address>` to reconnect one specific mailbox: the address becomes
+  Google's `login_hint` and is sealed into the signed `state`, and the
+  callback refuses to write anything if a different account is granted.
 - `GET /api/admin/gmail` lists connected mailboxes, each with `id`,
   `emailAddress`, `lastSyncedAt`, `lastError`, `lastGapAt`, and `createdAt`.
   It never returns token material. Check `lastGapAt` after any extended
@@ -221,9 +251,12 @@ admin:
   `{ "source": "gmail", "gmailAccountId": "<id from the list above>" }` maps
   an inbox; `{email}` does not need to already exist. Sending `"cloudflare"`
   as the source, with `gmailAccountId` set to `null`, unmaps it. The same
-  `400` / `502` / `503` refusals apply.
-- `DELETE /api/admin/gmail/{id}` disconnects one mailbox, with the same
-  no-revocation caveat as [Disconnecting](#disconnecting).
+  `400` / `502` / `503` refusals apply, plus a `400` for `"source": "gmail"`
+  with no `gmailAccountId` — a Gmail inbox has to name the mailbox it reads
+  from, and there would be nothing to run the send-as check against.
+- `DELETE /api/admin/gmail/{id}` disconnects one mailbox and unmaps the
+  inboxes that read from it, with the same no-revocation caveat as
+  [Disconnecting](#disconnecting).
 
 ## Sending through Gmail
 
@@ -371,6 +404,12 @@ cannot control is planned for a later release.
 
 ## Sync gaps
 
+A sync gap is any point where the cursor jumps forward to the mailbox's
+current position, leaving whatever had not been fetched yet unfetchable.
+**Two things cause one: an expired history cursor, and reconnecting the
+mailbox.** Both are recorded the same way, because both lose mail the same
+way.
+
 Gmail's history API only retains about a week of history. Sync resumes from a
 saved cursor each run; if a mailbox goes unpolled for longer than that —
 Gmail integration disabled, a long Worker outage, the account stuck on
@@ -380,16 +419,22 @@ starts syncing again on its own. But this means **mail that arrived inside
 the gap is never synced and cannot be recovered**; there is no history left
 to read it from.
 
+Reconnecting a mailbox does the same thing deliberately: the fresh grant
+takes a new cursor from the mailbox's current head, so anything that arrived
+while the grant was dead is skipped. That is unavoidable — there is no
+recovering it — but it is not silent: the reconnect stamps `lastGapAt` too.
+
 `gmail_accounts.last_gap_at` records the last time this happened for an
-account, `GET /api/admin/gmail` exposes it as `lastGapAt`, and the mailbox's
-row on `/inboxes` shows an amber **Sync gap** notice, with how long ago it
-happened, saying that mail from that window was never synced and cannot be
-recovered in saasmail — it is still in Gmail.
+account, in unix seconds. `GET /api/admin/gmail` exposes it as `lastGapAt`,
+and the mailbox's row on `/inboxes` shows an amber **Sync gap** notice, with
+how long ago it happened, saying that mail from that window was never synced
+and cannot be recovered in saasmail — it is still in Gmail.
 
 **That notice never goes away, and that is deliberate.** Nothing clears
-`lastGapAt`: not a later successful sync, not reconnecting the mailbox.
-Reconnecting clears the `lastError` that prompted it, but it does not
-un-lose the mail, so the gap stays on the record. Its age is the signal —
+`lastGapAt`: not a later successful sync, and not reconnecting the mailbox —
+a reconnect stamps a new one instead. Reconnecting clears the `lastError`
+that prompted it, but it does not un-lose the mail, so the gap stays on the
+record. Its age is the signal —
 treat a recent value as "some mail from around then is permanently missing",
 and an old one as history, not as a current-health indicator.
 
