@@ -195,6 +195,38 @@ export async function setUserState(
   }
 }
 
+export async function setSystemSpamState(
+  db: DrizzleD1Database<any>,
+  inbox: string,
+  messageId: string,
+  spam = true,
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const spamAt = spam ? now : null;
+
+  await db
+    .insert(mailboxMessageState)
+    .values({
+      inbox: inbox.trim().toLowerCase(),
+      messageKind: "received",
+      messageId,
+      archivedAt: null,
+      spamAt,
+      trashedAt: null,
+      updatedBy: null,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [mailboxMessageState.messageKind, mailboxMessageState.messageId],
+      set: {
+        inbox: inbox.trim().toLowerCase(),
+        spamAt,
+        updatedBy: null,
+        updatedAt: now,
+      },
+    });
+}
+
 export async function setMailboxState(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,

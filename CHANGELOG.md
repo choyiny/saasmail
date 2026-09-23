@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Drafts folder and per-inbox spam threshold.** The conventional mailbox now lists the signed-in user's existing autosaved drafts, supports independent `draft:<id>` compose contexts alongside `compose` and `reply:<emailId>`, resumes reply drafts in the reading pane, and allows draft deletion. Inbox admins can optionally set a SpamAssassin-style `X-Spam-Score` threshold; matching inbound mail is filed to Junk with system-owned state and arrives silently without waking snoozed conversations or sending realtime/push notifications.
+
 - **Conventional mailbox UI.** A new `/mail` surface adds inbox/system/custom-folder navigation, cursor-paged message rows, sanitized reading pane, reply and state actions, conversation snooze, custom-folder moves, realtime New messages handling, and a per-browser Customers/Mailbox default-home preference. It now also supports loaded-page multi-select with chunked bulk state actions, nested folder create/rename/delete management, and page-scoped keyboard shortcuts with an in-app reference dialog. It uses the same unified messages and message-state APIs as the customer-centric inbox; the existing `/` customer view remains available.
 
 - **Conversation snooze.** Inbox conversations can now be snoozed until a future Unix timestamp (up to 366 days) and appear in a derived Snoozed folder while active. Snooze is scoped by inbox plus group conversation id or one-to-one person key, expires at read time without cron work, wakes on newly received mail, and is exposed through HTTP, MCP, and reversible WebMCP state actions.

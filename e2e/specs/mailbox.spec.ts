@@ -151,4 +151,32 @@ test.describe.serial("conventional mailbox", () => {
         .filter({ hasText: "Mailbox bulk second" }),
     ).toBeVisible();
   });
+
+  test("drafts resume and delete end to end", async ({ page }) => {
+    await page.goto("/mail/support%40e2e.test/drafts");
+
+    const resumeDraft = page
+      .getByTestId("mail-draft-row")
+      .filter({ hasText: "Mailbox draft resume" });
+    const deleteDraft = page
+      .getByTestId("mail-draft-row")
+      .filter({ hasText: "Mailbox draft delete" });
+    await expect(resumeDraft).toBeVisible();
+    await expect(deleteDraft).toBeVisible();
+
+    await resumeDraft.click();
+    await expect(page.locator("#compose-to")).toHaveValue(
+      "resume@customers.test",
+    );
+    await expect(page.locator("#compose-subject")).toHaveValue(
+      "Mailbox draft resume",
+    );
+    await page.getByRole("button", { name: "Close" }).click();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await deleteDraft
+      .getByRole("button", { name: "Delete draft Mailbox draft delete" })
+      .click();
+    await expect(deleteDraft).toHaveCount(0);
+  });
 });

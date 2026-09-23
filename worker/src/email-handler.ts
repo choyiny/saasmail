@@ -20,6 +20,7 @@ import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
 import { forwardInbound } from "./lib/inbound-forward";
 import { wakeConversation } from "./lib/messages/conversation-state";
+import { setSystemSpamState } from "./lib/messages/state";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -171,6 +172,7 @@ export async function handleEmail(
       email: senderIdentities.email,
       displayName: senderIdentities.displayName,
       forwardTo: senderIdentities.forwardTo,
+      spamThreshold: senderIdentities.spamThreshold,
     })
     .from(senderIdentities);
 
@@ -217,80 +219,101 @@ export async function handleEmail(
     createdAt: now,
   });
 
-  // A new inbound message wakes its conversation. Snooze is deliberately
-  // evaluated/read separately from delivery, so this best-effort state update
-  // must never cause inbound delivery to fail.
-  try {
-    await wakeConversation(
-      db,
-      recipientCanonical,
-      conversationId ?? `p:${actualPersonId}`,
-    );
-  } catch (error) {
-    console.warn("Failed to wake snoozed conversation:", error);
+  const inboxIdentity = identityRows.find(
+    (row) => row.email.trim().toLowerCase() === recipientCanonical,
+  );
+  let autoFiledSpam = false;
+  if (
+    inboxIdentity?.spamThreshold !== null &&
+    inboxIdentity?.spamThreshold !== undefined &&
+    parsed.spamScore !== null &&
+    parsed.spamScore >= inboxIdentity.spamThreshold
+  ) {
+    try {
+      await setSystemSpamState(db, recipientCanonical, emailId);
+      autoFiledSpam = true;
+    } catch (error) {
+      console.warn("Failed to auto-file inbound message as spam:", error);
+    }
   }
 
-  // Notify connected WebSocket clients about the new email (per-user DOs).
-  // Fan out to users with explicit permission for this inbox, plus admins
-  // (capped) — all best-effort via ctx.waitUntil so push failures never
-  // block the inbound-email path.
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const [permRows, adminRows] = await Promise.all([
-          db
-            .select({ userId: inboxPermissions.userId })
-            .from(inboxPermissions)
-            .where(eq(inboxPermissions.email, recipientCanonical)),
-          db
-            .select({ id: users.id })
-            .from(users)
-            .where(eq(users.role, "admin"))
-            .limit(MAX_ADMIN_FANOUT + 1),
-        ]);
-        const { userIds, adminTruncated } = computeFanoutTargets({
-          permissionUserIds: permRows.map((r) => r.userId),
-          adminUserIds: adminRows.map((r) => r.id),
-        });
-        if (adminTruncated) {
-          console.warn(
-            `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
-          );
-        }
-        const deliverPayload = JSON.stringify({
-          inbox: recipientCanonical,
-          threadId: actualPersonId,
-          personId: actualPersonId,
-          senderName: parsed.from.name || fromAddressCanonical,
-          subject: parsed.subject ?? "",
-          bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
-        });
-        const results = await Promise.allSettled(
-          userIds.map((userId) => {
-            const hub = env.NOTIFICATIONS_HUB.get(
-              env.NOTIFICATIONS_HUB.idFromName(userId),
+  if (!autoFiledSpam) {
+    // A new non-spam inbound message wakes its conversation. Junk is silent:
+    // auto-filed spam must not resurface a snoozed customer conversation.
+    try {
+      await wakeConversation(
+        db,
+        recipientCanonical,
+        conversationId ?? `p:${actualPersonId}`,
+      );
+    } catch (error) {
+      console.warn("Failed to wake snoozed conversation:", error);
+    }
+
+    // Notify connected WebSocket clients about non-spam mail (per-user DOs).
+    // Fan out to users with explicit permission for this inbox, plus admins
+    // (capped) — all best-effort via ctx.waitUntil so push failures never
+    // block the inbound-email path.
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const [permRows, adminRows] = await Promise.all([
+            db
+              .select({ userId: inboxPermissions.userId })
+              .from(inboxPermissions)
+              .where(eq(inboxPermissions.email, recipientCanonical)),
+            db
+              .select({ id: users.id })
+              .from(users)
+              .where(eq(users.role, "admin"))
+              .limit(MAX_ADMIN_FANOUT + 1),
+          ]);
+          const { userIds, adminTruncated } = computeFanoutTargets({
+            permissionUserIds: permRows.map((r) => r.userId),
+            adminUserIds: adminRows.map((r) => r.id),
+          });
+          if (adminTruncated) {
+            console.warn(
+              `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
             );
-            return hub.fetch(
-              new Request("http://do/deliver", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: deliverPayload,
-              }),
-            );
-          }),
-        );
-        const failures = results.filter((r) => r.status === "rejected").length;
-        if (failures > 0) {
-          console.warn(
-            `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
+          }
+          const deliverPayload = JSON.stringify({
+            inbox: recipientCanonical,
+            threadId: actualPersonId,
+            personId: actualPersonId,
+            senderName: parsed.from.name || fromAddressCanonical,
+            subject: parsed.subject ?? "",
+            bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
+          });
+          const results = await Promise.allSettled(
+            userIds.map((userId) => {
+              const hub = env.NOTIFICATIONS_HUB.get(
+                env.NOTIFICATIONS_HUB.idFromName(userId),
+              );
+              return hub.fetch(
+                new Request("http://do/deliver", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: deliverPayload,
+                }),
+              );
+            }),
           );
+          const failures = results.filter(
+            (r) => r.status === "rejected",
+          ).length;
+          if (failures > 0) {
+            console.warn(
+              `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
+            );
+          }
+        } catch (err) {
+          // Non-fatal: real-time push is best-effort.
+          console.warn("Real-time fanout error:", err);
         }
-      } catch (err) {
-        // Non-fatal: real-time push is best-effort.
-        console.warn("Real-time fanout error:", err);
-      }
-    })(),
-  );
+      })(),
+    );
+  }
 
   // Best-effort outbound webhook for external automation (n8n / Make / etc.).
   // No-op unless an admin has configured a destination URL. Mirrors the push
@@ -325,9 +348,6 @@ export async function handleEmail(
   // rationale. Best-effort and non-blocking, like the webhook above — and it
   // sits after the blocklist and dedupe gates, so blocked senders and duplicate
   // deliveries are never forwarded.
-  const inboxIdentity = identityRows.find(
-    (r) => r.email.trim().toLowerCase() === recipientCanonical,
-  );
   forwardInbound(env, ctx, {
     inbox: recipientCanonical,
     forwardTo: inboxIdentity?.forwardTo ?? null,

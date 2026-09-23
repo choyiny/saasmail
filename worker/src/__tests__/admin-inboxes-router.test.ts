@@ -70,6 +70,66 @@ describe("admin inboxes router", () => {
     expect(rows[0].displayName).toBe("Alpha");
   });
 
+  it("PATCH persists and clears a 0..100 spam threshold", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+
+    const set = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ spamThreshold: 5 }),
+      },
+    );
+    expect(set.status).toBe(200);
+    expect((await set.json()).spamThreshold).toBe(5);
+
+    let rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows[0]?.spamThreshold).toBe(5);
+
+    const listed = await authFetch("/api/admin/inboxes", { apiKey });
+    const inbox = (
+      (await listed.json()) as Array<{
+        email: string;
+        spamThreshold: number | null;
+      }>
+    ).find((row) => row.email === "a@x.com");
+    expect(inbox?.spamThreshold).toBe(5);
+
+    const clear = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ spamThreshold: null }),
+      },
+    );
+    expect(clear.status).toBe(200);
+    expect((await clear.json()).spamThreshold).toBeNull();
+
+    rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("PATCH rejects a spam threshold outside 0..100", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ spamThreshold: 100.1 }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("PATCH clears display name when null is provided", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     const now = Math.floor(Date.now() / 1000);

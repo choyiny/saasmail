@@ -720,6 +720,16 @@ export interface Draft {
   updatedAt: number;
 }
 
+export interface DraftListItem {
+  id: string;
+  contextKey: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  subject: string | null;
+  replyToEmailId: string | null;
+  updatedAt: number;
+}
+
 export interface DraftInput {
   contextKey: string;
   fromAddress?: string;
@@ -729,6 +739,19 @@ export interface DraftInput {
   bodyHtml?: string;
   bodyText?: string;
   replyToEmailId?: string | null;
+}
+
+export async function fetchDraftList(params?: {
+  inbox?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ drafts: DraftListItem[] }> {
+  const qs = new URLSearchParams();
+  if (params?.inbox) qs.set("inbox", params.inbox);
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return apiFetch(`/api/drafts/list${query ? `?${query}` : ""}`);
 }
 
 export async function fetchDraft(contextKey: string): Promise<Draft | null> {
@@ -1040,6 +1063,8 @@ export interface AdminInbox {
   signatureHtml: string | null;
   /** Destination address for per-inbox forwarding; null = forwarding off. */
   forwardTo: string | null;
+  /** SpamAssassin-style X-Spam-Score cutoff; null = automatic filing off. */
+  spamThreshold: number | null;
   assignedUserIds: string[];
 }
 
@@ -1066,6 +1091,7 @@ export async function updateInboxSettings(
     displayMode?: InboxDisplayMode;
     signatureHtml?: string | null;
     forwardTo?: string | null;
+    spamThreshold?: number | null;
   },
 ): Promise<{
   email: string;
@@ -1073,6 +1099,7 @@ export async function updateInboxSettings(
   displayMode: InboxDisplayMode;
   signatureHtml: string | null;
   forwardTo: string | null;
+  spamThreshold: number | null;
 }> {
   return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
     method: "PATCH",

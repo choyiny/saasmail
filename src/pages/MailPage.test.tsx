@@ -6,11 +6,13 @@ import {
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
 
 const api = vi.hoisted(() => ({
   createMailbox: vi.fn(),
+  deleteDraft: vi.fn(),
   deleteMailbox: vi.fn(),
+  fetchDraftList: vi.fn(),
   fetchMailboxes: vi.fn(),
   fetchMessages: vi.fn(),
   fetchStats: vi.fn(),
@@ -29,6 +31,8 @@ vi.mock("@/components/ReplyComposer", () => ({
 }));
 
 import MailPage from "@/pages/MailPage";
+
+const onCompose = vi.fn();
 
 const baseState = {
   seen: false,
@@ -103,8 +107,13 @@ function mailbox(id: string, name: string, parentId: string | null = null) {
 function renderMail(path = "/mail/support%40e2e.test/inbox") {
   const router = createMemoryRouter(
     [
-      { path: "/mail/:inbox/:folder", element: <MailPage /> },
-      { path: "/mail/:inbox/f/:mailboxId", element: <MailPage /> },
+      {
+        element: <Outlet context={{ onCompose }} />,
+        children: [
+          { path: "/mail/:inbox/:folder", element: <MailPage /> },
+          { path: "/mail/:inbox/f/:mailboxId", element: <MailPage /> },
+        ],
+      },
     ],
     { initialEntries: [path] },
   );
@@ -115,6 +124,7 @@ function renderMail(path = "/mail/support%40e2e.test/inbox") {
 describe("MailPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    onCompose.mockReset();
     api.fetchStats.mockResolvedValue({
       totalPeople: 1,
       totalEmails: 2,
@@ -128,9 +138,11 @@ describe("MailPage", () => {
         },
       ],
     });
+    api.fetchDraftList.mockResolvedValue({ drafts: [] });
     api.fetchMailboxes.mockResolvedValue([]);
     api.fetchMessages.mockResolvedValue({ messages: [], nextCursor: null });
     api.createMailbox.mockResolvedValue(mailbox("mailbox-1", "Projects"));
+    api.deleteDraft.mockResolvedValue(undefined);
     api.deleteMailbox.mockResolvedValue({ success: true });
     api.renameMailbox.mockImplementation(async (id: string, name: string) => ({
       ...mailbox(id, name),
@@ -139,6 +151,122 @@ describe("MailPage", () => {
     api.setMailboxMembership.mockResolvedValue({ success: true });
     api.setMessageState.mockResolvedValue({ success: true });
     api.snoozeMessages.mockResolvedValue({ conversations: 1 });
+  });
+
+  it("lists inbox drafts and opens compose and draft contexts", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "draft-compose",
+          contextKey: "compose",
+          fromAddress: "support@e2e.test",
+          toAddress: "alice@example.test",
+          subject: "Legacy compose",
+          replyToEmailId: null,
+          updatedAt: 1_800_000_000,
+        },
+        {
+          id: "draft-new",
+          contextKey: "draft:new-1",
+          fromAddress: null,
+          toAddress: "bob@example.test",
+          subject: "Independent draft",
+          replyToEmailId: null,
+          updatedAt: 1_799_999_000,
+        },
+      ],
+    });
+
+    renderMail("/mail/support%40e2e.test/drafts");
+
+    await waitFor(() =>
+      expect(api.fetchDraftList).toHaveBeenCalledWith({
+        inbox: "support@e2e.test",
+      }),
+    );
+    expect(await screen.findByText("To: alice@example.test")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Legacy compose"));
+    expect(onCompose).toHaveBeenLastCalledWith(undefined, "compose");
+
+    fireEvent.click(screen.getByText("Independent draft"));
+    expect(onCompose).toHaveBeenLastCalledWith(undefined, "draft:new-1");
+
+    fireEvent.click(screen.getByTestId("mail-new-message"));
+    expect(onCompose.mock.calls.at(-1)?.[0]).toEqual({
+      from: "support@e2e.test",
+    });
+    expect(onCompose.mock.calls.at(-1)?.[1]).toMatch(/^draft:[A-Za-z0-9_-]+$/);
+  });
+
+  it("opens reply drafts on the received message and restores the reply composer", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "draft-reply",
+          contextKey: "reply:reply-target",
+          fromAddress: "support@e2e.test",
+          toAddress: "person@example.test",
+          subject: "Reply draft",
+          replyToEmailId: "reply-target",
+          updatedAt: 1_800_000_000,
+        },
+      ],
+    });
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("reply-target", "Original message", {
+          state: { seen: true },
+        }),
+      ],
+      nextCursor: null,
+    });
+    const router = renderMail("/mail/support%40e2e.test/drafts");
+
+    fireEvent.click(await screen.findByText("Reply draft"));
+
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        "/mail/support%40e2e.test/inbox",
+      ),
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toContain(
+        "m=received%3Areply-target",
+      ),
+    );
+    expect(await screen.findByTestId("reply-composer-mock")).toBeTruthy();
+  });
+
+  it("deletes a draft after confirmation", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "draft-delete",
+          contextKey: "draft:delete-me",
+          fromAddress: "support@e2e.test",
+          toAddress: "person@example.test",
+          subject: "Delete me",
+          replyToEmailId: null,
+          updatedAt: 1_800_000_000,
+        },
+      ],
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderMail("/mail/support%40e2e.test/drafts");
+
+    await screen.findByText("Delete me");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete draft Delete me" }),
+    );
+
+    await waitFor(() =>
+      expect(api.deleteDraft).toHaveBeenCalledWith("draft:delete-me"),
+    );
+    await waitFor(() => expect(screen.queryByText("Delete me")).toBeNull());
+    expect(confirmSpy).toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it("switches folders using the matching message query", async () => {

@@ -2,6 +2,7 @@
 -- Users are created via HTTP APIs in e2e/global-setup.ts.
 
 -- Clean tables (idempotent for repeated runs)
+DELETE FROM drafts;
 DELETE FROM sequence_emails;
 DELETE FROM sequence_enrollments;
 DELETE FROM sequences;
@@ -65,3 +66,47 @@ VALUES (
   CAST(strftime('%s','now') AS INTEGER) - 900,
   CAST(strftime('%s','now') AS INTEGER) - 900
 );
+
+
+-- Mailbox-only draft fixtures. These INSERT ... SELECT statements intentionally
+-- insert zero rows during the pre-user seed, then populate after globalSetup
+-- has created the admin and the mailbox spec re-runs this seed.
+INSERT INTO drafts (
+  id, user_id, context_key, from_address, to_address, cc, subject,
+  body_html, body_text, reply_to_email_id, created_at, updated_at
+)
+SELECT
+  'draft_e2e_resume',
+  users.id,
+  'draft:e2e-resume',
+  'support@e2e.test',
+  'resume@customers.test',
+  NULL,
+  'Mailbox draft resume',
+  '<p>Resume this mailbox draft.</p>',
+  'Resume this mailbox draft.',
+  NULL,
+  CAST(strftime('%s','now') AS INTEGER) - 300,
+  CAST(strftime('%s','now') AS INTEGER) - 100
+FROM users
+WHERE users.email = 'admin@e2e.test';
+
+INSERT INTO drafts (
+  id, user_id, context_key, from_address, to_address, cc, subject,
+  body_html, body_text, reply_to_email_id, created_at, updated_at
+)
+SELECT
+  'draft_e2e_delete',
+  users.id,
+  'draft:e2e-delete',
+  'support@e2e.test',
+  'delete@customers.test',
+  NULL,
+  'Mailbox draft delete',
+  '<p>Delete this mailbox draft.</p>',
+  'Delete this mailbox draft.',
+  NULL,
+  CAST(strftime('%s','now') AS INTEGER) - 400,
+  CAST(strftime('%s','now') AS INTEGER) - 200
+FROM users
+WHERE users.email = 'admin@e2e.test';

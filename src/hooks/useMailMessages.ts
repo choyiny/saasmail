@@ -26,6 +26,7 @@ export type SystemFolder =
   | "inbox"
   | "starred"
   | "snoozed"
+  | "drafts"
   | "sent"
   | "archive"
   | "junk"
@@ -76,6 +77,15 @@ export function useMailMessages({
     async (cursor: string | null, append: boolean) => {
       if (!inbox || !allowedInboxes.includes(inbox)) return;
       if (!mailboxId && !systemFolder) return;
+      if (systemFolder === "drafts") {
+        if (!append) {
+          setMessages([]);
+          setNextCursor(null);
+          setLoading(false);
+          setShowNewMessages(false);
+        }
+        return;
+      }
 
       if (append) setLoadingMore(true);
       else setLoading(true);

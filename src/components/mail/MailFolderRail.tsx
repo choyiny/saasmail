@@ -2,9 +2,11 @@ import { useState } from "react";
 import {
   Archive,
   Clock3,
+  FileText,
   Folder,
   Inbox,
   Pencil,
+  PenSquare,
   Send,
   Star,
   Trash2,
@@ -28,6 +30,7 @@ export const SYSTEM_FOLDERS: Array<{
   { id: "inbox", label: "Inbox", icon: Inbox },
   { id: "starred", label: "Starred", icon: Star },
   { id: "snoozed", label: "Snoozed", icon: Clock3 },
+  { id: "drafts", label: "Drafts", icon: FileText },
   { id: "sent", label: "Sent", icon: Send },
   { id: "archive", label: "Archive", icon: Archive },
   { id: "junk", label: "Junk", icon: TriangleAlert },
@@ -85,6 +88,7 @@ interface MailFolderRailProps {
   mailboxId?: string;
   systemFolder?: SystemFolder;
   onInboxChange: (inbox: string) => void;
+  onNewMessage: () => void;
   onOpenSystemFolder: (folder: SystemFolder) => void;
   onOpenMailbox: (mailboxId: string) => void;
   onMailboxCreated: (mailbox: Mailbox) => void;
@@ -100,6 +104,7 @@ export default function MailFolderRail({
   mailboxId,
   systemFolder,
   onInboxChange,
+  onNewMessage,
   onOpenSystemFolder,
   onOpenMailbox,
   onMailboxCreated,
@@ -193,6 +198,15 @@ export default function MailFolderRail({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          data-testid="mail-new-message"
+          onClick={onNewMessage}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[6px] bg-text-primary px-3 py-2 text-xs font-medium text-background transition-opacity hover:opacity-90"
+        >
+          <PenSquare className="h-3.5 w-3.5" />
+          New message
+        </button>
       </div>
 
       <nav className="min-h-0 flex-1 overflow-y-auto p-2">

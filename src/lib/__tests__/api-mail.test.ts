@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createMailbox,
   deleteMailbox,
+  fetchDraftList,
   fetchMailboxes,
   fetchMessages,
   renameMailbox,
@@ -119,6 +120,19 @@ describe("mail api client", () => {
           trashed: true,
         }),
       },
+    );
+  });
+
+  it("lists drafts with the inbox and pagination query", async () => {
+    await fetchDraftList({
+      inbox: "team@example.com",
+      limit: 25,
+      offset: 50,
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/drafts/list?inbox=team%40example.com&limit=25&offset=50",
+      { credentials: "include" },
     );
   });
 

@@ -43,6 +43,7 @@ mailbox rows.
 | Junk           | Received only; spam, not trashed                                                            |
 | Trash          | Received and sent with trash state                                                          |
 | Snoozed        | Received only; actively snoozed, not spam or trashed                                        |
+| Drafts         | Current user's rows from `drafts`, optionally filtered to the selected inbox                |
 | Custom mailbox | Members of that mailbox, not trashed, scoped to the mailbox inbox                           |
 
 A message that is both spam and trashed appears in Trash. Removing the trash
@@ -180,3 +181,41 @@ toggles selection, `e` archives, `s` stars, `#` trashes, `r` replies,
 and `?` opens the shortcuts dialog. Shortcuts are ignored while focus is in
 an input, textarea, select, or contenteditable element, and for command/control
 modifier combinations.
+
+## Drafts
+
+Drafts remain in the existing user-scoped `drafts` table; there is no second
+mailbox draft store. `GET /api/drafts/list` returns only the authenticated
+user's drafts newest-first with summary fields, supports `limit` (default 50,
+maximum 100) plus `offset`, and accepts an optional `inbox` filter. Inbox
+filters are trimmed and lowercased and include drafts whose `from_address` is
+null so an unassigned draft is still reachable.
+
+The Mailbox **Drafts** folder uses three context namespaces:
+
+- `compose` — the legacy single compose draft.
+- `reply:<emailId>` — reply drafts; opening one loads the received message and
+  opens its ReplyComposer, which restores that context.
+- `draft:<id>` — independent new-message drafts. **New message** creates a
+  fresh context so multiple drafts can coexist.
+
+`ComposeModal` accepts an optional `contextKey` and defaults to `compose`,
+so all existing callers retain their prior behavior. Draft deletion uses the
+existing `DELETE /api/drafts?contextKey=...` route.
+
+## Per-inbox spam threshold
+
+Each sender identity can optionally set a numeric spam threshold from 0 through 100. When a new inbound message carries an `X-Spam-Score` header and its
+parsed score is greater than or equal to that inbox's threshold, the message is
+filed into Junk through the system mailbox-state helper with `updated_by =
+NULL`.
+
+The score is SpamAssassin-style; **5.0 is a common threshold**, but the value is
+operator-configurable. This rule only applies when incoming mail actually
+carries `X-Spam-Score`; no score means no automatic filing. Leaving the inbox
+threshold empty disables the behavior.
+
+Auto-filed spam is silent: it does not wake a snoozed conversation and does not
+fan out push or realtime notifications. Spam-state write failures are logged
+and never break inbound delivery; if filing fails, the message follows the
+normal non-spam wake/notification path.

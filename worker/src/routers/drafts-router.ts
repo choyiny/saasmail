@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { drafts } from "../db/drafts.schema";
 import { json200Response } from "../lib/helpers";
@@ -55,6 +55,71 @@ function toDraft(row: DraftRow): z.infer<typeof DraftSchema> {
     updatedAt: row.updatedAt,
   };
 }
+
+const DraftListItemSchema = z.object({
+  id: z.string(),
+  contextKey: z.string(),
+  fromAddress: z.string().nullable(),
+  toAddress: z.string().nullable(),
+  subject: z.string().nullable(),
+  replyToEmailId: z.string().nullable(),
+  updatedAt: z.number(),
+});
+
+const DraftListQuery = z.object({
+  inbox: z.string().min(1).max(320).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+// GET /api/drafts/list — list the current user's drafts newest-first.
+const listDraftsRoute = createRoute({
+  method: "get",
+  path: "/list",
+  tags: ["Drafts"],
+  security: bearerSecurity,
+  description:
+    "List the current user's drafts newest-first, optionally scoped to an inbox.",
+  request: { query: DraftListQuery },
+  responses: {
+    ...json200Response(
+      z.object({ drafts: z.array(DraftListItemSchema) }),
+      "The current user's drafts",
+    ),
+  },
+});
+
+draftsRouter.openapi(listDraftsRoute, async (c) => {
+  const db = c.get("db");
+  const user = c.get("user");
+  const { inbox, limit, offset } = c.req.valid("query");
+  const normalizedInbox = inbox?.trim().toLowerCase();
+
+  const where = normalizedInbox
+    ? and(
+        eq(drafts.userId, user.id),
+        or(eq(drafts.fromAddress, normalizedInbox), isNull(drafts.fromAddress)),
+      )
+    : eq(drafts.userId, user.id);
+
+  const rows = await db
+    .select({
+      id: drafts.id,
+      contextKey: drafts.contextKey,
+      fromAddress: drafts.fromAddress,
+      toAddress: drafts.toAddress,
+      subject: drafts.subject,
+      replyToEmailId: drafts.replyToEmailId,
+      updatedAt: drafts.updatedAt,
+    })
+    .from(drafts)
+    .where(where)
+    .orderBy(desc(drafts.updatedAt))
+    .limit(limit)
+    .offset(offset);
+
+  return c.json({ drafts: rows }, 200);
+});
 
 const ContextQuery = z.object({
   contextKey: z.string().min(1).max(200),

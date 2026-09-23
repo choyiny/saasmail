@@ -7,7 +7,7 @@ import {
   getDb,
 } from "./helpers";
 import { drafts } from "../db/drafts.schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 const q = (contextKey: string) =>
   `/api/drafts?contextKey=${encodeURIComponent(contextKey)}`;
@@ -90,6 +90,108 @@ describe("drafts router", () => {
       expect(res.status).toBe(200);
       const { draft } = await res.json();
       expect(draft.toAddress).toBe("ali");
+    });
+  });
+
+  describe("GET /api/drafts/list", () => {
+    it("lists only the caller's drafts newest-first with inbox, limit, and offset filters", async () => {
+      await save(apiKey, {
+        contextKey: "draft:support",
+        fromAddress: "support@example.com",
+        to: "alice@example.com",
+        subject: "Support draft",
+        bodyText: "not returned in list",
+      });
+      await save(apiKey, {
+        contextKey: "draft:unassigned",
+        to: "bob@example.com",
+        subject: "Unassigned draft",
+      });
+      await save(apiKey, {
+        contextKey: "draft:marketing",
+        fromAddress: "marketing@example.com",
+        subject: "Marketing draft",
+      });
+
+      const { apiKey: apiKeyB } = await createTestUser({
+        id: "user-b-list",
+        email: "b-list@example.com",
+      });
+      await save(apiKeyB, {
+        contextKey: "draft:other-user",
+        fromAddress: "support@example.com",
+        subject: "Other user's secret",
+      });
+
+      const db = getDb();
+      await db
+        .update(drafts)
+        .set({ updatedAt: 300 })
+        .where(
+          and(
+            eq(drafts.userId, userId),
+            eq(drafts.contextKey, "draft:support"),
+          ),
+        );
+      await db
+        .update(drafts)
+        .set({ updatedAt: 200 })
+        .where(
+          and(
+            eq(drafts.userId, userId),
+            eq(drafts.contextKey, "draft:unassigned"),
+          ),
+        );
+      await db
+        .update(drafts)
+        .set({ updatedAt: 100 })
+        .where(
+          and(
+            eq(drafts.userId, userId),
+            eq(drafts.contextKey, "draft:marketing"),
+          ),
+        );
+
+      const res = await authFetch(
+        "/api/drafts/list?inbox=%20Support%40Example.COM%20&limit=1&offset=1",
+        { apiKey },
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.drafts).toEqual([
+        expect.objectContaining({
+          contextKey: "draft:unassigned",
+          fromAddress: null,
+          subject: "Unassigned draft",
+          updatedAt: 200,
+        }),
+      ]);
+      expect(body.drafts[0]).not.toHaveProperty("bodyText");
+
+      const all = await authFetch("/api/drafts/list", { apiKey });
+      expect(
+        (await all.json()).drafts.map(
+          (draft: { contextKey: string }) => draft.contextKey,
+        ),
+      ).toEqual(["draft:support", "draft:unassigned", "draft:marketing"]);
+    });
+
+    it("never includes another user's drafts", async () => {
+      await save(apiKey, { contextKey: "compose", subject: "Mine" });
+      const { apiKey: apiKeyB } = await createTestUser({
+        id: "user-b-isolation",
+        email: "b-isolation@example.com",
+      });
+      await save(apiKeyB, {
+        contextKey: "draft:secret",
+        subject: "Other user's secret",
+      });
+
+      const res = await authFetch("/api/drafts/list", { apiKey });
+      expect(res.status).toBe(200);
+      expect((await res.json()).drafts).toEqual([
+        expect.objectContaining({ contextKey: "compose", subject: "Mine" }),
+      ]);
     });
   });
 
