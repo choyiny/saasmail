@@ -412,6 +412,20 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     );
   }
 
+  // A Gmail source with no mailbox names nothing to sync from, and the
+  // sendAs check below is skipped for it because there is no account to ask —
+  // so without this it is the one way to write an unverified "gmail" row.
+  // Not reachable from the UI, which always sends both fields together.
+  if (nextSource === "gmail" && nextGmailAccountId === null) {
+    return c.json(
+      {
+        error:
+          'A Gmail inbox must name the connected mailbox it reads from. Send gmailAccountId alongside source: "gmail", or use source: "cloudflare" to unmap it.',
+      },
+      400,
+    );
+  }
+
   // A Gmail mapping is only usable if the connected account may actually put
   // this address in a From: header. Until this check existed, a wrong mapping
   // was saved happily and only surfaced when a real reply bounced.

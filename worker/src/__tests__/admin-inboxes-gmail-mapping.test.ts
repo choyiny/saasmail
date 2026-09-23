@@ -656,6 +656,31 @@ describe("admin inboxes router — Gmail mapping", () => {
     expect(rows[0].gmailAccountId).toBeNull();
   });
 
+  it("rejects source gmail with no account id, without asking Gmail anything", async () => {
+    // The sendAs guard only runs when an account id is present, so this is
+    // the one shape that could write a "gmail" row nothing ever verified.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    await seedIdentity();
+    const fetchFn = stubSendAs({ addresses: ["a@x.com"] });
+
+    const res = await patchInbox(apiKey, "a@x.com", {
+      source: "gmail",
+      gmailAccountId: null,
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/gmailAccountId/);
+    // Refused before any lookup — there is no mailbox to ask.
+    expect(calledSendAs(fetchFn)).toBe(false);
+
+    const rows = await rowsFor("a@x.com");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].source).toBe("cloudflare");
+    expect(rows[0].gmailAccountId).toBeNull();
+    expect(rows[0].displayName).toBe("Original");
+  });
+
   it("PATCH rejects a source value outside the enum with 400", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     const res = await patchInbox(apiKey, "a@x.com", { source: "outlook" });
