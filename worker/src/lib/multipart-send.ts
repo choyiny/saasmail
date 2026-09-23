@@ -96,6 +96,13 @@ export async function parseSendBody<T>(
     };
   }
 
+  // Nothing to weigh, so nothing to ask. A resolver may query the database,
+  // log, and — on the reply route — authorize the caller before it will
+  // answer, none of which a reply carrying no attachment should pay for.
+  if (rawFiles.length === 0) {
+    return { ok: true, value: { payload: result.data, files: [] } };
+  }
+
   const limitBytes =
     typeof maxBytes === "function" ? await maxBytes(result.data) : maxBytes;
 

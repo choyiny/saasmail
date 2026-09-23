@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { createEmailSender } from "../lib/email-sender";
 import { maxAttachmentBytesForInbox } from "../lib/email-sender/for-inbox";
+import { assertInboxAllowed } from "../lib/inbox-permissions";
 import { json201Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
@@ -276,10 +277,19 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
   // Budget from the sender that will actually carry this reply, which for a
   // Gmail-mapped inbox is Gmail — not `createEmailSender(c.env)`, the
   // configured provider, which never sends a Gmail reply at all. Resolved
-  // from the parsed payload's fromAddress, so it has to be a callback.
-  const parsed = await parseSendBody(c, ReplyEmailSchema, (payload) =>
-    maxAttachmentBytesForInbox(db, c.env, payload.fromAddress),
-  );
+  // from the parsed payload's fromAddress, so it has to be a callback, and
+  // only called at all when the request actually carries an attachment.
+  const parsed = await parseSendBody(c, ReplyEmailSchema, (payload) => {
+    const fromAddress = payload.fromAddress.trim().toLowerCase();
+    // Authorize BEFORE answering anything about this address. The budget is
+    // Gmail's for a Gmail-mapped inbox and the configured provider's
+    // otherwise, so the `limitBytes` in a 413 tells the caller which — and
+    // without this, it would tell them that about an inbox they do not own.
+    // `replyToEmail` asserts the same thing on the same normalised value;
+    // this only moves the refusal in front of the disclosure.
+    assertInboxAllowed(c.get("allowedInboxes")!, fromAddress);
+    return maxAttachmentBytesForInbox(db, c.env, fromAddress);
+  });
   if (!parsed.ok) {
     const { status, body } = sendParseErrorResponse(parsed.err);
     return c.json(body, status);
