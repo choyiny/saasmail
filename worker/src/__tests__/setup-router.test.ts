@@ -90,6 +90,35 @@ describe("setup router", () => {
       expect(res.status).toBe(400);
     });
 
+    it("tells an unauthenticated visitor nothing about an internal failure", async () => {
+      // /api/setup needs no token at all, so it is the more exposed of the
+      // two public account-creation routes. Dropping a table better-auth
+      // writes to makes createUser throw a raw D1 error instead of its own
+      // APIError, and a D1 error's message names the statement it was
+      // running — whose bound parameters here are the credentials.
+      await env.DB.prepare("DROP TABLE accounts").run();
+      try {
+        const res = await authFetch("/api/setup", {
+          method: "POST",
+          body: JSON.stringify({
+            name: "Admin",
+            email: "admin@example.com",
+            password: "securepassword123",
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).not.toMatch(/no such table/i);
+        expect(body.error).not.toMatch(/accounts/i);
+        expect(body.error).not.toMatch(/insert|select|sql|d1_error/i);
+        // Still says what happened, in the visitor's terms.
+        expect(body.error).toMatch(/try again/i);
+      } finally {
+        await applyMigrations();
+      }
+    });
+
     it("rejects short password", async () => {
       const res = await authFetch("/api/setup", {
         method: "POST",
