@@ -14,10 +14,12 @@ land on one customer timeline.
 
 ## What this release ships
 
-An admin can connect a Google mailbox, map it to a saasmail inbox, and its
-mail starts appearing on that inbox's timeline — driven by direct API calls,
-with no admin UI for any of it yet. Connecting, mapping, and disconnecting are
-all done through the endpoints below.
+An admin can connect a Google mailbox from the **Inboxes** page, point a
+saasmail inbox at it, and its mail starts appearing on that inbox's timeline.
+Connecting, reconnecting, disconnecting, and mapping an inbox to a mailbox are
+all done on `/inboxes` in the admin UI. The HTTP endpoints behind those
+controls are unchanged and still usable directly — see
+[Doing it over HTTP instead](#doing-it-over-http-instead).
 
 - **Mail syncs on a 15-minute poll.** A cron tick reads each connected
   mailbox's history and ingests anything new. A message can take up to 15
@@ -44,8 +46,9 @@ all done through the endpoints below.
   Gmail-mapped `fromAddress` — see
   [Sending through Gmail](#sending-through-gmail) for why.
 - **A revoked grant stops that mailbox syncing** until it is reconnected. The
-  account's `lastError` records what happened, and the connected-accounts
-  route below surfaces it.
+  account's `lastError` records what happened; the mailbox list on `/inboxes`
+  prints it and offers a **Reconnect** link, and the connected-accounts route
+  below returns it too.
 - **A long outage can lose mail permanently.** See
   [Sync gaps](#sync-gaps) below.
 
@@ -75,63 +78,159 @@ all done through the endpoints below.
    command above produces exactly that. A key of the wrong length makes
    connecting fail.
 
-5. Connect a mailbox and map it to an inbox by calling the API as an
-   authenticated admin — this slice ships the HTTP endpoints only; a Connect
-   control on the Inboxes page in the admin UI arrives in a later release.
-   - `GET /api/admin/gmail/connect` returns `{ "authUrl": "..." }`. You can
-     call this with an admin API key.
-   - Open that `authUrl` **in a browser that is signed in to saasmail as an
-     admin**. Google's consent screen redirects that same browser back to the
-     callback URI from step 3, and the callback sits behind the same admin
-     guard as every other `/api/admin/*` route. A browser navigation carries
-     cookies, not an `Authorization` header, so an API key cannot stand in
-     for the session here — without one the callback answers `403` and the
-     mailbox is never connected. Sign in to the saasmail web app first, then
-     paste the `authUrl` into that browser.
-   - `GET /api/admin/gmail` lists connected mailboxes, each with `id`,
-     `emailAddress`, `lastSyncedAt`, `lastError`, and `lastGapAt`. Check
-     `lastGapAt` after any extended outage — see [Sync gaps](#sync-gaps).
-   - Map the mailbox to a saasmail inbox with
-     `PATCH /api/admin/inboxes/{email}`, body
-     `{ "source": "gmail", "gmailAccountId": "<id from the list above>" }`.
-     `{email}` is the saasmail inbox address that should receive this
-     mailbox's mail — it does not need to already exist. The mapping is
-     verified before it is saved: saasmail asks Gmail for the connected
-     account's "Send mail as" list and refuses the mapping unless `{email}`
-     is on it, answering `400`. If Gmail cannot be reached to check, the
-     mapping is refused with a `502` rather than saved unverified — nothing
-     is written in either case. A rejected address usually just needs adding
-     under **Send mail as** in that account's Gmail settings, and verifying,
-     before you map it here. Until an inbox is
-     mapped this way, syncing for that mailbox is paused: the engine will not
-     guess a destination, so it does not fetch or consume any history for the
-     account. This is a safe, recoverable state, not data loss — the mail
-     stays in Gmail and sync resumes exactly where it left off as soon as
-     exactly one saasmail inbox is mapped to the account. While paused, the
-     account's `lastError` records why (`no_personal_inbox` if nothing is
-     mapped yet), and `GET /api/admin/gmail` surfaces it. The same pause
-     applies if the mapping becomes _ambiguous_ — for example if a second
-     saasmail inbox is also mapped to the same connected Google account —
-     since the engine only ever routes to a single personal mailbox and
-     refuses to pick between two (`lastError: ambiguous_inbox_mapping`). If
-     sync looks stuck on a mailbox, check that it has exactly one inbox
-     mapped to it.
-   - `DELETE /api/admin/gmail/{id}` disconnects one: it deletes saasmail's
-     stored row, including the encrypted refresh token, so saasmail can no
-     longer reach the mailbox. It does **not** revoke the grant at Google —
-     saasmail makes no revocation call. The refresh token stays valid on
-     Google's side until the mailbox owner removes it by hand, under their
-     Google Account's third-party access settings
-     (<https://myaccount.google.com/connections>). Revoke it there too if the
-     disconnect is a response to a compromise, or if the mailbox is leaving
-     for good.
+5. Sign in to the saasmail web app as an admin and open **Inboxes**
+   (`/inboxes`). The rest of the setup happens there — see
+   [Connecting a mailbox](#connecting-a-mailbox) and
+   [Pointing an inbox at a mailbox](#pointing-an-inbox-at-a-mailbox).
+
+## Connecting a mailbox
+
+**Connected Google mailboxes** sits at the top of the **Inboxes** page. With
+nothing connected it explains that connecting does not backfill; otherwise it
+lists each connected mailbox with its address and when it last synced, plus
+**Disconnect** and — only when that mailbox has an error — **Reconnect**.
+
+**Connect a Google mailbox** starts the OAuth flow. It is a plain link to
+`GET /api/admin/gmail/connect`, and that endpoint answers with JSON rather
+than redirecting, so the browser lands on
+
+```json
+{ "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?..." }
+```
+
+Open that `authUrl` in the same browser to reach Google's consent screen.
+(This is a rough edge, not a broken flow: the button and the endpoint disagree
+about who follows the URL. Everything after it works as described.) Use a
+browser that is signed in to saasmail as an admin — Google redirects back to
+the callback from step 3, which sits behind the same admin guard as every
+other `/api/admin/*` route, and a browser navigation carries cookies rather
+than an `Authorization` header, so an API key cannot stand in for the session
+here. Without one the callback answers `403` and the mailbox is never
+connected.
+
+Google then returns you to `/inboxes` with the result in the URL, and the page
+shows a banner for it:
+
+- `?gmail=connected` — the mailbox is in the list below; the first sync runs
+  within 15 minutes, and only mail arriving from now on is pulled in.
+- `?gmail=error` — nothing was added, try again. The banner deliberately does
+  not print the reason; it is in the Worker log, because the underlying error
+  can carry the access token.
+
+The parameter is stripped from the URL once read, so a refresh does not
+resurrect a stale banner.
+
+### What a Reconnect prompt means
+
+A mailbox with a non-null `lastError` gets a red note — _"This mailbox has
+stopped syncing… Google said: `<lastError>`"_ — and a **Reconnect** link next
+to it. It means sync has stopped for that mailbox and will not resume on its
+own. Read the error text before clicking, because **Reconnect appears for
+every error, and it is only the right fix for some of them**:
+
+- a revoked or broken grant (a token-refresh failure) — reconnect;
+- `no_personal_inbox` — no saasmail inbox is mapped to this mailbox yet;
+  reconnecting changes nothing. Map one (below).
+- `ambiguous_inbox_mapping` — more than one saasmail inbox is mapped to this
+  mailbox, and the engine refuses to pick. Remove the extra mapping.
+- `history_gap` — sync already recovered by re-seeding from the present; the
+  next successful run clears this. Mail from inside the gap is gone — see
+  [Sync gaps](#sync-gaps).
+
+Reconnecting runs the same OAuth flow and replaces the mailbox's stored
+credentials. It clears `lastError`, and it re-seeds the sync cursor at the
+mailbox's _current_ position — so mail that arrived while the mailbox was
+broken is not fetched afterwards, exactly as a first connection does not
+backfill. It does **not** clear the sync-gap notice; see below.
+
+While a mailbox is unmapped or ambiguously mapped, sync is _paused_ rather
+than lossy: the engine does not fetch or consume any history for the account,
+so the mail stays in Gmail and sync resumes exactly where it left off once
+exactly one saasmail inbox is mapped to it. If sync looks stuck on a mailbox,
+check its mapping first.
+
+### Disconnecting
+
+**Disconnect** arms an inline confirm rather than acting immediately.
+Confirming deletes saasmail's stored row, including the encrypted refresh
+token, so saasmail can no longer reach the mailbox; mail already synced stays
+on the timeline.
+
+It does **not** revoke the grant at Google — saasmail makes no revocation
+call, whatever the confirm text says. The refresh token stays valid on
+Google's side until the mailbox owner removes it by hand under their Google
+Account's third-party access settings
+(<https://myaccount.google.com/connections>). Revoke it there too if the
+disconnect is a response to a compromise, or if the mailbox is leaving for
+good.
+
+## Pointing an inbox at a mailbox
+
+Each row in the inbox table below has a **Source** dropdown: **Cloudflare**
+(the default — mail arrives through Cloudflare Email Routing) or one of the
+connected Google mailboxes, listed by address. Choosing a mailbox saves
+immediately.
+
+With no mailbox connected the dropdown is disabled and reads "Connect a Google
+mailbox first" — or "Couldn't load connected mailboxes" if that list failed to
+load, which is not the same thing. A row still mapped to a mailbox that has
+since been disconnected shows "Mailbox no longer connected" rather than
+quietly reverting to Cloudflare.
+
+### A mapping is verified before it is saved
+
+saasmail asks Gmail for the connected account's "Send mail as" list and
+refuses the mapping unless the inbox address is one that account can actually
+send from (which is not quite the same as being on the list — see below). The
+check runs whenever
+the mapping is new or changed — not on unrelated edits to the same inbox, so a
+Gmail outage cannot block renaming an inbox. Three refusals are possible, and
+they need different things from you. In each case **nothing is saved**, the
+dropdown snaps back, and the server's own message is printed under it:
+
+| Status | Means                                                       | What to do                                                                                             |
+| ------ | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `400`  | The account cannot send as this address                     | Add the address under **Send mail as** in that Gmail account, **verify it**, then map the inbox again. |
+| `502`  | The check itself could not be completed (Gmail unreachable) | Retry. Nothing about your configuration is wrong.                                                      |
+| `503`  | Gmail integration is not configured on this instance        | Set the three secrets from step 4. Retrying will not help until you do.                                |
+
+The `400` catches a mapping that would otherwise look fine and then die on the
+first real reply. One thing to know about it: **an address can be in the "Send
+mail as" list and still be refused.** saasmail drops every entry Gmail reports
+with `verificationStatus: "pending"` — an alias you added but have not
+confirmed from the verification mail — because Gmail will not send from one.
+That is the only status dropped: the account's own address and
+Workspace-managed aliases, which Gmail reports as
+`verificationStatusUnspecified` or with no status at all, are all accepted. So
+if a `400` names an address you can see under **Send mail as**, check that its
+verification actually completed.
+
+## Doing it over HTTP instead
+
+Every control above is a call you can make yourself, as an authenticated
+admin:
+
+- `GET /api/admin/gmail/connect` → `{ "authUrl": "..." }`. You can call this
+  with an admin API key, but the `authUrl` must then be opened in a browser
+  signed in to saasmail — see [above](#connecting-a-mailbox).
+- `GET /api/admin/gmail` lists connected mailboxes, each with `id`,
+  `emailAddress`, `lastSyncedAt`, `lastError`, `lastGapAt`, and `createdAt`.
+  It never returns token material. Check `lastGapAt` after any extended
+  outage — see [Sync gaps](#sync-gaps).
+- `PATCH /api/admin/inboxes/{email}` with
+  `{ "source": "gmail", "gmailAccountId": "<id from the list above>" }` maps
+  an inbox; `{email}` does not need to already exist. Sending `"cloudflare"`
+  as the source, with `gmailAccountId` set to `null`, unmaps it. The same
+  `400` / `502` / `503` refusals apply.
+- `DELETE /api/admin/gmail/{id}` disconnects one mailbox, with the same
+  no-revocation caveat as [Disconnecting](#disconnecting).
 
 ## Sending through Gmail
 
 ### Replies typed in saasmail
 
-When a saasmail inbox is mapped to a Gmail account
-(`PATCH /api/admin/inboxes/{email}` with `source: "gmail"`), a reply typed in
+When a saasmail inbox is mapped to a Gmail account (its **Source** on
+`/inboxes` set to that mailbox), a reply typed in
 saasmail through `POST /api/send/reply/{emailId}` sends through that Gmail
 account instead of the configured provider (Resend, Postmark, Bavimail, or
 Cloudflare Email Sending). It:
@@ -209,12 +308,10 @@ the fallback. (Unset secrets are a configuration problem, not an account
 one: they are logged, but nothing is written to `lastError`, because
 saasmail never reaches the account row to write it.)
 
-One caveat on the fallback. It sends through whichever provider is
-configured, and **Cloudflare Email Sending currently keeps only the last `Cc`
-recipient** — so a fallback reply Cc'd to several people reaches one of them.
-Resend, Postmark and Bavimail all carry the full list. If your fallback
-provider is Cloudflare Email Sending, treat a multi-`Cc` reply from a
-Gmail-mapped inbox as unreliable until the grant is reconnected.
+The fallback sends through whichever provider is configured, and all four —
+Resend, Postmark, Bavimail, and Cloudflare Email Sending — carry the full
+`Cc` list. (Cloudflare Email Sending used to keep only the last `Cc`
+recipient; that is fixed.)
 
 ### No duplicates
 
@@ -284,12 +381,17 @@ the gap is never synced and cannot be recovered**; there is no history left
 to read it from.
 
 `gmail_accounts.last_gap_at` records the last time this happened for an
-account, and `GET /api/admin/gmail` exposes it as `lastGapAt`. Nothing ever
-clears it — not a later successful sync, not reconnecting the mailbox — so
-its age is the signal: check it after any extended outage or after
-reconnecting a mailbox that had been failing, and treat a recent value as
-"some mail from around then is permanently missing," not as a current-health
-indicator.
+account, `GET /api/admin/gmail` exposes it as `lastGapAt`, and the mailbox's
+row on `/inboxes` shows an amber **Sync gap** notice, with how long ago it
+happened, saying that mail from that window was never synced and cannot be
+recovered in saasmail — it is still in Gmail.
+
+**That notice never goes away, and that is deliberate.** Nothing clears
+`lastGapAt`: not a later successful sync, not reconnecting the mailbox.
+Reconnecting clears the `lastError` that prompted it, but it does not
+un-lose the mail, so the gap stays on the record. Its age is the signal —
+treat a recent value as "some mail from around then is permanently missing",
+and an old one as history, not as a current-health indicator.
 
 ## Rotating `TOKEN_ENCRYPTION_KEY`
 
