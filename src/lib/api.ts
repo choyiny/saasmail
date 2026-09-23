@@ -957,9 +957,19 @@ export async function disconnectGmailAccount(
   );
 }
 
-/** Full-page navigation target — the worker redirects to Google's consent screen. */
-export function gmailConnectUrl(): string {
-  return "/api/admin/gmail/connect";
+/**
+ * Ask the worker for the Google consent URL to send the operator to.
+ *
+ * This endpoint answers `{ authUrl }` with a 200; it does **not** redirect.
+ * Linking an anchor straight at it lands the operator on a page of raw JSON,
+ * so the caller must fetch the URL and navigate to `authUrl` itself.
+ *
+ * On an instance with no OAuth secrets it answers 503 with
+ * `{ error: "Gmail integration is not configured" }`, which `apiFetch`
+ * rethrows verbatim — show it rather than navigating.
+ */
+export async function startGmailConnect(): Promise<{ authUrl: string }> {
+  return apiFetch<{ authUrl: string }>("/api/admin/gmail/connect");
 }
 
 // --- Suppressions ---

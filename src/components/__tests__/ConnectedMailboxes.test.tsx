@@ -5,19 +5,33 @@ import ConnectedMailboxes from "@/components/ConnectedMailboxes";
 import {
   fetchGmailAccounts,
   disconnectGmailAccount,
-  gmailConnectUrl,
+  startGmailConnect,
   type GmailAccount,
 } from "@/lib/api";
+import { navigateExternal } from "@/lib/navigate-external";
 
 vi.mock("@/lib/api", () => ({
   fetchGmailAccounts: vi.fn(),
   disconnectGmailAccount: vi.fn(),
-  gmailConnectUrl: vi.fn(() => "/api/admin/gmail/connect"),
+  startGmailConnect: vi.fn(),
+}));
+
+vi.mock("@/lib/navigate-external", () => ({
+  navigateExternal: vi.fn(),
 }));
 
 const mFetch = vi.mocked(fetchGmailAccounts);
 const mDisconnect = vi.mocked(disconnectGmailAccount);
-const mConnectUrl = vi.mocked(gmailConnectUrl);
+const mStartConnect = vi.mocked(startGmailConnect);
+const mNavigate = vi.mocked(navigateExternal);
+
+/**
+ * A realistic consent URL. Distinctive enough that navigating to anything
+ * else — the API path, a bare origin — fails the assertion rather than
+ * merely "navigation happened".
+ */
+const CONSENT_URL =
+  "https://accounts.google.com/o/oauth2/v2/auth?client_id=abc123.apps.googleusercontent.com&state=signed-state";
 
 /** Relative to real "now" so the component's own clock agrees with ours. */
 const minutesAgo = (n: number) => Date.now() - n * 60_000;
@@ -56,7 +70,8 @@ function renderAt(path = "/inboxes") {
 beforeEach(() => {
   mFetch.mockReset().mockResolvedValue([]);
   mDisconnect.mockReset().mockResolvedValue({ success: true });
-  mConnectUrl.mockReset().mockReturnValue("/api/admin/gmail/connect");
+  mStartConnect.mockReset().mockResolvedValue({ authUrl: CONSENT_URL });
+  mNavigate.mockReset();
 });
 
 describe("ConnectedMailboxes", () => {
@@ -93,9 +108,9 @@ describe("ConnectedMailboxes", () => {
     expect(row.textContent).toContain(
       "invalid_grant: token has been expired or revoked",
     );
-    // A Reconnect affordance pointing back at the consent screen.
-    const reconnect = screen.getByRole("link", { name: /reconnect/i });
-    expect(reconnect.getAttribute("href")).toBe("/api/admin/gmail/connect");
+    // A Reconnect affordance. A *button* — an anchor to the API path lands
+    // the operator on raw JSON, which is the bug this replaced.
+    expect(screen.getByTestId("gmail-reconnect-acct_1")).toBeTruthy();
     // And it must say the mailbox has stopped syncing until it is reconnected.
     expect(row.textContent).toMatch(/stopped syncing/i);
   });
@@ -105,7 +120,7 @@ describe("ConnectedMailboxes", () => {
     renderAt();
 
     await screen.findByTestId("gmail-account-acct_1");
-    expect(screen.queryByRole("link", { name: /reconnect/i })).toBeNull();
+    expect(screen.queryByTestId("gmail-reconnect-acct_1")).toBeNull();
   });
 
   it("warns that mail in a sync gap was never synced and cannot be recovered", async () => {
@@ -142,6 +157,14 @@ describe("ConnectedMailboxes", () => {
     expect(mDisconnect).not.toHaveBeenCalled();
     expect(screen.getByTestId("gmail-account-acct_2")).toBeTruthy();
 
+    // The confirm copy must not claim to revoke access at Google — DELETE
+    // only drops the stored row. Promising a revocation we never perform is
+    // the worst kind of security claim to leave in.
+    const confirmCopy = screen.getByTestId("gmail-account-acct_2").textContent;
+    expect(confirmCopy).not.toMatch(/revokes saasmail/i);
+    expect(confirmCopy).toMatch(/stored credentials|stored token/i);
+    expect(confirmCopy).toMatch(/separate step|your Google account/i);
+
     // Step 2: confirming calls the API with the SECOND account's id.
     fireEvent.click(screen.getByTestId("gmail-confirm-disconnect-acct_2"));
     await waitFor(() => expect(mDisconnect).toHaveBeenCalledTimes(1));
@@ -165,7 +188,7 @@ describe("ConnectedMailboxes", () => {
     expect(empty.textContent).toMatch(/backfill/i);
     expect(empty.textContent).toMatch(/going forward/i);
     expect(
-      screen.getByRole("link", { name: /connect a google mailbox/i }),
+      screen.getByRole("button", { name: /connect a google mailbox/i }),
     ).toBeTruthy();
   });
 
@@ -258,4 +281,104 @@ describe("ConnectedMailboxes — OAuth round-trip result", () => {
     expect(screen.queryByTestId("gmail-connect-error")).toBeNull();
     expect(screen.queryByTestId("gmail-connect-success")).toBeNull();
   });
+});
+
+/**
+ * `/api/admin/gmail/connect` returns `{ authUrl }` with 200 — it does NOT
+ * redirect. An anchor pointing at it lands the operator on a page of raw
+ * JSON, which is exactly what shipped before this suite existed. jsdom
+ * cannot follow a cross-origin navigation, so the navigation is stubbed and
+ * asserted on rather than performed.
+ */
+describe("ConnectedMailboxes — starting the consent flow", () => {
+  it("fetches the consent URL and navigates to it", async () => {
+    mFetch.mockResolvedValue([]);
+    renderAt();
+
+    fireEvent.click(await screen.findByTestId("gmail-connect-button"));
+
+    await waitFor(() => expect(mStartConnect).toHaveBeenCalledTimes(1));
+    // The URL the server returned, not the API path we asked it for.
+    await waitFor(() => expect(mNavigate).toHaveBeenCalledWith(CONSENT_URL));
+    expect(mNavigate).toHaveBeenCalledTimes(1);
+    expect(mNavigate).not.toHaveBeenCalledWith("/api/admin/gmail/connect");
+  });
+
+  it("shows the server's message and does not navigate when connect fails", async () => {
+    mFetch.mockResolvedValue([]);
+    // apiFetch surfaces the server's own { error }, so a 503 on an instance
+    // with no OAuth secrets arrives as this exact sentence.
+    mStartConnect.mockRejectedValue(
+      new Error("Gmail integration is not configured"),
+    );
+    renderAt();
+
+    fireEvent.click(await screen.findByTestId("gmail-connect-button"));
+
+    const banner = await screen.findByTestId("gmail-connect-error");
+    expect(banner.textContent).toContain("Gmail integration is not configured");
+    // Navigating anyway would replace the message with a broken Google page.
+    expect(mNavigate).not.toHaveBeenCalled();
+  });
+
+  it("does not fire two consent flows on a double-click", async () => {
+    mFetch.mockResolvedValue([]);
+    let release!: (v: { authUrl: string }) => void;
+    mStartConnect.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    renderAt();
+
+    const button = (await screen.findByTestId(
+      "gmail-connect-button",
+    )) as HTMLButtonElement;
+    fireEvent.click(button);
+    await waitFor(() => expect(button.disabled).toBe(true));
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(mStartConnect).toHaveBeenCalledTimes(1);
+
+    release({ authUrl: CONSENT_URL });
+    await waitFor(() => expect(mNavigate).toHaveBeenCalledWith(CONSENT_URL));
+  });
+
+  it("Reconnect starts a consent flow for an auth error", async () => {
+    mFetch.mockResolvedValue([account({ lastError: "invalid_grant" })]);
+    renderAt();
+
+    fireEvent.click(await screen.findByTestId("gmail-reconnect-acct_1"));
+
+    await waitFor(() => expect(mStartConnect).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mNavigate).toHaveBeenCalledWith(CONSENT_URL));
+  });
+
+  it("offers Reconnect for an unrecognised Google auth code", async () => {
+    // The auth codes come from Google's `error` field and that set is open
+    // ended, so anything not known to be non-auth gets the affordance.
+    mFetch.mockResolvedValue([account({ lastError: "invalid_client" })]);
+    renderAt();
+
+    expect(await screen.findByTestId("gmail-reconnect-acct_1")).toBeTruthy();
+  });
+
+  it.each([
+    "no_personal_inbox",
+    "ambiguous_inbox_mapping",
+    "history_gap",
+    "message_failed:18c2f0a1b2c3",
+  ])(
+    "does not offer Reconnect for %s — a new grant cannot fix it",
+    async (lastError) => {
+      mFetch.mockResolvedValue([account({ lastError })]);
+      renderAt();
+
+      const row = await screen.findByTestId("gmail-account-acct_1");
+      expect(screen.queryByTestId("gmail-reconnect-acct_1")).toBeNull();
+      // The error is still shown — hiding the action must not hide the problem.
+      expect(row.textContent).toContain(lastError);
+    },
+  );
 });
