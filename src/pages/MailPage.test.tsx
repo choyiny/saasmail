@@ -10,12 +10,14 @@ import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
 import { AgentContextProvider, useAgentContext } from "@/agent/AgentContext";
 
 const api = vi.hoisted(() => ({
+  assignMessages: vi.fn(),
   createMailbox: vi.fn(),
   deleteDraft: vi.fn(),
   deleteMailbox: vi.fn(),
   fetchDraft: vi.fn(),
   fetchDraftList: vi.fn(),
   fetchSuggestedReply: vi.fn(),
+  fetchInboxAssignees: vi.fn(),
   fetchMailboxes: vi.fn(),
   fetchMessages: vi.fn(),
   fetchStats: vi.fn(),
@@ -56,6 +58,7 @@ const baseState = {
   mailboxIds: [],
   conversationKey: "p:person-1",
   snoozedUntil: null,
+  assignedUserId: null,
 };
 
 function message(
@@ -164,6 +167,14 @@ describe("MailPage", () => {
     api.fetchDraft.mockResolvedValue(null);
     api.fetchDraftList.mockResolvedValue({ drafts: [] });
     api.fetchSuggestedReply.mockResolvedValue(null);
+    api.fetchInboxAssignees.mockResolvedValue([
+      {
+        id: "member-1",
+        name: "Support Agent",
+        email: "agent@e2e.test",
+        image: null,
+      },
+    ]);
     api.fetchMailboxes.mockResolvedValue([]);
     api.fetchMessages.mockResolvedValue({ messages: [], nextCursor: null });
     api.createMailbox.mockResolvedValue(mailbox("mailbox-1", "Projects"));
@@ -173,6 +184,7 @@ describe("MailPage", () => {
       ...mailbox(id, name),
       updatedAt: 2,
     }));
+    api.assignMessages.mockResolvedValue({ conversations: 1 });
     api.setMailboxMembership.mockResolvedValue({ success: true });
     api.setMessageState.mockResolvedValue({ success: true });
     api.snoozeMessages.mockResolvedValue({ conversations: 1 });
@@ -620,5 +632,104 @@ describe("MailPage", () => {
 
     for (const element of editableElements.slice(1, 4)) element.remove();
     agentPanel.remove();
+  });
+  it("assigns optimistically and rolls back when assignment fails", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("assign-one", "Needs an owner", {
+          state: { seen: true },
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    let rejectAssignment!: (error: Error) => void;
+    api.assignMessages.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectAssignment = reject;
+        }),
+    );
+
+    renderMail("/mail/support%40e2e.test/inbox?m=received%3Aassign-one");
+
+    await screen.findAllByText("Needs an owner");
+    await waitFor(() =>
+      expect(api.fetchInboxAssignees).toHaveBeenCalledWith("support@e2e.test"),
+    );
+    fireEvent.pointerDown(screen.getByTestId("mail-assign-menu"), {
+      button: 0,
+    });
+    const options = await screen.findAllByTestId("mail-assign-option");
+    const memberOption = options.find(
+      (option) => option.dataset.userId === "member-1",
+    );
+    expect(memberOption).toBeTruthy();
+    fireEvent.click(memberOption!);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mail-assignee-chip").textContent).toBe("SA"),
+    );
+    expect(api.assignMessages).toHaveBeenCalledWith(
+      ["received:assign-one"],
+      "member-1",
+    );
+
+    rejectAssignment(new Error("assignment failed"));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("mail-assignee-chip")).toBeNull(),
+    );
+  });
+
+  it("uses assignedTo=me for Assigned to me", async () => {
+    renderMail();
+    await waitFor(() => expect(api.fetchMessages).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("mail-folder-assigned"));
+
+    await waitFor(() =>
+      expect(api.fetchMessages).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          inbox: "support@e2e.test",
+          assignedTo: "me",
+          includeTrashed: false,
+          includeSpam: false,
+        }),
+      ),
+    );
+  });
+  it("removes a message after unassigning it from Assigned to me", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("assigned-one", "Assigned message", {
+          state: { seen: true, assignedUserId: "member-1" },
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    renderMail("/mail/support%40e2e.test/assigned?m=received%3Aassigned-one");
+
+    await screen.findAllByText("Assigned message");
+    fireEvent.pointerDown(screen.getByTestId("mail-assign-menu"), {
+      button: 0,
+    });
+    const options = await screen.findAllByTestId("mail-assign-option");
+    const unassignOption = options.find(
+      (option) => option.dataset.userId === "",
+    );
+    expect(unassignOption).toBeTruthy();
+    fireEvent.click(unassignOption!);
+
+    await waitFor(() =>
+      expect(api.assignMessages).toHaveBeenCalledWith(
+        ["received:assigned-one"],
+        null,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Assigned message")).toBeNull(),
+    );
   });
 });

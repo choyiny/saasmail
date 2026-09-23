@@ -412,6 +412,7 @@ export interface MailMessageState {
   mailboxIds: string[];
   conversationKey: string | null;
   snoozedUntil: number | null;
+  assignedUserId?: string | null;
 }
 
 export interface MailMessage {
@@ -458,6 +459,7 @@ export async function fetchMessages(params?: {
   cursor?: string;
   limit?: number;
   excludeCampaignSends?: boolean;
+  assignedTo?: string;
 }): Promise<MessageListResult> {
   const qs = new URLSearchParams();
   if (params?.inbox) qs.set("inbox", params.inbox);
@@ -478,6 +480,7 @@ export async function fetchMessages(params?: {
   if (params?.excludeCampaignSends !== undefined) {
     qs.set("excludeCampaignSends", String(params.excludeCampaignSends));
   }
+  if (params?.assignedTo) qs.set("assignedTo", params.assignedTo);
   return apiFetch(`/api/messages?${qs}`);
 }
 
@@ -550,6 +553,31 @@ export async function snoozeMessages(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refs, until }),
+  });
+}
+
+export interface InboxAssignee {
+  id: string;
+  name: string;
+  email: string;
+  image: string | null;
+}
+
+export async function fetchInboxAssignees(
+  inbox: string,
+): Promise<InboxAssignee[]> {
+  const qs = new URLSearchParams({ inbox });
+  return apiFetch(`/api/messages/assignees?${qs}`);
+}
+
+export async function assignMessages(
+  refs: string[],
+  userId: string | null,
+): Promise<{ conversations: number }> {
+  return apiFetch("/api/messages/assign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refs, userId }),
   });
 }
 
@@ -1236,6 +1264,123 @@ export interface AdminUser {
 
 export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
+}
+
+// --- Automations ---
+
+export type RuleCondition =
+  | {
+      field: "from_address";
+      operator: "equals" | "contains" | "ends_with";
+      value: string;
+    }
+  | { field: "from_domain"; operator: "equals"; value: string }
+  | {
+      field: "subject";
+      operator: "contains" | "equals" | "starts_with";
+      value: string;
+    }
+  | { field: "body"; operator: "contains"; value: string }
+  | { field: "has_attachments"; operator: "is"; value: boolean }
+  | { field: "spam_score"; operator: "gte" | "lte"; value: number }
+  | {
+      field: "header";
+      name: string;
+      operator: "equals" | "contains";
+      value: string;
+    };
+
+export type RuleAction =
+  | { type: "archive" }
+  | { type: "mark_spam" }
+  | { type: "move_to_folder"; mailboxId: string }
+  | { type: "snooze"; hours: number }
+  | { type: "assign"; userId: string };
+
+export interface AutomationRule {
+  id: string;
+  name: string;
+  inbox: string | null;
+  trigger: "message.received";
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  position: number;
+  stopProcessing: boolean;
+  enabled: boolean;
+  matchCount: number;
+  lastMatchedAt: number | null;
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AutomationRuleInput {
+  name: string;
+  inbox: string | null;
+  trigger?: "message.received";
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  position: number;
+  stopProcessing: boolean;
+  enabled: boolean;
+}
+
+export interface RuleTestResult {
+  matched: boolean;
+  conditionResults: Array<{
+    condition: RuleCondition;
+    matched: boolean;
+  }>;
+}
+
+export async function fetchRules(): Promise<AutomationRule[]> {
+  return apiFetch("/api/admin/rules");
+}
+
+export async function createRule(
+  rule: AutomationRuleInput,
+): Promise<AutomationRule> {
+  return apiFetch("/api/admin/rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rule),
+  });
+}
+
+export async function updateRule(
+  id: string,
+  patch: Partial<AutomationRuleInput>,
+): Promise<AutomationRule> {
+  return apiFetch(`/api/admin/rules/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteRule(id: string): Promise<{ success: true }> {
+  return apiFetch(`/api/admin/rules/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function reorderRules(ids: string[]): Promise<{ success: true }> {
+  return apiFetch("/api/admin/rules/reorder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+}
+
+export async function testRule(
+  conditions: RuleCondition[],
+  emailId: string,
+): Promise<RuleTestResult> {
+  return apiFetch("/api/admin/rules/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rule: { conditions }, emailId }),
+  });
 }
 
 // --- Suppressions ---

@@ -19,6 +19,7 @@ import {
   User,
   LogOut,
   Bot,
+  Workflow,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { fetchOutboxCount, fetchStats } from "@/lib/api";
@@ -231,6 +232,13 @@ export default function TopNav({
                     >
                       <InboxIcon className="h-4 w-4" />
                       Inboxes
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => navigate("/automations")}
+                      className="cursor-pointer"
+                    >
+                      <Workflow className="h-4 w-4" />
+                      Automations
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onClick={() => navigate("/admin/users")}

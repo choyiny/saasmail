@@ -44,6 +44,7 @@ import SubscribeFormBuilderPage from "@/pages/SubscribeFormBuilderPage";
 import CampaignsPage from "@/pages/CampaignsPage";
 import CampaignDetailPage from "@/pages/CampaignDetailPage";
 import ContactPrivacyPage from "@/pages/ContactPrivacyPage";
+import AutomationsPage from "@/pages/AutomationsPage";
 
 const queryClient = new QueryClient();
 
@@ -99,6 +100,24 @@ function AuthGuard() {
  * tab is already open. The SW focuses the tab and posts the target URL; we
  * complete the deep link by performing a client-side navigation here.
  */
+function AdminGuard() {
+  const { data: session, isPending } = useSession();
+
+  if (isPending) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-text-tertiary">
+        Loading…
+      </div>
+    );
+  }
+
+  if (session?.user?.role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
+}
+
 function NotificationClickListener() {
   const navigate = useNavigate();
   useEffect(() => {
@@ -189,6 +208,9 @@ function App() {
                 <Route path="/campaigns/:id" element={<CampaignDetailPage />} />
                 <Route path="/api-keys" element={<ApiKeysPage />} />
                 <Route path="/inboxes" element={<InboxesPage />} />
+                <Route element={<AdminGuard />}>
+                  <Route path="/automations" element={<AutomationsPage />} />
+                </Route>
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/blocklist" element={<BlocklistPage />} />
                 <Route path="/outbox" element={<OutboxPage />} />

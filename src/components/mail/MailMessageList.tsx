@@ -1,6 +1,6 @@
 import type { ReactNode, RefObject } from "react";
 import { ArrowLeft, MailOpen, Paperclip, Search, Star } from "lucide-react";
-import type { MailMessage } from "@/lib/api";
+import type { InboxAssignee, MailMessage } from "@/lib/api";
 import type { SystemFolder } from "@/hooks/useMailMessages";
 
 function counterparty(message: MailMessage): string {
@@ -25,6 +25,15 @@ function compactTime(timestamp: number): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function assigneeInitials(assignee: InboxAssignee | undefined): string {
+  const value = assignee?.name?.trim() || assignee?.email || "?";
+  const parts = value.split(/\s+/).filter(Boolean);
+  if (parts.length > 1) {
+    return (parts[0]![0] + parts[parts.length - 1]![0]).toUpperCase();
+  }
+  return value.slice(0, 2).toUpperCase();
+}
+
 function unixSeconds(date: Date): number {
   return Math.floor(date.getTime() / 1000);
 }
@@ -44,6 +53,7 @@ interface MailMessageRowProps {
   active: boolean;
   checked: boolean;
   busy: boolean;
+  assignees?: InboxAssignee[];
   onSelect: (ref: string) => void;
   onToggleSelected: (ref: string) => void;
   onToggleStar: (message: MailMessage) => void;
@@ -55,12 +65,16 @@ export function MailMessageRow({
   active,
   checked,
   busy,
+  assignees = [],
   onSelect,
   onToggleSelected,
   onToggleStar,
 }: MailMessageRowProps) {
   const unseen = message.direction === "inbound" && !message.state.seen;
   const snippet = bodySnippet(message);
+  const assignee = assignees.find(
+    (user) => user.id === message.state.assignedUserId,
+  );
 
   return (
     <div
@@ -102,6 +116,28 @@ export function MailMessageRow({
         {message.attachmentCount ? (
           <Paperclip className="h-3 w-3 shrink-0 text-text-tertiary" />
         ) : null}
+        {message.state.assignedUserId && (
+          <span
+            data-testid="mail-assignee-chip"
+            title={
+              "Assigned to " +
+              (assignee?.name ||
+                assignee?.email ||
+                message.state.assignedUserId)
+            }
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-bg-muted text-[8px] font-semibold text-text-secondary"
+          >
+            {assignee?.image ? (
+              <img
+                src={assignee.image}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              assigneeInitials(assignee)
+            )}
+          </span>
+        )}
         <button
           type="button"
           disabled={busy}
@@ -168,6 +204,7 @@ interface MailMessageListProps {
   loading: boolean;
   loadingMore: boolean;
   messages: MailMessage[];
+  assignees?: InboxAssignee[];
   nextCursor: string | null;
   selectedRef: string | null;
   activeRef: string | null;
@@ -197,6 +234,7 @@ export default function MailMessageList({
   loading,
   loadingMore,
   messages,
+  assignees = [],
   nextCursor,
   selectedRef,
   activeRef,
@@ -306,6 +344,7 @@ export default function MailMessageList({
                 active={activeRef === message.ref}
                 checked={selectedRefs.has(message.ref)}
                 busy={actionBusyRef === message.ref}
+                assignees={assignees}
                 onSelect={onSelectMessage}
                 onToggleSelected={onToggleSelected}
                 onToggleStar={onToggleStar}

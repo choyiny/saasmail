@@ -15,6 +15,7 @@ import {
   setMailboxMembership,
   setMailboxState,
 } from "../lib/messages/state";
+import { assignConversations } from "../lib/messages/conversation-state";
 
 const INBOX = "support@saasmail.test";
 
@@ -481,5 +482,153 @@ describe("message state routes", () => {
       }),
     });
     expect(res.status).toBe(404);
+  });
+  it("lists inbox assignees case-insensitively without cross-inbox users or duplicates", async () => {
+    const adminUser = await createTestUser({
+      id: "a11-admin",
+      name: "Admin",
+      email: "assignee-admin@example.com",
+    });
+    const caller = await createTestUser({
+      id: "b22-caller",
+      role: "member",
+      name: "Caller",
+      email: "assignee-caller@example.com",
+    });
+    const teammate = await createTestUser({
+      id: "c33-teammate",
+      role: "member",
+      name: "Teammate",
+      email: "assignee-teammate@example.com",
+    });
+    const other = await createTestUser({
+      id: "d44-other",
+      role: "member",
+      name: "Other",
+      email: "assignee-other@example.com",
+    });
+
+    await getDb()
+      .insert(inboxPermissions)
+      .values([
+        {
+          userId: caller.userId,
+          email: "SUPPORT@SAASMAIL.TEST",
+          createdAt: 1,
+          createdBy: adminUser.userId,
+        },
+        {
+          userId: teammate.userId,
+          email: "support@saasmail.test",
+          createdAt: 1,
+          createdBy: adminUser.userId,
+        },
+        {
+          userId: teammate.userId,
+          email: "SUPPORT@SAASMAIL.TEST",
+          createdAt: 2,
+          createdBy: adminUser.userId,
+        },
+        {
+          userId: other.userId,
+          email: "other@saasmail.test",
+          createdAt: 1,
+          createdBy: adminUser.userId,
+        },
+      ]);
+
+    const res = await authFetch(
+      `/api/messages/assignees?inbox=${encodeURIComponent(INBOX)}`,
+      { apiKey: caller.apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as Array<{ id: string }>;
+    const ids = body.map((user) => user.id);
+    expect(ids).toEqual(["a11-admin", "b22-caller", "c33-teammate"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("returns 404 when a caller cannot access the assignee inbox", async () => {
+    const owner = await createTestUser({
+      id: "a22-owner",
+      email: "assignee-owner@example.com",
+    });
+    const member = await createTestUser({
+      id: "e55-denied",
+      role: "member",
+      email: "assignee-denied@example.com",
+    });
+    await getDb().insert(inboxPermissions).values({
+      userId: member.userId,
+      email: "other@saasmail.test",
+      createdAt: 1,
+      createdBy: owner.userId,
+    });
+
+    const res = await authFetch(
+      `/api/messages/assignees?inbox=${encodeURIComponent(INBOX)}`,
+      { apiKey: member.apiKey },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("excludes assigned spam and trashed messages when those states are filtered", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "a55-assigned",
+      email: "assigned-route@example.com",
+    });
+
+    for (const name of ["visible", "trashed", "spam"] as const) {
+      await createTestPerson({
+        id: `assigned-${name}-person`,
+        email: `assigned-${name}@example.com`,
+      });
+      await createTestEmail({
+        id: `assigned-${name}`,
+        personId: `assigned-${name}-person`,
+        recipient: INBOX,
+        messageId: `assigned-${name}@example.com`,
+      });
+    }
+
+    await assignConversations(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [
+        { kind: "received", id: "assigned-visible" },
+        { kind: "received", id: "assigned-trashed" },
+        { kind: "received", id: "assigned-spam" },
+      ],
+      userId,
+    );
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "assigned-trashed" }],
+      { trashed: true },
+    );
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "assigned-spam" }],
+      { spam: true },
+    );
+
+    const res = await authFetch(
+      `/api/messages?inbox=${encodeURIComponent(INBOX)}&assignedTo=me&includeTrashed=false&includeSpam=false`,
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      messages: Array<{ ref: string }>;
+    };
+    expect(body.messages.map((message) => message.ref)).toEqual([
+      "received:assigned-visible",
+    ]);
   });
 });

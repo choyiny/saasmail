@@ -11,6 +11,7 @@ import {
   Star,
   Trash2,
   TriangleAlert,
+  UserRoundCheck,
 } from "lucide-react";
 import {
   createMailbox,
@@ -28,6 +29,7 @@ export const SYSTEM_FOLDERS: Array<{
   icon: React.ElementType;
 }> = [
   { id: "inbox", label: "Inbox", icon: Inbox },
+  { id: "assigned", label: "Assigned to me", icon: UserRoundCheck },
   { id: "starred", label: "Starred", icon: Star },
   { id: "snoozed", label: "Snoozed", icon: Clock3 },
   { id: "drafts", label: "Drafts", icon: FileText },

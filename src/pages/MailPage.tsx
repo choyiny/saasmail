@@ -23,9 +23,11 @@ import {
 import {
   deleteDraft,
   fetchDraftList,
+  fetchInboxAssignees,
   fetchMailboxes,
   fetchStats,
   type DraftListItem,
+  type InboxAssignee,
   type Mailbox,
   type Stats,
 } from "@/lib/api";
@@ -64,6 +66,7 @@ export default function MailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [stats, setStats] = useState<Stats | null>(null);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
+  const [assignees, setAssignees] = useState<InboxAssignee[]>([]);
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(false);
   const [mobilePane, setMobilePane] = useState<MobilePane>(
@@ -156,6 +159,16 @@ export default function MailPage() {
     fetchMailboxes(inbox)
       .then(setMailboxes)
       .catch(() => setMailboxes([]));
+  }, [allowedInboxes, inbox]);
+
+  useEffect(() => {
+    if (!inbox || !allowedInboxes.includes(inbox)) {
+      setAssignees([]);
+      return;
+    }
+    fetchInboxAssignees(inbox)
+      .then(setAssignees)
+      .catch(() => setAssignees([]));
   }, [allowedInboxes, inbox]);
 
   useEffect(() => {
@@ -577,6 +590,7 @@ export default function MailPage() {
               loading={mail.loading}
               loadingMore={mail.loadingMore}
               messages={mail.messages}
+              assignees={assignees}
               nextCursor={mail.nextCursor}
               selectedRef={selectedRef}
               activeRef={keyboardRef}
@@ -593,6 +607,7 @@ export default function MailPage() {
                   spam={spam}
                   trash={trash}
                   mailboxes={mailboxes}
+                  assignees={assignees}
                   onSeen={() =>
                     void runBulk(() =>
                       mail.bulkSetSeen(selectedMessages, markSeen),
@@ -624,6 +639,11 @@ export default function MailPage() {
                       mail.bulkMoveToMailbox(selectedMessages, targetId),
                     )
                   }
+                  onAssign={(userId) =>
+                    void runBulk(() =>
+                      mail.bulkAssign(selectedMessages, userId),
+                    )
+                  }
                   onClear={() => setSelectedRefs(new Set())}
                 />
               }
@@ -650,6 +670,7 @@ export default function MailPage() {
               actionBusyRef={mail.actionBusyRef}
               replyRequestKey={replyRequestKey}
               mailboxes={mailboxes}
+              assignees={assignees}
               mailboxId={mailboxId}
               currentMailboxName={currentMailbox?.name}
               senderIdentities={stats.senderIdentities}
@@ -661,6 +682,9 @@ export default function MailPage() {
               onToggleTrash={(message) => void mail.toggleTrash(message)}
               onSnooze={(message, until) =>
                 void mail.snoozeMessage(message, until)
+              }
+              onAssign={(message, userId) =>
+                void mail.assignMessage(message, userId)
               }
               onMoveToMailbox={(message, targetId) =>
                 void mail.moveToMailbox(message, targetId)

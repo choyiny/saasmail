@@ -1,4 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { sql } from "drizzle-orm";
+import { users } from "../db/auth.schema";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { InvalidCursorError } from "../lib/messages/cursor";
 import {
   InvalidQueryError,
@@ -22,6 +25,7 @@ import {
   assignConversations,
   snoozeConversations,
 } from "../lib/messages/conversation-state";
+import { isInboxAllowed } from "../lib/inbox-permissions";
 import { bearerSecurity } from "../lib/openapi-auth";
 import type { Variables } from "../variables";
 
@@ -85,6 +89,63 @@ const MessageSchema = z.object({
   delivery: z.object({ status: z.string() }).nullable(),
   attachmentCount: z.number().optional(),
   state: MessageStateSchema.optional(),
+});
+
+const AssigneeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  image: z.string().nullable(),
+});
+
+const assigneesRoute = createRoute({
+  method: "get",
+  path: "/assignees",
+  tags: ["Messages"],
+  security: bearerSecurity,
+  request: {
+    query: z.object({ inbox: z.string().min(1) }),
+  },
+  responses: {
+    200: {
+      description: "Users who can be assigned conversations in an inbox",
+      content: {
+        "application/json": { schema: z.array(AssigneeSchema) },
+      },
+    },
+    404: errorResponse("Inbox not found"),
+  },
+});
+
+messagesRouter.openapi(assigneesRoute, async (c) => {
+  const inbox = c.req.valid("query").inbox.trim().toLowerCase();
+  const allowed = c.get("allowedInboxes")!;
+  if (!isInboxAllowed(allowed, inbox)) {
+    return c.json({ error: "Inbox not found" }, 404);
+  }
+
+  type AssigneeRow = {
+    id: string;
+    name: string;
+    email: string;
+    image: string | null;
+  };
+
+  const rows = await c.get("db").all<AssigneeRow>(sql`
+    SELECT DISTINCT
+      u.id AS id,
+      u.name AS name,
+      u.email AS email,
+      u.image AS image
+    FROM ${users} AS u
+    LEFT JOIN ${inboxPermissions} AS ip
+      ON ip.user_id = u.id
+      AND lower(ip.email) = ${inbox}
+    WHERE u.role = 'admin' OR ip.user_id IS NOT NULL
+    ORDER BY u.name, u.email, u.id
+  `);
+
+  return c.json(rows, 200);
 });
 
 function parseRefs(values: string[]): MessageRef[] {

@@ -57,6 +57,37 @@ The caller must be allowed to access every referenced inbox. Message reads can
 filter by `assignedTo=me` or a user id, and state-aware responses expose
 `state.assignedUserId`.
 
+## Web UI
+
+Admins manage rules at \`/automations\`. The list follows evaluation order and
+shows each rule's name, scope, condition/action summary, enabled state, match
+count, and relative last-match time. Move controls send the complete ordered id
+list to the reorder endpoint. Creating and editing rules uses the same condition
+and action limits as the API; folder moves and assignments are disabled until a
+specific inbox scope is selected. Server validation errors stay inline in the
+editor, and a zero-condition rule is explicitly called out as matching every
+message in its scope.
+
+**Screenshot (list, described):** an Automations page with ordered rows. Each row
+has a name and inbox badge on the left, condition and action summaries below,
+match activity in the middle, and On/Off, move, edit, and delete controls on the
+right.
+
+**Screenshot (editor, described):** a rule dialog with name and scope at the top,
+stacked condition and action builders, a catch-all warning when conditions are
+empty, Stop processing, and a Test against a message panel that reports the
+overall match and each condition result.
+
+Assignment is also available directly in Mail. The reading pane and bulk
+selection bar expose an Assign menu containing only users who can access the
+current inbox plus Unassign. Assigned messages show the assignee avatar or
+initials in the list, and the folder rail includes **Assigned to me**, which
+queries the current inbox with \`assignedTo=me\`.
+
+**Screenshot (mail assignment, described):** a selected message with an Assign
+menu open beside the reading-pane actions, a small assignee initials chip on the
+corresponding list row, and Assigned to me visible in the folder rail.
+
 ## Admin API
 
 Admins can list, create, partially update, delete, and reorder rules under

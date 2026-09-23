@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   Star,
   Trash2,
+  UserRoundCheck,
 } from "lucide-react";
 import ReplyComposer from "@/components/ReplyComposer";
 import SuggestedReplyCard from "@/components/SuggestedReplyCard";
@@ -27,7 +28,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { MailMessage, Mailbox, Stats } from "@/lib/api";
+import type { InboxAssignee, MailMessage, Mailbox, Stats } from "@/lib/api";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { showToast } from "@/lib/toast";
 
@@ -65,6 +66,7 @@ interface MailReadingPaneProps {
   actionBusyRef: string | null;
   replyRequestKey: number;
   mailboxes: Mailbox[];
+  assignees?: InboxAssignee[];
   mailboxId?: string;
   currentMailboxName?: string;
   senderIdentities: Stats["senderIdentities"];
@@ -75,6 +77,7 @@ interface MailReadingPaneProps {
   onToggleSpam: (message: MailMessage) => void;
   onToggleTrash: (message: MailMessage) => void;
   onSnooze: (message: MailMessage, until: number) => void;
+  onAssign: (message: MailMessage, userId: string | null) => void;
   onMoveToMailbox: (message: MailMessage, mailboxId: string) => void;
   onRemoveFromCurrentMailbox: (message: MailMessage) => void;
   onOpenCustomer: (message: MailMessage) => void;
@@ -88,6 +91,7 @@ export default function MailReadingPane({
   actionBusyRef,
   replyRequestKey,
   mailboxes,
+  assignees = [],
   mailboxId,
   currentMailboxName,
   senderIdentities,
@@ -98,6 +102,7 @@ export default function MailReadingPane({
   onToggleSpam,
   onToggleTrash,
   onSnooze,
+  onAssign,
   onMoveToMailbox,
   onRemoveFromCurrentMailbox,
   onOpenCustomer,
@@ -262,6 +267,40 @@ export default function MailReadingPane({
                     onSnooze={(until) => onSnooze(selectedMessage, until)}
                     onCustom={openCustomSnooze}
                   />
+
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        type="button"
+                        data-testid="mail-assign-menu"
+                        disabled={actionBusyRef === selectedMessage.ref}
+                        className="inline-flex items-center gap-1 rounded-[6px] px-2 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary disabled:opacity-50"
+                      >
+                        <UserRoundCheck className="h-3.5 w-3.5" />
+                        Assign
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        data-testid="mail-assign-option"
+                        data-user-id=""
+                        onSelect={() => onAssign(selectedMessage, null)}
+                      >
+                        Unassign
+                      </DropdownMenuItem>
+                      {assignees.length > 0 && <DropdownMenuSeparator />}
+                      {assignees.map((user) => (
+                        <DropdownMenuItem
+                          key={user.id}
+                          data-testid="mail-assign-option"
+                          data-user-id={user.id}
+                          onSelect={() => onAssign(selectedMessage, user.id)}
+                        >
+                          {user.name || user.email}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
 
                   {mailboxes.length > 0 && (
                     <DropdownMenu>

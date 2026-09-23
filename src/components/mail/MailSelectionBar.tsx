@@ -8,6 +8,7 @@ import {
   ShieldAlert,
   Star,
   Trash2,
+  UserRoundCheck,
   X,
 } from "lucide-react";
 import {
@@ -16,7 +17,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Mailbox } from "@/lib/api";
+import type { InboxAssignee, Mailbox } from "@/lib/api";
 import {
   nextMondayAtEight,
   snoozeInHours,
@@ -33,6 +34,7 @@ interface MailSelectionBarProps {
   spam: boolean;
   trash: boolean;
   mailboxes: Mailbox[];
+  assignees?: InboxAssignee[];
   onSeen: () => void;
   onStar: () => void;
   onArchive: () => void;
@@ -40,6 +42,7 @@ interface MailSelectionBarProps {
   onTrash: () => void;
   onSnooze: (until: number) => void;
   onMove: (mailboxId: string) => void;
+  onAssign: (userId: string | null) => void;
   onClear: () => void;
 }
 
@@ -53,6 +56,7 @@ export default function MailSelectionBar({
   spam,
   trash,
   mailboxes,
+  assignees = [],
   onSeen,
   onStar,
   onArchive,
@@ -60,6 +64,7 @@ export default function MailSelectionBar({
   onTrash,
   onSnooze,
   onMove,
+  onAssign,
   onClear,
 }: MailSelectionBarProps) {
   if (count === 0) return null;
@@ -174,6 +179,30 @@ export default function MailSelectionBar({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" disabled={busy} className={actionClass}>
+            <UserRoundCheck size={12} />
+            Assign
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => onAssign(null)}>
+            Unassign
+          </DropdownMenuItem>
+          {assignees.map((user) => (
+            <DropdownMenuItem
+              key={user.id}
+              onSelect={() => onAssign(user.id)}
+              data-testid="mail-bulk-assign-option"
+              data-user-id={user.id}
+            >
+              {user.name || user.email}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <button
         type="button"

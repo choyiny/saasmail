@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Automations and assignment UI.** Admins can now manage ordered inbound rules from `/automations`, build and dry-run conditions/actions, reorder, enable/disable, and delete rules with inline validation. Mail adds permission-scoped assignment menus, assignee chips, bulk assignment, and an **Assigned to me** view.
+
 - **Inbound automation rules and conversation assignment.** Admins can create ordered, inbox-scoped or global `message.received` rules with bounded, case-insensitive conditions and best-effort archive, junk, folder, snooze, and assignment actions. Rule-spam follows the existing silent junk path; D21 auto-junk skips rules entirely. Conversation assignment is permission-checked, persists across new inbound mail, can be filtered through the unified message API, and rules are visible read-only through MCP under `email:read`.
 
 - **Per-inbox suggested replies.** Inbox admins can opt individual inboxes into automatic AI reply suggestions. Eligible inbound mail is queued after storage, screened for prompt injection in a fail-closed model call, then drafted with no tools from inbox-scoped recent context and optional agent instructions. Suggestions are review-only: users can load one into the existing reply draft, replace an existing non-empty draft only after confirmation, or dismiss it; nothing is sent automatically. Realtime updates are WebSocket-only with no push notification.
