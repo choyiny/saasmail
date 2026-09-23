@@ -16,6 +16,10 @@ export const inboxConversationState = sqliteTable(
     snoozedBy: text("snoozed_by").references(() => users.id, {
       onDelete: "set null",
     }),
+    assignedUserId: text("assigned_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    assignedAt: integer("assigned_at"),
     updatedAt: integer("updated_at").notNull(),
   },
   (table) => [

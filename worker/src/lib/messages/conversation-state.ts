@@ -3,7 +3,12 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { emails } from "../../db/emails.schema";
 import { inboxConversationState } from "../../db/inbox-conversation-state.schema";
 import { sentEmails } from "../../db/sent-emails.schema";
-import { isInboxAllowed, type AllowedInboxes } from "../inbox-permissions";
+import {
+  isInboxAllowed,
+  resolveAllowedInboxes,
+  type AllowedInboxes,
+} from "../inbox-permissions";
+import { users } from "../../db/auth.schema";
 import { InvalidMessageStateError, MessageStateAccessError } from "./state";
 import type { MessageRef, UnifiedMessage } from "./types";
 
@@ -122,7 +127,7 @@ async function resolveConversationRefs(
 export async function snoozeConversations(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
-  userId: string,
+  userId: string | null,
   refs: MessageRef[],
   until: number | null,
 ): Promise<number> {
@@ -157,6 +162,57 @@ export async function snoozeConversations(
         set: {
           snoozedUntil: until,
           snoozedBy: userId,
+          updatedAt: now,
+        },
+      });
+  }
+
+  return conversations.length;
+}
+
+export async function assignConversations(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  _actorUserId: string | null,
+  refs: MessageRef[],
+  userId: string | null,
+): Promise<number> {
+  const conversations = await resolveConversationRefs(db, allowed, refs);
+  if (userId !== null) {
+    const [user] = await db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) throw new MessageStateAccessError();
+
+    const assigneeAllowed = await resolveAllowedInboxes(db, user);
+    for (const conversation of conversations) {
+      if (!isInboxAllowed(assigneeAllowed, conversation.inbox)) {
+        throw new MessageStateAccessError();
+      }
+    }
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  for (const conversation of conversations) {
+    await db
+      .insert(inboxConversationState)
+      .values({
+        inbox: conversation.inbox,
+        conversationKey: conversation.conversationKey,
+        assignedUserId: userId,
+        assignedAt: userId === null ? null : now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          inboxConversationState.inbox,
+          inboxConversationState.conversationKey,
+        ],
+        set: {
+          assignedUserId: userId,
+          assignedAt: userId === null ? null : now,
           updatedAt: now,
         },
       });

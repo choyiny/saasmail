@@ -231,7 +231,7 @@ export async function setSystemSpamState(
 export async function setMailboxState(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
-  userId: string,
+  userId: string | null,
   refs: MessageRef[],
   changes: {
     archived?: boolean;
@@ -272,7 +272,7 @@ export async function setMailboxState(
 
     const update: {
       inbox: string;
-      updatedBy: string;
+      updatedBy: string | null;
       updatedAt: number;
       archivedAt?: number | null;
       spamAt?: number | null;
@@ -464,7 +464,7 @@ export async function deleteMailbox(
 export async function setMailboxMembership(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
-  userId: string,
+  userId: string | null,
   refs: MessageRef[],
   changes: { add?: string[]; remove?: string[] },
 ): Promise<void> {

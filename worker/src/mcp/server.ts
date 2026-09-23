@@ -1,8 +1,10 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { asc } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
+import { rules } from "../db/rules.schema";
 import { SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE, hasScope } from "../auth/scopes";
 import { sendTemplate } from "../lib/send-template";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
@@ -180,6 +182,34 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         scopes: ctx.scopes,
       }),
     ),
+  );
+
+  server.registerTool(
+    "list_rules",
+    {
+      description:
+        "List automation rules that apply globally or to inboxes this connection may access.",
+      annotations: { readOnlyHint: true, title: "List Rules" },
+      inputSchema: {},
+    },
+    guard(ctx, SCOPE_READ, async () => {
+      const rows = await db
+        .select()
+        .from(rules)
+        .orderBy(asc(rules.position), asc(rules.id));
+      return ok(
+        rows
+          .filter(
+            (rule) =>
+              rule.inbox === null || isInboxAllowed(allowed, rule.inbox),
+          )
+          .map((rule) => ({
+            ...rule,
+            stopProcessing: rule.stopProcessing === 1,
+            enabled: rule.enabled === 1,
+          })),
+      );
+    }),
   );
 
   server.registerTool(

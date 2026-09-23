@@ -23,6 +23,7 @@ export interface UnifiedMessageState {
   mailboxIds: string[];
   conversationKey: string | null;
   snoozedUntil: number | null;
+  assignedUserId: string | null;
 }
 
 export interface UnifiedMessage {

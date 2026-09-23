@@ -22,6 +22,7 @@ import { forwardInbound } from "./lib/inbound-forward";
 import { wakeConversation } from "./lib/messages/conversation-state";
 import { setSystemSpamState } from "./lib/messages/state";
 import { selectModel } from "./lib/agent/provider";
+import { evaluateRules } from "./lib/rules/evaluate";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -284,6 +285,28 @@ export async function handleEmail(
     }
   }
 
+  let ruleSnoozed = false;
+  if (!autoFiledSpam) {
+    try {
+      const ruleResult = await evaluateRules(db, {
+        emailId,
+        inbox: recipientCanonical,
+        fromAddress: fromAddressCanonical,
+        subject: parsed.subject,
+        bodyText: parsed.bodyText,
+        bodyHtml,
+        hasAttachments: cappedAttachments.length > 0,
+        spamScore: parsed.spamScore,
+        headers: parsed.headers,
+        now,
+      });
+      autoFiledSpam ||= ruleResult.markedSpam;
+      ruleSnoozed = ruleResult.snoozed;
+    } catch (error) {
+      console.warn("Failed to evaluate inbound rules:", error);
+    }
+  }
+
   if (
     shouldEnqueueSuggestedReply({
       agentAutodraft: inboxIdentity?.agentAutodraft,
@@ -304,14 +327,16 @@ export async function handleEmail(
   if (!autoFiledSpam) {
     // A new non-spam inbound message wakes its conversation. Junk is silent:
     // auto-filed spam must not resurface a snoozed customer conversation.
-    try {
-      await wakeConversation(
-        db,
-        recipientCanonical,
-        conversationId ?? `p:${actualPersonId}`,
-      );
-    } catch (error) {
-      console.warn("Failed to wake snoozed conversation:", error);
+    if (!ruleSnoozed) {
+      try {
+        await wakeConversation(
+          db,
+          recipientCanonical,
+          conversationId ?? `p:${actualPersonId}`,
+        );
+      } catch (error) {
+        console.warn("Failed to wake snoozed conversation:", error);
+      }
     }
 
     // Notify connected WebSocket clients about non-spam mail (per-user DOs).

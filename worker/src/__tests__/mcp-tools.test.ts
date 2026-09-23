@@ -132,6 +132,7 @@ describe("MCP tools", () => {
           "list_emails",
           "list_messages",
           "list_people",
+          "list_rules",
           "mark_read",
           "read_email",
           "reply_email",

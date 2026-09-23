@@ -25,6 +25,7 @@ import { setupRouter } from "./routers/setup-router";
 import { emailTemplatesRouter } from "./routers/email-templates-router";
 import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
+import { adminRulesRouter } from "./routers/admin-rules-router";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
@@ -255,6 +256,7 @@ app.route("/api/contacts", contactsRouter);
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
+app.route("/api/admin/rules", adminRulesRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a

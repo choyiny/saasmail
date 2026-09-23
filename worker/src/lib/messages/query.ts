@@ -60,6 +60,7 @@ export interface MessageQuery {
   includeSpam?: boolean;
   includeSnoozed?: boolean;
   excludeCampaignSends?: boolean;
+  assignedTo?: string;
   /** Unix seconds used for snooze evaluation. Defaults to the current time. */
   now?: number;
 }
@@ -100,6 +101,7 @@ type RawMessageRow = {
   trashed_at: number | null;
   conversation_key: string | null;
   snoozed_until: number | null;
+  assigned_user_id: string | null;
 };
 
 function normalizeInboxes(inboxes: string[] | undefined): string[] | undefined {
@@ -209,7 +211,7 @@ function snoozeStateSelect(
   personIdColumn: SQL,
 ): SQL {
   if (!query.withState) {
-    return sql`NULL AS conversation_key, NULL AS snoozed_until`;
+    return sql`NULL AS conversation_key, NULL AS snoozed_until, NULL AS assigned_user_id`;
   }
   const now = query.now ?? Math.floor(Date.now() / 1000);
   const key = conversationKeySql({
@@ -220,7 +222,8 @@ function snoozeStateSelect(
     CASE WHEN ics.snoozed_until > ${now}
       THEN ics.snoozed_until
       ELSE NULL
-    END AS snoozed_until`;
+    END AS snoozed_until,
+    ics.assigned_user_id AS assigned_user_id`;
 }
 
 function snoozeScope(
@@ -260,6 +263,25 @@ function snoozeScope(
     )`;
   }
   return sql``;
+}
+
+function assignmentScope(
+  query: MessageQuery,
+  inboxColumn: SQL,
+  conversationIdColumn: SQL,
+  personIdColumn: SQL,
+): SQL {
+  if (query.assignedTo === undefined) return sql``;
+  const key = conversationKeySql({
+    conversationId: conversationIdColumn,
+    personId: personIdColumn,
+  });
+  return sql`AND EXISTS (
+    SELECT 1 FROM inbox_conversation_state assignment
+    WHERE assignment.inbox = ${inboxColumn}
+      AND assignment.conversation_key = ${key}
+      AND assignment.assigned_user_id = ${query.assignedTo}
+  )`;
 }
 
 function stateScope(
@@ -496,6 +518,12 @@ function receivedArm(
         sql`e.conversation_id`,
         sql`e.person_id`,
       )}
+      ${assignmentScope(
+        query,
+        sql`e.recipient`,
+        sql`e.conversation_id`,
+        sql`e.person_id`,
+      )}
       ${sourceCursorScope(
         sql`e.received_at`,
         sql`e.id`,
@@ -565,6 +593,12 @@ function sentArm(
       ${blockedScope(query.excludeBlocked ?? false)}
       ${stateScope(query, "sent", sql`se.id`, sql`se.from_address`)}
       ${snoozeScope(
+        query,
+        sql`se.from_address`,
+        sql`se.conversation_id`,
+        sql`se.person_id`,
+      )}
+      ${assignmentScope(
         query,
         sql`se.from_address`,
         sql`se.conversation_id`,
@@ -676,6 +710,7 @@ function toUnified(
       mailboxIds: [],
       conversationKey: row.conversation_key,
       snoozedUntil: row.snoozed_until,
+      assignedUserId: row.assigned_user_id,
     };
   }
 

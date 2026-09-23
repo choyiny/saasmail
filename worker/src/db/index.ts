@@ -37,3 +37,5 @@ export * from "./message-mailboxes.schema";
 export * from "./inbox-conversation-state.schema";
 export * from "./agent-sessions.schema";
 export * from "./suggested-replies.schema";
+
+export * from "./rules.schema";

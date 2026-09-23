@@ -18,7 +18,10 @@ import {
   setMailboxState,
   setUserState,
 } from "../lib/messages/state";
-import { snoozeConversations } from "../lib/messages/conversation-state";
+import {
+  assignConversations,
+  snoozeConversations,
+} from "../lib/messages/conversation-state";
 import { bearerSecurity } from "../lib/openapi-auth";
 import type { Variables } from "../variables";
 
@@ -48,6 +51,7 @@ const MessageStateSchema = z.object({
   mailboxIds: z.array(z.string()),
   conversationKey: z.string().nullable(),
   snoozedUntil: z.number().nullable(),
+  assignedUserId: z.string().nullable(),
 });
 
 const MessageSchema = z.object({
@@ -132,6 +136,7 @@ const listMessagesRoute = createRoute({
       cursor: z.string().optional(),
       limit: z.coerce.number().int().min(1).max(100).optional(),
       excludeCampaignSends: BoolQuery,
+      assignedTo: z.string().min(1).optional(),
     }),
   },
   responses: {
@@ -188,6 +193,7 @@ messagesRouter.openapi(listMessagesRoute, async (c) => {
       withState: true,
       withAttachmentCounts: true,
       excludeCampaignSends,
+      assignedTo: input.assignedTo === "me" ? user.id : input.assignedTo,
     });
 
     return c.json(
@@ -348,6 +354,54 @@ messagesRouter.openapi(snoozeRoute, async (c) => {
       c.get("user").id,
       parseRefs(body.refs),
       body.until,
+    );
+    return c.json({ conversations }, 200);
+  } catch (error) {
+    const mapped = stateError(error);
+    if (mapped) return c.json({ error: mapped.message }, mapped.status);
+    throw error;
+  }
+});
+
+const assignRoute = createRoute({
+  method: "post",
+  path: "/assign",
+  tags: ["Messages"],
+  security: bearerSecurity,
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            refs: RefsSchema,
+            userId: z.string().min(1).nullable(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Conversation assignment updated",
+      content: {
+        "application/json": {
+          schema: z.object({ conversations: z.number().int().nonnegative() }),
+        },
+      },
+    },
+    404: errorResponse("Message or assignee not found or not allowed"),
+  },
+});
+
+messagesRouter.openapi(assignRoute, async (c) => {
+  const body = c.req.valid("json");
+  try {
+    const conversations = await assignConversations(
+      c.get("db"),
+      c.get("allowedInboxes")!,
+      c.get("user").id,
+      parseRefs(body.refs),
+      body.userId,
     );
     return c.json({ conversations }, 200);
   } catch (error) {
