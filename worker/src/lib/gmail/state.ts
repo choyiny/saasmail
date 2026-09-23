@@ -1,4 +1,6 @@
 const MAX_AGE_SECONDS = 600;
+/** Clock skew allowed on the other end of the window. */
+const MAX_SKEW_SECONDS = 60;
 
 async function hmac(message: string, secret: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -64,11 +66,16 @@ export async function signState(
   expectedEmail: string | null = null,
 ): Promise<string> {
   // The two-field form is kept byte-identical for a plain connect, so a state
-  // signed before this field existed still verifies.
+  // signed before this field existed still verifies. An empty string takes
+  // that same path on purpose: signing "" would mint a state expecting a
+  // mailbox no profile can ever equal, so every callback using it would
+  // refuse — a lockout produced by a caller passing nothing in particular.
+  const mailbox =
+    expectedEmail === null || expectedEmail === "" ? null : expectedEmail;
   const payload =
-    expectedEmail === null
+    mailbox === null
       ? `${userId}.${nowSeconds}`
-      : `${userId}.${nowSeconds}.${encodeField(expectedEmail)}`;
+      : `${userId}.${nowSeconds}.${encodeField(mailbox)}`;
   return `${payload}.${await hmac(payload, secret)}`;
 }
 
@@ -99,6 +106,12 @@ export async function verifyState(
   if (!Number.isFinite(issuedAt)) throw new Error("malformed OAuth state");
   if (nowSeconds - issuedAt > MAX_AGE_SECONDS) {
     throw new Error("OAuth state expired");
+  }
+  // A window has two ends. Without this a far-future timestamp never expires,
+  // so one state would be replayable forever; the allowance covers ordinary
+  // clock skew between signing and verifying.
+  if (issuedAt - nowSeconds > MAX_SKEW_SECONDS) {
+    throw new Error("OAuth state is not yet valid");
   }
   let expectedEmail: string | null = null;
   if (encodedEmail !== undefined) {

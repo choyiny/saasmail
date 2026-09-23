@@ -63,6 +63,25 @@ function nonAuthGuidance(lastError: string): string {
 }
 
 /**
+ * A `?gmail_expected=` / `?gmail_granted=` value the wrong-account banner is
+ * willing to print, or null.
+ *
+ * These come from the query string, so they are whatever the URL says — and
+ * the banner they land in is a red notice that reads as a verdict from the
+ * server. React escapes the text, so this is not an injection; it is simply
+ * that an admin-facing message must not be dictated by a link. One `@`, no
+ * whitespace, and RFC 5321's 254-character ceiling is all an address needs.
+ */
+function mailboxParam(raw: string | null): string | null {
+  if (raw === null) return null;
+  const value = raw.trim();
+  if (value.length === 0 || value.length > 254) return null;
+  if (value.split("@").length !== 2) return null;
+  if (/\s/.test(value)) return null;
+  return value;
+}
+
+/**
  * "N minutes ago" for a past timestamp in **unix seconds** — the unit the
  * worker writes (`nowSeconds` in worker/src/lib/gmail/sync.ts) and that
  * `GET /api/admin/gmail` returns verbatim. Treating it as milliseconds is not
@@ -138,12 +157,21 @@ export default function ConnectedMailboxes({
     ) {
       return;
     }
-    setConnectResult(outcome);
     if (outcome === "wrong_account") {
-      setWrongAccount({
-        expected: searchParams.get("gmail_expected") ?? "",
-        granted: searchParams.get("gmail_granted") ?? "",
-      });
+      const expected = mailboxParam(searchParams.get("gmail_expected"));
+      const granted = mailboxParam(searchParams.get("gmail_granted"));
+      // The callback always sends both, and both are addresses. Anything
+      // else means the URL was hand-made, and a red admin banner must not
+      // read back whatever a link put in it — nor say "you were reconnecting
+      // , but you granted access as ." Fall back to the generic failure.
+      if (expected === null || granted === null) {
+        setConnectResult("error");
+      } else {
+        setConnectResult(outcome);
+        setWrongAccount({ expected, granted });
+      }
+    } else {
+      setConnectResult(outcome);
     }
     setSearchParams(
       (prev) => {

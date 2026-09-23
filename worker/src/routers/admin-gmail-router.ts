@@ -98,7 +98,12 @@ adminGmailRouter.openapi(connectRoute, async (c) => {
     return c.json({ error: "Gmail integration is not configured" }, 503);
   }
   const { email } = c.req.valid("query");
-  const expectedEmail = email ? email.trim().toLowerCase() : null;
+  // Lowercased here and on the profile coming back, or a reconnect started
+  // as ?email=Ops@Example.com would refuse itself: the callback compares
+  // against Gmail's lowercase address and redirects to wrong_account. No
+  // trim: `z.string().email()` has already rejected a padded address with a
+  // 400, so trimming here would only be decoration.
+  const expectedEmail = email ? email.toLowerCase() : null;
   // TOKEN_ENCRYPTION_KEY does double duty: it seals stored refresh tokens and
   // is the HMAC secret for the OAuth state. Deliberate — one secret to manage.
   const state = await signState(
@@ -143,10 +148,12 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
   try {
     // Same key as signState above — it both seals refresh tokens and signs
     // this state parameter. Deliberate; see docs/configuration.md.
-    const { userId, expectedEmail } = await verifyState(
-      state,
-      cfg.encryptionKey,
-    );
+    // The state is verified for its integrity — the signature is what makes
+    // `expectedEmail` trustworthy — but who is acting is the session, not the
+    // payload: this route is admin-guarded, and a callback completed in a
+    // second admin's browser is that admin's doing.
+    const { expectedEmail } = await verifyState(state, cfg.encryptionKey);
+    const connectedBy = c.get("user").id;
     const tokens = await exchangeCode({
       code,
       clientId: cfg.clientId,
@@ -207,7 +214,7 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
         historyId: profile.historyId,
         lastSyncedAt: null,
         lastError: null,
-        connectedBy: userId,
+        connectedBy,
         createdAt: now,
         updatedAt: now,
       })
@@ -220,7 +227,7 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
           historyId: profile.historyId,
           lastError: null,
           lastGapAt: now,
-          connectedBy: userId,
+          connectedBy,
           updatedAt: now,
         },
       });
