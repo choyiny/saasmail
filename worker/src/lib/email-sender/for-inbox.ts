@@ -2,6 +2,8 @@ import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../../db/schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
+import { GmailApiError } from "../gmail/api";
+import { GoogleAuthError } from "../gmail/oauth";
 import { getAccessToken, invalidateAccessToken } from "../gmail/token";
 import { createEmailSender } from "./index";
 import { GmailSender, GMAIL_MAX_ATTACHMENT_BYTES } from "./providers/gmail";
@@ -19,15 +21,47 @@ type ForInboxEnv = CloudflareBindings & {
 };
 
 /**
+ * This inbox is mapped to a Google mailbox and no token for it could be
+ * resolved — so there is no honest way to send this reply.
+ *
+ * `code` is a classification, never free text: it reaches a log, and the
+ * frame it comes from ends in a D1 UPDATE binding the plaintext access token
+ * and the sealed refresh token.
+ */
+export class GmailSenderUnavailableError extends Error {
+  constructor(
+    readonly code: string,
+    readonly inbox: string,
+  ) {
+    super(`gmail sender unavailable for ${inbox}: ${code}`);
+    this.name = "GmailSenderUnavailableError";
+  }
+}
+
+/**
  * Picks the sender for a reply from `fromAddress`: a GmailSender when that
  * address is a Gmail-mapped inbox with usable credentials, otherwise the
  * provider `createEmailSender` would already pick.
  *
- * This sits behind the reply button, so it must NEVER throw. Every failure —
- * Gmail integration not configured, an unmapped address, a dangling
- * `gmailAccountId` (there is no foreign-key check on that column), or a
- * revoked Google grant — falls back to `createEmailSender(env)` and logs,
- * rather than breaking replying. A degraded send path beats a broken one.
+ * Two outcomes that used to be one. "This inbox is not Gmail-mapped" — no
+ * OAuth secrets, no identity row, `source: "cloudflare"`, or a null
+ * `gmail_account_id` — still falls back quietly, because the configured
+ * provider IS the right transport for it.
+ *
+ * "This inbox IS Gmail-mapped and we could not get a token" throws. Catching
+ * it and falling back meant one failed HTTPS request to Google silently
+ * rerouted a reply: on a Gmail-only install `createEmailSender` is
+ * `NoopSender`, so the outbox marked the row "failed" while `replyToEmail`
+ * returned ok, the route answered 201, and the composer cleared the draft and
+ * closed — nothing sent and the user told it was. On an install that does
+ * have Resend or Postmark it is worse: the reply goes out from a Workspace
+ * address through a provider that domain's SPF/DKIM does not authorise,
+ * failing DMARC, and the outbox retries it every 15 minutes. That is exactly
+ * what `send-email.ts` forbids in the comment above its Gmail branch, and the
+ * guard there could not see it because the substitution happened up here.
+ *
+ * The caller turns this into the same 502-and-preserve-the-draft outcome a
+ * failed Gmail reply already gets.
  */
 export async function createSenderForInbox(
   db: DrizzleD1Database<typeof schema>,
@@ -38,11 +72,17 @@ export async function createSenderForInbox(
     const gmailSender = await tryGmailSender(db, env, fromAddress);
     if (gmailSender) return gmailSender;
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    // A code, not the message: `getAccessToken`'s last statement binds the
+    // access token and the sealed refresh token, and a D1 error carries its
+    // bound parameters.
+    const code =
+      e instanceof GoogleAuthError || e instanceof GmailApiError
+        ? e.code
+        : "token_unavailable";
     console.error(
-      `[createSenderForInbox] falling back to the configured provider for ${fromAddress}:`,
-      message,
+      `[createSenderForInbox] ${fromAddress} is Gmail-mapped but no token could be resolved: ${code}. Refusing to send it through another transport.`,
     );
+    throw new GmailSenderUnavailableError(code, fromAddress);
   }
   return createEmailSender(env);
 }
