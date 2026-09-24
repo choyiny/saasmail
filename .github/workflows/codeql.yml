@@ -3,8 +3,12 @@ name: CodeQL
 on:
   push:
     branches: [main]
+  # Stacked PRs target their parent branch rather than main, so filtering on
+  # `main` alone silently skips CodeQL for every PR in a stack until the base
+  # of the stack lands. Match the branch-name prefixes this repo uses for
+  # feature work so a stacked PR is scanned like any other.
   pull_request:
-    branches: [main]
+    branches: [main, "feat/**", "fix/**", "refactor/**", "chore/**"]
   schedule:
     - cron: "17 6 * * 1"
 
