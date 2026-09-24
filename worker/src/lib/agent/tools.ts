@@ -10,6 +10,7 @@ import { sequenceEnrollments } from "../../db/sequence-enrollments.schema";
 import { sequences } from "../../db/sequences.schema";
 import { emailTemplates } from "../../db/email-templates.schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
+import { listAssigneesForInbox } from "../assignees";
 import { cancelSequencesForPerson } from "../cancel-sequence";
 import { findOrCreateContact } from "../contacts";
 import {
@@ -63,6 +64,7 @@ export const MAX_AGENT_APPROVAL_ACTIONS_PER_TURN = 5;
 export const AGENT_TOOL_NAMES = [
   "whoami",
   "list_inboxes",
+  "list_assignees",
   "list_messages",
   "read_message",
   "search_messages",
@@ -237,6 +239,21 @@ export function createAgentTools({
         return {
           inboxes: rows.filter((row) => isInboxAllowed(allowed, row.email)),
         };
+      },
+    }),
+
+    list_assignees: tool({
+      description:
+        "List teammates who can be assigned conversations in an inbox. Use this to resolve a teammate name to a user id.",
+      inputSchema: z.object({ inbox: z.string().min(1) }),
+      execute: async ({ inbox }) => {
+        const canonicalInbox = inbox.trim().toLowerCase();
+        const allowed = await allowedForCall();
+        if (!isInboxAllowed(allowed, canonicalInbox)) {
+          throw new Error("Inbox not found");
+        }
+        const rows = await listAssigneesForInbox(db, canonicalInbox);
+        return rows.map(({ id, name, email }) => ({ id, name, email }));
       },
     }),
 

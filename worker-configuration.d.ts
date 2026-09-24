@@ -22,6 +22,8 @@ declare namespace Cloudflare {
 		UNSUBSCRIBE_SECRET: string;
 		/** Secret: set via `wrangler secret put BETTER_AUTH_SECRET`. Signs sessions and protects the OAuth signing keys in `jwkss`. Not emitted by `wrangler types`; added manually. */
 		BETTER_AUTH_SECRET: string;
+		/** Optional secret: set via `wrangler secret put AGENT_APPROVAL_SECRET`. Overrides the BETTER_AUTH_SECRET-derived key used to sign native-agent tool approvals. Not emitted by `wrangler types`; added manually. */
+		AGENT_APPROVAL_SECRET?: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
 	}
 }

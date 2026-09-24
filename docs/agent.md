@@ -25,7 +25,12 @@ Assistant text is rendered as sanitized Markdown. Markdown images are
 intentionally not rendered: model output and quoted mail are untrusted, and an
 `<img>` would make the browser automatically fetch a remote URL (including
 tracking pixels) without an explicit user action. Links remain clickable after
-sanitization.
+sanitization. Reasoning parts normally stay hidden. Once an assistant message
+is complete, reasoning is rendered through the same sanitizer only when there
+is no non-empty final text: for a message with tools, only reasoning after the
+last tool call is eligible; for a message with no tools, its reasoning can be
+the fallback answer. The active submitted/streaming message never uses this
+fallback, so reasoning cannot flash before a tool call or final text arrives.
 
 Admins can set up to 4000 characters of **Agent instructions** for each inbox on
 the **Inboxes** admin page. When the current navigation context identifies that
@@ -42,8 +47,9 @@ Suggested replies are opt-in per inbox. An admin enables **Auto-suggest replies*
 on the **Inboxes** page; disabled inboxes never enqueue this work.
 
 For each eligible received message, saasmail makes one model call to screen the
-message for prompt injection and, only when that call returns exactly
-`SAFE`, one model call to draft a reply. Mail that is already Junk, carries
+message for prompt injection and, only when the first word of the call's final
+text is `SAFE` (case-insensitive, ignoring surrounding Markdown/punctuation),
+one model call to draft a reply. Mail that is already Junk, carries
 automated/list headers, arrives after the setting was disabled, or has no
 configured model provider is skipped. The consumer re-checks the message,
 inbox setting, spam/trash state, and existing suggestion before generating, so
@@ -57,8 +63,11 @@ text for a human to review, use, edit, or dismiss. **Nothing is ever sent by
 this feature.**
 
 Cost per eligible message is therefore one screening call plus one generation
-call. A screening flag, error, timeout, or any output other than exactly
-`SAFE` creates no suggestion.
+call. The screen and draft calls disable reasoning for providers that support
+the AI SDK's unified reasoning option, and the Workers AI call also disables
+Kimi/GLM thinking explicitly. A screening flag, error, timeout, missing final
+text, or any first final-text word other than `SAFE` creates no suggestion.
+An empty final draft is never stored.
 
 ## Provider selection
 
@@ -181,6 +190,7 @@ acting.
 Read tools:
 
 - identify the caller and list allowed inboxes
+- list assignable teammates for an allowed inbox (id, name, and email)
 - list, read, and search received/sent messages through `queryMessages()`
 - read a customer timeline
 - list sequences with step/active-enrollment counts
@@ -213,11 +223,30 @@ CRM actions with approval:
 
 These five tools use the AI SDK's human-in-the-loop approval state. The tool
 request pauses at `approval-requested`; the UI renders a D1-derived,
-permission-checked summary and the user chooses **Approve** or **Deny**.
-Execution happens only after approval and re-reads the user's current role and
-inbox permissions, so access revoked while the card is waiting is enforced.
-At most five approved CRM actions execute in one user turn; further calls return
-a guard error instructing the model to ask the user before doing more.
+permission-checked summary and the user chooses **Approve** or **Deny**. The
+approval card is the confirmation, so the agent calls the gated tool directly
+once its inputs are resolved instead of asking for an extra text confirmation.
+For assignment by teammate name, it first calls `list_assignees` to resolve the
+user id.
+
+Approval requests are cryptographically bound to the exact tool call. By
+default the runtime derives a stable 32-byte HKDF-SHA256 key from
+`BETTER_AUTH_SECRET` with info `saasmail/agent-tool-approval/v1`; a non-empty
+`AGENT_APPROVAL_SECRET` overrides that derived key. Because the effective key
+is stable, pending approvals survive Durable Object reload/hibernation. Rotating
+it invalidates still-pending cards rather than executing them with a stale
+signature. An unsigned or stale card shows "This approval expired. Ask the
+agent again."; the tool is not executed, and a later user turn treats the
+incomplete old approval as denied so the session remains usable.
+
+Execution happens only after a valid approval and re-reads the user's current
+role and inbox permissions, so access revoked while the card is waiting is
+enforced. Approval continuations preserve the original assistant message when
+building the AI SDK UI stream, including Workers AI's composite tool-call id, so
+tool output and denied results attach to the existing invocation instead of
+creating a broken new assistant message. At most five approved CRM actions
+execute in one user turn; further calls return a guard error instructing the
+model to ask the user before doing more.
 
 A reply draft never overwrites a non-empty human autosave. If a user already has
 content in `reply:<emailId>`, the agent returns

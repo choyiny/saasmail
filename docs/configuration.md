@@ -37,7 +37,8 @@ Local development secrets. Created from `.dev.vars.example`. This file is gitign
 - `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
 - `POSTMARK_API_KEY` — Postmark server API token (if using Postmark)
 - `RESEND_API_KEY` — Resend API key (if using Resend)
-- `BETTER_AUTH_SECRET` — Secret for session signing
+- `BETTER_AUTH_SECRET` — Secret for session signing. The native agent also derives a stable 32-byte HKDF-SHA256 tool-approval signing key from it (info: `saasmail/agent-tool-approval/v1`), so pending approval cards remain verifiable across Durable Object reloads and hibernation.
+- `AGENT_APPROVAL_SECRET` — Optional dedicated secret for native-agent approval signatures. When set, it overrides the key derived from `BETTER_AUTH_SECRET`. Set in production with `wrangler secret put AGENT_APPROVAL_SECRET`. Rotating either effective secret invalidates approval cards that were still pending.
 - `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the [suppressions/unsubscribe](suppressions.md) feature.
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. **Never set this in production.**
 

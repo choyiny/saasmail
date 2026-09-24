@@ -1,7 +1,4 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { sql } from "drizzle-orm";
-import { users } from "../db/auth.schema";
-import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { InvalidCursorError } from "../lib/messages/cursor";
 import {
   InvalidQueryError,
@@ -25,6 +22,7 @@ import {
   assignConversations,
   snoozeConversations,
 } from "../lib/messages/conversation-state";
+import { listAssigneesForInbox } from "../lib/assignees";
 import { isInboxAllowed } from "../lib/inbox-permissions";
 import { bearerSecurity } from "../lib/openapi-auth";
 import type { Variables } from "../variables";
@@ -124,28 +122,7 @@ messagesRouter.openapi(assigneesRoute, async (c) => {
     return c.json({ error: "Inbox not found" }, 404);
   }
 
-  type AssigneeRow = {
-    id: string;
-    name: string;
-    email: string;
-    image: string | null;
-  };
-
-  const rows = await c.get("db").all<AssigneeRow>(sql`
-    SELECT DISTINCT
-      u.id AS id,
-      u.name AS name,
-      u.email AS email,
-      u.image AS image
-    FROM ${users} AS u
-    LEFT JOIN ${inboxPermissions} AS ip
-      ON ip.user_id = u.id
-      AND lower(ip.email) = ${inbox}
-    WHERE u.role = 'admin' OR ip.user_id IS NOT NULL
-    ORDER BY u.name, u.email, u.id
-  `);
-
-  return c.json(rows, 200);
+  return c.json(await listAssigneesForInbox(c.get("db"), inbox), 200);
 });
 
 function parseRefs(values: string[]): MessageRef[] {

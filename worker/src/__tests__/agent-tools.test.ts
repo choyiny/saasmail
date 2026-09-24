@@ -16,6 +16,7 @@ import { AGENT_PLAYBOOK_INTRO, AGENT_PLAYBOOKS } from "../lib/agent/playbook";
 import { upsertDraft } from "../lib/drafts";
 import {
   applyMigrations,
+  authFetch,
   cleanDb,
   createTestEmail,
   createTestPerson,
@@ -208,6 +209,69 @@ describe("agent tools", () => {
     for (const name of mentioned) {
       expect(AGENT_TOOL_NAMES).toContain(name);
     }
+  });
+
+  it("lists assignees with the route's scoping and fields", async () => {
+    const { db, member, other, tools: agentTools } = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    const admin = await createTestUser({
+      id: "agent-assignee-admin",
+      email: "agent-assignee-admin@example.com",
+      role: "admin",
+      name: "Admin Assignee",
+    });
+    await db.insert(inboxPermissions).values({
+      userId: other.userId,
+      email: ALLOWED,
+      createdAt: now,
+      createdBy: null,
+    });
+
+    const routeResponse = await authFetch(
+      `/api/messages/assignees?inbox=${encodeURIComponent(ALLOWED)}`,
+      { apiKey: member.apiKey },
+    );
+    expect(routeResponse.status).toBe(200);
+    const routeRows = (await routeResponse.json()) as Array<{
+      id: string;
+      name: string;
+      email: string;
+      image: string | null;
+    }>;
+    const toolRows = (await execute(agentTools, "list_assignees", {
+      inbox: ALLOWED.toUpperCase(),
+    })) as Array<{ id: string; name: string; email: string }>;
+
+    expect(toolRows).toEqual(
+      routeRows.map(({ id, name, email }) => ({ id, name, email })),
+    );
+    expect(toolRows.map((row) => row.id)).toEqual(
+      expect.arrayContaining([member.userId, other.userId, admin.userId]),
+    );
+
+    const deniedUser = await createTestUser({
+      id: "agent-tools-denied-assignee",
+      email: "agent-tools-denied-assignee@example.com",
+      role: "member",
+      name: "Denied Assignee",
+    });
+    const deniedTools = createAgentTools({
+      db,
+      user: {
+        id: deniedUser.userId,
+        name: "Denied Assignee",
+        email: "agent-tools-denied-assignee@example.com",
+        role: "member",
+      },
+    });
+    const deniedRoute = await authFetch(
+      `/api/messages/assignees?inbox=${encodeURIComponent(ALLOWED)}`,
+      { apiKey: deniedUser.apiKey },
+    );
+    expect(deniedRoute.status).toBe(404);
+    await expect(
+      execute(deniedTools, "list_assignees", { inbox: ALLOWED }),
+    ).rejects.toThrow("Inbox not found");
   });
 
   it("scopes every read surface to the caller's inbox permissions", async () => {

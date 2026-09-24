@@ -62,7 +62,7 @@ function textModel(outputs: string[]) {
 }
 
 describe("suggested reply consumer", () => {
-  it.each(["FLAG", "MAYBE", "safe"])(
+  it.each(["FLAG", "MAYBE", "UNSAFE"])(
     "creates no row when the screen returns %j",
     async (screenOutput) => {
       const { emailId } = await seed();
@@ -83,6 +83,128 @@ describe("suggested reply consumer", () => {
       expect(model.doGenerateCalls).toHaveLength(1);
     },
   );
+
+  it("disables reasoning for the screen and accepts a SAFE first word after reasoning", async () => {
+    const { emailId } = await seed("reasoning-screen-email");
+    let call = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        call += 1;
+        return {
+          content:
+            call === 1
+              ? [
+                  {
+                    type: "reasoning" as const,
+                    text: "This content is ordinary.",
+                  },
+                  { type: "text" as const, text: "**SAFE.**" },
+                ]
+              : [{ type: "text" as const, text: "A safe draft." }],
+          finishReason: "stop" as const,
+          usage: USAGE,
+          warnings: [],
+        };
+      },
+    });
+
+    await runSuggestedReply(
+      getDb(),
+      env as unknown as CloudflareBindings,
+      emailId,
+      model,
+    );
+
+    const [row] = await getDb()
+      .select()
+      .from(suggestedReplies)
+      .where(eq(suggestedReplies.emailId, emailId));
+    expect(row?.bodyText).toBe("A safe draft.");
+    expect(model.doGenerateCalls[0]).toMatchObject({
+      maxOutputTokens: 256,
+      reasoning: "none",
+      providerOptions: {
+        "workers-ai": {
+          chat_template_kwargs: { enable_thinking: false },
+        },
+      },
+    });
+    expect(model.doGenerateCalls[1]).toMatchObject({
+      maxOutputTokens: 4096,
+      reasoning: "none",
+      providerOptions: {
+        "workers-ai": {
+          chat_template_kwargs: { enable_thinking: false },
+        },
+      },
+    });
+  });
+
+  it("fails closed when the screen returns reasoning without final text", async () => {
+    const { emailId } = await seed("reasoning-only-screen-email");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => ({
+        content: [
+          {
+            type: "reasoning" as const,
+            text: "A hidden verdict must never be used.",
+          },
+        ],
+        finishReason: "length" as const,
+        usage: USAGE,
+        warnings: [],
+      }),
+    });
+
+    await runSuggestedReply(
+      getDb(),
+      env as unknown as CloudflareBindings,
+      emailId,
+      model,
+    );
+
+    expect(
+      await getDb()
+        .select()
+        .from(suggestedReplies)
+        .where(eq(suggestedReplies.emailId, emailId)),
+    ).toHaveLength(0);
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(warn).toHaveBeenCalledWith(
+      "[suggested-reply] injection screen returned empty text; skipping:",
+      expect.objectContaining({
+        reasoningLength: expect.any(Number),
+      }),
+    );
+    warn.mockRestore();
+  });
+
+  it("stores nothing when reply generation returns empty final text", async () => {
+    const { emailId } = await seed("empty-generation-email");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const model = textModel(["SAFE", ""]);
+
+    await runSuggestedReply(
+      getDb(),
+      env as unknown as CloudflareBindings,
+      emailId,
+      model,
+    );
+
+    expect(
+      await getDb()
+        .select()
+        .from(suggestedReplies)
+        .where(eq(suggestedReplies.emailId, emailId)),
+    ).toHaveLength(0);
+    expect(model.doGenerateCalls).toHaveLength(2);
+    expect(warn).toHaveBeenCalledWith(
+      "[suggested-reply] generation returned empty text; skipping:",
+      expect.objectContaining({ reasoningLength: 0 }),
+    );
+    warn.mockRestore();
+  });
 
   it("creates no row when the screen call errors", async () => {
     const { emailId } = await seed("screen-error-email");
