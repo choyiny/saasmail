@@ -48,6 +48,7 @@ const account = (over: Partial<GmailAccount> = {}): GmailAccount => ({
   lastError: null,
   lastGapAt: null,
   createdAt: minutesAgo(60 * 24),
+  connectedBy: { id: "user_1", name: "Jane Ops", email: "jane@example.com" },
   ...over,
 });
 
@@ -85,14 +86,16 @@ describe("ConnectedMailboxes", () => {
     renderAt();
 
     expect(await screen.findByText("ops@example.com")).toBeTruthy();
-    const row = screen.getByTestId("gmail-account-acct_1");
-    expect(row.textContent).toContain("Synced 5 minutes ago");
+    // The synced line specifically — the row also carries the (legitimately
+    // much older) date the mailbox was added.
+    const synced = screen.getByTestId("gmail-synced-acct_1");
+    expect(synced.textContent).toContain("Synced 5 minutes ago");
     // Reading the seconds the server sends as milliseconds puts every live
     // mailbox ~20698 days in the past, which is what shipped. Any "days ago"
     // at all is wrong for a fixture five minutes old.
-    expect(row.textContent).not.toMatch(/days? ago/);
+    expect(synced.textContent).not.toMatch(/days? ago/);
     // "Never synced" is a different, explicit state — not this one.
-    expect(row.textContent).not.toContain("Not synced yet");
+    expect(synced.textContent).not.toContain("Not synced yet");
   });
 
   it("shows Not synced yet, and says sync runs every 15 minutes", async () => {
@@ -122,6 +125,42 @@ describe("ConnectedMailboxes", () => {
     expect(screen.getByTestId("gmail-reconnect-acct_1")).toBeTruthy();
     // And it must say the mailbox has stopped syncing until it is reconnected.
     expect(row.textContent).toMatch(/stopped syncing/i);
+  });
+
+  it("says who last connected the mailbox and when it was added", async () => {
+    // A mailbox reads someone else's mail. An operator looking at one they
+    // did not set up has to be able to see where it came from without
+    // querying the database.
+    mFetch.mockResolvedValue([account({ createdAt: minutesAgo(60 * 24 * 3) })]);
+    renderAt();
+
+    const provenance = await screen.findByTestId("gmail-provenance-acct_1");
+    expect(provenance.textContent).toContain("Jane Ops");
+    expect(provenance.textContent).toContain("Added 3 days ago");
+  });
+
+  it("still dates a mailbox connected before the server recorded who", async () => {
+    mFetch.mockResolvedValue([
+      account({ connectedBy: null, createdAt: minutesAgo(60 * 2) }),
+    ]);
+    renderAt();
+
+    const provenance = await screen.findByTestId("gmail-provenance-acct_1");
+    expect(provenance.textContent).toBe("Added 2 hours ago");
+  });
+
+  it("names a deleted admin as such rather than printing a user id", async () => {
+    // `connected_by` carries no foreign key, so the id outlives the account.
+    mFetch.mockResolvedValue([
+      account({
+        connectedBy: { id: "user_gone", name: null, email: null },
+      }),
+    ]);
+    renderAt();
+
+    const provenance = await screen.findByTestId("gmail-provenance-acct_1");
+    expect(provenance.textContent).toContain("a deleted user");
+    expect(provenance.textContent).not.toContain("user_gone");
   });
 
   it("does not offer Reconnect for a healthy mailbox", async () => {
@@ -325,6 +364,26 @@ describe("ConnectedMailboxes — OAuth round-trip result", () => {
     expect(banner.textContent).toMatch(/connected/i);
     // A success banner must never be shown for the failure branch.
     expect(screen.queryByTestId("gmail-connect-error")).toBeNull();
+  });
+
+  it("explains a callback refused because another admin started it", async () => {
+    // The worker sends this when the signed state names a different admin
+    // than the session finishing the flow. Without its own banner the
+    // operator sees a generic failure and retries the identical thing.
+    mFetch.mockResolvedValue([]);
+    renderAt("/inboxes?gmail=wrong_admin");
+
+    const banner = await screen.findByTestId("gmail-wrong-admin");
+    expect(banner.textContent).toMatch(/different administrator/i);
+    // Nothing was stored, and what to do instead.
+    expect(banner.textContent).toMatch(/nothing was changed/i);
+    expect(banner.textContent).toMatch(/start it again/i);
+    // Not the generic failure, which would say something else entirely.
+    expect(screen.queryByTestId("gmail-connect-error")).toBeNull();
+    // And the param is cleared like every other outcome.
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search").textContent).toBe(""),
+    );
   });
 
   it("clears ?gmail=error from the URL so a refresh drops the banner", async () => {
