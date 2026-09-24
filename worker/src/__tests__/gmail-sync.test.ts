@@ -397,6 +397,178 @@ describe("syncAccount — happy path", () => {
   });
 });
 
+describe("syncAccount — one message, two connected mailboxes", () => {
+  /** The second mailbox's row, which `account()` (hard-coded to acct-1) can't give us. */
+  async function accountB() {
+    const [row] = await getDb()
+      .select()
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.id, "acct-2"));
+    return row;
+  }
+
+  it("delivers the same Message-ID to both inboxes", async () => {
+    await seedAccount();
+    await seedAccount("9000", {
+      id: "acct-2",
+      emailAddress: "collector-b@acme.dev",
+    });
+    await seedInbox("support@acme.dev", null, "acct-1");
+    await seedInbox("sales@acme.dev", null, "acct-2");
+    // One message, both inboxes on the To: line — so both mailboxes collect
+    // it and both copies carry the same Message-ID.
+    const opts = {
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          raw: rawEmail({
+            from: "jane@example.com",
+            deliveredTo: "support@acme.dev",
+            messageId: "<shared-1@example.com>",
+          }),
+        },
+      },
+    };
+
+    stubGmail(opts);
+    const a = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+    stubGmail(opts);
+    const b = await syncAccount(
+      getDb(),
+      await accountB(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(a.ingested).toBe(1);
+    // The defect this pins: B's copy hit a GLOBAL Message-ID dedupe, was
+    // dropped, was counted as `ingested: 1` anyway, and B's cursor advanced
+    // past it — so sales@ could never receive it by any later route.
+    expect(b.ingested).toBe(1);
+    expect(b.skipped).toBe(0);
+
+    const rows = await getDb().select().from(emails);
+    expect(rows.map((r) => r.recipient).sort()).toEqual([
+      "sales@acme.dev",
+      "support@acme.dev",
+    ]);
+    // Both rows are real deliveries of the same Gmail message, each stamped
+    // by the run that created it.
+    expect(rows.every((r) => r.gmailMessageId === "m1")).toBe(true);
+    expect(rows.every((r) => r.messageId === "<shared-1@example.com>")).toBe(
+      true,
+    );
+  });
+
+  it("counts the same message offered to the SAME inbox twice as skipped, not ingested", async () => {
+    await seedAccount();
+    await seedInbox("support@acme.dev", null);
+    const opts = {
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          raw: rawEmail({
+            from: "jane@example.com",
+            deliveredTo: "support@acme.dev",
+            messageId: "<g1@example.com>",
+          }),
+        },
+      },
+    };
+
+    stubGmail(opts);
+    const first = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+    // Rewind the cursor so the same history record is genuinely replayed —
+    // an overlapping cron tick reads the pre-advance value, which is exactly
+    // this. Without the rewind the second run sees an empty page and the
+    // dedupe is never reached.
+    await getDb()
+      .update(gmailAccounts)
+      .set({ historyId: "9000" })
+      .where(eq(gmailAccounts.id, "acct-1"));
+    stubGmail(opts);
+    const second = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(first.ingested).toBe(1);
+    expect(second.ingested).toBe(0);
+    expect(second.skipped).toBe(1);
+    expect(await getDb().select().from(emails)).toHaveLength(1);
+  });
+
+  it("does not stamp Gmail ids onto a row a different source already delivered", async () => {
+    await seedAccount();
+    await seedInbox("support@acme.dev", null);
+    // A Cloudflare-delivered row on a DIFFERENT inbox, carrying a Message-ID
+    // the sender also put on the Gmail copy. The write-back used to find it
+    // by `message_id` alone — `gmail_message_id IS NULL` is true for exactly
+    // this row, so the guard that claimed to protect it did not.
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(emails).values({
+      id: "pre-existing",
+      personId: "p-1",
+      recipient: "hello@acme.dev",
+      subject: "delivered by cloudflare",
+      messageId: "<forged@example.com>",
+      receivedAt: now,
+      createdAt: now,
+    });
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          raw: rawEmail({
+            from: "attacker@example.com",
+            deliveredTo: "support@acme.dev",
+            messageId: "<forged@example.com>",
+          }),
+        },
+      },
+    });
+
+    await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    const [preExisting] = await getDb()
+      .select()
+      .from(emails)
+      .where(eq(emails.id, "pre-existing"));
+    expect(preExisting.gmailMessageId).toBeNull();
+    expect(preExisting.gmailThreadId).toBeNull();
+    // The Gmail copy is its own row on its own inbox, and it is the one
+    // that carries the ids.
+    const [synced] = await getDb()
+      .select()
+      .from(emails)
+      .where(eq(emails.recipient, "support@acme.dev"));
+    expect(synced.gmailMessageId).toBe("m1");
+    expect(synced.gmailThreadId).toBe("t-m1");
+  });
+});
+
 describe("syncAccount — skipping", () => {
   it("skips a message carrying the SENT label", async () => {
     await seedAccount();

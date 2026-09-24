@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { schema } from "./db/schema";
 import { people } from "./db/people.schema";
@@ -37,6 +37,29 @@ export async function handleEmail(
 }
 
 /**
+ * What an ingest actually did.
+ *
+ * This used to be `void` for all three outcomes, so a caller counting
+ * deliveries could not tell a stored message from one the blocklist or the
+ * dedupe threw away. The Gmail sync counted every one of them as `ingested`
+ * and advanced its history cursor accordingly — a drop reported as a success,
+ * after which the mail was unreachable by any code path. Naming the outcome is
+ * what lets a caller decide, and `emailId` is what lets the sync stamp Gmail's
+ * ids onto the row this call created instead of guessing at it by Message-ID.
+ */
+export type IngestOutcome =
+  /** A new `emails` row was written; `emailId` is its primary key. */
+  | { status: "stored"; emailId: string }
+  /** The sender is on the blocklist. Nothing was written. */
+  | { status: "blocked" }
+  /**
+   * This inbox already holds this Message-ID — a retry, a replayed Gmail
+   * history page, or two overlapping cron ticks. Nothing was written;
+   * `emailId` is the row that was already there.
+   */
+  | { status: "duplicate"; emailId: string };
+
+/**
  * Store an already-parsed inbound message and run every side effect that
  * follows: blocklist, dedupe, person matching, conversation grouping,
  * attachments, notification fan-out, webhooks, forwarding and sequence
@@ -52,7 +75,7 @@ export async function ingestParsedEmail(
   parsed: ParsedEmail,
   env: CloudflareBindings,
   ctx: ExecutionContext,
-): Promise<void> {
+): Promise<IngestOutcome> {
   const now = Math.floor(Date.now() / 1000);
 
   // Canonicalize inbox addresses to lowercase before storage so casing
@@ -66,19 +89,34 @@ export async function ingestParsedEmail(
   // Drop mail from blocked senders/domains before any storage or side effects.
   if (await isBlocked(db, fromAddressCanonical)) {
     console.log(`Dropped blocked email from ${fromAddressCanonical}`);
-    return;
+    return { status: "blocked" };
   }
 
-  // Deduplicate by Message-ID
+  // Deduplicate by Message-ID, PER INBOX.
+  //
+  // Scoped to `recipient` because one message addressed to two of our inboxes
+  // is two deliveries, not a duplicate: the two copies carry the same
+  // Message-ID, and matching on that alone dropped the second inbox's copy on
+  // the floor. The duplicate this check actually exists to absorb — the same
+  // message offered to the SAME inbox twice, by a retry or a replayed Gmail
+  // history page — is still caught, and the `emails_message_recipient_unique`
+  // index backs it so a race between two callers cannot slip a copy past.
   if (parsed.messageId) {
     const existing = await db
       .select({ id: emails.id })
       .from(emails)
-      .where(eq(emails.messageId, parsed.messageId))
+      .where(
+        and(
+          eq(emails.messageId, parsed.messageId),
+          eq(emails.recipient, recipientCanonical),
+        ),
+      )
       .limit(1);
     if (existing.length > 0) {
-      console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);
-      return;
+      console.log(
+        `Duplicate email with Message-ID ${parsed.messageId} for ${recipientCanonical}`,
+      );
+      return { status: "duplicate", emailId: existing[0]!.id };
     }
   }
 
@@ -360,4 +398,6 @@ export async function ingestParsedEmail(
   console.log(
     `Processed email from ${fromAddressCanonical} to ${recipientCanonical} (${parsed.attachments.length} attachments)`,
   );
+
+  return { status: "stored", emailId };
 }

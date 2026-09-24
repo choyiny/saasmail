@@ -339,34 +339,46 @@ export async function syncAccount(
           });
           parsed.to = inbox;
 
-          await ingestParsedEmail(db, parsed, env, ctx);
-          ingested++;
+          const outcome = await ingestParsedEmail(db, parsed, env, ctx);
+
+          // Count what happened, not what was attempted.
+          //
+          // `ingested++` unconditionally was the critical bug in this engine:
+          // a blocked sender or a duplicate produced the same `void` as a
+          // stored message, so the run reported mail as ingested that it had
+          // thrown away, and the cursor advanced past it. `skipped` is the
+          // honest counter for both — and neither is a failure, so neither
+          // stalls the run.
+          //
+          // The duplicate that matters here is now per-inbox (see the dedupe
+          // in `ingestParsedEmail`): a message addressed to two connected
+          // mailboxes is stored once per inbox, so the second mailbox's sync
+          // no longer drops it and calls that a delivery.
+          if (outcome.status === "stored") ingested++;
+          else skipped++;
 
           // `gmailMessageId` / `gmailThreadId` are not ParsedEmail fields, so
-          // they are written back by matching the UNIQUE `emails.message_id`.
+          // they are written back afterwards — by PRIMARY KEY, using the id
+          // the ingest just handed back.
           //
-          // `isNull(emails.gmailMessageId)` is load-bearing.
-          // `ingestParsedEmail` silently DROPS blocked senders and duplicate
-          // Message-IDs, and returns void either way. Without the guard, a
-          // message dropped as a duplicate of one Cloudflare already
-          // delivered would stamp Gmail ids onto that pre-existing row — a
-          // row this sync never created.
+          // It used to match on `emails.message_id`, which is written by the
+          // sender. A stranger who reuses a Message-ID we already hold could
+          // therefore get this mailbox's Gmail ids stamped onto a row created
+          // by a different source, and `isNull(gmailMessageId)` did not stop
+          // it — a Cloudflare-delivered row has exactly that. Addressing the
+          // row by id removes the guesswork instead of narrowing it.
           //
-          // With no Message-ID there is no row we can identify as ours, so we
-          // write nothing rather than guess.
-          if (parsed.messageId) {
+          // Only for a row THIS call created: a duplicate means the row
+          // already belongs to an earlier delivery, and a blocked message has
+          // no row at all.
+          if (outcome.status === "stored") {
             await db
               .update(emails)
               .set({
                 gmailMessageId: messageId,
                 gmailThreadId: message.threadId || null,
               })
-              .where(
-                and(
-                  eq(emails.messageId, parsed.messageId),
-                  isNull(emails.gmailMessageId),
-                ),
-              );
+              .where(eq(emails.id, outcome.emailId));
           }
         } catch (err) {
           // One message must not discard the work this run already finished,
