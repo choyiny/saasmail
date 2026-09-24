@@ -309,14 +309,54 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         ? null
         : body.forwardTo.trim().toLowerCase()
       : (currentRow?.forwardTo ?? null);
-  const nextSource =
-    body.source !== undefined
-      ? body.source
-      : (currentRow?.source ?? "cloudflare");
-  const nextGmailAccountId =
-    body.gmailAccountId !== undefined
-      ? body.gmailAccountId
-      : (currentRow?.gmailAccountId ?? null);
+  // `source` and `gmail_account_id` are one fact, not two.
+  //
+  // Merging them independently let either field be written without the other,
+  // and the two halves of the feature read the pair differently: the sync
+  // routes on `gmail_account_id` and the send path on `source`. So
+  // `{"gmailAccountId": "..."}` alone wrote a mapping the send-as check never
+  // saw, and `{"source": "cloudflare"}` alone left the id in place — the
+  // operator had unmapped the inbox, the cron had not, and the UI rendered
+  // "Cloudflare" for a row that was plainly Gmail-fed. Both are reachable
+  // from the documented HTTP API and the MCP surface; only the admin UI
+  // happens to always send the pair.
+  //
+  // What is written is therefore derived from the resulting STATE, and the
+  // send-as verification below keys off that same state rather than off which
+  // fields the request happened to carry.
+  const sourceGiven = body.source !== undefined;
+  const accountGiven = body.gmailAccountId !== undefined;
+
+  // One body that says both things at once is a mistake worth naming rather
+  // than silently resolving in a direction the caller may not have meant.
+  if (
+    sourceGiven &&
+    accountGiven &&
+    body.source === "cloudflare" &&
+    body.gmailAccountId !== null
+  ) {
+    return c.json(
+      {
+        error:
+          'source: "cloudflare" and a gmailAccountId contradict each other. Send source: "gmail" with the mailbox to map it, or source: "cloudflare" on its own to unmap it.',
+      },
+      400,
+    );
+  }
+
+  let nextSource = sourceGiven
+    ? body.source!
+    : (currentRow?.source ?? "cloudflare");
+  let nextGmailAccountId = accountGiven
+    ? body.gmailAccountId!
+    : (currentRow?.gmailAccountId ?? null);
+
+  // Naming a mailbox is choosing Gmail...
+  if (accountGiven && body.gmailAccountId !== null && !sourceGiven) {
+    nextSource = "gmail";
+  }
+  // ...and choosing Cloudflare is giving the mailbox up.
+  if (nextSource === "cloudflare") nextGmailAccountId = null;
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards

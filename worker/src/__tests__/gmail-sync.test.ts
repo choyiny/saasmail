@@ -357,6 +357,53 @@ describe("syncAccount — happy path", () => {
     expect(await getDb().select().from(emails)).toHaveLength(1);
   });
 
+  it("ignores a mapping whose source is not gmail, even when it names this account", async () => {
+    // The send path already refuses this row — `resolveGmailAccountId` checks
+    // `source !== "gmail"`. The sync used to route on `gmail_account_id`
+    // alone, so the same row received through Google while replies from it
+    // left through the configured provider, under a Workspace address, with
+    // the UI showing "Cloudflare".
+    await seedAccount();
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "support@acme.dev",
+      displayName: "Support",
+      source: "cloudflare",
+      gmailAccountId: "acct-1",
+      gmailGroupAddress: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          raw: rawEmail({
+            from: "jane@example.com",
+            deliveredTo: "support@acme.dev",
+            messageId: "<src1@example.com>",
+          }),
+        },
+      },
+    });
+
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+
+    expect(res.ingested).toBe(0);
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+    // No usable destination, so the cursor is held rather than consumed —
+    // the same stall-rather-than-drop rule as any other bad mapping.
+    const row = await account();
+    expect(row.historyId).toBe("9000");
+    expect(row.lastError).toBe("no_personal_inbox");
+  });
+
   it("ignores inboxes that belong to no Gmail account", async () => {
     await seedAccount();
     await seedInbox("support@acme.dev", null);
