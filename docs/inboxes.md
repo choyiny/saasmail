@@ -21,6 +21,19 @@ Different inboxes call for different UX. Set each inbox to render as **Thread** 
 
 One deployment, one person timeline, but the interaction model matches the channel.
 
+## Where an inbox gets its mail
+
+Each row on the **Inboxes** page has a **Source** dropdown: **Cloudflare** —
+the default, mail arrives through Cloudflare Email Routing — or one of the
+Google mailboxes connected in the **Connected Google mailboxes** section at the
+top of the same page. Pointing an inbox at a Google mailbox makes saasmail read
+that mailbox over the Gmail API instead, and send its replies through it.
+
+Everything about that path — connecting a mailbox, what the mapping is checked
+against before it saves, the 15-minute poll, and why it never backfills — is in
+[Gmail integration](gmail.md). Setting it up on a local instance is
+[Gmail on a local instance](gmail-local-setup.md).
+
 ## Per-inbox forwarding
 
 Give any inbox a **Forward to** address and every message it receives is re-sent to
@@ -65,4 +78,4 @@ forward to another inbox on the same instance, and any message already carrying 
 
 ---
 
-**See also:** [Users and API keys](users-and-api-keys.md) for the permission model · [Webhooks](webhooks.md) to fire on inbound mail · [Email providers](email-providers.md)
+**See also:** [Gmail integration](gmail.md) for the **Source** dropdown · [Users and API keys](users-and-api-keys.md) for the permission model · [Webhooks](webhooks.md) to fire on inbound mail · [Email providers](email-providers.md)

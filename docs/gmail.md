@@ -41,29 +41,46 @@ controls are unchanged and still usable directly — see
   [Sending through Gmail](#sending-through-gmail) below. Read state is still
   not written back to Gmail in either direction — that remains a later
   release.
+- **A Gmail-mapped inbox that cannot reach Google refuses the reply.** It no
+  longer quietly reroutes it through the configured provider — see
+  [A broken grant refuses the reply](#a-broken-grant-refuses-the-reply-it-does-not-reroute-it).
 - **Bulk and campaign mail never goes through Gmail.** New compose, template
   sends, and sequence steps always use the configured provider, even for a
   Gmail-mapped `fromAddress` — see
   [Sending through Gmail](#sending-through-gmail) for why.
-- **A revoked grant stops that mailbox syncing** until it is reconnected. The
-  account's `lastError` records what happened; the mailbox list on `/inboxes`
-  prints it and offers a **Reconnect** link, and the connected-accounts route
-  below returns it too.
+- **A failing mailbox says so.** Any sync failure — a revoked grant, a Gmail
+  outage, a rate limit — is written to the account's `lastError`; the mailbox
+  list on `/inboxes` prints it, offers a **Reconnect** link for the failures a
+  fresh grant can fix, and the connected-accounts route below returns it too.
 - **A long outage can lose mail permanently.** See
   [Sync gaps](#sync-gaps) below.
 
 ## Setup
 
+Setting this up on a local instance has extra steps — the redirect URI Google
+has to accept, and how to trigger the sync cron without waiting for the real
+tick. Those are in
+[Gmail on a local instance](gmail-local-setup.md), step by step.
+
 1. Create a Google Cloud project inside the same Workspace organisation whose
    mail you want to read, and enable the Gmail API for it.
 2. Create an OAuth client with an **Internal** consent screen (see
    [Internal-only, by design](#internal-only-by-design) below — this is not
-   optional).
+   optional). The application type must be **Web application**; no other
+   client type accepts redirect URIs.
 3. Add the redirect URI:
 
    ```
    <BASE_URL>/api/admin/gmail/callback
    ```
+
+   `BASE_URL` is the `wrangler.jsonc` var, and saasmail builds the URI by
+   appending that path to it. Google matches it character for character, so
+   the two must agree exactly — including the scheme, the port, and
+   `localhost` versus `127.0.0.1`. `BASE_URL` is a prerequisite for this
+   feature even though nothing refuses to start without it: unset, saasmail
+   sends Google a relative redirect URI and Google answers with its own error
+   page.
 
 4. Set three Worker secrets:
 
@@ -74,11 +91,38 @@ controls are unchanged and still usable directly — see
    openssl rand -base64 32 | wrangler secret put TOKEN_ENCRYPTION_KEY
    ```
 
-   `TOKEN_ENCRYPTION_KEY` must be exactly 32 bytes before base64 encoding — the
-   command above produces exactly that. A key of the wrong length makes
-   connecting fail.
+   For local development these three go in `.dev.vars` instead, alongside
+   `DISABLE_PASSKEY_GATE=true` — without that, the passkey gate refuses the
+   OAuth callback like any other `/api/*` route and the mailbox is never
+   stored. See [Gmail on a local instance](gmail-local-setup.md).
 
-5. Sign in to the saasmail web app as an admin and open **Inboxes**
+   `TOKEN_ENCRYPTION_KEY` must be exactly 32 bytes before base64 encoding — the
+   command above produces exactly that. A key of the wrong length does not stop
+   the flow starting: connecting begins normally and fails at the **callback**,
+   which returns a bare `?gmail=error` with the reason only in the Worker log.
+
+5. Apply the migrations (`yarn db:migrate:dev` locally,
+   `yarn db:migrate:prod` for a deployed instance). This feature needs `0035`
+   through `0041`.
+
+   **One upgrade caveat.** `0041` makes
+   `sent_emails (gmail_message_id, from_address)` unique, and SQLite refuses
+   to build a unique index over data that already violates it. A fresh
+   install cannot hit this. An instance that ran an **earlier build of this
+   feature** can, because the duplicate Sent mirrors that index exists to
+   prevent were possible then. Check before applying:
+
+   ```bash
+   wrangler d1 execute saasmail-db --remote --command \
+     "select gmail_message_id, from_address, count(*) c from sent_emails \
+      where gmail_message_id is not null \
+      group by gmail_message_id, from_address having c > 1"
+   ```
+
+   Any rows returned are duplicate mirrors of one Gmail message on one
+   timeline; delete all but one of each group, then re-run the migration.
+
+6. Sign in to the saasmail web app as an admin and open **Inboxes**
    (`/inboxes`). The rest of the setup happens there — see
    [Connecting a mailbox](#connecting-a-mailbox) and
    [Pointing an inbox at a mailbox](#pointing-an-inbox-at-a-mailbox).
@@ -102,8 +146,11 @@ Use a browser that is signed in to saasmail as an admin — Google redirects
 back to the callback from step 3, which sits behind the same admin guard as every
 other `/api/admin/*` route, and a browser navigation carries cookies rather
 than an `Authorization` header, so an API key cannot stand in for the session
-here. Without one the callback answers `403` and the mailbox is never
-connected.
+here. Without a session the callback answers `401`; with a session belonging
+to a non-admin it answers `403`. Either way the mailbox is never connected.
+A third case looks the same from the browser: on a local instance without
+`DISABLE_PASSKEY_GATE=true`, an admin who has not registered a passkey is
+refused with `403` before the callback runs at all.
 
 Google then returns you to `/inboxes` with the result in the URL, and the page
 shows a banner for it:
@@ -116,9 +163,22 @@ shows a banner for it:
 - `?gmail=wrong_account` — you were reconnecting one mailbox and granted
   access as another, so nothing was written. Only a per-mailbox **Reconnect**
   can produce this; see [What a Reconnect prompt means](#what-a-reconnect-prompt-means).
+- `?gmail=wrong_admin` — the flow was started by a different administrator.
+  The signed `state` names the admin who began it, and the callback requires
+  the session finishing it to be the same one, so a consent flow cannot be
+  completed in somebody else's browser. Nothing was written and the
+  authorization code was not spent; start the flow again from your own
+  account. A state lives ten minutes, so this is otherwise invisible.
 
 The parameter is stripped from the URL once read, so a refresh does not
 resurrect a stale banner.
+
+**The OAuth `state` expires after ten minutes** (plus 60 seconds of allowed
+clock skew). A consent screen left open longer than that comes back as a bare
+`?gmail=error` with nothing to distinguish it from any other failure; start
+the flow again. The same banner is also what you get when Google returns no
+refresh token — saasmail refuses a grant it cannot refresh rather than storing
+a connection that dies with the first access token.
 
 ### What a Reconnect prompt means
 
@@ -128,7 +188,7 @@ stopped for that mailbox and will not resume on its own.
 
 **Reconnect is offered only for the errors a fresh grant can actually fix**:
 a revoked or broken grant, and anything else Google reports, since that set
-is open-ended. For the four codes saasmail raises itself the button is hidden
+is open-ended. For the codes saasmail raises itself the button is hidden
 and the note says what to do instead, because a consent round trip would
 change nothing:
 
@@ -141,6 +201,20 @@ change nothing:
   [Sync gaps](#sync-gaps).
 - `message_failed:<id>` — one message threw. The cursor did not move, so the
   next run retries it.
+- `sync_failed:<code>` — the whole run failed before it could sync anything:
+  a Gmail 5xx (`sync_failed:http_500`), a rate limit
+  (`sync_failed:rate_limited`), or an unclassified error
+  (`sync_failed:unknown`). Neither the cursor nor `lastSyncedAt` moved, so
+  the next run picks up where this one left off. The two exceptions are
+  `sync_failed:http_401` and `sync_failed:http_403` — Gmail refusing the
+  credential itself — which **do** offer Reconnect: that is how a grant
+  revoked while the cached access token was still valid shows up.
+
+The code is all that is recorded. An error's own message never reaches
+`lastError`, because this field is returned by the admin API and rendered in
+the UI, and a D1 error's message carries the parameters bound to its query —
+which on this path include the access token. The message goes to the Worker
+log instead.
 
 Reconnecting runs the OAuth flow again **for that specific mailbox**: its
 address is sent to Google as a `login_hint` so the right account is
@@ -175,6 +249,15 @@ on the timeline. Any inbox that read from that mailbox is switched back to
 **Cloudflare** in the same request, since a mapping pointing at a deleted
 mailbox is an inbox that silently receives nothing.
 
+It also **forgets the Gmail thread ids** stored against those inboxes. Gmail
+thread ids are per-mailbox, so an id issued by the mailbox you just
+disconnected is a claim the next mailbox cannot honour — handing one to a
+different account's send endpoint is a `4xx`, and a `4xx` from Gmail is
+terminal and never queued, which would leave every pre-existing conversation
+permanently unreplyable. Clearing them costs the Gmail-side threading on those
+old conversations: replies start a new Gmail thread. The saasmail timeline
+groups by person and conversation, not by this id, so nothing moves there.
+
 It does **not** revoke the grant at Google — saasmail makes no revocation
 call, whatever the confirm text says. The refresh token stays valid on
 Google's side until the mailbox owner removes it by hand under their Google
@@ -193,6 +276,11 @@ immediately.
 With no mailbox connected the dropdown is disabled and reads "Connect a Google
 mailbox first" — or "Couldn't load connected mailboxes" if that list failed to
 load, which is not the same thing.
+
+**Re-pointing an inbox at a different mailbox, or unmapping it, forgets that
+inbox's stored Gmail thread ids**, for the same reason
+[Disconnecting](#disconnecting) does. Replies on conversations that predate
+the change start a new Gmail thread instead of failing forever.
 
 A mapped row says which of three things is true, because confusing them would
 talk you into unmapping a working inbox:
@@ -219,7 +307,17 @@ refuses the mapping unless the inbox address is one that account can actually
 send from (which is not quite the same as being on the list — see below). The
 check runs whenever
 the mapping is new or changed — not on unrelated edits to the same inbox, so a
-Gmail outage cannot block renaming an inbox. Three refusals are possible, and
+Gmail outage cannot block renaming an inbox.
+
+It keys on the mapping the request would **result** in, not on which fields
+the request happened to carry. `source` and `gmailAccountId` are one fact:
+naming a mailbox is choosing Gmail, and choosing Cloudflare gives the mailbox
+up. A body that contradicts itself — `"source": "cloudflare"` together with a
+`gmailAccountId` — is refused with a `400` before Google is contacted. So a
+`PATCH` carrying only `gmailAccountId` is verified exactly like one carrying
+both fields.
+
+Three refusals are possible, and
 they need different things from you. In each case **nothing is saved**, the
 dropdown snaps back, and the server's own message is printed under it:
 
@@ -252,9 +350,18 @@ admin:
   Google's `login_hint` and is sealed into the signed `state`, and the
   callback refuses to write anything if a different account is granted.
 - `GET /api/admin/gmail` lists connected mailboxes, each with `id`,
-  `emailAddress`, `lastSyncedAt`, `lastError`, `lastGapAt`, and `createdAt`.
-  It never returns token material. Check `lastGapAt` after any extended
-  outage — see [Sync gaps](#sync-gaps).
+  `emailAddress`, `lastSyncedAt`, `lastError`, `lastGapAt`, `createdAt`, and
+  `connectedBy` — `{ id, name, email }` for the admin who last connected or
+  reconnected it. `connectedBy` is null on a mailbox connected before saasmail
+  recorded it, and its `name`/`email` are null if that admin has since been
+  deleted: the column holds an id, not a foreign key, so the mailbox outlives
+  the account. The mailbox row on `/inboxes` renders this as "Added 3 days ago
+  · last connected by Jane Ops".
+  It never returns token material. `lastSyncedAt` advances on every completed
+  run, **including one that found no new mail** — so a moving `lastSyncedAt`
+  proves the cron fired and the grant still works, not that anything arrived.
+  Check `lastGapAt` after any extended outage — see
+  [Sync gaps](#sync-gaps).
 - `PATCH /api/admin/inboxes/{email}` with
   `{ "source": "gmail", "gmailAccountId": "<id from the list above>" }` maps
   an inbox; `{email}` does not need to already exist. Sending `"cloudflare"`
@@ -298,6 +405,14 @@ it answers. There is no separate mechanism for this: it is the same sync
 described above, watching for the mailbox's own `SENT`-labeled mail alongside
 inbound mail.
 
+**A reply typed in Gmail cancels that person's active sequences**, exactly as
+an inbound reply or a reply typed in saasmail does. A rep who answers a lead
+from their phone has made contact, so the automated follow-ups stop; without
+this the customer keeps getting nudged about a question a human already
+answered. It only applies when saasmail recognises the recipient — a message
+to an address it has never heard from has no timeline and no enrollments to
+cancel. See [Sequences](sequences.md).
+
 ### Bulk and campaign mail stays on the configured provider
 
 `/api/send` (new compose), template sends, and sequence steps always go out
@@ -330,29 +445,53 @@ see this error, the reply was not sent and is not in flight: send it again —
 unless the error asks you to reconnect the mailbox, which means the Google
 grant is dead and resending cannot work until you do (see below).
 
-### A revoked grant degrades, it doesn't break
+### A broken grant refuses the reply; it does not reroute it
 
-If `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` /
-`TOKEN_ENCRYPTION_KEY` are unset, or the Google grant is revoked and saasmail
-already knows it, a reply to a Gmail-mapped inbox falls back to the
-configured provider — it just will not appear in that mailbox's Gmail Sent
-folder or thread onto the Gmail conversation.
+**This behaviour was reversed.** A Gmail-mapped inbox whose token cannot be
+obtained used to fall back to the configured provider. It no longer does: the
+reply is **refused with a `502`, nothing is written, nothing is queued, and
+the composer keeps the draft**. If you were relying on the old fallback, this
+is the change to know about.
+
+The fallback was dishonest in both directions. On a Gmail-only install there
+is no configured provider, so the outbox marked the row failed while the API
+answered `201` and the composer cleared the draft — nothing sent, and the user
+told it was. On an install that does have Resend or Postmark it is worse: the
+reply leaves from a real Workspace address through a service that domain's
+SPF/DKIM does not authorise, fails DMARC, and is retried every fifteen
+minutes.
+
+The line is drawn on the mapping, not on the error. An inbox that is **not**
+Gmail-mapped still uses the configured provider with no fuss, because that
+provider genuinely is its transport — including when the three OAuth secrets
+are unset, which makes no inbox Gmail-mapped at all. An inbox that **is**
+Gmail-mapped and cannot produce a token is refused: a revoked grant, a
+mailbox that was disconnected while an inbox still pointed at it, or Google
+being unreachable.
 
 A revocation is discovered when saasmail next refreshes the access token,
 which is either when the cached one expires or when Gmail rejects it
-mid-send. In the mid-send case that first reply is **not** sent: saasmail
-forces one token refresh, and when that fails it returns the `502` above with
-an error telling you to reconnect the mailbox rather than to resend. The
-account's `lastError` records the refresh failure and `GET /api/admin/gmail`
-surfaces it, the same as it does for a sync failure. Replies after that take
-the fallback. (Unset secrets are a configuration problem, not an account
-one: they are logged, but nothing is written to `lastError`, because
-saasmail never reaches the account row to write it.)
+mid-send. Either way that reply is refused with the `502` above and an error
+telling you to reconnect the mailbox rather than to resend. The account's
+`lastError` records the refresh failure and `GET /api/admin/gmail` surfaces
+it, the same as it does for a sync failure. (Unset secrets are a
+configuration problem, not an account one: they are logged, but nothing is
+written to `lastError`, because saasmail never reaches the account row to
+write it.)
 
-The fallback sends through whichever provider is configured, and all four —
-Resend, Postmark, Bavimail, and Cloudflare Email Sending — carry the full
-`Cc` list. (Cloudflare Email Sending used to keep only the last `Cc`
-recipient; that is fixed.)
+When a reply does go out through the configured provider, all four — Resend,
+Postmark, Bavimail, and Cloudflare Email Sending — carry the full `Cc` list.
+(Cloudflare Email Sending used to keep only the last `Cc` recipient; that is
+fixed.)
+
+### A `2xx` with no message id counts as delivered
+
+If Gmail accepts a reply but returns no message id, saasmail treats it as
+**delivered**, not as something to retry, and the error it returns says so
+instead of telling you to send it again — a resend would put a second copy of
+a real reply in the customer's mailbox. What is lost is saasmail's own
+`sent_emails` record of it; the Sent-folder mirror puts the message back on
+the timeline on the next poll.
 
 ### No duplicates
 
@@ -360,6 +499,39 @@ saasmail's own Gmail replies come back through the Sent-folder mirror like
 any other Gmail-typed reply. They are recognised by the Gmail message id
 saasmail already recorded when it sent them, and skipped — so they never
 appear twice on the timeline.
+
+## Limits
+
+None of these are configurable, and each of them has been reported as a bug
+at least once.
+
+- **50 messages per mailbox per cron run.** A backlog drains at 50 every 15
+  minutes — roughly 200 an hour — rather than all at once, so a large first
+  day looks stalled when it is only queued. The Worker log says so:
+  `hit the 50-message cap; resuming after history record …`. Nothing is lost;
+  the cursor stops at the last record processed in full and the next run
+  resumes from there.
+- **`DRAFT`, `TRASH` and `SPAM` messages are skipped**, and that skip beats
+  the Sent mirror — a message that was sent and then trashed is dropped
+  rather than mirrored.
+- **Only newly added messages are polled.** The sync asks Gmail's history API
+  for `messageAdded` and nothing else, so label changes, and mail a filter
+  moves into the mailbox after it arrived, are never seen.
+- **A mirrored Sent message whose first recipient is not a plain address is
+  skipped silently.** It counts as a skip; nothing is written to `lastError`.
+- **Gmail replies cap attachments at about 14 MiB.** Gmail's own ceiling is a
+  25 MB message, but the send endpoint carries the whole RFC822 message
+  base64url-encoded inside a JSON body and the attachment is already base64
+  inside that message, so a byte of attachment costs about 1.78 bytes on the
+  wire. saasmail budgets against the encoded size. A Gmail-mapped inbox
+  therefore has a **different**, lower attachment ceiling than the configured
+  provider, and because a Gmail reply is never queued, a `413` here is a dead
+  end rather than something to retry.
+- **The OAuth `state` lives ten minutes** (plus 60 seconds of clock skew).
+- **Google Workspace caps sending at roughly 2,000 messages per day per
+  user**, and Gmail API sends count against it. That cap is why bulk mail
+  never takes this path — see
+  [Bulk and campaign mail stays on the configured provider](#bulk-and-campaign-mail-stays-on-the-configured-provider).
 
 ## Internal-only, by design
 
@@ -455,4 +627,4 @@ disconnecting and reconnecting each mailbox from scratch.
 
 ---
 
-**See also:** [Configuration](configuration.md) for where the secrets live
+**See also:** [Gmail on a local instance](gmail-local-setup.md) for a step-by-step local setup · [Configuration](configuration.md) for where the secrets live · [Inboxes and timelines](inboxes.md) for the rest of the Inboxes page

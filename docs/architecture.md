@@ -24,7 +24,7 @@ operate.
 | **Realtime + Push** | Durable Object (`NotificationsHub`, one per user) — WebSockets + Web Push |
 | **Web Push**        | VAPID + `aes128gcm` payload encryption (RFC 8291), implemented in-worker  |
 | **Service Worker**  | `public/sw.js` — receives push events, renders OS notifications           |
-| **Cron**            | Hourly trigger for sequence email scheduling                              |
+| **Cron**            | Every 15 minutes: sequence scheduling, outbox retries, Gmail mailbox sync |
 | **Frontend**        | React + Tailwind CSS + TipTap editor                                      |
 | **ORM**             | Drizzle                                                                   |
 | **Auth**            | BetterAuth with passkey support                                           |
