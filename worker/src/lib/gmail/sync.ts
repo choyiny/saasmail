@@ -7,7 +7,7 @@ import { emails } from "../../db/emails.schema";
 import { parseRaw } from "../email-parser";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
-import { getProfile } from "./oauth";
+import { getProfile, GoogleAuthError } from "./oauth";
 import {
   listHistory,
   getMessage,
@@ -15,6 +15,18 @@ import {
   type AddedMessage,
 } from "./api";
 import { resolvePersonalInbox } from "./route-inbox";
+import {
+  AMBIGUOUS_INBOX_MAPPING_ERROR,
+  HISTORY_GAP_ERROR,
+  MESSAGE_FAILED_PREFIX,
+  NO_PERSONAL_INBOX_ERROR,
+  SYNC_FAILED_PREFIX,
+} from "./error-codes";
+
+// The `lastError` vocabulary lives in `./error-codes` so the admin UI can
+// import the same strings instead of re-declaring them. Re-exported here
+// because this is where callers expect to find it.
+export { HISTORY_GAP_ERROR, SYNC_FAILED_PREFIX };
 
 /**
  * Bounded so one account cannot exhaust the Worker CPU budget. The cursor
@@ -61,15 +73,54 @@ export type SyncResult = {
 };
 
 /**
- * Written to `gmail_accounts.lastError` when an expired cursor forced a
- * re-seed. Mail arrived in the gap and was never synced, so the account is
- * working but incomplete, and an operator needs to be told.
+ * A short, stable code for a sync that rejected — and never the error's own
+ * message.
  *
- * This signal is TRANSIENT — the next successful run clears `lastError`. The
- * durable record of the same event is `gmail_accounts.lastGapAt`, which
- * nothing in this file ever clears.
+ * `lastError` is returned by `GET /api/admin/gmail` and rendered in the admin
+ * UI, so what goes in it has to be safe to show. An error message is not: a
+ * D1 failure carries its bound query parameters, which on this path include
+ * the access token. Gmail's classification (`http_500`, `rate_limited`) and
+ * Google's auth codes (`invalid_grant`, `profile_request_failed`) are built
+ * in this repo from a status line and carry nothing else, so they can be
+ * shown verbatim. Anything else becomes `unknown`, and its message goes to
+ * the log only.
+ *
+ * A Google auth code is recorded bare, without the prefix: `getAccessToken`
+ * already writes that same value before rethrowing, and Reconnect is the
+ * right offer for it.
  */
-export const HISTORY_GAP_ERROR = "history_gap";
+function syncFailureCode(err: unknown): string {
+  if (err instanceof GoogleAuthError) return err.code;
+  if (err instanceof GmailApiError) return `${SYNC_FAILED_PREFIX}${err.code}`;
+  return `${SYNC_FAILED_PREFIX}unknown`;
+}
+
+/**
+ * Mark an account as failing, so the failure is visible somewhere other than
+ * cron output.
+ *
+ * `lastSyncedAt` is deliberately left where it was — nothing synced — and so
+ * is `historyId`, so the next run resumes from the same cursor.
+ */
+async function recordSyncFailure(
+  db: DrizzleD1Database<typeof schema>,
+  accountId: string,
+  code: string,
+): Promise<void> {
+  try {
+    await db
+      .update(gmailAccounts)
+      .set({ lastError: code, updatedAt: nowSeconds() })
+      .where(eq(gmailAccounts.id, accountId));
+  } catch (err) {
+    // This account's sync has already failed; failing to write the marker
+    // must not also stop the remaining accounts being reported.
+    const reason = err instanceof Error ? err.message : "unknown error";
+    console.error(
+      `Gmail sync could not record the failure for account ${accountId}: ${reason}`,
+    );
+  }
+}
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -171,7 +222,9 @@ export async function syncAccount(
       (m) => m.gmailGroupAddress === null,
     ).length;
     const reason =
-      personalCount === 0 ? "no_personal_inbox" : "ambiguous_inbox_mapping";
+      personalCount === 0
+        ? NO_PERSONAL_INBOX_ERROR
+        : AMBIGUOUS_INBOX_MAPPING_ERROR;
     console.error(
       `Gmail sync for ${account.emailAddress}: ${reason} (${personalCount} personal mappings). Not consuming history until the mapping is fixed.`,
     );
@@ -357,7 +410,9 @@ export async function syncAccount(
     lastSyncedAt: now,
     // Naming the message gives an operator something to act on: they can open
     // it in Gmail and see why it cannot be ingested.
-    lastError: failedMessageId ? `message_failed:${failedMessageId}` : null,
+    lastError: failedMessageId
+      ? `${MESSAGE_FAILED_PREFIX}${failedMessageId}`
+      : null,
     updatedAt: now,
   };
 
@@ -430,13 +485,28 @@ export async function syncAllGmailAccounts(
     accounts.map((account) => syncAccount(db, account, env, ctx, cfg)),
   );
 
-  results.forEach((result, i) => {
+  for (const [i, result] of results.entries()) {
     if (result.status === "rejected") {
+      // The message only, never the error object: a D1 error carries its
+      // bound query parameters, which on this path include the access token.
+      const reason =
+        result.reason instanceof Error
+          ? result.reason.message
+          : "unknown error";
       console.error(
-        `Gmail sync failed for ${accounts[i].emailAddress}:`,
-        result.reason,
+        `Gmail sync failed for ${accounts[i].emailAddress}: ${reason}`,
       );
-      return;
+      // And on the row, or the failure exists only in cron output. `lastError`
+      // is the one field the admin UI reads for trouble, and nothing there has
+      // a staleness threshold — so without this a mailbox that has failed
+      // every 15 minutes for a week renders as "Synced 7 days ago" with no
+      // Reconnect offered, and the only symptom is mail not arriving.
+      await recordSyncFailure(
+        db,
+        accounts[i].id,
+        syncFailureCode(result.reason),
+      );
+      continue;
     }
 
     // A fulfilled result can still carry a failure: `syncAccount` catches a
@@ -462,5 +532,5 @@ export async function syncAllGmailAccounts(
         `Gmail sync re-seeded the history cursor for ${accounts[i].emailAddress} after an expired cursor; mail in the gap was not synced.`,
       );
     }
-  });
+  }
 }
