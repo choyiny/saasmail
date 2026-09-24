@@ -351,6 +351,13 @@
       "when": 1790179814892,
       "tag": "0049_identity_graph",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1790197000000,
+      "tag": "0050_jmap_changes",
+      "breakpoints": true
     }
   ]
 }

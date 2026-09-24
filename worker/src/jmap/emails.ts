@@ -16,7 +16,7 @@ import {
 } from "../lib/messages/types";
 import { customMailboxId, systemMailboxId } from "./ids";
 import { loadMailboxDescriptors, type MailboxDescriptor } from "./mailboxes";
-import { jmapState } from "./state";
+import { currentJmapState, jmapState } from "./state";
 import { MAX_OBJECTS_IN_GET } from "./constants";
 
 export type JmapMethodError = {
@@ -80,16 +80,10 @@ function systemMailboxForMessage(message: UnifiedMessage): string | null {
   if (message.direction === "outbound") return systemMailboxId(inbox, "sent");
   if (state?.spamAt) return systemMailboxId(inbox, "junk");
   if (state?.archivedAt) return systemMailboxId(inbox, "archive");
-  if (
-    state?.snoozedUntil &&
-    state.snoozedUntil > Math.floor(Date.now() / 1000)
-  ) {
-    return null;
-  }
   return systemMailboxId(inbox, "inbox");
 }
 
-function mailboxIds(message: UnifiedMessage): Record<string, true> {
+export function jmapMailboxIds(message: UnifiedMessage): Record<string, true> {
   const ids: Record<string, true> = {};
   const system = systemMailboxForMessage(message);
   if (system) ids[system] = true;
@@ -99,7 +93,7 @@ function mailboxIds(message: UnifiedMessage): Record<string, true> {
   return ids;
 }
 
-function keywords(message: UnifiedMessage): Record<string, true> {
+export function jmapKeywords(message: UnifiedMessage): Record<string, true> {
   const result: Record<string, true> = {};
   if (message.state?.seen) result.$seen = true;
   if (message.state?.starredAt) result.$flagged = true;
@@ -193,8 +187,8 @@ export function toJmapEmail(
   const full: Record<string, unknown> = {
     id,
     threadId: jmapThreadId(message),
-    mailboxIds: mailboxIds(message),
-    keywords: keywords(message),
+    mailboxIds: jmapMailboxIds(message),
+    keywords: jmapKeywords(message),
     size: approximateSize(message),
     receivedAt: utcDate(message.occurredAt),
     sentAt:
@@ -225,11 +219,41 @@ async function queryEmailObjects(
 ): Promise<UnifiedMessage[]> {
   const page = await queryMessages(db, allowed, {
     ...query,
+    ignoreSnooze: true,
     viewer: { userId },
     withState: true,
     withAttachments: true,
   });
   return page.messages;
+}
+
+export async function loadJmapEmailObjectsByIds(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  ids: string[],
+): Promise<Map<string, UnifiedMessage>> {
+  const refsById = new Map<string, MessageRef>();
+  for (const id of ids) {
+    const ref = parseMessageRef(id);
+    if (ref) refsById.set(serializeMessageRef(ref), ref);
+  }
+
+  const messages: UnifiedMessage[] = [];
+  const refs = [...refsById.values()];
+  for (let start = 0; start < refs.length; start += MESSAGE_REFS_PER_QUERY) {
+    const chunk = refs.slice(start, start + MESSAGE_REFS_PER_QUERY);
+    messages.push(
+      ...(await queryEmailObjects(db, allowed, userId, {
+        messageRefs: chunk,
+        limit: chunk.length,
+      })),
+    );
+  }
+
+  return new Map(
+    messages.map((message) => [serializeMessageRef(message.ref), message]),
+  );
 }
 
 export async function emailGet(
@@ -254,11 +278,12 @@ export async function emailGet(
     };
   }
 
+  const state = (await currentJmapState(db, allowed, userId)).state;
   let requestedIds: string[];
   let messages: UnifiedMessage[];
 
   if (ids === undefined || ids === null) {
-    const count = await countMessages(db, allowed, {});
+    const count = await countMessages(db, allowed, { ignoreSnooze: true });
     if (count > MAX_OBJECTS_IN_GET) {
       return {
         type: "requestTooLarge",
@@ -274,23 +299,11 @@ export async function emailGet(
     requestedIds = messages.map((message) => serializeMessageRef(message.ref));
   } else {
     requestedIds = ids as string[];
-    const refsById = new Map<string, MessageRef>();
-    for (const id of requestedIds) {
-      const ref = parseMessageRef(id);
-      if (ref) refsById.set(serializeMessageRef(ref), ref);
-    }
-
-    messages = [];
-    const refs = [...refsById.values()];
-    for (let start = 0; start < refs.length; start += MESSAGE_REFS_PER_QUERY) {
-      const chunk = refs.slice(start, start + MESSAGE_REFS_PER_QUERY);
-      messages.push(
-        ...(await queryEmailObjects(db, allowed, userId, {
-          messageRefs: chunk,
-          limit: chunk.length,
-        })),
-      );
-    }
+    messages = [
+      ...(
+        await loadJmapEmailObjectsByIds(db, allowed, userId, requestedIds)
+      ).values(),
+    ];
   }
 
   const byId = new Map(
@@ -311,7 +324,7 @@ export async function emailGet(
 
   return {
     accountId,
-    state: await jmapState(db, allowed, userId),
+    state,
     list,
     notFound,
   };
@@ -478,6 +491,7 @@ export async function emailQuery(
 
   let queryExtra: MessageQuery = {
     order: "desc",
+    ignoreSnooze: true,
     offset: position,
     limit: Math.max(limit, 1),
     viewer: { userId },

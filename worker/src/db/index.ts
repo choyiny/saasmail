@@ -41,3 +41,4 @@ export * from "./suggested-replies.schema";
 export * from "./rules.schema";
 export * from "./auto-reply-log.schema";
 export * from "./customers.schema";
+export * from "./jmap-changes.schema";

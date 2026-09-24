@@ -69,6 +69,8 @@ export interface MessageQuery {
   includeTrashed?: boolean;
   includeSpam?: boolean;
   includeSnoozed?: boolean;
+  /** Ignore snooze visibility rules. Used by JMAP, where snooze is app-only. */
+  ignoreSnooze?: boolean;
   excludeCampaignSends?: boolean;
   assignedTo?: string;
   /** Unix seconds used for snooze evaluation. Defaults to the current time. */
@@ -289,6 +291,7 @@ function snoozeScope(
   conversationIdColumn: SQL,
   personIdColumn: SQL,
 ): SQL {
+  if (query.ignoreSnooze === true) return sql``;
   const now = query.now ?? Math.floor(Date.now() / 1000);
   const key = conversationKeySql({
     conversationId: conversationIdColumn,

@@ -7,6 +7,7 @@ import { injectDb } from "./db/middleware";
 import { createAuth } from "./auth";
 import { users } from "./db/auth.schema";
 import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
 import { customersRouter } from "./routers/customers-router";
@@ -36,6 +37,7 @@ import { handleScheduled } from "./lib/sequence-processor";
 import { handleQueueBatch } from "./lib/queue-router";
 import { processOutbox } from "./lib/outbox";
 import { runNewsletterMaintenance } from "./lib/newsletter-cron";
+import { pruneJmapChanges } from "./jmap/changes";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -387,7 +389,16 @@ export default {
         .then(() => processOutbox(env))
         // Newsletter retention sweep. Chained after the delivery work and
         // separately caught so a cleanup failure can never stop mail going out.
-        .then(() => runNewsletterMaintenance(env)),
+        .then(() => runNewsletterMaintenance(env))
+        .catch((err) =>
+          console.error("[cron] outbox/newsletter maintenance failed:", err),
+        )
+        .then(() =>
+          pruneJmapChanges(
+            drizzle(env.DB),
+            Math.floor(Date.now() / 1000),
+          ).catch((err) => console.error("[cron] JMAP pruning failed:", err)),
+        ),
     );
   },
   async queue(batch: MessageBatch<unknown>, env: CloudflareBindings) {

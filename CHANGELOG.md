@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **JMAP change tracking and safe Email state writes.** JMAP now keeps a 30-day permission-scoped change log, supports Email/changes and Mailbox/changes, and accepts update-only Email/set calls for seen/flagged state and mailbox membership. Snooze remains app-only and invisible to JMAP; Email creation/destruction and EmailSubmission remain unsupported.
+
 - **Read-only JMAP mail access.** Authenticated clients can discover a JMAP Session and read permission-scoped mailboxes, messages, threads, identities, and attachment blobs through a bounded RFC 8620/8621 subset. The adapter reuses the unified message/state services, supports result references and the documented Email/query filters, and deliberately exposes no write or change-calculation methods.
 
 - **Approval-gated CRM actions for the native agent.** The in-app agent can now list sequences/lists/customer identity and request sequence enrollment or cancellation, list membership, conversation assignment, and customer linking. Every CRM write pauses for an explicit Approve/Deny decision, shows a permission-checked D1-derived summary, re-checks role/inbox access at execution time, and is capped at five approved CRM actions per user turn. Sending, trash, and delete remain unavailable.

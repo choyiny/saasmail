@@ -77,7 +77,7 @@ async function createMember() {
   return { userId, apiKey };
 }
 
-describe("read-only JMAP", () => {
+describe("JMAP", () => {
   beforeAll(async () => {
     await applyMigrations();
   });
@@ -109,13 +109,14 @@ describe("read-only JMAP", () => {
       maxSizeRequest: 10_000_000,
       maxCallsInRequest: 16,
       maxObjectsInGet: 256,
+      maxObjectsInSet: 256,
       maxConcurrentRequests: 4,
       collationAlgorithms: ["i;ascii-casemap"],
     });
     expect(session.capabilities[MAIL_CAPABILITY]).toEqual({});
     expect(session.accounts[userId]).toMatchObject({
       isPersonal: true,
-      isReadOnly: true,
+      isReadOnly: false,
     });
     expect(session.primaryAccounts[MAIL_CAPABILITY]).toBe(userId);
   });

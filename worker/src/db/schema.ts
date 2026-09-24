@@ -39,6 +39,7 @@ import { suggestedReplies } from "./suggested-replies.schema";
 import { rules } from "./rules.schema";
 import { autoReplyLog } from "./auto-reply-log.schema";
 import { customerPeople, customers } from "./customers.schema";
+import { jmapChanges } from "./jmap-changes.schema";
 
 export const schema = {
   ...authSchema,
@@ -83,4 +84,5 @@ export const schema = {
   autoReplyLog,
   customers,
   customerPeople,
+  jmapChanges,
 } as const;
