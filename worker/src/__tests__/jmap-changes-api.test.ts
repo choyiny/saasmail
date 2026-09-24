@@ -12,9 +12,7 @@ import {
 import { emails } from "../db/emails.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { inboxConversationState } from "../db/inbox-conversation-state.schema";
-import { jmapChanges } from "../db/jmap-changes.schema";
 import { mailboxes } from "../db/mailboxes.schema";
-import { messageUserState } from "../db/message-user-state.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { setUserState } from "../lib/messages/state";
 import { CORE_CAPABILITY, MAIL_CAPABILITY } from "../jmap/constants";

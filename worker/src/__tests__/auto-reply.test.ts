@@ -365,7 +365,7 @@ describe("manual reply threading", () => {
         bodyHtml: "<p>Manual reply</p>",
       },
       files: [],
-      allowed: { isAdmin: true, inboxes: [] },
+      allowed: { isAdmin: true },
       sender,
     });
 

@@ -219,7 +219,7 @@ export function createAgentTools({
         const allowed = await resolveAllowedInboxes(db, currentUser);
         return {
           user: currentUser,
-          inboxes: allowed.isAdmin ? "all" : allowed.inboxes,
+          inboxes: "inboxes" in allowed ? allowed.inboxes : "all",
         };
       },
     }),
@@ -538,7 +538,7 @@ export function createAgentTools({
               delayOverrides: {},
             },
           });
-          if (!result.ok) throw new Error(result.message);
+          if ("message" in result) throw new Error(result.message);
           return {
             success: true,
             enrollmentId: result.enrollment.id,

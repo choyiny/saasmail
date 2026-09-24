@@ -229,10 +229,10 @@ export async function executeJmapCalls(
 
     try {
       const result = await executor(db, allowed, user, name, args);
-      if (result.ok) {
-        methodResponses.push([result.name, result.result, callId]);
-      } else {
+      if ("error" in result) {
         methodResponses.push(["error", result.error, callId]);
+      } else {
+        methodResponses.push([result.name, result.result, callId]);
       }
     } catch {
       methodResponses.push(["error", { type: "serverFail" }, callId]);

@@ -79,7 +79,11 @@ describe("agent session runtime", () => {
       apiKey: alice.apiKey,
     });
     expect(aliceList.status).toBe(200);
-    const aliceSessions = (await aliceList.json()).sessions;
+    const aliceSessions = (
+      (await aliceList.json()) as {
+        sessions: Array<{ instanceName: string }>;
+      }
+    ).sessions;
     expect(aliceSessions).toHaveLength(1);
     expect(aliceSessions[0].instanceName).toBe(created.instanceName);
 
@@ -87,7 +91,13 @@ describe("agent session runtime", () => {
       apiKey: bob.apiKey,
     });
     expect(bobList.status).toBe(200);
-    expect((await bobList.json()).sessions).toEqual([]);
+    expect(
+      (
+        (await bobList.json()) as {
+          sessions: Array<{ instanceName: string }>;
+        }
+      ).sessions,
+    ).toEqual([]);
 
     const bobPatch = await authFetch(`/api/agent/sessions/${created.id}`, {
       method: "PATCH",
@@ -288,7 +298,7 @@ describe("agent session runtime", () => {
               userId: z.string().nullable(),
             }),
             needsApproval: true,
-            execute: async () => {
+            execute: async (): Promise<{ success: true }> => {
               throw new Error("approval request must not execute");
             },
           }),
@@ -1159,45 +1169,46 @@ describe("agent model loop", () => {
     const model = new MockLanguageModelV4({
       doStream: async () => {
         call++;
+        if (call === 1) {
+          return {
+            stream: convertArrayToReadableStream([
+              {
+                type: "tool-call" as const,
+                toolCallId: "read-1",
+                toolName: "read_message",
+                input: JSON.stringify({
+                  ref: "received:message-1",
+                }),
+              },
+              {
+                type: "finish" as const,
+                finishReason: {
+                  unified: "tool-calls" as const,
+                  raw: "tool-calls",
+                },
+                usage: MOCK_USAGE,
+              },
+            ]),
+          };
+        }
         return {
-          stream: convertArrayToReadableStream(
-            call === 1
-              ? [
-                  {
-                    type: "tool-call" as const,
-                    toolCallId: "read-1",
-                    toolName: "read_message",
-                    input: JSON.stringify({
-                      ref: "received:message-1",
-                    }),
-                  },
-                  {
-                    type: "finish" as const,
-                    finishReason: {
-                      unified: "tool-calls" as const,
-                      raw: "tool-calls",
-                    },
-                    usage: MOCK_USAGE,
-                  },
-                ]
-              : [
-                  { type: "text-start" as const, id: "text-1" },
-                  {
-                    type: "text-delta" as const,
-                    id: "text-1",
-                    delta: "The customer asked for an invoice copy.",
-                  },
-                  { type: "text-end" as const, id: "text-1" },
-                  {
-                    type: "finish" as const,
-                    finishReason: {
-                      unified: "stop" as const,
-                      raw: "stop",
-                    },
-                    usage: MOCK_USAGE,
-                  },
-                ],
-          ),
+          stream: convertArrayToReadableStream([
+            { type: "text-start" as const, id: "text-1" },
+            {
+              type: "text-delta" as const,
+              id: "text-1",
+              delta: "The customer asked for an invoice copy.",
+            },
+            { type: "text-end" as const, id: "text-1" },
+            {
+              type: "finish" as const,
+              finishReason: {
+                unified: "stop" as const,
+                raw: "stop",
+              },
+              usage: MOCK_USAGE,
+            },
+          ]),
         };
       },
     });
@@ -1236,43 +1247,44 @@ describe("agent model loop", () => {
     const model = new MockLanguageModelV4({
       doStream: async () => {
         call++;
+        if (call === 1) {
+          return {
+            stream: convertArrayToReadableStream([
+              {
+                type: "tool-call" as const,
+                toolCallId: "bad-1",
+                toolName: "send_email",
+                input: "{}",
+              },
+              {
+                type: "finish" as const,
+                finishReason: {
+                  unified: "tool-calls" as const,
+                  raw: "tool-calls",
+                },
+                usage: MOCK_USAGE,
+              },
+            ]),
+          };
+        }
         return {
-          stream: convertArrayToReadableStream(
-            call === 1
-              ? [
-                  {
-                    type: "tool-call" as const,
-                    toolCallId: "bad-1",
-                    toolName: "send_email",
-                    input: "{}",
-                  },
-                  {
-                    type: "finish" as const,
-                    finishReason: {
-                      unified: "tool-calls" as const,
-                      raw: "tool-calls",
-                    },
-                    usage: MOCK_USAGE,
-                  },
-                ]
-              : [
-                  { type: "text-start" as const, id: "text-2" },
-                  {
-                    type: "text-delta" as const,
-                    id: "text-2",
-                    delta: "I can save a draft, but I cannot send it.",
-                  },
-                  { type: "text-end" as const, id: "text-2" },
-                  {
-                    type: "finish" as const,
-                    finishReason: {
-                      unified: "stop" as const,
-                      raw: "stop",
-                    },
-                    usage: MOCK_USAGE,
-                  },
-                ],
-          ),
+          stream: convertArrayToReadableStream([
+            { type: "text-start" as const, id: "text-2" },
+            {
+              type: "text-delta" as const,
+              id: "text-2",
+              delta: "I can save a draft, but I cannot send it.",
+            },
+            { type: "text-end" as const, id: "text-2" },
+            {
+              type: "finish" as const,
+              finishReason: {
+                unified: "stop" as const,
+                raw: "stop",
+              },
+              usage: MOCK_USAGE,
+            },
+          ]),
         };
       },
     });

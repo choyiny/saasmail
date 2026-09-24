@@ -73,7 +73,7 @@ function isUniquePersonMembershipError(error: unknown): boolean {
   let current: unknown = error;
   for (let depth = 0; depth < 3 && current; depth += 1) {
     const message =
-      current instanceof Error ? current.message : String(current ?? "");
+      current instanceof Error ? current.message : String(current);
     if (
       /unique constraint failed:\s*customer_people\.person_id/i.test(message) ||
       /customer_people_person_id_unique/i.test(message)

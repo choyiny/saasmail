@@ -65,7 +65,7 @@ export async function listAllowedInboxAddresses(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
 ): Promise<string[]> {
-  if (!allowed.isAdmin) {
+  if ("inboxes" in allowed) {
     return [
       ...new Set(allowed.inboxes.map((email) => email.toLowerCase())),
     ].sort();

@@ -172,7 +172,7 @@ export async function runAutoReply(
       retryOnFailure: false,
       ...(input.sender ? { sender: input.sender } : {}),
     });
-    if (!result.ok) {
+    if ("message" in result) {
       console.warn(
         `[auto-reply] send skipped after log for rule ${input.ruleId}:`,
         result.message,

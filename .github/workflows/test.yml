@@ -20,5 +20,5 @@ jobs:
       - name: Create empty assets dir (referenced by wrangler.jsonc)
         run: mkdir -p dist/client
       - name: Type check
-        run: yarn tsc --noEmit
+        run: yarn typecheck
       - run: yarn test

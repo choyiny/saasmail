@@ -10,7 +10,7 @@ yarn dev
 yarn test
 
 # Type-check
-yarn tsc --noEmit
+yarn typecheck
 
 # Generate a migration after schema changes
 yarn db:generate
@@ -26,6 +26,26 @@ yarn db:studio:dev
 ```
 
 Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script populates `seeds/demo.sql` so you can exercise the inbox UI without real inbound email.
+
+## Type checking
+
+Use Node 22, matching CI and the repository's `.nvmrc`, then run:
+
+```bash
+yarn typecheck
+```
+
+The frontend check (`tsc -p tsconfig.app.json --noEmit`) is a zero-error gate. The worker still carries older TypeScript debt, so `scripts/check-worker-types.mjs` compares `tsc -p worker/tsconfig.json --noEmit --pretty false` against the committed per-file counts in `scripts/worker-tsc-baseline.json`. A file that exceeds its count, or a file absent from the baseline that gains an error, fails the check. Files that improve are printed but do not fail, so the baseline only moves downward during normal development.
+
+Only when intentionally accepting a new snapshot of existing worker debt, regenerate the file with:
+
+```bash
+yarn typecheck:update-baseline
+```
+
+Review that diff carefully; newly added worker files should be error-free rather than added to the baseline.
+
+Web tests use jsdom for `localStorage` and `sessionStorage`. Node 25 and newer also provide experimental built-in web storage, which can shadow jsdom's globals, so `vitest.config.web.ts` passes `--no-experimental-webstorage` to its test workers. Node 22 accepts the same negated flag, keeping local and CI behavior aligned.
 
 ## API explorer
 

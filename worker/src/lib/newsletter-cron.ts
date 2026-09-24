@@ -1,5 +1,4 @@
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { and, eq, lt, sql } from "drizzle-orm";
 import { campaigns } from "../db/campaigns.schema";
 import { beginCampaignSend } from "../routers/campaigns-router";
@@ -26,7 +25,7 @@ import { purgeExpiredAttempts } from "./subscribe-abuse";
 export async function runNewsletterMaintenance(
   env: CloudflareBindings,
 ): Promise<void> {
-  const db = drizzle(env.DB, { schema });
+  const db = createDb(env);
   const now = Math.floor(Date.now() / 1000);
 
   await purgeExpiredAttempts(db, now).catch((err) =>

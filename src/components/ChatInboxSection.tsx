@@ -8,7 +8,6 @@ import {
   UserPen,
   ArrowDown,
   Check,
-  CheckCheck,
 } from "lucide-react";
 import type { Email } from "@/lib/api";
 import { fetchDraft } from "@/lib/api";
@@ -300,12 +299,7 @@ function Bubble({
         className={`mt-1 flex items-center gap-2 text-[10px] text-text-tertiary ${isSent ? "flex-row-reverse" : ""}`}
       >
         <span>{stamp}</span>
-        {isSent &&
-          (email.deliveredAt ? (
-            <CheckCheck size={11} className="text-text-tertiary" />
-          ) : (
-            <Check size={11} className="text-text-tertiary" />
-          ))}
+        {isSent && <Check size={11} className="text-text-tertiary" />}
         {email.bodyHtml && (
           <button
             type="button"

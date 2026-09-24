@@ -102,6 +102,10 @@
     // public/saasmail-logo.png to rebrand the favicon and in-app logo.
     "COOKIE_PREFIX": "saasmail",
 
+    // Drizzle SQL logging is disabled by default. Enabling it logs bound
+    // parameters, which can include email addresses, subjects, and secrets.
+    "DB_LOG_QUERIES": "false",
+
     /* push notifications */
     // VAPID_PRIVATE_KEY is a secret — set it with `wrangler secret put VAPID_PRIVATE_KEY`.
     // VAPID_PUBLIC_KEY and VAPID_SUBJECT are public config (safe to commit here).

@@ -23,6 +23,7 @@ const getStatusRoute = createRoute({
   description:
     "Report whether the native mail agent is configured, without exposing provider credentials.",
   responses: {
+    500: { description: "Internal server error" },
     ...json200Response(AgentStatusSchema, "Agent configuration status"),
   },
 });

@@ -41,6 +41,7 @@ const listSessionsRoute = createRoute({
   security: bearerSecurity,
   description: "List the authenticated user's agent sessions.",
   responses: {
+    500: { description: "Internal server error" },
     ...json200Response(
       z.object({ sessions: z.array(AgentSessionSchema) }),
       "Agent sessions",
@@ -77,6 +78,7 @@ const createSessionRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     ...json201Response(AgentSessionSchema, "Created agent session"),
   },
 });
@@ -123,6 +125,7 @@ const patchSessionRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     ...json200Response(AgentSessionSchema, "Updated agent session"),
     404: {
       description: "Session not found",
@@ -176,6 +179,7 @@ const deleteSessionRoute = createRoute({
   description: "Delete one of the authenticated user's agent sessions.",
   request: { params: z.object({ id: z.string().min(1) }) },
   responses: {
+    500: { description: "Internal server error" },
     ...json200Response(z.object({ success: z.literal(true) }), "Deleted"),
     404: {
       description: "Session not found",

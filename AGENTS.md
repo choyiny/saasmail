@@ -22,7 +22,7 @@ there and link it from the index rather than growing `README.md`.
 - Use **yarn**, not npm (`yarn install --frozen-lockfile` in CI).
 - **Lockfile integrity:** after dependency changes, run `yarn install --update-checksums`; CI rejects any `yarn.lock` resolved entry without an integrity hash.
 - **Format:** `yarn format` before push. Husky runs `lint-staged` → Prettier on staged `*.{js,jsx,ts,tsx,json,css,md,html}` at commit; CI runs full-tree `yarn format:check` (so husky alone is not enough if you skip staging a dirty file).
-- **Typecheck:** `yarn tsc --noEmit`
+- **Typecheck:** `yarn typecheck` — the frontend must have zero TypeScript errors; the worker uses the committed per-file ratchet documented in [`docs/development.md`](./docs/development.md#type-checking).
 - **Unit tests:** `yarn test` (invokes `vitest run --config vitest.config.test.ts` — bare `vitest run` hits the wrong pool config and fails to start).
 - **E2E:** `yarn test:e2e` (Playwright; **wipes local D1** — re-seed with `yarn db:seed:dev` afterward). Needs `DEMO_MODE=1` + `DISABLE_PASSKEY_GATE=true` in `.dev.vars`, and `http://localhost:8788` in `TRUSTED_ORIGINS` in `wrangler.jsonc` (see `.dev.vars.example` / `wrangler.jsonc.example` and [`docs/development.md`](./docs/development.md#end-to-end-tests)).
 
@@ -33,7 +33,7 @@ Vitest uses `@cloudflare/vitest-pool-workers`, which requires a present `wrangle
 ```bash
 cp wrangler.jsonc.ci wrangler.jsonc
 mkdir -p dist/client
-yarn tsc --noEmit
+yarn typecheck
 yarn test
 ```
 
@@ -44,7 +44,7 @@ Prefer `wrangler.jsonc.ci` for unit tests (placeholders tuned for the pool). Use
 | Workflow / check name                               | Merge impact                                                                                                                                                                                                                                           |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Format → `prettier`                                 | Fails if `yarn format:check` fails                                                                                                                                                                                                                     |
-| Test → `vitest` (+ typecheck step in that workflow) | Fails on `yarn tsc --noEmit` or `yarn test`                                                                                                                                                                                                            |
+| Test → `vitest` (+ typecheck step in that workflow) | Fails on `yarn typecheck` (frontend zero-error gate + worker per-file ratchet) or `yarn test`                                                                                                                                                          |
 | e2e → `playwright`                                  | Fails on `yarn test:e2e`                                                                                                                                                                                                                               |
 | Check PR labels → job named `test`                  | Fails unless the PR has **at least one** of `major` / `minor` / `patch`; also fails if `hold` is present (`disable-reviews: true`, so this is a failing check — not a review). Note the job is named `test`, distinct from the Test/`vitest` workflow. |
 | CodeQL → `Analyze (javascript-typescript)`          | Runs on PRs to `main`; findings are uploaded via codeql-action (do not treat SARIF alerts as an automatic red X unless the Analyze job itself fails)                                                                                                   |
@@ -57,7 +57,7 @@ Semver labels drive [release-drafter](./.github/release-drafter.yml). Dependabot
 From [`CONTRIBUTING.md`](./CONTRIBUTING.md) + the PR template:
 
 1. Focused change; branch off `main`.
-2. `yarn format` / `yarn tsc --noEmit` / `yarn test` (and `yarn test:e2e` if UI or HTTP surface changed).
+2. `yarn format` / `yarn typecheck` / `yarn test` (and `yarn test:e2e` if UI or HTTP surface changed).
 3. User-visible change → entry under `## [Unreleased]` in `CHANGELOG.md`.
 4. Schema or data migration → see below; include the generated files.
 5. Behavior/setup change → update the relevant page under [`docs/`](./docs/README.md) (and `README.md` if the overview or feature index changes).

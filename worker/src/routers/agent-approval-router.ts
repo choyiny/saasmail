@@ -83,6 +83,7 @@ const summaryRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Approval summary",
       content: {

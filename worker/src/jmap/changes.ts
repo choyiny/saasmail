@@ -54,7 +54,7 @@ function maxChanges(value: unknown): number | JmapMethodError {
 }
 
 function allowedChunks(allowed: AllowedInboxes): AllowedInboxes[] {
-  if (allowed.isAdmin) return [allowed];
+  if (!("inboxes" in allowed)) return [allowed];
   if (allowed.inboxes.length === 0) return [allowed];
 
   const inboxes = [

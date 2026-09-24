@@ -1,6 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { users } from "../db/auth.schema";
 import { sessions } from "../db/auth.schema";
 import { people } from "../db/people.schema";
@@ -23,7 +22,7 @@ import {
 import { hashKey } from "../lib/crypto";
 
 export function getDb() {
-  return drizzle(env.DB, { schema });
+  return createDb(env);
 }
 
 /**

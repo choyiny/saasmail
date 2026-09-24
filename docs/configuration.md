@@ -17,6 +17,10 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
 - `vars.BASE_URL` — Your deployed URL (used for OAuth redirects and BetterAuth)
 - `vars.TRUSTED_ORIGINS` — CORS allowed origins
 - `vars.COOKIE_PREFIX` — Prefix for better-auth session cookies
+- `vars.DB_LOG_QUERIES` — Optional Drizzle query logging toggle. It is off by
+  default; set it to exactly `"true"` only while debugging. **Warning:** query
+  logging includes bound SQL parameters, so Workers logs may contain email
+  addresses, subjects, token hashes, or other sensitive values.
 - `vars.VAPID_PUBLIC_KEY` / `vars.VAPID_SUBJECT` — public VAPID config for
   browser push notifications. Generate with `yarn vapid:generate` and store
   the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank

@@ -112,7 +112,7 @@ const JMAP_STATE_INBOX_CHUNK_SIZE = 40;
 const JMAP_STATE_DAY_SECONDS = 24 * 60 * 60;
 
 function memberInboxChunks(allowed: AllowedInboxes): string[][] {
-  if (allowed.isAdmin) return [];
+  if (!("inboxes" in allowed)) return [];
   const inboxes = [
     ...new Set(allowed.inboxes.map((inbox) => inbox.toLowerCase())),
   ].sort();

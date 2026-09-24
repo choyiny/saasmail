@@ -1,12 +1,11 @@
 import { nanoid } from "nanoid";
 import { and, eq, lte, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { drizzle } from "drizzle-orm/d1";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { attachments } from "../db/attachments.schema";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import type { EmailSender, SendEmailAttachment } from "./email-sender";
 import { createEmailSender } from "./email-sender";
 import {
@@ -234,7 +233,7 @@ export async function sendViaOutbox(
  */
 export async function processOutbox(env: CloudflareBindings): Promise<void> {
   if (isDemoMode(env)) return;
-  const db = drizzle(env.DB, { schema }) as unknown as Db;
+  const db = createDb(env) as unknown as Db;
   const sender = createEmailSender(env);
   const now = Math.floor(Date.now() / 1000);
 

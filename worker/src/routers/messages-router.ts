@@ -105,6 +105,7 @@ const assigneesRoute = createRoute({
     query: z.object({ inbox: z.string().min(1) }),
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Users who can be assigned conversations in an inbox",
       content: {
@@ -178,6 +179,7 @@ const listMessagesRoute = createRoute({
     }),
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Message page",
       content: {
@@ -272,6 +274,7 @@ const userStateRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "State updated",
       content: {
@@ -319,6 +322,7 @@ const mailboxStateRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "State updated",
       content: {
@@ -370,6 +374,7 @@ const snoozeRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Conversation snooze state updated",
       content: {
@@ -419,6 +424,7 @@ const assignRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Conversation assignment updated",
       content: {
@@ -468,6 +474,7 @@ const mailboxMembershipRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Membership updated",
       content: {

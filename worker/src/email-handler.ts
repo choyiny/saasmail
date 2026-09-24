@@ -1,7 +1,6 @@
-import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { schema } from "./db/schema";
+import { createDb } from "./db/client";
 import { people } from "./db/people.schema";
 import { emails } from "./db/emails.schema";
 import { attachments } from "./db/attachments.schema";
@@ -50,7 +49,7 @@ export async function handleEmail(
   env: CloudflareBindings,
   ctx: ExecutionContext,
 ): Promise<void> {
-  const db = drizzle(env.DB, { schema, logger: true });
+  const db = createDb(env);
   const parsed = await parseEmail(message);
   const now = Math.floor(Date.now() / 1000);
 

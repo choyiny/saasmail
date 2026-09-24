@@ -39,6 +39,7 @@ const getRoute = createRoute({
     query: z.object({ emailId: z.string().min(1) }),
   },
   responses: {
+    500: { description: "Internal server error" },
     ...json200Response(
       z.object({ suggestion: SuggestedReplySchema.nullable() }),
       "Pending suggested reply, or null",
@@ -90,6 +91,7 @@ async function loadAllowedSuggestion(
 }
 
 const transitionResponses = {
+  500: { description: "Internal server error" },
   ...json200Response(SuggestedReplySchema, "Updated suggested reply"),
   404: notFound,
   409: {

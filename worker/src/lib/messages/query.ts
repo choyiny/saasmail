@@ -973,7 +973,7 @@ export function buildMessageQuerySql(
   allowed: AllowedInboxes,
   query: MessageQuery = {},
 ): BuiltMessageQuery | null {
-  if (!allowed.isAdmin && allowed.inboxes.length === 0) {
+  if ("inboxes" in allowed && allowed.inboxes.length === 0) {
     return null;
   }
 

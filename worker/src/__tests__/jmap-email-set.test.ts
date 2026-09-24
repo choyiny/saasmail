@@ -7,7 +7,6 @@ import {
   it,
   vi,
 } from "vitest";
-import { eq } from "drizzle-orm";
 import {
   applyMigrations,
   authFetch,
@@ -396,8 +395,13 @@ describe("JMAP Email/set", () => {
         "m",
       ],
     ]);
-    const byId = new Map(
-      result.methodResponses[0][1].list.map((row: any) => [row.id, row]),
+    type MailboxResult = {
+      id: string;
+      myRights: Record<string, boolean>;
+    };
+    const mailboxList = result.methodResponses[0][1].list as MailboxResult[];
+    const byId = new Map<string, MailboxResult>(
+      mailboxList.map((row) => [row.id, row]),
     );
     expect(byId.get(`sys:${MINE}:inbox`).myRights).toMatchObject({
       mayReadItems: true,

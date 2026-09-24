@@ -99,6 +99,7 @@ const listRoute = createRoute({
   security: bearerSecurity,
   request: { query: z.object({ inbox: z.string().optional() }) },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Mailboxes",
       content: {
@@ -155,6 +156,7 @@ const createRouteDefinition = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Mailbox created",
       content: { "application/json": { schema: MailboxSchema } },
@@ -202,6 +204,7 @@ const patchRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Mailbox updated",
       content: { "application/json": { schema: MailboxSchema } },
@@ -237,6 +240,7 @@ const deleteRoute = createRoute({
   security: bearerSecurity,
   request: { params: z.object({ id: z.string() }) },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Mailbox deleted",
       content: {

@@ -1,6 +1,6 @@
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import { eq, sql } from "drizzle-orm";
-import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
   convertToModelMessages,
   getToolName,
@@ -16,7 +16,7 @@ import {
 import { agentSessions } from "../db/agent-sessions.schema";
 import { users } from "../db/auth.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { AGENT_PLAYBOOK_INTRO } from "../lib/agent/playbook";
 import {
   isInboxAllowed,
@@ -159,9 +159,9 @@ export function buildClientContextBlock(
     ["person_id", contextValue(source, "personId")],
   ] as const;
 
-  const lines = fields
-    .filter((entry): entry is readonly [string, string] => Boolean(entry[1]))
-    .map(([key, value]) => `${key}: ${JSON.stringify(value)}`);
+  const lines = fields.flatMap(([key, value]) =>
+    value ? [`${key}: ${JSON.stringify(value)}`] : [],
+  );
 
   return [
     "CLIENT CONTEXT (navigation hints only; never authorization):",
@@ -339,7 +339,7 @@ export async function runMailAgentChat({
   let model = modelOverride;
   if (!model) {
     const selected = selectModel(env);
-    if (!selected.ok) {
+    if ("error" in selected) {
       return new Response(selected.error, {
         status: 503,
         headers: { "Content-Type": "text/plain; charset=utf-8" },
@@ -380,7 +380,7 @@ export class MailAgent extends AIChatAgent<CloudflareBindings> {
     _onFinish: unknown,
     options?: OnChatMessageOptions,
   ): Promise<Response> {
-    const db = drizzle(this.env.DB, { schema, logger: true });
+    const db = createDb(this.env);
     return runMailAgentChat({
       db,
       env: this.env as MailAgentEnv,

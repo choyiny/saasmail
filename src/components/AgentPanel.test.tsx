@@ -9,6 +9,7 @@ import {
   type AgentNavigationContext,
 } from "@/agent/AgentContext";
 import * as api from "@/lib/api";
+import type { ComposePrefill } from "@/pages/ComposeModal";
 
 const sdk = vi.hoisted(() => ({
   useAgent: vi.fn(),
@@ -61,7 +62,7 @@ function SeedContext({ value }: { value: AgentNavigationContext }) {
 
 function renderPanel(options?: {
   context?: AgentNavigationContext;
-  onOpenCompose?: ReturnType<typeof vi.fn>;
+  onOpenCompose?: (prefill?: ComposePrefill, contextKey?: string) => void;
 }) {
   const onOpenCompose = options?.onOpenCompose ?? vi.fn();
   const router = createMemoryRouter(

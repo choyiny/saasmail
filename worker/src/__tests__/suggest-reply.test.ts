@@ -17,9 +17,17 @@ import {
 } from "./helpers";
 
 const USAGE = {
-  inputTokens: 10,
-  outputTokens: 5,
-  totalTokens: 15,
+  inputTokens: {
+    total: 10,
+    noCache: 10,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+  },
+  outputTokens: {
+    total: 5,
+    text: 5,
+    reasoning: undefined,
+  },
 };
 
 beforeAll(applyMigrations);
@@ -54,7 +62,7 @@ function textModel(outputs: string[]) {
   return new MockLanguageModelV4({
     doGenerate: async () => ({
       content: [{ type: "text" as const, text: outputs[call++] ?? "" }],
-      finishReason: "stop" as const,
+      finishReason: { unified: "stop" as const, raw: "stop" },
       usage: USAGE,
       warnings: [],
     }),
@@ -101,7 +109,7 @@ describe("suggested reply consumer", () => {
                   { type: "text" as const, text: "**SAFE.**" },
                 ]
               : [{ type: "text" as const, text: "A safe draft." }],
-          finishReason: "stop" as const,
+          finishReason: { unified: "stop" as const, raw: "stop" },
           usage: USAGE,
           warnings: [],
         };
@@ -151,7 +159,7 @@ describe("suggested reply consumer", () => {
             text: "A hidden verdict must never be used.",
           },
         ],
-        finishReason: "length" as const,
+        finishReason: { unified: "length" as const, raw: "length" },
         usage: USAGE,
         warnings: [],
       }),
@@ -242,7 +250,7 @@ describe("suggested reply consumer", () => {
         if (call === 1) {
           return {
             content: [{ type: "text" as const, text: "SAFE" }],
-            finishReason: "stop" as const,
+            finishReason: { unified: "stop" as const, raw: "stop" },
             usage: USAGE,
             warnings: [],
           };

@@ -28,7 +28,9 @@
     "db:reset:e2e": "node e2e/scripts/wipe-db.mjs",
     "test:e2e": "node e2e/scripts/wipe-db.mjs && playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "PWDEBUG=1 playwright test"
+    "test:e2e:debug": "PWDEBUG=1 playwright test",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && node scripts/check-worker-types.mjs",
+    "typecheck:update-baseline": "node scripts/check-worker-types.mjs --update"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,css,md,html}": "prettier --write"

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrading to the mailbox/agent/JMAP release
+
+- Apply D1 migrations `0037` through `0052` with `yarn db:migrate:prod`.
+- Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
+- Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
+
 ### Changed
 
 - **Reply threading.** Manual replies now include a `References` header equal to `In-Reply-To` when the original Message-ID is available, improving standards-based thread reconstruction.
@@ -73,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **First-admin onboarding sign-in:** setup now uses Better Auth's email sign-in method after creating the first administrator, so successful setup signs the new admin in automatically instead of falling through to the login page because the old client method mapped to a nonexistent endpoint.
 - **Automation reference safety:** deleted folders and unavailable assignees are surfaced as rule warnings; missing-folder actions log and skip without blocking later actions, and folder deletion warns how many automation rules will become dangling.
 - **Automated inbound guards:** suggested replies and rule auto-replies now reject bounce/report signals, auto-response headers, and common no-reply sender local-parts in addition to the existing list/bulk headers.
 - **Auto-reply deduplication:** migration `0052` keeps the latest legacy rate-limit row per rule/sender, enforces uniqueness, and the 24-hour claim now atomically updates that single row.

@@ -1,5 +1,4 @@
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { createEmailSender } from "./email-sender";
 import { isDemoMode } from "./is-dev";
 import {
@@ -104,7 +103,7 @@ export async function handleQueueBatch(
     return;
   }
 
-  const db = drizzle(env.DB, { schema });
+  const db = createDb(env);
   const sender = createEmailSender(env);
 
   for (const msg of batch.messages) {

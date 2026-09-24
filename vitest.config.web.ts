@@ -5,6 +5,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
+    execArgv: ["--no-experimental-webstorage"],
     include: ["src/**/*.test.{ts,tsx}"],
   },
   resolve: {

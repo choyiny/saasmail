@@ -44,6 +44,16 @@ async function seedSuggestion(options?: {
   return { id, emailId };
 }
 
+type SuggestionResponse = {
+  suggestion: { id: string; emailId: string } | null;
+};
+
+type SuggestionStatusResponse = { status: string };
+
+async function jsonBody<T>(response: Response): Promise<T> {
+  return response.json() as Promise<T>;
+}
+
 describe("suggested replies routes", () => {
   it("returns a pending suggestion for an allowed inbox and null after use", async () => {
     const admin = await createTestUser({
@@ -58,27 +68,32 @@ describe("suggested replies routes", () => {
       { apiKey: admin.apiKey },
     );
     expect(res.status).toBe(200);
-    expect((await res.json()).suggestion).toMatchObject({ id, emailId });
+    expect((await jsonBody<SuggestionResponse>(res)).suggestion).toMatchObject({
+      id,
+      emailId,
+    });
 
     res = await authFetch(`/api/suggested-replies/${id}/use`, {
       apiKey: admin.apiKey,
       method: "POST",
     });
     expect(res.status).toBe(200);
-    expect((await res.json()).status).toBe("used");
+    expect((await jsonBody<SuggestionStatusResponse>(res)).status).toBe("used");
 
     const again = await authFetch(`/api/suggested-replies/${id}/use`, {
       apiKey: admin.apiKey,
       method: "POST",
     });
     expect(again.status).toBe(200);
-    expect((await again.json()).status).toBe("used");
+    expect((await jsonBody<SuggestionStatusResponse>(again)).status).toBe(
+      "used",
+    );
 
     res = await authFetch(
       `/api/suggested-replies?emailId=${encodeURIComponent(emailId)}`,
       { apiKey: admin.apiKey },
     );
-    expect((await res.json()).suggestion).toBeNull();
+    expect((await jsonBody<SuggestionResponse>(res)).suggestion).toBeNull();
   });
 
   it("returns 404 when the caller cannot see the inbox", async () => {
@@ -133,14 +148,18 @@ describe("suggested replies routes", () => {
       method: "POST",
     });
     expect(first.status).toBe(200);
-    expect((await first.json()).status).toBe("dismissed");
+    expect((await jsonBody<SuggestionStatusResponse>(first)).status).toBe(
+      "dismissed",
+    );
 
     const again = await authFetch(`/api/suggested-replies/${id}/dismiss`, {
       apiKey: member.apiKey,
       method: "POST",
     });
     expect(again.status).toBe(200);
-    expect((await again.json()).status).toBe("dismissed");
+    expect((await jsonBody<SuggestionStatusResponse>(again)).status).toBe(
+      "dismissed",
+    );
 
     const use = await authFetch(`/api/suggested-replies/${id}/use`, {
       apiKey: member.apiKey,

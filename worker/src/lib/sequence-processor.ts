@@ -1,9 +1,8 @@
-import { drizzle } from "drizzle-orm/d1";
 import { eq, and, lte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createEmailSender, type EmailSender } from "./email-sender";
 import { isDemoMode } from "./is-dev";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { emailTemplates } from "../db/email-templates.schema";
@@ -34,7 +33,7 @@ export async function handleScheduled(env: CloudflareBindings): Promise<void> {
     console.log("[demo] Skipping scheduled sequence dispatch");
     return;
   }
-  const db = drizzle(env.DB, { schema });
+  const db = createDb(env);
   const now = Math.floor(Date.now() / 1000);
 
   // Find pending emails that are due

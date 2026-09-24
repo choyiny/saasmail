@@ -430,7 +430,7 @@ export async function listMailboxes(
     return db.select().from(mailboxes).where(eq(mailboxes.inbox, requested));
   }
 
-  if (allowed.isAdmin) return db.select().from(mailboxes);
+  if (!("inboxes" in allowed)) return db.select().from(mailboxes);
   if (allowed.inboxes.length === 0) return [];
 
   const rows: (typeof mailboxes.$inferSelect)[] = [];

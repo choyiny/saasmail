@@ -139,6 +139,7 @@ describe("MailReadingPane suggested reply", () => {
         onToggleSpam={() => {}}
         onToggleTrash={() => {}}
         onSnooze={() => {}}
+        onAssign={() => {}}
         onMoveToMailbox={() => {}}
         onRemoveFromCurrentMailbox={() => {}}
         onOpenCustomer={() => {}}

@@ -1,6 +1,5 @@
-import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { pushSubscriptions } from "../db/push-subscriptions.schema";
 import { sendPush, type PushPayload, type VapidConfig } from "../lib/web-push";
 
@@ -135,7 +134,7 @@ export class NotificationsHub implements DurableObject {
       );
     }
 
-    const db = drizzle(this.env.DB, { schema });
+    const db = createDb(this.env);
     const subs = await db
       .select()
       .from(pushSubscriptions)

@@ -196,6 +196,7 @@ const listRoute = createRoute({
   path: "/",
   tags: ["Admin", "Rules"],
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Automation rules",
       content: { "application/json": { schema: z.array(RuleSchema) } },
@@ -222,6 +223,7 @@ const getRuleRoute = createRoute({
   tags: ["Admin", "Rules"],
   request: { params: z.object({ id: z.string().min(1) }) },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Automation rule",
       content: { "application/json": { schema: RuleSchema } },
@@ -252,6 +254,7 @@ const createRuleRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     201: {
       description: "Rule created",
       content: { "application/json": { schema: RuleSchema } },
@@ -313,6 +316,7 @@ const updateRuleRoute = createRoute({
     },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Rule updated",
       content: { "application/json": { schema: RuleSchema } },
@@ -384,6 +388,7 @@ const deleteRuleRoute = createRoute({
   tags: ["Admin", "Rules"],
   request: { params: z.object({ id: z.string().min(1) }) },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Rule deleted",
       content: {
@@ -422,6 +427,7 @@ const reorderRoute = createRoute({
     body: { content: { "application/json": { schema: ReorderSchema } } },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Rules reordered",
       content: {
@@ -484,6 +490,7 @@ const testRuleRoute = createRoute({
     body: { content: { "application/json": { schema: TestRuleSchema } } },
   },
   responses: {
+    500: { description: "Internal server error" },
     200: {
       description: "Dry-run condition results",
       content: {
