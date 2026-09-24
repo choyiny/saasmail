@@ -334,4 +334,26 @@ describe("DELETE /api/admin/gmail/{id}", () => {
     expect(res.status).toBe(200);
     expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
   });
+
+  it("answers 404 for an id that is not connected, and deletes nothing", async () => {
+    // `success: true` for a mailbox that was never here tells an operator
+    // theirs is gone while the one they meant is still connected and syncing.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed",
+      historyId: "1",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail/acct-nope", {
+      method: "DELETE",
+      apiKey,
+    });
+    expect(res.status).toBe(404);
+    expect(await getDb().select().from(gmailAccounts)).toHaveLength(1);
+  });
 });

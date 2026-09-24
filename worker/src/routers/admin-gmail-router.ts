@@ -239,11 +239,31 @@ const disconnectRoute = createRoute({
   request: { params: z.object({ id: z.string() }) },
   responses: {
     ...json200Response(z.object({ success: z.boolean() }), "Disconnected"),
+    404: {
+      description: "No such connected mailbox",
+      content: {
+        "application/json": { schema: z.object({ error: z.string() }) },
+      },
+    },
   },
 });
 
 adminGmailRouter.openapi(disconnectRoute, async (c) => {
   const { id } = c.req.valid("param");
-  await c.get("db").delete(gmailAccounts).where(eq(gmailAccounts.id, id));
+  const db = c.get("db");
+
+  // Say so when there is nothing to disconnect. Answering `success: true` for
+  // an id that was never here tells an operator their mailbox is gone when
+  // the one they meant is still connected and still syncing.
+  const [account] = await db
+    .select({ id: gmailAccounts.id })
+    .from(gmailAccounts)
+    .where(eq(gmailAccounts.id, id))
+    .limit(1);
+  if (!account) {
+    return c.json({ error: "That Google mailbox is not connected." }, 404);
+  }
+
+  await db.delete(gmailAccounts).where(eq(gmailAccounts.id, id));
   return c.json({ success: true });
 });
