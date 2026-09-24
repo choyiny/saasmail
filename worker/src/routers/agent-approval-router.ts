@@ -1,6 +1,7 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { users } from "../db/auth.schema";
+import { customerPeople } from "../db/customers.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
@@ -305,9 +306,32 @@ agentApprovalRouter.openapi(summaryRoute, async (c) => {
     getPersonScoped(db, otherPersonId, allowed),
   ]);
   if (!person || !other) return c.json(notFound(), 404);
+  if (personId === otherPersonId) {
+    return c.json({ summary: "Cannot link a person to themselves" }, 200);
+  }
+
+  const memberships = await db
+    .select({
+      personId: customerPeople.personId,
+      customerId: customerPeople.customerId,
+    })
+    .from(customerPeople)
+    .where(inArray(customerPeople.personId, [personId, otherPersonId]));
+  const byPerson = new Map(
+    memberships.map((row) => [row.personId, row.customerId]),
+  );
+  const personCustomer = byPerson.get(personId);
+  const otherCustomer = byPerson.get(otherPersonId);
+  const merge =
+    personCustomer !== undefined &&
+    otherCustomer !== undefined &&
+    personCustomer !== otherCustomer;
+
   return c.json(
     {
-      summary: `Link ${person.email} and ${other.email} as one customer`,
+      summary: merge
+        ? `Merge two existing customers (admin only): ${person.email} and ${other.email}`
+        : `Link ${person.email} and ${other.email} as one customer`,
     },
     200,
   );

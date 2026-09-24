@@ -160,6 +160,7 @@ export default function PersonDetail({
   const [linkQuery, setLinkQuery] = useState("");
   const [linkResults, setLinkResults] = useState<Person[]>([]);
   const [linking, setLinking] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   async function handleBlock(type: "email" | "domain") {
     const email = person.email.toLowerCase();
@@ -212,6 +213,7 @@ export default function PersonDetail({
     setActiveInbox(null);
     setLinkOpen(false);
     setLinkQuery("");
+    setLinkError(null);
 
     void (async () => {
       try {
@@ -278,6 +280,7 @@ export default function PersonDetail({
 
   async function handleLink(otherPersonId: string) {
     setLinking(true);
+    setLinkError(null);
     try {
       const next = await linkCustomerPeople(person.id, otherPersonId);
       setCustomer(next);
@@ -285,6 +288,10 @@ export default function PersonDetail({
       setLinkOpen(false);
       setLinkQuery("");
       await refetchEmails(true);
+    } catch (error) {
+      setLinkError(
+        error instanceof Error ? error.message : "Couldn't link addresses",
+      );
     } finally {
       setLinking(false);
     }
@@ -665,10 +672,21 @@ export default function PersonDetail({
               autoFocus
               aria-label="Search people to link"
               value={linkQuery}
-              onChange={(event) => setLinkQuery(event.target.value)}
+              onChange={(event) => {
+                setLinkQuery(event.target.value);
+                setLinkError(null);
+              }}
               placeholder="Search people by name or email"
               className="w-full rounded-[6px] border border-border bg-card px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-text-tertiary"
             />
+            {linkError && (
+              <p
+                data-testid="link-address-error"
+                className="mt-1 px-2 py-1 text-[11px] text-rose-600"
+              >
+                {linkError}
+              </p>
+            )}
             <div className="mt-1 max-h-36 overflow-y-auto">
               {linkResults.map((candidate) => (
                 <button

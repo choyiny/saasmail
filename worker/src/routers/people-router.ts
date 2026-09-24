@@ -15,7 +15,10 @@ import {
 import type { Variables } from "../variables";
 import { isInboxAllowed } from "../lib/inbox-permissions";
 import { deleteMessageState } from "../lib/messages/state";
-import { deletePersonConversationState } from "../lib/messages/conversation-state";
+import {
+  collectPersonGroupConversations,
+  deletePersonConversationState,
+} from "../lib/messages/conversation-state";
 import { cleanupCustomerForPersonDeletion } from "../lib/customers";
 
 export const peopleRouter = new OpenAPIHono<{
@@ -740,6 +743,8 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
     return c.json({ error: "Person not found" }, 404);
   }
 
+  const groupConversations = await collectPersonGroupConversations(db, id);
+
   const received = await db
     .select({ id: emails.id })
     .from(emails)
@@ -782,7 +787,7 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
   await db.delete(emails).where(eq(emails.personId, id));
   await db.delete(sentEmails).where(eq(sentEmails.personId, id));
   await cleanupCustomerForPersonDeletion(db, id);
-  await deletePersonConversationState(db, id);
+  await deletePersonConversationState(db, id, groupConversations);
   await db.delete(people).where(eq(people.id, id));
 
   return c.json({ success: true }, 200);

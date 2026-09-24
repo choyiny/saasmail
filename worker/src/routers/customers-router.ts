@@ -2,6 +2,8 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { customerPeople, customers } from "../db/customers.schema";
 import {
+  CustomerMergeRequiresAdminError,
+  CustomerSelfLinkError,
   getCustomerByPerson,
   linkPeople,
   unlinkPerson,
@@ -75,6 +77,8 @@ const linkRoute = createRoute({
   },
   responses: {
     ...json200Response(CustomerSchema, "Linked customer"),
+    400: { description: "Cannot link a person to themselves" },
+    403: { description: "Merging two customers requires an admin" },
     404: { description: "Person not found" },
   },
 });
@@ -99,6 +103,12 @@ customersRouter.openapi(linkRoute, async (c) => {
   } catch (error: any) {
     if (error?.status === 404)
       return c.json({ error: "Person not found" }, 404);
+    if (error instanceof CustomerSelfLinkError) {
+      return c.json({ error: error.message }, 400);
+    }
+    if (error instanceof CustomerMergeRequiresAdminError) {
+      return c.json({ error: error.message, code: error.code }, 403);
+    }
     throw error;
   }
 });

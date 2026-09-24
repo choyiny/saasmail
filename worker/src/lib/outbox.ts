@@ -94,7 +94,7 @@ export async function sendViaOutbox(
     sentEmailId,
     sequenceEmailId,
     campaignRecipientId,
-    fromAddress,
+    fromAddress: rawFromAddress,
     from,
     to,
     cc,
@@ -107,6 +107,9 @@ export async function sendViaOutbox(
     retryOnFailure,
     unsubscribeContext,
   } = params;
+  // Defense in depth: every retry is scoped by the persisted bare inbox
+  // address, so never trust a caller to have canonicalized it already.
+  const fromAddress = rawFromAddress.trim().toLowerCase();
   const now = Math.floor(Date.now() / 1000);
   const outboxId = nanoid();
 

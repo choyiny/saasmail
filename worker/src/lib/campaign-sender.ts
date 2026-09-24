@@ -125,7 +125,7 @@ export async function snapshotCampaign(
       subjectSnapshot: subject,
       htmlSnapshot: html,
       textSnapshot: text,
-      fromAddressSnapshot: campaign.fromAddress,
+      fromAddressSnapshot: campaign.fromAddress.trim().toLowerCase(),
       templateRevision: `${campaign.id}@${campaign.updatedAt}`,
       updatedAt: now,
     })
@@ -430,7 +430,9 @@ export async function sendCampaignRecipient(
     },
   );
 
-  const fromAddress = campaign.fromAddressSnapshot ?? campaign.fromAddress;
+  const fromAddress = (campaign.fromAddressSnapshot ?? campaign.fromAddress)
+    .trim()
+    .toLowerCase();
   const messageId = generateMessageId(fromAddress);
 
   const result = await sendViaOutbox({
@@ -545,7 +547,9 @@ export async function completeCampaignBookkeeping(
     .values({
       id: sentEmailId,
       personId,
-      fromAddress: campaign.fromAddressSnapshot ?? campaign.fromAddress,
+      fromAddress: (campaign.fromAddressSnapshot ?? campaign.fromAddress)
+        .trim()
+        .toLowerCase(),
       toAddress: recipient.email,
       subject: opts.subject,
       bodyHtml: opts.html,

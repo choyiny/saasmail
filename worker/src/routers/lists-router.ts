@@ -280,7 +280,7 @@ listsRouter.openapi(createListRoute, async (c) => {
   const db = c.get("db");
   const allowed = c.get("allowedInboxes")!;
   const body = c.req.valid("json");
-  const fromAddress = body.fromAddress.toLowerCase();
+  const fromAddress = body.fromAddress.trim().toLowerCase();
 
   assertInboxAllowed(allowed, fromAddress);
 

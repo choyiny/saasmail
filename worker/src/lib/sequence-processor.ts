@@ -121,7 +121,10 @@ export async function processSequenceEmail(
   if (enrollmentRows.length === 0) return;
   const enrollment = enrollmentRows[0];
 
-  const fromAddress = enrollment.fromAddress;
+  // Enrollment rows created before canonicalization may still carry casing.
+  // Normalize on read so every downstream outbox/sent write is scoped to the
+  // same canonical inbox key even before migration 0051 has run.
+  const fromAddress = enrollment.fromAddress.trim().toLowerCase();
 
   if (enrollment.status !== "active") {
     // Enrollment was cancelled while queued — mark email as cancelled
@@ -151,7 +154,7 @@ export async function processSequenceEmail(
       .values({
         id: outboxRow.sentEmailId,
         personId: enrollment.personId,
-        fromAddress: outboxRow.fromAddress,
+        fromAddress,
         toAddress: outboxRow.toAddress,
         subject: outboxRow.subject,
         bodyHtml: outboxRow.bodyHtml ?? null,

@@ -131,7 +131,16 @@ export async function sendConfirmationEmail(opts: {
   confirmUrl: string;
   templateSlug: string | null;
 }): Promise<{ sent: boolean }> {
-  const { db, env, to, fromAddress, listName, confirmUrl, templateSlug } = opts;
+  const {
+    db,
+    env,
+    to,
+    fromAddress: rawFromAddress,
+    listName,
+    confirmUrl,
+    templateSlug,
+  } = opts;
+  const fromAddress = rawFromAddress.trim().toLowerCase();
 
   const { subject: renderedSubject, html: renderedHtml } =
     await buildConfirmationContent(db, { listName, confirmUrl, templateSlug });

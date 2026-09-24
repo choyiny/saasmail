@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
+import { customerPeople, customers } from "../db/customers.schema";
 import { sequences } from "../db/sequences.schema";
 import { suppressions } from "../db/suppressions.schema";
 import { createAgentTools } from "../lib/agent/tools";
@@ -251,5 +252,88 @@ describe("agent approval summaries", () => {
       }),
     });
     expect(revoked.status).toBe(404);
+  });
+
+  it("labels an existing-customer merge as admin-only in the approval summary", async () => {
+    const member = await createTestUser({
+      id: "approval-merge-member",
+      role: "member",
+      email: "approval-merge-member@example.com",
+    });
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(inboxPermissions).values({
+      userId: member.userId,
+      email: "allowed@example.com",
+      createdAt: now,
+      createdBy: null,
+    });
+
+    for (const id of ["approval-a", "approval-b", "approval-c", "approval-d"]) {
+      await createTestPerson({ id, email: `${id}@example.com` });
+      await createTestEmail({
+        id: `${id}-mail`,
+        personId: id,
+        recipient: "allowed@example.com",
+        messageId: `${id}@example.test`,
+      });
+    }
+    await db.insert(customers).values([
+      {
+        id: "approval-customer-1",
+        displayName: null,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "approval-customer-2",
+        displayName: null,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    await db.insert(customerPeople).values([
+      {
+        customerId: "approval-customer-1",
+        personId: "approval-a",
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "approval-customer-1",
+        personId: "approval-b",
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "approval-customer-2",
+        personId: "approval-c",
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "approval-customer-2",
+        personId: "approval-d",
+        linkedBy: null,
+        linkedAt: now,
+      },
+    ]);
+
+    const response = await authFetch("/api/agent/approval-summary", {
+      apiKey: member.apiKey,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        toolName: "link_customer",
+        input: { personId: "approval-a", otherPersonId: "approval-c" },
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      summary:
+        "Merge two existing customers (admin only): approval-a@example.com and approval-c@example.com",
+    });
   });
 });

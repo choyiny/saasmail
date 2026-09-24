@@ -212,4 +212,124 @@ describe("identity graph", () => {
     );
     expect(customer?.people.map((person) => person.id)).toEqual(["view-a"]);
   });
+
+  it("requires admin to merge two existing customers without moving rows on denial", async () => {
+    const member = await createTestUser({
+      id: "identity-merge-member",
+      role: "member",
+      email: "identity-merge-member@example.com",
+    });
+    const admin = await createTestUser({
+      id: "identity-merge-admin",
+      role: "admin",
+      email: "identity-merge-admin@example.com",
+    });
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(inboxPermissions).values({
+      userId: member.userId,
+      email: "allowed@example.com",
+      createdAt: now,
+      createdBy: null,
+    });
+
+    for (const id of ["merge-a", "merge-b", "merge-c", "merge-d"]) {
+      await createTestPerson({ id, email: `${id}@example.com` });
+      await createTestEmail({
+        id: `${id}-mail`,
+        personId: id,
+        recipient: "allowed@example.com",
+        messageId: `${id}@example.test`,
+      });
+    }
+    await linkPeople(db, { isAdmin: true }, null, "merge-a", "merge-b");
+    await linkPeople(db, { isAdmin: true }, null, "merge-c", "merge-d");
+
+    const before = await db.select().from(customerPeople);
+    const denied = await authFetch("/api/customers/link", {
+      apiKey: member.apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        personId: "merge-a",
+        otherPersonId: "merge-c",
+      }),
+    });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({
+      error: "Merging two customers requires an admin",
+      code: "CUSTOMER_MERGE_REQUIRES_ADMIN",
+    });
+    expect(await db.select().from(customerPeople)).toEqual(before);
+
+    const allowed = await authFetch("/api/customers/link", {
+      apiKey: admin.apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        personId: "merge-a",
+        otherPersonId: "merge-c",
+      }),
+    });
+    expect(allowed.status).toBe(200);
+    expect((await resolveCustomerScope(db, "merge-a")).personIds).toHaveLength(
+      4,
+    );
+  });
+
+  it("allows a non-admin to add a visible unlinked person to an existing customer", async () => {
+    const member = await createTestUser({
+      id: "identity-grow-member",
+      role: "member",
+      email: "identity-grow-member@example.com",
+    });
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(inboxPermissions).values({
+      userId: member.userId,
+      email: "allowed@example.com",
+      createdAt: now,
+      createdBy: null,
+    });
+    for (const id of ["grow-a", "grow-b", "grow-c"]) {
+      await createTestPerson({ id, email: `${id}@example.com` });
+      await createTestEmail({
+        id: `${id}-mail`,
+        personId: id,
+        recipient: "allowed@example.com",
+        messageId: `${id}@example.test`,
+      });
+    }
+    await linkPeople(db, { isAdmin: true }, null, "grow-a", "grow-b");
+
+    const response = await authFetch("/api/customers/link", {
+      apiKey: member.apiKey,
+      method: "POST",
+      body: JSON.stringify({ personId: "grow-a", otherPersonId: "grow-c" }),
+    });
+    expect(response.status).toBe(200);
+    expect(
+      new Set((await resolveCustomerScope(db, "grow-a")).personIds),
+    ).toEqual(new Set(["grow-a", "grow-b", "grow-c"]));
+  });
+
+  it("rejects linking a person to themselves", async () => {
+    const admin = await createTestUser({
+      id: "identity-self-admin",
+      role: "admin",
+      email: "identity-self-admin@example.com",
+    });
+    await createTestPerson({ id: "self-person", email: "self@example.com" });
+
+    const response = await authFetch("/api/customers/link", {
+      apiKey: admin.apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        personId: "self-person",
+        otherPersonId: "self-person",
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "Cannot link a person to themselves",
+    });
+  });
 });

@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { users } from "../../db/auth.schema";
@@ -38,6 +38,30 @@ type ResolvedMessage = {
 
 const refKey = (ref: MessageRef) => `${ref.kind}:${ref.id}`;
 const LOOKUP_BATCH_SIZE = 40;
+const WRITE_BATCH_STATEMENTS = 40;
+const USER_STATE_ROWS_PER_STATEMENT = Math.floor(90 / 6);
+const MAILBOX_STATE_ROWS_PER_STATEMENT = Math.floor(90 / 8);
+const MAILBOX_MEMBERSHIP_ROWS_PER_STATEMENT = Math.floor(90 / 5);
+const MAILBOX_MEMBERSHIP_DELETE_ROWS_PER_STATEMENT = Math.floor(90 / 3);
+
+async function runWriteBatches(
+  db: DrizzleD1Database<any>,
+  statements: any[],
+): Promise<void> {
+  // Each D1 batch is transactional, but a mutation can span several batches.
+  // If a later batch fails, earlier batches remain applied. The writes here are
+  // idempotent upserts/deletes, matching the Stage 3 (#11) chunk-and-retry
+  // behavior used by bulk mailbox actions.
+  for (
+    let start = 0;
+    start < statements.length;
+    start += WRITE_BATCH_STATEMENTS
+  ) {
+    await db.batch(
+      statements.slice(start, start + WRITE_BATCH_STATEMENTS) as any,
+    );
+  }
+}
 
 function dedupeRefs(refs: MessageRef[]): MessageRef[] {
   const seen = new Set<string>();
@@ -150,10 +174,10 @@ export async function setUserState(
   const resolved = await resolveMessageRefs(db, allowed, refs);
   const now = Math.floor(Date.now() / 1000);
 
-  for (const message of resolved) {
+  const rows = resolved.flatMap((message) => {
     const effectiveSeen =
       message.ref.kind === "received" ? changes.seen : undefined;
-    if (effectiveSeen === undefined && changes.starred === undefined) continue;
+    if (effectiveSeen === undefined && changes.starred === undefined) return [];
 
     const seenAt =
       message.ref.kind === "sent"
@@ -166,34 +190,50 @@ export async function setUserState(
               ? now
               : null;
     const starredAt = changes.starred === true ? now : null;
-
-    const update: {
-      updatedAt: number;
-      seenAt?: number | null;
-      starredAt?: number | null;
-    } = { updatedAt: now };
-    if (effectiveSeen !== undefined) update.seenAt = seenAt;
-    if (changes.starred !== undefined) update.starredAt = starredAt;
-
-    await db
-      .insert(messageUserState)
-      .values({
+    return [
+      {
         userId,
         messageKind: message.ref.kind,
         messageId: message.ref.id,
         seenAt,
         starredAt,
         updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [
-          messageUserState.userId,
-          messageUserState.messageKind,
-          messageUserState.messageId,
-        ],
-        set: update,
-      });
+      },
+    ];
+  });
+
+  const statements: any[] = [];
+  for (
+    let start = 0;
+    start < rows.length;
+    start += USER_STATE_ROWS_PER_STATEMENT
+  ) {
+    const chunk = rows.slice(start, start + USER_STATE_ROWS_PER_STATEMENT);
+    statements.push(
+      db
+        .insert(messageUserState)
+        .values(chunk)
+        .onConflictDoUpdate({
+          target: [
+            messageUserState.userId,
+            messageUserState.messageKind,
+            messageUserState.messageId,
+          ],
+          set: {
+            updatedAt: sql`excluded.updated_at`,
+            ...(changes.seen !== undefined
+              ? {
+                  seenAt: sql`CASE WHEN excluded.message_kind = 'received' THEN excluded.seen_at ELSE message_user_state.seen_at END`,
+                }
+              : {}),
+            ...(changes.starred !== undefined
+              ? { starredAt: sql`excluded.starred_at` }
+              : {}),
+          },
+        }),
+    );
   }
+  await runWriteBatches(db, statements);
 }
 
 export async function setSystemSpamState(
@@ -251,61 +291,63 @@ export async function setMailboxState(
         "Archived and spam state apply only to received messages",
       );
     }
-
-    if (
-      changes.archived === undefined &&
-      changes.spam === undefined &&
-      changes.trashed === undefined
-    ) {
-      continue;
-    }
-
-    const archivedAt =
-      changes.archived === true
-        ? now
-        : changes.archived === false
-          ? null
-          : null;
-    const spamAt =
-      changes.spam === true ? now : changes.spam === false ? null : null;
-    const trashedAt = changes.trashed === true ? now : null;
-
-    const update: {
-      inbox: string;
-      updatedBy: string | null;
-      updatedAt: number;
-      archivedAt?: number | null;
-      spamAt?: number | null;
-      trashedAt?: number | null;
-    } = {
-      inbox: message.inbox,
-      updatedBy: userId,
-      updatedAt: now,
-    };
-    if (changes.archived !== undefined) update.archivedAt = archivedAt;
-    if (changes.spam !== undefined) update.spamAt = spamAt;
-    if (changes.trashed !== undefined) update.trashedAt = trashedAt;
-
-    await db
-      .insert(mailboxMessageState)
-      .values({
-        inbox: message.inbox,
-        messageKind: message.ref.kind,
-        messageId: message.ref.id,
-        archivedAt,
-        spamAt,
-        trashedAt,
-        updatedBy: userId,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: [
-          mailboxMessageState.messageKind,
-          mailboxMessageState.messageId,
-        ],
-        set: update,
-      });
   }
+
+  if (
+    changes.archived === undefined &&
+    changes.spam === undefined &&
+    changes.trashed === undefined
+  ) {
+    return;
+  }
+
+  const archivedAt = changes.archived === true ? now : null;
+  const spamAt = changes.spam === true ? now : null;
+  const trashedAt = changes.trashed === true ? now : null;
+  const rows = resolved.map((message) => ({
+    inbox: message.inbox,
+    messageKind: message.ref.kind,
+    messageId: message.ref.id,
+    archivedAt,
+    spamAt,
+    trashedAt,
+    updatedBy: userId,
+    updatedAt: now,
+  }));
+
+  const statements: any[] = [];
+  for (
+    let start = 0;
+    start < rows.length;
+    start += MAILBOX_STATE_ROWS_PER_STATEMENT
+  ) {
+    statements.push(
+      db
+        .insert(mailboxMessageState)
+        .values(rows.slice(start, start + MAILBOX_STATE_ROWS_PER_STATEMENT))
+        .onConflictDoUpdate({
+          target: [
+            mailboxMessageState.messageKind,
+            mailboxMessageState.messageId,
+          ],
+          set: {
+            inbox: sql`excluded.inbox`,
+            updatedBy: sql`excluded.updated_by`,
+            updatedAt: sql`excluded.updated_at`,
+            ...(changes.archived !== undefined
+              ? { archivedAt: sql`excluded.archived_at` }
+              : {}),
+            ...(changes.spam !== undefined
+              ? { spamAt: sql`excluded.spam_at` }
+              : {}),
+            ...(changes.trashed !== undefined
+              ? { trashedAt: sql`excluded.trashed_at` }
+              : {}),
+          },
+        }),
+    );
+  }
+  await runWriteBatches(db, statements);
 }
 
 async function getMailboxForMutation(
@@ -503,38 +545,66 @@ export async function setMailboxMembership(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  for (const message of resolved) {
-    for (const mailboxId of add) {
-      await db
+  const statements: any[] = [];
+  const addRows = resolved.flatMap((message) =>
+    add.map((mailboxId) => ({
+      messageKind: message.ref.kind,
+      messageId: message.ref.id,
+      mailboxId,
+      addedBy: userId,
+      addedAt: now,
+    })),
+  );
+  for (
+    let start = 0;
+    start < addRows.length;
+    start += MAILBOX_MEMBERSHIP_ROWS_PER_STATEMENT
+  ) {
+    statements.push(
+      db
         .insert(messageMailboxes)
-        .values({
-          messageKind: message.ref.kind,
-          messageId: message.ref.id,
-          mailboxId,
-          addedBy: userId,
-          addedAt: now,
-        })
+        .values(
+          addRows.slice(start, start + MAILBOX_MEMBERSHIP_ROWS_PER_STATEMENT),
+        )
         .onConflictDoNothing({
           target: [
             messageMailboxes.messageKind,
             messageMailboxes.messageId,
             messageMailboxes.mailboxId,
           ],
-        });
-    }
-
-    for (const mailboxId of remove) {
-      await db
-        .delete(messageMailboxes)
-        .where(
-          and(
-            eq(messageMailboxes.messageKind, message.ref.kind),
-            eq(messageMailboxes.messageId, message.ref.id),
-            eq(messageMailboxes.mailboxId, mailboxId),
-          ),
-        );
-    }
+        }),
+    );
   }
+
+  const removals = resolved.flatMap((message) =>
+    remove.map((mailboxId) => ({
+      messageKind: message.ref.kind,
+      messageId: message.ref.id,
+      mailboxId,
+    })),
+  );
+  for (
+    let start = 0;
+    start < removals.length;
+    start += MAILBOX_MEMBERSHIP_DELETE_ROWS_PER_STATEMENT
+  ) {
+    const chunk = removals.slice(
+      start,
+      start + MAILBOX_MEMBERSHIP_DELETE_ROWS_PER_STATEMENT,
+    );
+    const where = or(
+      ...chunk.map((row) =>
+        and(
+          eq(messageMailboxes.messageKind, row.messageKind),
+          eq(messageMailboxes.messageId, row.messageId),
+          eq(messageMailboxes.mailboxId, row.mailboxId),
+        ),
+      ),
+    );
+    if (where) statements.push(db.delete(messageMailboxes).where(where));
+  }
+
+  await runWriteBatches(db, statements);
 }
 
 const DELETE_BATCH_SIZE = 40;

@@ -16,7 +16,9 @@ A persisted customer exists only while at least two people are linked:
 - `customer_people` links a person to at most one customer and records who linked it.
 - Linking two unlinked people creates a customer.
 - Linking an unlinked person to a linked person adds it to that customer.
-- Linking two existing customers merges the smaller graph into the larger one.
+- Linking two existing customers merges the smaller graph into the larger one. This
+  merge is admin-only because it can move members that are outside a scoped caller's
+  inbox visibility.
 - Unlinking a person removes that edge. If fewer than two people remain, the customer
   row is deleted and the last person becomes implicit again.
 - Deleting a person runs the same cleanup, so one-person customer rows cannot remain.
@@ -27,7 +29,10 @@ The `people` and `contacts` tables remain unchanged and uncollapsed.
 
 Identity does not expand mailbox permissions. Linking requires both people to be
 visible under the existing person-visibility rule; callers get `404` rather than an
-existence signal when either person is outside their scope. Customer reads expose
+existence signal when either person is outside their scope. The visibility checks run
+before the admin-only merge check. Non-admins may still create a customer from two
+visible unlinked people, add a visible unlinked person to an existing customer,
+re-link an already-linked pair, and unlink a visible person. Customer reads expose
 only people the caller can see.
 
 The unified message service accepts a customer id by translating it to the linked

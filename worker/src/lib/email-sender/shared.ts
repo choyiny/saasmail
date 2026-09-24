@@ -1,7 +1,11 @@
 export function parseFrom(input: string): { name?: string; address: string } {
   const match = input.match(/^\s*(.*)\s*<([^>]+)>\s*$/);
   if (match && match[2]) {
-    const name = match[1].replace(/^"|"$/g, "").trim();
+    const rawName = match[1].trim();
+    const name =
+      rawName.length >= 2 && rawName.startsWith('"') && rawName.endsWith('"')
+        ? rawName.slice(1, -1).replace(/\\(["\\])/g, "$1")
+        : rawName;
     return { name: name || undefined, address: match[2].trim() };
   }
   return { address: input.trim() };

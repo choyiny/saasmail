@@ -358,6 +358,13 @@
       "when": 1790197000000,
       "tag": "0050_jmap_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1790263000000,
+      "tag": "0051_canonical_from_address",
+      "breakpoints": true
     }
   ]
 }

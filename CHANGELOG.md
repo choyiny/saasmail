@@ -73,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **QA data correctness:** canonicalize every persisted outbound inbox key used by sequences, campaigns, templates, lists, drafts, the outbox, and sent history so mixed-case sender addresses cannot disappear from permission-scoped Sent or JMAP reads. Migration `0051` repairs existing rows.
+- **Customer identity safety:** merging two existing customer graphs is admin-only after both people pass visibility checks; self-links are rejected, agent approvals identify merges, and PersonDetail surfaces the server error inline.
+- **Bulk message state writes:** state and folder mutations use bounded multi-row statements inside D1 batches instead of one sequential write per message/folder pair.
+- **Agent CRM lookup:** selecting the latest permitted inbox is performed in SQL with the permission predicate and `LIMIT 1`.
+- **Person deletion:** group-conversation snooze/assignment state is removed only when deleting a person's messages leaves no message in that inbox conversation.
+- **Display-name parsing:** quoted From names containing `@`, commas, escaped quotes, or backslashes now round-trip through the formatter without retaining a stray quote.
+
 - `PATCH /api/emails/bulk` works. It was registered after `PATCH /api/emails/{id}`, and Hono matches in registration order, so the request bound `id: "bulk"`, was answered by the single-email handler, and returned `404` without marking anything — the bulk handler was unreachable dead code. Registering it before the parameterised route makes it live; it applies the same inbox scoping it always contained, silently skipping ids the caller may not access.
 - Inbox list: hydrate group participants/CC after pagination so `GET /api/people/grouped` no longer 500s on mailboxes with 50+ group threads (D1's 100 bound-parameter cap). Stats still counted unread while the people list failed empty.
 - Blocklist: mark matching unread mail as read when a rule is created, so the nav unread badge cannot stick on senders the inbox list has hidden. Migration `0033` clears existing blocked unread counts.

@@ -18,6 +18,22 @@ export type CustomerView = {
   people: Array<{ id: string; email: string; name: string | null }>;
 };
 
+export class CustomerMergeRequiresAdminError extends Error {
+  readonly code = "CUSTOMER_MERGE_REQUIRES_ADMIN";
+
+  constructor() {
+    super("Merging two customers requires an admin");
+    this.name = "CustomerMergeRequiresAdminError";
+  }
+}
+
+export class CustomerSelfLinkError extends Error {
+  constructor() {
+    super("Cannot link a person to themselves");
+    this.name = "CustomerSelfLinkError";
+  }
+}
+
 async function requireVisiblePerson(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
@@ -116,6 +132,7 @@ export async function resolveCustomerScope(
 
 async function linkPeopleDecision(
   db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
   actor: string | null,
   a: string,
   b: string,
@@ -173,6 +190,10 @@ async function linkPeopleDecision(
     return resolveCustomerScope(db, a);
   }
 
+  if (!allowed.isAdmin) {
+    throw new CustomerMergeRequiresAdminError();
+  }
+
   const [aSize, bSize] = await Promise.all([
     customerSize(db, aCustomer),
     customerSize(db, bCustomer),
@@ -204,13 +225,13 @@ export async function linkPeople(
     requireVisiblePerson(db, allowed, a),
     a === b ? Promise.resolve(null) : requireVisiblePerson(db, allowed, b),
   ]);
-  if (a === b) return resolveCustomerScope(db, a);
+  if (a === b) throw new CustomerSelfLinkError();
 
   try {
-    return await linkPeopleDecision(db, actor, a, b);
+    return await linkPeopleDecision(db, allowed, actor, a, b);
   } catch (error) {
     if (!isUniquePersonMembershipError(error)) throw error;
-    return linkPeopleDecision(db, actor, a, b);
+    return linkPeopleDecision(db, allowed, actor, a, b);
   }
 }
 

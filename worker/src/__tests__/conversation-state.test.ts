@@ -358,4 +358,70 @@ describe("conversation snooze state", () => {
     expect(response.status).toBe(200);
     expect(await getDb().select().from(inboxConversationState)).toEqual([]);
   });
+
+  it("removes orphaned group state but keeps state for conversations with remaining messages", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "delete-group-admin",
+      email: "delete-group-admin@example.com",
+    });
+    await createTestPerson({
+      id: "delete-group-person",
+      email: "delete-group@example.com",
+    });
+    await createTestPerson({
+      id: "group-survivor",
+      email: "survivor@example.com",
+    });
+    await createTestEmail({
+      id: "orphan-received",
+      personId: "delete-group-person",
+      recipient: INBOX,
+      conversationId: "group-orphan",
+      messageId: "orphan-received@example.com",
+    });
+    await createTestSentEmail({
+      id: "orphan-sent",
+      personId: "delete-group-person",
+      fromAddress: INBOX,
+      toAddress: "delete-group@example.com",
+      conversationId: "group-sent-orphan",
+    });
+    await createTestEmail({
+      id: "shared-deleted",
+      personId: "delete-group-person",
+      recipient: INBOX,
+      conversationId: "group-shared",
+      messageId: "shared-deleted@example.com",
+    });
+    await createTestEmail({
+      id: "shared-survivor",
+      personId: "group-survivor",
+      recipient: INBOX,
+      conversationId: "group-shared",
+      messageId: "shared-survivor@example.com",
+    });
+
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(inboxConversationState)
+      .values(
+        ["group-orphan", "group-sent-orphan", "group-shared"].map(
+          (conversationKey) => ({
+            inbox: INBOX,
+            conversationKey,
+            snoozedUntil: now + 3600,
+            snoozedBy: userId,
+            updatedAt: now,
+          }),
+        ),
+      );
+
+    const response = await authFetch("/api/people/delete-group-person", {
+      apiKey,
+      method: "DELETE",
+    });
+    expect(response.status).toBe(200);
+    const rows = await getDb().select().from(inboxConversationState);
+    expect(rows.map((row) => row.conversationKey)).toEqual(["group-shared"]);
+  });
 });

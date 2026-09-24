@@ -712,4 +712,91 @@ describe("agent tools", () => {
       bodyText: "Human in-progress reply",
     });
   });
+
+  it("returns typed customer-link errors cleanly for non-admin merges and self-links", async () => {
+    const { db, tools, allowedPerson } = await fixture();
+    const now = Math.floor(Date.now() / 1000);
+    for (const id of ["agent-merge-a", "agent-merge-b"]) {
+      await createTestPerson({ id, email: `${id}@example.net` });
+      await createTestEmail({
+        id: `${id}-mail`,
+        personId: id,
+        recipient: ALLOWED,
+        messageId: `${id}@example.test`,
+      });
+    }
+    const primaryAlias = await createTestPerson({
+      id: "agent-primary-alias",
+      email: "agent-primary-alias@example.net",
+    });
+    await createTestEmail({
+      id: "agent-primary-alias-mail",
+      personId: primaryAlias.id,
+      recipient: ALLOWED,
+      messageId: "agent-primary-alias@example.test",
+    });
+    await db.insert(customers).values([
+      {
+        id: "agent-primary-customer",
+        displayName: null,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "agent-other-customer",
+        displayName: null,
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ]);
+    await db.insert(customerPeople).values([
+      {
+        customerId: "agent-primary-customer",
+        personId: allowedPerson.id,
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "agent-primary-customer",
+        personId: primaryAlias.id,
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "agent-other-customer",
+        personId: "agent-merge-a",
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "agent-other-customer",
+        personId: "agent-merge-b",
+        linkedBy: null,
+        linkedAt: now,
+      },
+    ]);
+
+    expect(
+      await execute(tools, "link_customer", {
+        personId: allowedPerson.id,
+        otherPersonId: "agent-merge-a",
+      }),
+    ).toEqual({
+      success: false,
+      error: "Merging two customers requires an admin",
+      code: "CUSTOMER_MERGE_REQUIRES_ADMIN",
+    });
+
+    expect(
+      await execute(tools, "link_customer", {
+        personId: allowedPerson.id,
+        otherPersonId: allowedPerson.id,
+      }),
+    ).toEqual({
+      success: false,
+      error: "Cannot link a person to themselves",
+    });
+  });
 });

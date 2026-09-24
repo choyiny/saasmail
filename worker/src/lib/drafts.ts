@@ -40,6 +40,7 @@ export async function upsertDraft(
 ): Promise<typeof drafts.$inferSelect> {
   const now = Math.floor(Date.now() / 1000);
   const cc = input.cc ? JSON.stringify(input.cc) : null;
+  const fromAddress = input.fromAddress?.trim().toLowerCase() ?? null;
 
   await db
     .insert(drafts)
@@ -47,7 +48,7 @@ export async function upsertDraft(
       id: input.id ?? nanoid(),
       userId,
       contextKey: input.contextKey,
-      fromAddress: input.fromAddress ?? null,
+      fromAddress,
       toAddress: input.to ?? null,
       cc,
       subject: input.subject ?? null,
@@ -60,7 +61,7 @@ export async function upsertDraft(
     .onConflictDoUpdate({
       target: [drafts.userId, drafts.contextKey],
       set: {
-        fromAddress: input.fromAddress ?? null,
+        fromAddress,
         toAddress: input.to ?? null,
         cc,
         subject: input.subject ?? null,

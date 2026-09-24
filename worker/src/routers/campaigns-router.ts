@@ -306,7 +306,8 @@ campaignsRouter.openapi(createCampaignRoute, async (c) => {
   if (list.archivedAt !== null) {
     return c.json({ error: "List is archived" }, 409);
   }
-  assertInboxAllowed(allowed, list.fromAddress);
+  const fromAddress = list.fromAddress.trim().toLowerCase();
+  assertInboxAllowed(allowed, fromAddress);
 
   // Seeding from a template copies its content in once. After this the
   // campaign owns that content outright — editing or deleting the template
@@ -351,7 +352,7 @@ campaignsRouter.openapi(createCampaignRoute, async (c) => {
     format: seeded.format,
     bodyHtml: seeded.bodyHtml,
     bodyJson: seeded.bodyJson,
-    fromAddress: list.fromAddress,
+    fromAddress,
     listId: list.id,
     status: "draft" as const,
     createdAt: ts,
@@ -459,10 +460,11 @@ campaignsRouter.openapi(updateRoute, async (c) => {
       .where(eq(lists.id, body.listId))
       .limit(1);
     if (!listRows[0]) return c.json({ error: "List not found" }, 404);
-    assertInboxAllowed(c.get("allowedInboxes")!, listRows[0].fromAddress);
+    const fromAddress = listRows[0].fromAddress.trim().toLowerCase();
+    assertInboxAllowed(c.get("allowedInboxes")!, fromAddress);
     patch.listId = body.listId;
     // The identity follows the list, so the two can never disagree.
-    patch.fromAddress = listRows[0].fromAddress;
+    patch.fromAddress = fromAddress;
   }
 
   await db.update(campaigns).set(patch).where(eq(campaigns.id, id));
@@ -576,7 +578,7 @@ export async function beginCampaignSend(
   const capacity = await providerCapacityError(
     db,
     env,
-    campaign.fromAddress,
+    campaign.fromAddress.trim().toLowerCase(),
     target,
   );
   if (capacity) return { status: 422, error: capacity };

@@ -240,11 +240,73 @@ export async function wakeConversation(
     );
 }
 
+export type PersonGroupConversation = {
+  inbox: string;
+  conversationId: string;
+};
+
+export async function collectPersonGroupConversations(
+  db: DrizzleD1Database<any>,
+  personId: string,
+): Promise<PersonGroupConversation[]> {
+  const rows = await db.all<{ inbox: string; conversation_id: string }>(sql`
+    SELECT DISTINCT recipient AS inbox, conversation_id
+    FROM ${emails}
+    WHERE person_id = ${personId} AND conversation_id IS NOT NULL
+    UNION
+    SELECT DISTINCT from_address AS inbox, conversation_id
+    FROM ${sentEmails}
+    WHERE person_id = ${personId} AND conversation_id IS NOT NULL
+  `);
+  return rows.map((row) => ({
+    inbox: row.inbox,
+    conversationId: row.conversation_id,
+  }));
+}
+
 export async function deletePersonConversationState(
   db: DrizzleD1Database<any>,
   personId: string,
+  groupConversations: PersonGroupConversation[] = [],
 ): Promise<void> {
   await db
     .delete(inboxConversationState)
     .where(eq(inboxConversationState.conversationKey, `p:${personId}`));
+
+  const byInbox = new Map<string, Set<string>>();
+  for (const conversation of groupConversations) {
+    const ids = byInbox.get(conversation.inbox) ?? new Set<string>();
+    ids.add(conversation.conversationId);
+    byInbox.set(conversation.inbox, ids);
+  }
+
+  for (const [inbox, ids] of byInbox) {
+    const allIds = [...ids];
+    for (let start = 0; start < allIds.length; start += LOOKUP_BATCH_SIZE) {
+      const chunk = allIds.slice(start, start + LOOKUP_BATCH_SIZE);
+      // Each conversation id is bound once in each UNION arm, so 40 ids
+      // consume ~82 parameters including the two inbox binds — under D1's
+      // per-statement cap while checking received and sent mail together.
+      const remaining = await db.all<{ conversation_id: string }>(sql`
+        SELECT conversation_id FROM ${emails}
+        WHERE recipient = ${inbox} AND conversation_id IN ${chunk}
+        UNION
+        SELECT conversation_id FROM ${sentEmails}
+        WHERE from_address = ${inbox} AND conversation_id IN ${chunk}
+      `);
+      const live = new Set(remaining.map((row) => row.conversation_id));
+      const orphaned = chunk.filter(
+        (conversationId) => !live.has(conversationId),
+      );
+      if (orphaned.length === 0) continue;
+      await db
+        .delete(inboxConversationState)
+        .where(
+          and(
+            eq(inboxConversationState.inbox, inbox),
+            inArray(inboxConversationState.conversationKey, orphaned),
+          ),
+        );
+    }
+  }
 }
