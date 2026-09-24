@@ -10,6 +10,8 @@ import {
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
+import { senderIdentities } from "../db/sender-identities.schema";
+import { emails } from "../db/emails.schema";
 import { decryptSecret } from "../lib/crypto";
 import { signState } from "../lib/gmail/state";
 import {
@@ -17,6 +19,8 @@ import {
   applyMigrations,
   cleanDb,
   createTestUser,
+  createTestPerson,
+  createTestEmail,
   authFetch,
 } from "./helpers";
 
@@ -378,6 +382,81 @@ describe("DELETE /api/admin/gmail/{id}", () => {
     });
     expect(res.status).toBe(200);
     expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
+  });
+
+  it("forgets the disconnected mailbox's Gmail threads, and only those", async () => {
+    // The mailbox that issued these thread ids is gone, so replying on one
+    // would hand a stranger's id to whatever account the inbox is mapped to
+    // next: 4xx, terminal, never queued. See `clearGmailThreadIds`.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values([
+        {
+          id: "acct-gone",
+          emailAddress: "gone@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "acct-stays",
+          emailAddress: "stays@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    await getDb()
+      .insert(senderIdentities)
+      .values([
+        {
+          email: "mapped@acme.dev",
+          source: "gmail",
+          gmailAccountId: "acct-gone",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          email: "other@acme.dev",
+          source: "gmail",
+          gmailAccountId: "acct-stays",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    const person = await createTestPerson({ id: "p-d", email: "c@ex.com" });
+    await createTestEmail({
+      id: "rcv-gone",
+      personId: person.id,
+      recipient: "mapped@acme.dev",
+      messageId: "gone@ex.com",
+    });
+    await createTestEmail({
+      id: "rcv-stays",
+      personId: person.id,
+      recipient: "other@acme.dev",
+      messageId: "stays@ex.com",
+    });
+    await getDb()
+      .update(emails)
+      .set({ gmailThreadId: "th-gone" })
+      .where(eq(emails.id, "rcv-gone"));
+    await getDb()
+      .update(emails)
+      .set({ gmailThreadId: "th-stays" })
+      .where(eq(emails.id, "rcv-stays"));
+
+    await authFetch("/api/admin/gmail/acct-gone", { method: "DELETE", apiKey });
+
+    const rows = await getDb().select().from(emails);
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId["rcv-gone"].gmailThreadId).toBeNull();
+    // The mailbox still connected keeps its threading.
+    expect(byId["rcv-stays"].gmailThreadId).toBe("th-stays");
   });
 
   it("answers 404 for an id that is not connected, and deletes nothing", async () => {

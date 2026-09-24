@@ -1,10 +1,17 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { nanoid } from "nanoid";
 import { schema } from "../../db/schema";
 import { gmailAccounts } from "../../db/gmail-accounts.schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
 import { emails } from "../../db/emails.schema";
+import { people } from "../../db/people.schema";
+import { sentEmails } from "../../db/sent-emails.schema";
+import { addressParser } from "postal-mime";
 import { parseRaw } from "../email-parser";
+import { cancelSequencesForPerson } from "../cancel-sequence";
+import { computeConversationId, externalsOnly } from "../conversation-id";
+import { fetchInternalDomains } from "../internal-domains";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
 import { getProfile, GoogleAuthError } from "./oauth";
@@ -35,8 +42,20 @@ export { HISTORY_GAP_ERROR, SYNC_FAILED_PREFIX };
  */
 export const MAX_MESSAGES_PER_RUN = 50;
 
-/** Never reaches a customer timeline. SENT is a later slice's job. */
-const SKIP_LABELS = new Set(["SENT", "DRAFT", "TRASH", "SPAM"]);
+/**
+ * Never reaches a customer timeline, whatever else the message carries.
+ *
+ * Checked BEFORE the SENT branch on purpose: a sent message that was later
+ * trashed carries both SENT and TRASH, and the skip must win.
+ */
+const SKIP_LABELS = new Set(["DRAFT", "TRASH", "SPAM"]);
+
+/**
+ * Gmail's label for the mailbox's own outgoing mail. These are mirrored into
+ * `sent_emails` rather than ingested as inbound, so a reply someone typed in
+ * Gmail lands on the customer's timeline next to everything else.
+ */
+const SENT_LABEL = "SENT";
 
 export type GmailAccountRow = typeof gmailAccounts.$inferSelect;
 
@@ -65,7 +84,19 @@ function groupIntoRecords(added: AddedMessage[]): HistoryRecord[] {
 }
 
 export type SyncResult = {
+  /** Inbound messages that reached a customer timeline as `emails` rows. */
   ingested: number;
+  /**
+   * Messages from the mailbox's own Sent folder written to `sent_emails`.
+   *
+   * Separate from `ingested` because it is a different outcome: mail that
+   * ARRIVED and mail of ours that came home are not the same event, and one
+   * counter cannot answer for both. Nothing surfaces either number today —
+   * `syncAllGmailAccounts` logs only `failed` and `reseeded`, and returns
+   * void — so this is internal bookkeeping and a correct signal for whatever
+   * reads it first, not a number an operator is looking at right now.
+   */
+  mirrored: number;
   skipped: number;
   reseeded: boolean;
   /** Messages that threw. At most one — a failure stops the run. */
@@ -124,6 +155,436 @@ async function recordSyncFailure(
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+/**
+ * Header lookup. Keys are lowercase: postal-mime lowercases them, which is
+ * the same fact `firstHeaderValue("to")` in email-parser.ts relies on. There
+ * is no Title-Case variant to fall back to.
+ */
+function header(
+  headers: Record<string, string>,
+  name: string,
+): string | undefined {
+  return headers[name];
+}
+
+/**
+ * Is this a plain addr-spec we are willing to file a customer's mail under?
+ *
+ * The LAST gate, applied to whatever the MIME parser hands back. A parser's
+ * job is to say what the header contains; this one's is to say whether that
+ * is something we will put a customer's reply under. postal-mime will
+ * faithfully report `jane,x@example.com`, or the entire text of a header it
+ * could not make sense of, and neither is an address.
+ *
+ * Prefer null over a guess — a skipped mirror costs one row, a wrong one puts
+ * a customer's reply on someone else's timeline.
+ */
+function isAddrSpec(address: string): boolean {
+  // RFC 5321's 254-octet ceiling; also stops a pathological header early.
+  // (`""` needs no separate check — it has no `@`, so the test below fails.)
+  if (address.length > 254) return false;
+  // No whitespace, and none of RFC 5322's specials: comma, quote, angle
+  // brackets, parens, colon, semicolon, backslash, square brackets.
+  if (/[\s",<>();:\\[\]]/.test(address)) return false;
+  // Characters that render as NOTHING and that JS `\s` does not cover: zero
+  // widths and joiners, soft hyphen, and the bidi embedding / override /
+  // isolate controls. `alpha@x.com` with a ZWSP welded to the end is a third
+  // outcome \u2014 neither the first-written address nor null \u2014 and it is the worst
+  // KIND of third outcome, because it looks correct everywhere it is displayed
+  // and matches nothing: the `people.email` lookup misses, so the mirror files
+  // a row under an address that can never merge with the real person's.
+  // U+202E would render the whole thing backwards. An address we cannot show a
+  // human truthfully is not one we will file a customer under.
+  if (
+    /[\u00ad\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/.test(
+      address,
+    )
+  )
+    return false;
+  const at = address.indexOf("@");
+  if (at === -1 || at !== address.lastIndexOf("@")) return false;
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  if (!local || !domain) return false;
+  // A dot in the domain, and not a leading, trailing or doubled one.
+  if (!domain.includes(".")) return false;
+  if (domain.startsWith(".") || domain.endsWith(".")) return false;
+  if (domain.includes("..")) return false;
+  return true;
+}
+
+/**
+ * Blank out every TERMINATED quoted string and comment, offsets preserved.
+ *
+ * Both can legally contain anything, including text that looks like an
+ * address (`"Bob <bob@x.com>" <jane@example.com>`), so neither may be read as
+ * naming a recipient. What they cannot contain is an addr-spec's own `@`:
+ * that sits between the local part and the domain, outside any quoting. So
+ * after masking, every recipient the header names still contributes exactly
+ * one `@`, and nothing else does.
+ *
+ * An UNTERMINATED quote or paren is left as written from that point on, on
+ * purpose. An unterminated quote means we do not know where the display name
+ * was meant to end, so we refuse to assume it swallowed the rest of the line
+ * — anything address-shaped after it still counts against the header.
+ *
+ * A comment ends at its first unescaped `)`, so a NESTED comment is masked
+ * only up to the inner close. That is deliberately the same reading
+ * postal-mime itself applies, which keeps this function and the entry list it
+ * is compared against from disagreeing about where a comment ended. Tracking
+ * nesting properly was tried and changed the verdict on no input at all: the
+ * unmasked tail either contains no `@`, or it makes the header look dirtier
+ * and the answer is refused, which is the safe direction anyway.
+ */
+function maskQuotedAndComments(value: string): string {
+  const out = value.split("");
+  let i = 0;
+  while (i < value.length) {
+    if (value[i] === '"') {
+      let j = i + 1;
+      while (j < value.length && value[j] !== '"') {
+        j += value[j] === "\\" ? 2 : 1;
+      }
+      if (j >= value.length) break; // unterminated: leave the remainder alone
+      for (let k = i; k <= j; k++) out[k] = " ";
+      i = j + 1;
+    } else if (value[i] === "(") {
+      let j = i + 1;
+      while (j < value.length && value[j] !== ")") {
+        j += value[j] === "\\" ? 2 : 1;
+      }
+      if (j >= value.length) break; // unterminated: leave the remainder alone
+      for (let k = i; k <= j; k++) out[k] = " ";
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+/**
+ * Split a masked header on the commas that separate RECIPIENTS.
+ *
+ * Commas inside `<...>` do not (`<jane,x@example.com>` is one broken entry,
+ * not two). Commas inside a group's `:` … `;` do — a group's members are
+ * recipients in their own right and each gets its own chunk, which is what
+ * makes the chunk count comparable with the parser's flattened entry count.
+ */
+function topLevelChunks(masked: string): string[] {
+  const chunks: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < masked.length; i++) {
+    const ch = masked[i];
+    if (ch === "<") depth++;
+    else if (ch === ">" && depth > 0) depth--;
+    else if (ch === "," && depth === 0) {
+      chunks.push(masked.slice(start, i));
+      start = i + 1;
+    }
+  }
+  chunks.push(masked.slice(start));
+  return chunks;
+}
+
+/**
+ * The FIRST-WRITTEN recipient of one recipient header, or null.
+ *
+ * There is no third outcome, and that is the whole point of this function. A
+ * mirrored Sent message needs one counterparty to hang off a timeline, and the
+ * only defensible choice is the person the sender put first; everyone else is
+ * already carried by the Cc column. Returning a later recipient because an
+ * earlier one was unreadable files a customer's reply on a DIFFERENT
+ * customer's timeline, which is the worst thing this subsystem can do.
+ *
+ * Why the raw header and not a parsed list: postal-mime drops entries it
+ * cannot make sense of, so the first entry of any parsed list is the first
+ * SURVIVING recipient. Those differ precisely when recipient #1 is malformed
+ * — i.e. exactly in the case this function exists to get right. The header
+ * text is the only thing that can answer "was anyone ahead of this one?".
+ *
+ * Four gates, each of which can only ever turn an answer into null:
+ *
+ *  1. postal-mime must produce a first entry (groups flattened in place, so a
+ *     group's first member counts as written where the group stands).
+ *  2. `isAddrSpec` must accept it — the parser reports what the header says,
+ *     not whether it is an address.
+ *  3. It must be FINDABLE in the masked header. An address the parser
+ *     RECONSTRUCTED rather than copied — an unquoted local part like
+ *     `"a"@b.com`, a decoded encoded-word — is not in the text anywhere, so
+ *     its position cannot be established and it is refused.
+ *  4. Either the header names exactly ONE address — masking guarantees every
+ *     recipient contributes exactly one `@` and nothing else does, so a single
+ *     `@` means a single recipient, there is nobody to confuse them with, and
+ *     a recovered-from-garbage answer is still the only answer the header
+ *     admits — or the header is structurally clean: one chunk per parsed
+ *     entry, each chunk carrying exactly one address. A header that is BOTH
+ *     malformed and multi-recipient has separators we cannot trust, so we
+ *     cannot claim to know which recipient came first.
+ *
+ * TWO of the lines below are not killed by any test in this suite, and the
+ * honest thing is to say so rather than let a future maintainer credit them
+ * with work they are not observably doing. They are "no `@` may precede the
+ * answer" and "one chunk per parsed entry". The first of them does fire on
+ * real headers — it is what rejects `Jane <jane@example.com, Bob <bob@x.com>`
+ * — but every input found so far, some two thousand generated headers plus
+ * every case in `gmail-sync-sent.test.ts`, is ALSO refused further down, so
+ * deleting either leaves the suite green. They are kept because between them
+ * they are what makes the argument above SOUND rather than merely true today:
+ * they are the two checks that fail closed if postal-mime ever starts silently
+ * dropping an entry, which is precisely how this function was wrong before.
+ * Nothing else here may be relaxed on the assumption that they will catch it.
+ */
+function firstWrittenAddress(rawHeaderValue: string | null): string | null {
+  if (rawHeaderValue === null) return null;
+
+  const entries = addressParser(rawHeaderValue, { flatten: true });
+  const address = entries[0]?.address?.trim().toLowerCase() ?? "";
+  if (!isAddrSpec(address)) return null;
+
+  const masked = maskQuotedAndComments(rawHeaderValue).toLowerCase();
+  const at = masked.indexOf(address);
+  if (at === -1) return null;
+  // Untested by construction — see the docstring. Do not lean on it.
+  if (masked.slice(0, at).includes("@")) return null;
+
+  const addressCount = (masked.match(/@/g) ?? []).length;
+  if (addressCount === 1) return address;
+
+  const chunks = topLevelChunks(masked);
+  const clean =
+    // Untested by construction — see the docstring. Do not lean on it.
+    chunks.length === entries.length &&
+    chunks.every((chunk) => (chunk.match(/@/g) ?? []).length === 1);
+  return clean ? address : null;
+}
+
+/**
+ * A `Date:` header as unix seconds, or null when absent or unparseable.
+ *
+ * Worth the parse: `sentAt` decides where a mirrored reply sorts on the
+ * timeline, and stamping the sync time instead would file a backlog drained
+ * after an outage at the moment it was pulled — every reply sorting after the
+ * mail it answers, on a feature whose whole point is a coherent timeline.
+ *
+ * The header is sender-controlled in general, but these are messages from the
+ * mailbox's OWN Sent folder, so the writer is us. A value that is missing,
+ * junk, or not a finite instant falls back to the sync time.
+ */
+function parseDateHeader(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const ms = Date.parse(raw.trim());
+  if (!Number.isFinite(ms)) return null;
+  const seconds = Math.floor(ms / 1000);
+  return seconds > 0 ? seconds : null;
+}
+
+/**
+ * Mirror one message from the mailbox's Sent folder onto the timeline.
+ *
+ * Returns whether a row was written. A `false` is an ordinary skip, not a
+ * failure — it never stops the run. Anything genuinely wrong throws, and the
+ * caller treats that exactly as it treats a failed inbound ingest.
+ */
+async function mirrorSentMessage(
+  db: DrizzleD1Database<typeof schema>,
+  opts: {
+    gmailMessageId: string;
+    message: { raw: ArrayBuffer; threadId: string };
+    /** The saasmail inbox this account is mapped to. */
+    inbox: string;
+    internalDomains: string[];
+  },
+): Promise<boolean> {
+  const { gmailMessageId, message, inbox, internalDomains } = opts;
+
+  // ECHO SUPPRESSION. saasmail now sends replies THROUGH Gmail, and Gmail
+  // files those in the same mailbox's Sent folder, so they come straight back
+  // here. The send path records Gmail's returned id on the `sent_emails` row
+  // (`sent_emails.gmailMessageId`), so seeing that id again means this is our
+  // own send coming home. Without this check every reply a user sends would
+  // appear on the timeline twice.
+  //
+  // It reads as this mirror's idempotency key, and on its own it is NOT one:
+  // a SELECT cannot exclude a write that has not happened yet. The send path
+  // writes its `sent_emails` row AFTER Gmail has accepted the message, and
+  // Gmail files a Sent copy the instant it returns that 2xx — so a tick
+  // inside that window finds nothing here and mirrors our own reply. Two
+  // overlapping ticks reproduce it for any message. What actually holds the
+  // invariant is `sent_emails_gmail_message_from_unique` plus the
+  // `onConflictDoNothing` on the insert below; this stays as the cheap path
+  // that skips before paying for a parse.
+  //
+  // Scoped to this account's inbox: Gmail documents message ids as immutable
+  // per MAILBOX, not globally unique, so with two connected mailboxes an
+  // unscoped match could let one mailbox's id suppress the other's genuine
+  // Sent message. The index still carries the lookup.
+  //
+  // `inbox` is a safe scope ONLY while one Gmail account maps to exactly one
+  // personal inbox — which is what `resolvePersonalInbox` enforces and what
+  // `admin-inboxes-router.ts` guarantees by rejecting Google Group mappings
+  // outright. If a later slice enables group routing, several accounts could
+  // write `sent_emails` rows under the same `from_address` and this predicate
+  // stops distinguishing them; scope it by `gmail_accounts.id` then.
+  const echo = await db
+    .select({ id: sentEmails.id })
+    .from(sentEmails)
+    .where(
+      and(
+        eq(sentEmails.gmailMessageId, gmailMessageId),
+        eq(sentEmails.fromAddress, inbox),
+      ),
+    )
+    .limit(1);
+  if (echo.length > 0) return false;
+
+  // Provisional envelope: nothing in a Sent message's envelope is known to
+  // us, and the addresses that matter are read back out of the headers below.
+  const parsed = await parseRaw(message.raw, { from: inbox, to: inbox });
+
+  // The counterparty of a SENT message is its RECIPIENT, not its sender —
+  // the sender is us.
+  //
+  // `To:`, else `Cc:`, else `Bcc:`. A message in the mailbox's own Sent folder
+  // usually retains the Bcc it was sent with, so the chain rescues a
+  // blind-copied send that would otherwise have no counterparty at all.
+  //
+  // The `??`s choose a HEADER, never an address: the chain moves on only when
+  // the message carried no header of that name at all. A `To:` that is present
+  // but yields nothing usable ends the search — falling through to `Cc:` there
+  // would file the reply on a third party who was copied, while the person it
+  // was actually addressed to sits unread on the To: line.
+  const recipientHeader =
+    parsed.recipientHeaders.to ??
+    parsed.recipientHeaders.cc ??
+    parsed.recipientHeaders.bcc;
+  const toAddress = firstWrittenAddress(recipientHeader);
+  if (!toAddress) {
+    // There is no timeline to put it on, and `sent_emails.to_address` is NOT
+    // NULL, so inventing a value would be worse than passing over it.
+    //
+    // Says what happened, not what caused it. Plenty of headers land here
+    // while being perfectly legal RFC 5322 — `undisclosed-recipients:;` names
+    // nobody, `<jane@localhost>` is an address we will not file a customer
+    // under, and a header that is both malformed and multi-recipient is one
+    // whose first recipient we decline to guess at. None of those means
+    // something upstream is broken, and telling an operator it does sends
+    // them looking for a fault that is not there.
+    console.warn(
+      recipientHeader === null
+        ? `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no To:, Cc: or Bcc: header at all, so it has no counterparty; not mirrored.`
+        : `Gmail sync for ${inbox}: sent message ${gmailMessageId} yielded no usable counterparty from its first recipient header (${JSON.stringify(recipientHeader.slice(0, 120))}) — it names nobody, or its first-written recipient is not an address we can file mail under. Not mirrored, and deliberately not guessing at a later recipient.`,
+    );
+    return false;
+  }
+
+  // Person matching follows the inbound path: look the person up by the
+  // canonical (trimmed, lowercased) address, which is the form
+  // `firstWrittenAddress` returns, so casing variants resolve to the same row.
+  //
+  // Unlike the inbound path this never CREATES a person. Inbound mail is
+  // proof someone exists and wants to be on the timeline; our own outgoing
+  // mail is not, and `sent_emails.person_id` is nullable precisely so a row
+  // can be stored without one. A message to an address we have never heard
+  // from is therefore recorded, not dropped and not a failure.
+  const personRow = await db
+    .select({ id: people.id })
+    .from(people)
+    .where(eq(people.email, toAddress))
+    .limit(1);
+
+  // Same grouping the outbound send path computes, so a mirrored reply lands
+  // in the same group thread as the messages it answers rather than forking
+  // one of its own.
+  const externals = externalsOnly(
+    [toAddress, ...parsed.cc.map((c) => c.email)],
+    internalDomains,
+  );
+  const conversationId = await computeConversationId(inbox, externals);
+
+  const now = nowSeconds();
+  // When the message was actually sent, not when we got around to pulling it.
+  const sentAt = parseDateHeader(header(parsed.headers, "date")) ?? now;
+
+  // `onConflictDoNothing` + `returning` is what makes this mirror actually
+  // idempotent: the unique index refuses a second row for this (Gmail id,
+  // inbox) pair, and an empty `returning` is how we learn it did. So a tick
+  // that raced the send path — or another tick — writes nothing and reports a
+  // skip, instead of putting the same reply on the timeline twice forever.
+  //
+  // Not a failure: a row that is already there is the outcome this function
+  // wanted. Throwing would stall the account on a message that needs nothing
+  // doing.
+  const inserted = await db
+    .insert(sentEmails)
+    .values({
+      id: nanoid(),
+      personId: personRow[0]?.id ?? null,
+      // The mapped inbox, not the Gmail account's own address: the timeline
+      // groups sent mail by `from_address`, and the inbox is what the rest of
+      // the thread is filed under.
+      fromAddress: inbox,
+      toAddress,
+      subject: parsed.subject,
+      bodyHtml: parsed.bodyHtml,
+      bodyText: parsed.bodyText,
+      inReplyTo: header(parsed.headers, "in-reply-to") ?? null,
+      messageId: parsed.messageId,
+      status: "sent",
+      cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
+      conversationId,
+      gmailMessageId,
+      gmailThreadId: message.threadId || null,
+      // `sentAt` orders the timeline, so it is the message's own time.
+      // `createdAt` is when this row appeared here, which is now.
+      sentAt,
+      createdAt: now,
+    })
+    .onConflictDoNothing()
+    .returning({ id: sentEmails.id });
+
+  if (inserted.length === 0) {
+    console.log(
+      `Gmail sync for ${inbox}: sent message ${gmailMessageId} is already on the timeline; not mirrored again.`,
+    );
+    return false;
+  }
+
+  // A rep who answered this lead from their phone has made contact, so the
+  // automated follow-ups must stop — exactly as they do for inbound mail
+  // (email-handler.ts) and for every saasmail-originated send. Without this
+  // the customer keeps getting nudged about a question a human already
+  // answered, and the slice's whole premise — a Gmail-typed reply behaves
+  // like a saasmail-typed one — fails on the behaviour that is most visible
+  // to the customer.
+  //
+  // Conditional because `sent_emails.person_id` is nullable on mirrored rows:
+  // a message to an address we have never heard from has no timeline and no
+  // enrollments to cancel.
+  //
+  // Guarded, unlike the identical call on the inbound path, because the
+  // consequence of a throw differs here. The row above is already committed,
+  // so an escaping error would stop the run AND leave the echo check at the
+  // top of this function matching on the next attempt — the message would be
+  // skipped forever and the cancellation lost permanently, rather than
+  // retried. A sequence that keeps running is worth an operator's attention;
+  // it is not worth discarding the mirror that is already on the timeline.
+  const personId = personRow[0]?.id;
+  if (personId) {
+    try {
+      await cancelSequencesForPerson(db, personId);
+    } catch (err) {
+      console.error(
+        `Gmail sync for ${inbox}: mirrored sent message ${gmailMessageId}, but cancelling sequences for ${toAddress} failed; that person may keep receiving automated follow-ups:`,
+        err,
+      );
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -211,8 +672,22 @@ export async function syncAccount(
   const inbox = resolvePersonalInbox(mappings);
 
   let ingested = 0;
+  let mirrored = 0;
   let skipped = 0;
   let failed = 0;
+
+  /**
+   * Our own domains, for the conversation grouping a mirrored Sent message
+   * needs. Loaded at most once per run and only when a Sent message actually
+   * turns up, so an account that never sees one pays nothing for it.
+   */
+  let internalDomains: string[] | null = null;
+  const getInternalDomains = async (): Promise<string[]> => {
+    if (internalDomains === null) {
+      internalDomains = await fetchInternalDomains(db);
+    }
+    return internalDomains;
+  };
 
   // No usable destination — so stall, before touching history at all.
   //
@@ -246,14 +721,14 @@ export async function syncAccount(
       // cursor stays exactly where it was.
       .set({ lastError: reason, updatedAt: now })
       .where(eq(gmailAccounts.id, account.id));
-    return { ingested, skipped, reseeded: false, failed };
+    return { ingested, mirrored, skipped, reseeded: false, failed };
   }
 
   if (!account.historyId) {
     // A first seed skips nothing — there was no cursor — so it leaves no
     // error marker behind.
     await seedCursor(db, account.id, accessToken);
-    return { ingested, skipped, reseeded: false, failed };
+    return { ingested, mirrored, skipped, reseeded: false, failed };
   }
 
   const startHistoryId = account.historyId;
@@ -296,7 +771,7 @@ export async function syncAccount(
         console.warn(
           `Gmail history expired for ${account.emailAddress}: cursor ${startHistoryId} is gone, re-seeded at ${seeded}. Messages in the gap were not synced.`,
         );
-        return { ingested, skipped, reseeded: true, failed };
+        return { ingested, mirrored, skipped, reseeded: true, failed };
       }
       throw err;
     }
@@ -316,7 +791,8 @@ export async function syncAccount(
       // would leave the cursor unable to advance past that record, ever.
       if (
         lastCompleteRecordId !== null &&
-        ingested + skipped + record.messageIds.length > MAX_MESSAGES_PER_RUN
+        ingested + mirrored + skipped + record.messageIds.length >
+          MAX_MESSAGES_PER_RUN
       ) {
         truncated = true;
         break;
@@ -338,6 +814,29 @@ export async function syncAccount(
 
           if (message.labelIds.some((label) => SKIP_LABELS.has(label))) {
             skipped++;
+            continue;
+          }
+
+          // The mailbox's own outgoing mail goes onto the timeline as a
+          // `sent_emails` row instead of down the inbound path. Everything
+          // below this branch is the inbound path, unchanged.
+          //
+          // Inside the same try/catch as the inbound ingest deliberately: a
+          // mirror that throws is not a new failure mode, it is the existing
+          // one. The catch counts it, leaves this record incomplete and stops
+          // the run with the cursor at the last record that finished.
+          if (message.labelIds.includes(SENT_LABEL)) {
+            const didMirror = await mirrorSentMessage(db, {
+              gmailMessageId: messageId,
+              message,
+              inbox,
+              internalDomains: await getInternalDomains(),
+            });
+            // Counted either way, so the per-run message cap stays honest —
+            // but under `mirrored`, not `ingested`: our own outgoing mail
+            // coming home is not mail that arrived.
+            if (didMirror) mirrored++;
+            else skipped++;
             continue;
           }
 
@@ -474,7 +973,7 @@ export async function syncAccount(
     .set(patch)
     .where(eq(gmailAccounts.id, account.id));
 
-  return { ingested, skipped, reseeded: false, failed };
+  return { ingested, mirrored, skipped, reseeded: false, failed };
 }
 
 /**

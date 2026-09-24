@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { emails } from "../db/emails.schema";
+import { sentEmails } from "../db/sent-emails.schema";
 import { encryptSecret } from "../lib/crypto";
 import {
   syncAccount,
@@ -617,7 +618,7 @@ describe("syncAccount — one message, two connected mailboxes", () => {
 });
 
 describe("syncAccount — skipping", () => {
-  it("skips a message carrying the SENT label", async () => {
+  it("mirrors a SENT message onto the timeline, never into emails", async () => {
     await seedAccount();
     await seedInbox("support@acme.dev", null);
     stubGmail({
@@ -641,9 +642,18 @@ describe("syncAccount — skipping", () => {
       fakeCtx(),
       CFG,
     );
+    expect(res.mirrored).toBe(1);
+    // Not an ingest: nothing ARRIVED, we mirrored our own outgoing mail.
     expect(res.ingested).toBe(0);
-    expect(res.skipped).toBe(1);
+    expect(res.skipped).toBe(0);
+    // The boundary this test has always guarded, and still does: mail the
+    // mailbox SENT must never be ingested as if it had arrived.
     expect(await getDb().select().from(emails)).toHaveLength(0);
+    // It is mirrored into `sent_emails` instead — see gmail-sync-sent.test.ts
+    // for the full contract.
+    const sent = await getDb().select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].gmailMessageId).toBe("m1");
   });
 
   it("tolerates a message deleted between the history page and the fetch", async () => {
