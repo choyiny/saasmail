@@ -124,6 +124,27 @@ function relativeTime(unixSeconds: number): string {
   return plural(Math.round(hours / 24), "day");
 }
 
+/**
+ * Where this mailbox came from: when it was added, and who last authorised
+ * it. A mailbox reads someone else's mail, so an operator looking at one they
+ * did not set up needs the row to answer that.
+ *
+ * The two halves are deliberately worded as different facts, because they
+ * are: `createdAt` is the first connection and never moves, while
+ * `connectedBy` is re-stamped on every reconnect and so names whoever last
+ * replaced the credentials.
+ *
+ * Degrades rather than disappears — a row connected before the server
+ * recorded this says only when, and a deleted admin is named as such rather
+ * than printed as a user id nobody can resolve.
+ */
+function connectedByLabel(account: GmailAccount): string {
+  const added = `Added ${relativeTime(account.createdAt)}`;
+  if (account.connectedBy === null) return added;
+  const who = account.connectedBy.name ?? "a deleted user";
+  return `${added} · last connected by ${who}`;
+}
+
 interface ConnectedMailboxesProps {
   /**
    * Called when the set of connected mailboxes has changed, so the rest of
@@ -157,7 +178,7 @@ export default function ConnectedMailboxes({
   // for this visit but a refresh does not resurrect a stale one.
   const [searchParams, setSearchParams] = useSearchParams();
   const [connectResult, setConnectResult] = useState<
-    "connected" | "error" | "wrong_account" | null
+    "connected" | "error" | "wrong_account" | "wrong_admin" | null
   >(null);
   // Which mailbox a refused reconnect was aimed at, and which one Google
   // actually granted. Naming both is the point of the message: without it the
@@ -176,7 +197,8 @@ export default function ConnectedMailboxes({
     if (
       outcome !== "connected" &&
       outcome !== "error" &&
-      outcome !== "wrong_account"
+      outcome !== "wrong_account" &&
+      outcome !== "wrong_admin"
     ) {
       return;
     }
@@ -364,6 +386,24 @@ export default function ConnectedMailboxes({
         </div>
       )}
 
+      {connectResult === "wrong_admin" && (
+        <div
+          data-testid="gmail-wrong-admin"
+          className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
+        >
+          <AlertTriangle size={14} className="mt-px shrink-0" />
+          <span>
+            <span className="font-medium">
+              That consent flow belongs to a different administrator, so nothing
+              was changed.
+            </span>{" "}
+            A connection is tied to the admin who started it. Start it again
+            from this account — the button above — and finish it in this
+            browser.
+          </span>
+        </div>
+      )}
+
       {connectResult === "connected" && (
         <div
           data-testid="gmail-connect-success"
@@ -433,10 +473,19 @@ export default function ConnectedMailboxes({
                       <div className="truncate text-sm font-medium text-text-primary">
                         {account.emailAddress}
                       </div>
-                      <div className="mt-0.5 text-xs font-light text-text-tertiary">
+                      <div
+                        data-testid={`gmail-synced-${account.id}`}
+                        className="mt-0.5 text-xs font-light text-text-tertiary"
+                      >
                         {account.lastSyncedAt === null
                           ? "Not synced yet — the first sync runs within 15 minutes."
                           : `Synced ${relativeTime(account.lastSyncedAt)}`}
+                      </div>
+                      <div
+                        data-testid={`gmail-provenance-${account.id}`}
+                        className="mt-0.5 text-xs font-light text-text-tertiary"
+                      >
+                        {connectedByLabel(account)}
                       </div>
                     </div>
 

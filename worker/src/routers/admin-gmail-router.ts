@@ -148,12 +148,26 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
   try {
     // Same key as signState above — it both seals refresh tokens and signs
     // this state parameter. Deliberate; see docs/configuration.md.
-    // The state is verified for its integrity — the signature is what makes
-    // `expectedEmail` trustworthy — but who is acting is the session, not the
-    // payload: this route is admin-guarded, and a callback completed in a
-    // second admin's browser is that admin's doing.
-    const { expectedEmail } = await verifyState(state, cfg.encryptionKey);
+    const { userId, expectedEmail } = await verifyState(
+      state,
+      cfg.encryptionKey,
+    );
     const connectedBy = c.get("user").id;
+
+    // The signature is what makes the payload trustworthy; this is what the
+    // payload is *for*. `signState` seals in the admin who began the flow, so
+    // requiring the session to match binds the consent to them. Without it a
+    // state minted in one admin's browser completes in another's, and the
+    // mailbox Google hands back is stored — and attributed — under whoever
+    // happened to open the link.
+    //
+    // It refuses nothing legitimate: a state lives ten minutes (state.ts) and
+    // the same admin signed in twice is still the same user id. The only flow
+    // this stops is one finished by somebody else. Checked before
+    // `exchangeCode`, so a refused callback also burns no authorization code.
+    if (userId !== connectedBy) {
+      return c.redirect(`${INBOXES_PATH}?gmail=wrong_admin`, 302);
+    }
     const tokens = await exchangeCode({
       code,
       clientId: cfg.clientId,

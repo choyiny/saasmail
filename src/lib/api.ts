@@ -943,6 +943,17 @@ export interface GmailAccount {
   lastGapAt: number | null;
   /** Unix **seconds** of the connection, like the two fields above. */
   createdAt: number;
+  /**
+   * The admin who last connected or reconnected this mailbox. Null on a row
+   * connected before the server recorded it; `name` and `email` are null when
+   * that user has since been deleted — the id is kept either way, because it
+   * is what the row actually stores.
+   */
+  connectedBy: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
 }
 
 export async function fetchGmailAccounts(): Promise<GmailAccount[]> {

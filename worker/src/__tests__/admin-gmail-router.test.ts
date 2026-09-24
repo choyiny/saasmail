@@ -184,12 +184,35 @@ describe("GET /api/admin/gmail/callback", () => {
     );
   });
 
-  it("attributes the connection to the admin who completed it", async () => {
-    // Two admins: the state was signed when the first started the flow, but
-    // the browser that came back from Google is the second one's session.
-    // connectedBy records who acted, and the session is the authority on
-    // that — the state payload is only evidence of what was asked for.
-    const { userId: starter } = await createTestUser({
+  it("attributes the connection to the admin whose flow it is", async () => {
+    const { userId, apiKey } = await createTestUser({
+      id: "admin-starter",
+      role: "admin",
+      email: "starter@example.com",
+    });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].connectedBy).toBe("admin-starter");
+  });
+
+  it("refuses a callback finished by a different admin", async () => {
+    // The signed state names the admin who began the flow. That binding is
+    // the point of signing it: without the check, a state minted in one
+    // admin's browser completes in another's, and whatever Google hands back
+    // is stored under their session.
+    await createTestUser({
       id: "admin-starter",
       role: "admin",
       email: "starter@example.com",
@@ -205,16 +228,18 @@ describe("GET /api/admin/gmail/callback", () => {
       expires_in: 3599,
     });
 
-    const state = await signState(starter, KEY);
-    await authFetch(
+    const state = await signState("admin-starter", KEY);
+    const res = await authFetch(
       `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
       { apiKey, redirect: "manual" },
     );
 
-    const rows = await getDb().select().from(gmailAccounts);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].connectedBy).toBe("admin-finisher");
-    expect(rows[0].connectedBy).not.toBe("admin-starter");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("gmail=wrong_admin");
+    // Nothing stored, and — because the check runs before `exchangeCode` —
+    // the authorization code was never spent either.
+    expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 
   it("refuses a grant that returns no refresh token", async () => {
