@@ -357,7 +357,16 @@ export default {
       (async () => {
         const db = drizzle(env.DB, { schema });
         await syncAllGmailAccounts(db, env, ctx);
-      })().catch((err) => console.error("[cron] gmail sync failed:", err)),
+      })().catch((err) =>
+        // The message only, never the error object. This frame begins with
+        // `getAccessToken`, whose last act is a D1 UPDATE binding the
+        // plaintext access token and the sealed refresh token — and a D1
+        // error's serialised form carries the parameters bound to it. Same
+        // rule `syncAllGmailAccounts` and the OAuth callback already hold.
+        console.error(
+          `[cron] gmail sync failed: ${err instanceof Error ? err.message : "unknown error"}`,
+        ),
+      ),
     );
   },
   async queue(
