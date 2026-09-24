@@ -2,6 +2,7 @@ import { createMimeMessage, Mailbox } from "mimetext/browser";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { parseFrom, toBase64 } from "../shared";
 import { classifyErrorMessage, transientFromStatus } from "../classify";
+import { GoogleAuthError } from "../../gmail/oauth";
 
 const SEND_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
 
@@ -197,14 +198,32 @@ export class GmailSender implements EmailSender {
         try {
           refreshed = await this.reauthorize();
         } catch (e) {
-          const detail = e instanceof Error ? e.message : String(e);
+          // The underlying error's text NEVER goes into this message. It
+          // becomes a 502 body, and the reply route is reachable by any
+          // authenticated user holding a permission on the inbox — not only
+          // an admin. `reauthorize` is `invalidateAccessToken` +
+          // `getAccessToken`, and `getAccessToken`'s last act is a D1 UPDATE
+          // whose bound parameters are the plaintext access token and the
+          // sealed refresh token; a D1 error carries its bound parameters in
+          // its message. The same reasoning is written out at the OAuth
+          // callback, which answers it by logging the message and never the
+          // error — this is the response-body version of that rule.
+          //
+          // Nothing in that text was actionable anyway. What the user has to
+          // do is in the fixed sentence below; the code goes to the log, for
+          // whoever can read logs.
+          const code =
+            e instanceof GoogleAuthError ? e.code : "reauthorize_failed";
+          console.error(
+            `[GmailSender] re-authorizing the mailbox failed: ${code}`,
+          );
           return {
             id: null,
             error: {
               message:
                 "Gmail rejected saasmail's access to this mailbox and " +
-                `re-authorizing it failed (${detail}). The Google grant ` +
-                "looks revoked — reconnect this mailbox under Gmail settings.",
+                "re-authorizing it failed. The Google grant looks revoked — " +
+                "reconnect this mailbox under Gmail settings.",
               transient: false,
               reconnect: true,
             },

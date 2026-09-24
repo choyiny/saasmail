@@ -328,6 +328,69 @@ describe("GmailSender", () => {
     expect(result.error?.transient).toBe(true);
   });
 
+  it("keeps a failed re-authorization's own error text out of the reply's error", async () => {
+    // `reauthorize` is `invalidateAccessToken` + `getAccessToken`, and
+    // `getAccessToken` ends in a D1 UPDATE whose bound parameters are the
+    // plaintext access token and the SEALED refresh token. A D1 error carries
+    // the parameters bound to it, and this message becomes a 502 body that
+    // any authenticated user holding a permission on the inbox can read —
+    // not only an admin. So none of it may be interpolated, whatever it says.
+    const leak = new Error(
+      "D1_ERROR: UPDATE gmail_accounts SET access_token = 'ya29.SECRET-AT', " +
+        "refresh_token_encrypted = 'SEALED-RT'",
+    );
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { message: "Invalid Credentials" } }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+    const sender = new GmailSender(
+      "gm_test_token",
+      fetchMock as unknown as typeof fetch,
+      {
+        accountId: "acct-1",
+        reauthorize: async () => {
+          throw leak;
+        },
+      },
+    );
+
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    let result;
+    let logged: string;
+    try {
+      result = await sender.send({
+        from: "a@b.com",
+        to: "c@d.com",
+        subject: "s",
+        html: "<p>h</p>",
+      });
+    } finally {
+      // Read the calls BEFORE restoring: `mockRestore` resets the mock's
+      // recorded calls, which would leave every log assertion below vacuously
+      // true against an empty string.
+      logged = errorSpy.mock.calls.flat().join(" ");
+      errorSpy.mockRestore();
+    }
+
+    expect(result.id).toBeNull();
+    expect(result.error?.reconnect).toBe(true);
+    // What the user needs is the action, and it is still there.
+    expect(result.error?.message).toMatch(/reconnect this mailbox/i);
+    // What they must never get is any of the thrown text.
+    expect(result.error?.message).not.toContain("SECRET-AT");
+    expect(result.error?.message).not.toContain("SEALED-RT");
+    expect(result.error?.message).not.toMatch(/D1_ERROR|gmail_accounts/i);
+    // The log gets a code, not the error and not its message.
+    expect(logged).toContain("reauthorize_failed");
+    expect(logged).not.toContain("SECRET-AT");
+    expect(logged).not.toContain("SEALED-RT");
+  });
+
   it("budgets Gmail's 25MB message limit against the ENCODED size", () => {
     const sender = makeSender(vi.fn() as unknown as typeof fetch);
     const limit = sender.maxAttachmentBytes();
