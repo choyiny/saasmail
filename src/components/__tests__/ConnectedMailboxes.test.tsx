@@ -255,6 +255,26 @@ describe("ConnectedMailboxes", () => {
     expect(screen.getByTestId("gmail-account-acct_1")).toBeTruthy();
   });
 
+  it("says why, when the disconnect failed", async () => {
+    // A row that sits there looking untouched reads as "the click didn't
+    // register", and the operator clicks again. The server's own message is
+    // the only thing that says otherwise, so it has to be on screen — this
+    // pins the branch that renders it, which nothing else asserted.
+    mFetch.mockResolvedValue([account()]);
+    mDisconnect.mockRejectedValue(
+      new Error("Gmail is still mapped to an inbox"),
+    );
+    renderAt();
+
+    fireEvent.click(await screen.findByTestId("gmail-disconnect-acct_1"));
+    fireEvent.click(screen.getByTestId("gmail-confirm-disconnect-acct_1"));
+
+    // The server's sentence verbatim, not a generic "something went wrong".
+    expect(
+      await screen.findByText(/Gmail is still mapped to an inbox/),
+    ).toBeTruthy();
+  });
+
   it("explains what connecting does when no mailbox is connected", async () => {
     mFetch.mockResolvedValue([]);
     renderAt();
@@ -445,6 +465,12 @@ describe("ConnectedMailboxes — starting the consent flow", () => {
     "ambiguous_inbox_mapping",
     "history_gap",
     "message_failed:18c2f0a1b2c3",
+    // The sync engine records these when a whole run threw. A Gmail 5xx, a
+    // rate limit or an unclassified throw is not a credential problem, and a
+    // reconnect would re-seed the cursor — losing mail — to fix nothing.
+    "sync_failed:http_500",
+    "sync_failed:rate_limited",
+    "sync_failed:unknown",
   ])(
     "does not offer Reconnect for %s — a new grant cannot fix it",
     async (lastError) => {
@@ -468,6 +494,11 @@ describe("ConnectedMailboxes — starting the consent flow", () => {
     ["ambiguous_inbox_mapping", /leave exactly one/i, /more than one inbox/i],
     ["history_gap", /re-seeded from the present/i, /next successful sync/i],
     ["message_failed:18c2f0a1b2c3", /the next run retries it/i, /cursor/i],
+    [
+      "sync_failed:http_500",
+      /retries every 15 minutes/i,
+      /last sync could not run/i,
+    ],
   ])(
     "tells the operator what to do instead for %s",
     async (lastError, action, cause) => {
@@ -479,6 +510,25 @@ describe("ConnectedMailboxes — starting the consent flow", () => {
       expect(row.textContent).toMatch(cause);
       // And never the auth advice, which is the whole point of the branch.
       expect(row.textContent).not.toMatch(/until you reconnect it/i);
+    },
+  );
+
+  /**
+   * The one shape of `sync_failed:` a fresh grant DOES fix. A grant revoked
+   * while the cached access token was still inside its TTL never reaches the
+   * refresh path, so it surfaces as Gmail refusing the call — and Reconnect
+   * is exactly the right offer for it.
+   */
+  it.each(["sync_failed:http_401", "sync_failed:http_403"])(
+    "offers Reconnect for %s — Gmail refused the credential",
+    async (lastError) => {
+      mFetch.mockResolvedValue([account({ lastError })]);
+      renderAt();
+
+      const row = await screen.findByTestId("gmail-account-acct_1");
+      expect(screen.getByTestId("gmail-reconnect-acct_1")).toBeTruthy();
+      expect(row.textContent).toMatch(/until you reconnect it/i);
+      expect(row.textContent).toContain(lastError);
     },
   );
 });

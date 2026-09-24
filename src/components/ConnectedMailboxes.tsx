@@ -16,6 +16,16 @@ import {
   type GmailAccount,
 } from "@/lib/api";
 import { navigateExternal } from "@/lib/navigate-external";
+// The worker writes these into `gmail_accounts.lastError`; this is the one
+// place that reads them. Imported, not re-typed — the module is
+// dependency-free and bundles for the browser, like `@worker/lib/interpolate`.
+import {
+  AMBIGUOUS_INBOX_MAPPING_ERROR,
+  HISTORY_GAP_ERROR,
+  MESSAGE_FAILED_PREFIX,
+  NO_PERSONAL_INBOX_ERROR,
+  SYNC_FAILED_PREFIX,
+} from "@worker/lib/gmail/error-codes";
 
 /** How often the backend cron sweeps every connected mailbox. */
 const SYNC_INTERVAL_LABEL = "every 15 minutes";
@@ -28,36 +38,49 @@ const SYNC_INTERVAL_LABEL = "every 15 minutes";
  * A denylist rather than an allowlist, because the two sets differ in kind.
  * The auth codes are whatever Google puts in its `error` field, plus the
  * local `refresh_failed` fallback — open-ended, so a code we have never seen
- * should still get the affordance. These are generated in this repo and the
- * list is closed:
- *   - `history_gap`            (lib/gmail/sync.ts)
- *   - `no_personal_inbox`      (lib/gmail/sync.ts — inbox mapping)
- *   - `ambiguous_inbox_mapping` (same)
- *   - `message_failed:<id>`    (lib/gmail/sync.ts — one message threw)
+ * should still get the affordance. The ones generated in this repo are a
+ * closed list, and they are imported rather than re-typed so the two ends
+ * cannot drift.
  */
-const NON_AUTH_ERRORS = new Set([
-  "history_gap",
-  "no_personal_inbox",
-  "ambiguous_inbox_mapping",
+const NON_AUTH_ERRORS = new Set<string>([
+  HISTORY_GAP_ERROR,
+  NO_PERSONAL_INBOX_ERROR,
+  AMBIGUOUS_INBOX_MAPPING_ERROR,
 ]);
-const MESSAGE_FAILED_PREFIX = "message_failed:";
+
+/**
+ * The `sync_failed:` codes a fresh grant CAN fix: Gmail refusing the
+ * credential itself. A 5xx, a rate limit or an unclassified throw are the
+ * server's problem or ours, and the next run in 15 minutes is the answer —
+ * reconnecting only re-seeds the cursor and loses mail.
+ */
+const RECONNECTABLE_SYNC_FAILURES = new Set<string>([
+  `${SYNC_FAILED_PREFIX}http_401`,
+  `${SYNC_FAILED_PREFIX}http_403`,
+]);
 
 function isReconnectable(lastError: string): boolean {
   if (NON_AUTH_ERRORS.has(lastError)) return false;
   if (lastError.startsWith(MESSAGE_FAILED_PREFIX)) return false;
+  if (lastError.startsWith(SYNC_FAILED_PREFIX)) {
+    return RECONNECTABLE_SYNC_FAILURES.has(lastError);
+  }
   return true;
 }
 
 /** What to do instead, for the errors Reconnect cannot fix. */
 function nonAuthGuidance(lastError: string): string {
-  if (lastError === "history_gap") {
+  if (lastError === HISTORY_GAP_ERROR) {
     return "Sync re-seeded from the present after Gmail expired the history cursor. The next successful sync clears this.";
   }
-  if (lastError === "no_personal_inbox") {
+  if (lastError === NO_PERSONAL_INBOX_ERROR) {
     return "No inbox is mapped to this mailbox's personal mail, so nothing can be routed. Map one below — reconnecting will not help.";
   }
-  if (lastError === "ambiguous_inbox_mapping") {
+  if (lastError === AMBIGUOUS_INBOX_MAPPING_ERROR) {
     return "More than one inbox is mapped to this mailbox's personal mail. Leave exactly one — reconnecting will not help.";
+  }
+  if (lastError.startsWith(SYNC_FAILED_PREFIX)) {
+    return `The last sync could not run — nothing since has arrived. Sync retries ${SYNC_INTERVAL_LABEL}, and reconnecting will not help. Gmail said:`;
   }
   return "A message failed to sync. The cursor did not move, so the next run retries it — reconnecting will not help.";
 }
