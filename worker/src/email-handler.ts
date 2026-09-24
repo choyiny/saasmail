@@ -162,13 +162,34 @@ export async function ingestParsedEmail(
     .limit(1);
   const actualPersonId = personRow[0]!.id;
 
-  // Process attachments first (need IDs for CID rewriting)
+  // PLAN the attachments — ids, keys and the CID map — without storing
+  // anything yet. The ids are minted here because the CID rewrite below needs
+  // them, and nothing else about this step requires I/O.
+  //
+  // The storing itself happens AFTER the `emails` insert. It used to happen
+  // before, and a failure in between — a D1 blip, `SQLITE_TOOBIG` on a very
+  // large body, the scheduled handler hitting the CPU limit mid-record — left
+  // `attachments` rows and R2 objects pointing at an `emails` row that was
+  // never written. Unreachable and uncollectable: every delete path
+  // (`lib/delete-email.ts`, `people-router.ts`) finds attachments BY an email
+  // or a person, so nothing ever sees them. Worse, the retry minted a fresh
+  // `emailId`, re-uploaded the bytes and inserted another orphan — 96 cron
+  // ticks a day, forever, for one deterministically failing message.
   const cidMap: Record<string, string> = {};
   const emailId = nanoid();
 
   // Enforce attachment limits
   const cappedAttachments = parsed.attachments.slice(0, MAX_ATTACHMENTS);
   let totalAttachmentBytes = 0;
+  const plannedAttachments: Array<{
+    id: string;
+    r2Key: string;
+    filename: string;
+    contentId: string | null;
+    content: ArrayBuffer | Uint8Array;
+    contentType: string;
+    size: number;
+  }> = [];
 
   for (const att of cappedAttachments) {
     totalAttachmentBytes += att.content.byteLength;
@@ -181,24 +202,16 @@ export async function ingestParsedEmail(
 
     const safeFilename = sanitizeFilename(att.filename);
     const attachmentId = nanoid();
-    const r2Key = `attachments/${emailId}/${attachmentId}/${safeFilename}`;
-
-    await env.R2.put(r2Key, att.content, {
-      httpMetadata: { contentType: att.contentType },
-    });
-
     const isInline = att.disposition === "inline" && !!att.contentId;
 
-    await db.insert(attachments).values({
+    plannedAttachments.push({
       id: attachmentId,
-      emailId,
-      kind: "inbound",
+      r2Key: `attachments/${emailId}/${attachmentId}/${safeFilename}`,
       filename: safeFilename,
+      contentId: isInline ? att.contentId : null,
+      content: att.content,
       contentType: att.contentType,
       size: att.content.byteLength,
-      r2Key,
-      contentId: isInline ? att.contentId : null,
-      createdAt: now,
     });
 
     if (isInline && att.contentId) {
@@ -276,6 +289,28 @@ export async function ingestParsedEmail(
     receivedAt: now,
     createdAt: now,
   });
+
+  // Now store the attachments, against a row that exists. A failure from here
+  // on leaves this message on the timeline without some of its attachments —
+  // and the retry is caught by the per-inbox dedupe above, so it is a bounded
+  // loss reported as a skip, not an unbounded accumulation of orphans and a
+  // person's counters climbing by one per tick.
+  for (const att of plannedAttachments) {
+    await env.R2.put(att.r2Key, att.content, {
+      httpMetadata: { contentType: att.contentType },
+    });
+    await db.insert(attachments).values({
+      id: att.id,
+      emailId,
+      kind: "inbound",
+      filename: att.filename,
+      contentType: att.contentType,
+      size: att.size,
+      r2Key: att.r2Key,
+      contentId: att.contentId,
+      createdAt: now,
+    });
+  }
 
   // Notify connected WebSocket clients about the new email (per-user DOs).
   // Fan out to users with explicit permission for this inbox, plus admins
@@ -392,8 +427,24 @@ export async function ingestParsedEmail(
     knownInboxes: identityRows.map((r) => r.email),
   });
 
-  // Cancel any active sequences for this person
-  await cancelSequencesForPerson(db, actualPersonId);
+  // Cancel any active sequences for this person.
+  //
+  // Guarded, like the identical call in `mirrorSentMessage`, and for the same
+  // reason: the `emails` row above is already committed, so a throw here
+  // would stop the Gmail sync's run AND leave the retry hitting the per-inbox
+  // dedupe — the message would be skipped forever and the cancellation lost
+  // permanently, so the customer who just wrote in keeps getting automated
+  // follow-ups. A sequence that keeps running is worth an operator's
+  // attention; it is not worth discarding mail that is already on the
+  // timeline.
+  try {
+    await cancelSequencesForPerson(db, actualPersonId);
+  } catch (err) {
+    console.error(
+      `Stored the message from ${fromAddressCanonical} to ${recipientCanonical}, but cancelling their sequences failed; they may keep receiving automated follow-ups:`,
+      err instanceof Error ? err.message : "unknown error",
+    );
+  }
 
   console.log(
     `Processed email from ${fromAddressCanonical} to ${recipientCanonical} (${parsed.attachments.length} attachments)`,
