@@ -39,6 +39,15 @@ export interface SendEmailError {
    * is pointless until the mailbox is reconnected.
    */
   reconnect?: boolean;
+  /**
+   * Set when the provider ACCEPTED the message and the failure is only that
+   * we could not record it — today, a Gmail 2xx whose body carried no message
+   * id. The mail is on its way to the recipient, so this is the one error on
+   * which "send it again" is the wrong advice: it would deliver a second copy
+   * of a real reply. A caller wrapping this error in its own sentence must
+   * not add a retry instruction; `message` already says what happened.
+   */
+  delivered?: boolean;
 }
 
 export interface SendEmailResult {

@@ -265,14 +265,30 @@ export class GmailSender implements EmailSender {
 
       if (!data || typeof data.id !== "string") {
         // A 2xx with a body that didn't parse (e.g. an HTML outage page
-        // slipped through) or that's missing the id Gmail always returns on
-        // success. There's no status code to classify from, and a wasted
-        // retry is cheaper than silently dropping the mail.
+        // slipped through a proxy) or that's missing the id Gmail always
+        // returns on success.
+        //
+        // NOT transient, and the message says so plainly. A 2xx means Gmail
+        // ACCEPTED the message and it is on its way to the customer — this is
+        // the one error path on which retrying is unsafe, and calling it
+        // transient produced "Gmail did not accept this reply… Send it again
+        // to retry", which is both untrue and the worst advice available:
+        // pressing send again delivers a second copy of a real reply.
+        //
+        // What is actually lost is the `sent_emails` row, since the id it
+        // keys on never arrived. The Sent-folder mirror will pull the message
+        // back onto the timeline on the next sync, so the reply is not
+        // invisible either — it just is not ours to record.
         return {
           id: null,
           error: {
-            message: "Gmail returned a 2xx response with no message id",
-            transient: true,
+            message:
+              "Gmail accepted this reply but did not return a message id, " +
+              "so it could not be recorded on the timeline. The reply HAS " +
+              "been sent — do not send it again; it will appear here after " +
+              "the next sync.",
+            transient: false,
+            delivered: true,
           },
         };
       }

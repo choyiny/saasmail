@@ -724,6 +724,55 @@ describe("send router — Gmail reply routing", () => {
     expect(rows[0].gmailMessageId).toBe("18stale");
   });
 
+  it("does not wrap 'send it again' around a Gmail 2xx that carried no message id", async () => {
+    // Gmail accepted the reply, so it is already on its way to the customer.
+    // The route still answers 502 — there is no `sent_emails` row to hand
+    // back — but the advice must not be to press send again, which would
+    // deliver a second copy.
+    await seedGmailAccount();
+    await seedGmailIdentity();
+
+    const person = await createTestPerson({
+      id: "p-noid",
+      email: "customer-noid@example.com",
+    });
+    await createTestEmail({
+      id: "rcv-noid",
+      personId: person.id,
+      recipient: "support@acme.dev",
+      subject: "Question",
+      messageId: "parent-noid@example.com",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<html>Service Unavailable</html>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          }),
+      ),
+    );
+
+    const res = await authFetch("/api/send/reply/rcv-noid", {
+      apiKey,
+      method: "POST",
+      body: buildSendForm({
+        fromAddress: "support@acme.dev",
+        bodyHtml: "<p>Thanks for reaching out.</p>",
+      }),
+    });
+
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/do not send it again/i);
+    expect(body.error).not.toMatch(/send it again to retry/i);
+    expect(body.error).not.toMatch(/did not accept/i);
+    // And nothing is queued, so the outbox cannot resend it either.
+    expect(await getDb().select().from(outboxEmails)).toHaveLength(0);
+  });
+
   it("refuses a Gmail-mapped reply whose token cannot be resolved, instead of sending it through the configured provider", async () => {
     // The reply used to fall back here, and that is the failure this pins.
     // On this install the configured provider IS reachable (RESEND_API_KEY
