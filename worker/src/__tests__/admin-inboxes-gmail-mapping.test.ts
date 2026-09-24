@@ -99,6 +99,65 @@ describe("admin inboxes router — Gmail mapping", () => {
     expect(rows[0].gmailAccountId).toBe("acct-1");
   });
 
+  it("clears gmailAccountId when a body names only source cloudflare", async () => {
+    // "Unmapped" has to mean unmapped to the cron too. Leaving the id behind
+    // kept the inbox receiving through Google while replies left through the
+    // configured provider.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: "a@x.com",
+      displayName: "Keep me",
+      source: "gmail",
+      gmailAccountId: "acct-1",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ source: "cloudflare" }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    const rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows[0].source).toBe("cloudflare");
+    expect(rows[0].gmailAccountId).toBeNull();
+    // Unmapping is not a reset of the rest of the row.
+    expect(rows[0].displayName).toBe("Keep me");
+  });
+
+  it("rejects a body that asks for cloudflare and a mailbox at once", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({
+          source: "cloudflare",
+          gmailAccountId: "acct-1",
+        }),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    // Refused before anything was written.
+    const rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(0);
+  });
+
   it("rejects a non-null gmailGroupAddress with 400 and leaves the row untouched", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     const now = Math.floor(Date.now() / 1000);

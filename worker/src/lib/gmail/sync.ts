@@ -185,13 +185,24 @@ export async function syncAccount(
   // Scoped to THIS account: a `source: "cloudflare"` identity also has a null
   // `gmailGroupAddress`, and without this filter it would look like every
   // Gmail account's personal mailbox.
+  //
+  // And scoped to `source: "gmail"`, because the send path already is:
+  // `resolveGmailAccountId` refuses an identity whose source is not "gmail".
+  // Reading the pair differently is how a row could receive through Google
+  // while replying through Cloudflare — and it made `source: "cloudflare"`,
+  // the obvious way to stop a sync from an API client, not stop it.
   const mappings = await db
     .select({
       email: senderIdentities.email,
       gmailGroupAddress: senderIdentities.gmailGroupAddress,
     })
     .from(senderIdentities)
-    .where(eq(senderIdentities.gmailAccountId, account.id));
+    .where(
+      and(
+        eq(senderIdentities.gmailAccountId, account.id),
+        eq(senderIdentities.source, "gmail"),
+      ),
+    );
 
   // Resolved once per run, not per message: this slice routes personal
   // mailboxes only (1:1 account -> inbox) and deliberately inspects no
