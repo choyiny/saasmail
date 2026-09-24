@@ -1190,4 +1190,139 @@ describe("syncAllGmailAccounts", () => {
     )[0];
     expect(row.lastError).toBe("message_failed:bad");
   });
+
+  /**
+   * A rejecting sync used to be logged and nothing else: `lastError` stayed
+   * null and `lastSyncedAt` kept its old value, so a mailbox failing every
+   * 15 minutes for a week rendered in the admin UI as "Synced 7 days ago"
+   * with no Reconnect offered. `lastError` is the only field that page reads
+   * for trouble, so it is the only place this can be said.
+   */
+  describe("records a rejecting sync on the account", () => {
+    /** Seed one mapped account with a sync already behind it. */
+    async function seedSyncedAccount(lastSyncedAt: number) {
+      await seedAccount("9000", {
+        id: "acct-1",
+        emailAddress: "collector@acme.dev",
+      });
+      await seedInbox("support@acme.dev", null, "acct-1");
+      await getDb()
+        .update(gmailAccounts)
+        .set({ lastSyncedAt })
+        .where(eq(gmailAccounts.id, "acct-1"));
+    }
+
+    it("writes the Gmail status code and moves neither the cursor nor lastSyncedAt", async () => {
+      const syncedAt = Math.floor(Date.now() / 1000) - 86400;
+      await seedSyncedAccount(syncedAt);
+      // A 5xx from history.list is not `history_gone`, so `syncAccount`
+      // rethrows it and the whole account rejects.
+      stubGmail({ historyStatus: 500 });
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await expect(
+          syncAllGmailAccounts(
+            getDb(),
+            env as unknown as CloudflareBindings,
+            fakeCtx(),
+          ),
+        ).resolves.toBeUndefined();
+      } finally {
+        errorSpy.mockRestore();
+      }
+
+      const row = await account();
+      expect(row.lastError).toBe("sync_failed:http_500");
+      // Nothing synced, so nothing may claim it did — and the cursor has to
+      // stay put or the next run skips whatever this one never read.
+      expect(row.lastSyncedAt).toBe(syncedAt);
+      expect(row.historyId).toBe("9000");
+    });
+
+    it("distinguishes a rate limit from a server error", async () => {
+      await seedSyncedAccount(Math.floor(Date.now() / 1000) - 3600);
+      stubGmail({ historyStatus: 429 });
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await syncAllGmailAccounts(
+          getDb(),
+          env as unknown as CloudflareBindings,
+          fakeCtx(),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
+
+      // Gmail's own classification, so the operator can tell "try again" from
+      // "something is broken" — and so the UI can withhold Reconnect, which
+      // fixes neither.
+      expect((await account()).lastError).toBe("sync_failed:rate_limited");
+    });
+
+    it("reduces an unclassified failure to a code, never its message", async () => {
+      await seedSyncedAccount(Math.floor(Date.now() / 1000) - 3600);
+      stubGmail({});
+      // Fail the history call with the shape this rule exists for: a D1
+      // error, whose message carries the parameters bound to the query — on
+      // this path the access token and the sealed refresh token. `lastError`
+      // is returned by GET /api/admin/gmail and rendered in the admin UI, so
+      // copying a message into it would publish them.
+      const inner = globalThis.fetch;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (String(input).includes("/users/me/history")) {
+            throw new Error(
+              `D1_ERROR: no such column: foo at offset 0: SQLITE_ERROR (params: ["at-1","rt-1"])`,
+            );
+          }
+          return inner(input, init);
+        }),
+      );
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await syncAllGmailAccounts(
+          getDb(),
+          env as unknown as CloudflareBindings,
+          fakeCtx(),
+        );
+      } finally {
+        errorSpy.mockRestore();
+      }
+
+      const { lastError } = await account();
+      expect(lastError).toBe("sync_failed:unknown");
+      expect(lastError).not.toContain("at-1");
+      expect(lastError).not.toContain("rt-1");
+    });
+
+    it("logs the failure's message but never the error object", async () => {
+      await seedSyncedAccount(Math.floor(Date.now() / 1000) - 3600);
+      stubGmail({ historyStatus: 500 });
+
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        await syncAllGmailAccounts(
+          getDb(),
+          env as unknown as CloudflareBindings,
+          fakeCtx(),
+        );
+        const call = errorSpy.mock.calls.find(
+          (args) =>
+            typeof args[0] === "string" &&
+            args[0].includes("Gmail sync failed for collector@acme.dev"),
+        );
+        expect(call).toBeDefined();
+        // One string argument. Passing the Error itself is what leaks: a D1
+        // error's serialised form carries the query parameters bound to it.
+        expect(call).toHaveLength(1);
+        expect(call![0]).toContain("500");
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+  });
 });
