@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **One message delivered to two connected Gmail mailboxes now reaches both inboxes.** `emails.message_id` was globally unique, so the second mailbox's copy hit the dedupe, was counted as ingested, and the sync advanced its cursor past it — the message vanished with nothing recorded. The dedupe key is now `(message_id, recipient)`. Migration `0038`.
+- A Gmail reply's inbound attachments are stored after the message row rather than before, so a failure part-way through no longer leaves orphaned attachment rows and live R2 objects behind; and a failure to cancel a person's sequences no longer aborts the ingest that had already been written.
+
 - `PATCH /api/emails/bulk` works. It was registered after `PATCH /api/emails/{id}`, and Hono matches in registration order, so the request bound `id: "bulk"`, was answered by the single-email handler, and returned `404` without marking anything — the bulk handler was unreachable dead code. Registering it before the parameterised route makes it live; it applies the same inbox scoping it always contained, silently skipping ids the caller may not access.
 - Inbox list: hydrate group participants/CC after pagination so `GET /api/people/grouped` no longer 500s on mailboxes with 50+ group threads (D1's 100 bound-parameter cap). Stats still counted unread while the people list failed empty.
 - Blocklist: mark matching unread mail as read when a rule is created, so the nav unread badge cannot stick on senders the inbox list has hidden. Migration `0033` clears existing blocked unread counts.
