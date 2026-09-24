@@ -308,7 +308,12 @@ describe("GmailSender", () => {
     expect(result.error?.message).toBe("Invalid To header");
   });
 
-  it("treats a 2xx response with an unparsable (e.g. HTML) body as transient", async () => {
+  it("does not tell the user to resend a 2xx Gmail already accepted", async () => {
+    // A 2xx means Gmail took the message and it is on its way to the
+    // customer. What is lost is only the id we file it under. Calling this
+    // transient produced "Gmail did not accept this reply… Send it again to
+    // retry" — untrue, and the one error path where following the advice
+    // delivers a second copy of a real reply.
     const fetchMock = vi.fn().mockResolvedValue(
       new Response("<html>Service Unavailable</html>", {
         status: 200,
@@ -325,7 +330,10 @@ describe("GmailSender", () => {
     });
 
     expect(result.id).toBeNull();
-    expect(result.error?.transient).toBe(true);
+    // Not queued for a retry either: the outbox would send it again too.
+    expect(result.error?.transient).toBe(false);
+    expect(result.error?.delivered).toBe(true);
+    expect(result.error?.message).toMatch(/do not send it again/i);
   });
 
   it("keeps a failed re-authorization's own error text out of the reply's error", async () => {
