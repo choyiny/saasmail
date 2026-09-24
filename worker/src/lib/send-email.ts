@@ -128,6 +128,22 @@ export type ReplyEmailResult = ReplyEmailSuccess | ReplyEmailFailure;
  * ordinary API, not a contrived setup.
  *
  * Dropping the id costs the threading; refusing to send costs the reply.
+ *
+ * There is no "same inbox, so necessarily the same account" shortcut, and
+ * there used to be. `emails.gmail_thread_id` records whichever account was
+ * mapped WHEN THE MESSAGE WAS SYNCED, and an inbox can be remapped afterwards
+ * — an operator disconnecting a departed colleague's mailbox and mapping the
+ * inbox to a new collector is the documented migration. After it, every
+ * pre-migration thread in that inbox carried an id the new account has never
+ * seen: Gmail 4xx, terminal, never queued, so the reply 502'd identically on
+ * every resend while the UI said to send it again, and the only exit was a
+ * manual D1 UPDATE.
+ *
+ * The lookup below settles the cross-INBOX case. It cannot settle the remap,
+ * because after one the parent inbox's current mapping is the new account and
+ * nothing records which account issued the stored id — so `clearGmailThreadIds`
+ * erases those ids at the moment a mapping changes, and what survives here is
+ * an id the currently mapped account issued.
  */
 async function threadIdForSender(
   db: Db,
@@ -137,8 +153,6 @@ async function threadIdForSender(
   origGmailThreadId: string | null,
 ): Promise<string | null> {
   if (!origGmailThreadId || !(sender instanceof GmailSender)) return null;
-  // Same inbox, so necessarily the same Gmail account: no lookup needed.
-  if (origInbox === fromAddress) return origGmailThreadId;
 
   const [parentIdentity] = await db
     .select({ gmailAccountId: senderIdentities.gmailAccountId })

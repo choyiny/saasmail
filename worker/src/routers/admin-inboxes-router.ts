@@ -8,6 +8,7 @@ import {
   MAX_SIGNATURE_HTML_LENGTH,
   sanitizeSignatureHtml,
 } from "../lib/sanitize-signature";
+import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
 import type { Variables } from "../variables";
 
 export const adminInboxesRouter = new OpenAPIHono<{
@@ -369,6 +370,15 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     );
   }
 
+  // The mailbox this inbox's stored Gmail thread ids came from is about to
+  // stop being the mailbox it reads from. Those ids are per-MAILBOX and
+  // nothing records which account issued them, so from here on they are
+  // claims no one can check — and handing one to a different account's
+  // `messages.send` is a 4xx, which is terminal, which is never queued. See
+  // `clearGmailThreadIds`.
+  const mappingChanged =
+    nextGmailAccountId !== (currentRow?.gmailAccountId ?? null);
+
   // All fields at defaults → delete the row to keep the table sparse.
   if (
     nextDisplayName === null &&
@@ -379,6 +389,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextGmailAccountId === null
   ) {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+    if (mappingChanged) await clearGmailThreadIds(db, [email]);
     return c.json(
       {
         email,
@@ -418,6 +429,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         updatedAt: now,
       },
     });
+
+  if (mappingChanged) await clearGmailThreadIds(db, [email]);
 
   return c.json(
     {

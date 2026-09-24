@@ -2,10 +2,12 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
+import { senderIdentities } from "../db/sender-identities.schema";
 import { users } from "../db/auth.schema";
 import { encryptSecret } from "../lib/crypto";
 import { buildAuthUrl, exchangeCode, getProfile } from "../lib/gmail/oauth";
 import { signState, verifyState } from "../lib/gmail/state";
+import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 
@@ -269,6 +271,20 @@ adminGmailRouter.openapi(disconnectRoute, async (c) => {
     return c.json({ error: "That Google mailbox is not connected." }, 404);
   }
 
+  const mapped = await db
+    .select({ email: senderIdentities.email })
+    .from(senderIdentities)
+    .where(eq(senderIdentities.gmailAccountId, id));
+
   await db.delete(gmailAccounts).where(eq(gmailAccounts.id, id));
+
+  // Those inboxes' stored Gmail thread ids were issued by the mailbox that
+  // has just gone. See `clearGmailThreadIds` for why leaving them is worse
+  // than losing the threading.
+  await clearGmailThreadIds(
+    db,
+    mapped.map((m) => m.email),
+  );
+
   return c.json({ success: true });
 });
