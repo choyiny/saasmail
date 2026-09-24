@@ -430,12 +430,18 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   // this address in a From: header. Until this check existed, a wrong mapping
   // was saved happily and only surfaced when a real reply bounced.
   //
-  // Checked only when the mapping is new or changed: re-checking on every
+  // Keyed on the RESULTING mapping, not on `body.source`. Entering this block
+  // only when the request carried `source` is what let
+  // `{"gmailAccountId": "..."}` write a mapping with no `sendAs` call at all
+  // — the gate skipped entirely by the one field that creates the thing it
+  // gates. A non-null `nextGmailAccountId` now implies `nextSource ===
+  // "gmail"` by construction above, so this is the whole condition.
+  //
+  // Still only when the mapping is new or changed: re-checking on every
   // unrelated edit would make renaming an inbox fail whenever Gmail is
   // unreachable, and an unchanged mapping was already checked when it was
   // saved.
   if (
-    nextSource === "gmail" &&
     nextGmailAccountId !== null &&
     (currentRow?.source !== "gmail" ||
       currentRow?.gmailAccountId !== nextGmailAccountId)
@@ -481,6 +487,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       );
     }
   }
+
   // The mailbox this inbox's stored Gmail thread ids came from is about to
   // stop being the mailbox it reads from. Those ids are per-MAILBOX and
   // nothing records which account issued them, so from here on they are
