@@ -4,6 +4,7 @@ import {
   integer,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 export const emails = sqliteTable(
@@ -16,7 +17,7 @@ export const emails = sqliteTable(
     bodyHtml: text("body_html"),
     bodyText: text("body_text"),
     rawHeaders: text("raw_headers"),
-    messageId: text("message_id").unique(),
+    messageId: text("message_id"),
     spf: text("spf"),
     dkim: text("dkim"),
     dmarc: text("dmarc"),
@@ -50,5 +51,27 @@ export const emails = sqliteTable(
       table.receivedAt,
     ),
     index("emails_conversation_idx").on(table.conversationId),
+    /**
+     * The inbound dedupe key, and the reason it is a PAIR.
+     *
+     * A global UNIQUE on `message_id` used to hold it. That is correct for
+     * one delivery path, and silently lossy for two: when a sender puts two
+     * of our inboxes on one To: line, both copies carry the same Message-ID,
+     * and the second inbox's copy was refused by the constraint. With Gmail
+     * sync that refusal became permanent — the sync counted the drop as an
+     * ingest and advanced its cursor past mail that never landed anywhere.
+     *
+     * One message to two inboxes is two deliveries. Scoping the key to
+     * `(message_id, recipient)` keeps the real duplicate — the same message
+     * offered twice to the SAME inbox, which is what a retry or an overlapping
+     * cron tick produces — a no-op, while letting the second inbox receive.
+     *
+     * SQLite treats NULLs as distinct in a unique index, so mail with no
+     * Message-ID at all is unconstrained here exactly as it was before.
+     */
+    uniqueIndex("emails_message_recipient_unique").on(
+      table.messageId,
+      table.recipient,
+    ),
   ],
 );
