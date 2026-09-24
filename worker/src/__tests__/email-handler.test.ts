@@ -525,3 +525,121 @@ describe("parseRaw + ingestParsedEmail — direct seam usage", () => {
     expect(row.recipient).toBe("real-group@acme.dev");
   });
 });
+
+describe("ingestParsedEmail — a failure part-way through", () => {
+  /**
+   * Appended, not edited: every characterization test above still describes
+   * the behaviour it always did. What is new is what happens when the ingest
+   * does not finish, which nothing pinned before.
+   */
+  async function ingest(opts: Parameters<typeof buildRawEmail>[0]) {
+    const rawBytes = await new Response(buildRawEmail(opts)).arrayBuffer();
+    const parsed = await parseRaw(rawBytes, {
+      from: opts.from,
+      to: opts.to,
+    });
+    const waitUntilCalls: Promise<unknown>[] = [];
+    const outcome = await ingestParsedEmail(
+      getDb(),
+      parsed,
+      env as unknown as CloudflareBindings,
+      fakeCtx(waitUntilCalls),
+    );
+    await Promise.allSettled(waitUntilCalls);
+    return outcome;
+  }
+
+  const withAttachment = {
+    from: "jane@example.com",
+    to: "support@acme.dev",
+    subject: "With a file",
+    attachment: {
+      filename: "a.bin",
+      contentType: "application/octet-stream",
+      content: "hello bytes",
+    },
+  };
+
+  it("leaves no orphaned attachment row when storing the bytes fails", async () => {
+    // The R2 put and the `attachments` insert used to commit BEFORE the
+    // `emails` row. A failure in between left a row pointing at an email
+    // that does not exist — unreachable by every delete path, because they
+    // all find attachments by an email or a person.
+    const put = vi
+      .spyOn(env.R2 as R2Bucket, "put")
+      .mockRejectedValue(new Error("R2 unavailable"));
+    try {
+      await expect(
+        ingest({ ...withAttachment, messageId: "<orphan@example.com>" }),
+      ).rejects.toThrow(/R2 unavailable/);
+    } finally {
+      put.mockRestore();
+    }
+
+    // The message itself is on the timeline...
+    const emailRows = await getDb().select().from(emails);
+    expect(emailRows).toHaveLength(1);
+    // ...and nothing dangles.
+    expect(await getDb().select().from(attachments)).toHaveLength(0);
+  });
+
+  it("still completes the ingest when cancelling sequences fails", async () => {
+    // The `emails` row is committed by the time the cancel runs, and the
+    // per-inbox dedupe matches on it — so an escaping error would stop the
+    // Gmail sync's run AND make every retry skip this message, losing the
+    // cancellation permanently rather than retrying it. `mirrorSentMessage`
+    // guards the identical call for the identical reason; the inbound path
+    // did not.
+    //
+    // The failure is real, not mocked: dropping the table makes the cancel's
+    // own SELECT throw the way a genuine database fault would.
+    await env.DB.exec("DROP TABLE sequence_enrollments");
+    try {
+      const outcome = await ingest({
+        from: "jane@example.com",
+        to: "support@acme.dev",
+        subject: "Answer me",
+        messageId: "<cancelfail@example.com>",
+      });
+      expect(outcome.status).toBe("stored");
+      expect(await getDb().select().from(emails)).toHaveLength(1);
+    } finally {
+      // Every statement is CREATE TABLE IF NOT EXISTS, so this just puts the
+      // dropped table back for the rest of the file.
+      await applyMigrations();
+    }
+  });
+
+  it("does not count the person twice when the same message is retried", async () => {
+    // The retry used to mint a fresh emailId, re-upload the bytes and
+    // re-insert, while the person's unread and total climbed by one per
+    // tick — unbounded for a deterministically failing message.
+    const put = vi
+      .spyOn(env.R2 as R2Bucket, "put")
+      .mockRejectedValue(new Error("R2 unavailable"));
+    try {
+      await expect(
+        ingest({ ...withAttachment, messageId: "<retry@example.com>" }),
+      ).rejects.toThrow(/R2 unavailable/);
+    } finally {
+      put.mockRestore();
+    }
+
+    const first = await getDb().select().from(people);
+    expect(first[0].totalCount).toBe(1);
+    expect(first[0].unreadCount).toBe(1);
+
+    // The retry now finds the row this inbox already holds.
+    const outcome = await ingest({
+      ...withAttachment,
+      messageId: "<retry@example.com>",
+    });
+    expect(outcome.status).toBe("duplicate");
+
+    const after = await getDb().select().from(people);
+    expect(after[0].totalCount).toBe(1);
+    expect(after[0].unreadCount).toBe(1);
+    expect(await getDb().select().from(emails)).toHaveLength(1);
+    expect(await getDb().select().from(attachments)).toHaveLength(0);
+  });
+});

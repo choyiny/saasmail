@@ -33,6 +33,9 @@ import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { processOutbox } from "./lib/outbox";
+import { syncAllGmailAccounts } from "./lib/gmail/sync";
+import { drizzle } from "drizzle-orm/d1";
+import { schema } from "./db/schema";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -335,6 +338,35 @@ export default {
       handleScheduled(env)
         .catch((err) => console.error("[cron] sequence dispatch failed:", err))
         .then(() => processOutbox(env)),
+    );
+    // Isolated from sequence dispatch / outbox processing above: a Gmail
+    // sync failure must not be able to break either. `syncAllGmailAccounts`
+    // already isolates per-account failures internally (see its own
+    // Promise.allSettled) and no-ops when the integration isn't configured,
+    // so this call either does nothing or runs to completion.
+    //
+    // `syncAllGmailAccounts` returns `Promise<void>` — it does not hand
+    // per-account outcomes back to this handler. It logs them itself
+    // instead: a distinct line for an account that synced but failed to
+    // ingest a message, and another for an account whose history cursor
+    // expired and had to be re-seeded (see its `results.forEach` for both).
+    // The `.catch()` below only covers a hard failure of the whole call
+    // (e.g. thrown before/outside its own per-account isolation) — per
+    // -account failures never reach it, by design.
+    ctx.waitUntil(
+      (async () => {
+        const db = drizzle(env.DB, { schema });
+        await syncAllGmailAccounts(db, env, ctx);
+      })().catch((err) =>
+        // The message only, never the error object. This frame begins with
+        // `getAccessToken`, whose last act is a D1 UPDATE binding the
+        // plaintext access token and the sealed refresh token — and a D1
+        // error's serialised form carries the parameters bound to it. Same
+        // rule `syncAllGmailAccounts` and the OAuth callback already hold.
+        console.error(
+          `[cron] gmail sync failed: ${err instanceof Error ? err.message : "unknown error"}`,
+        ),
+      ),
     );
   },
   async queue(

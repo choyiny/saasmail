@@ -51,7 +51,11 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS oauth_consents (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, scopes TEXT NOT NULL, created_at INTEGER, updated_at INTEGER)`,
     `CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT, last_email_at INTEGER NOT NULL, unread_count INTEGER NOT NULL DEFAULT 0, total_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS people_last_email_at_idx ON people(last_email_at)`,
-    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT UNIQUE, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    // `message_id` is NOT globally unique: the dedupe key is the
+    // (message_id, recipient) pair below, so one message addressed to two of
+    // our inboxes stores one row per inbox. See emails.schema.ts.
+    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, conversation_id TEXT, gmail_message_id TEXT, gmail_thread_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS emails_message_recipient_unique ON emails(message_id, recipient)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
     `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, conversation_id TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
@@ -65,7 +69,7 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS enrollments_person_status_idx ON sequence_enrollments(person_id, status)`,
     `CREATE TABLE IF NOT EXISTS sequence_emails (id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL, step_order INTEGER NOT NULL, template_slug TEXT NOT NULL, scheduled_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', sent_at INTEGER, sent_email_id TEXT)`,
     `CREATE INDEX IF NOT EXISTS seq_emails_status_scheduled_idx ON sequence_emails(status, scheduled_at)`,
-    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, source TEXT NOT NULL DEFAULT 'cloudflare', gmail_account_id TEXT, gmail_group_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS inbox_permissions (user_id TEXT NOT NULL, email TEXT NOT NULL, created_at INTEGER NOT NULL, created_by TEXT, PRIMARY KEY(user_id, email), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)`,
     `CREATE INDEX IF NOT EXISTS inbox_permissions_email_idx ON inbox_permissions(email)`,
     `CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER)`,
@@ -81,7 +85,7 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS outbox_from_idx ON outbox_emails(from_address)`,
     `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, context_key TEXT NOT NULL, from_address TEXT, to_address TEXT, cc TEXT, subject TEXT, body_html TEXT, body_text TEXT, reply_to_email_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS drafts_user_context_idx ON drafts(user_id, context_key)`,
-    `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, last_gap_at INTEGER, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   ];
 
   for (const sql of statements) {

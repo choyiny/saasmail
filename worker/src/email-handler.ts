@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { schema } from "./db/schema";
 import { people } from "./db/people.schema";
@@ -37,6 +37,29 @@ export async function handleEmail(
 }
 
 /**
+ * What an ingest actually did.
+ *
+ * This used to be `void` for all three outcomes, so a caller counting
+ * deliveries could not tell a stored message from one the blocklist or the
+ * dedupe threw away. The Gmail sync counted every one of them as `ingested`
+ * and advanced its history cursor accordingly — a drop reported as a success,
+ * after which the mail was unreachable by any code path. Naming the outcome is
+ * what lets a caller decide, and `emailId` is what lets the sync stamp Gmail's
+ * ids onto the row this call created instead of guessing at it by Message-ID.
+ */
+export type IngestOutcome =
+  /** A new `emails` row was written; `emailId` is its primary key. */
+  | { status: "stored"; emailId: string }
+  /** The sender is on the blocklist. Nothing was written. */
+  | { status: "blocked" }
+  /**
+   * This inbox already holds this Message-ID — a retry, a replayed Gmail
+   * history page, or two overlapping cron ticks. Nothing was written;
+   * `emailId` is the row that was already there.
+   */
+  | { status: "duplicate"; emailId: string };
+
+/**
  * Store an already-parsed inbound message and run every side effect that
  * follows: blocklist, dedupe, person matching, conversation grouping,
  * attachments, notification fan-out, webhooks, forwarding and sequence
@@ -52,7 +75,7 @@ export async function ingestParsedEmail(
   parsed: ParsedEmail,
   env: CloudflareBindings,
   ctx: ExecutionContext,
-): Promise<void> {
+): Promise<IngestOutcome> {
   const now = Math.floor(Date.now() / 1000);
 
   // Canonicalize inbox addresses to lowercase before storage so casing
@@ -66,19 +89,34 @@ export async function ingestParsedEmail(
   // Drop mail from blocked senders/domains before any storage or side effects.
   if (await isBlocked(db, fromAddressCanonical)) {
     console.log(`Dropped blocked email from ${fromAddressCanonical}`);
-    return;
+    return { status: "blocked" };
   }
 
-  // Deduplicate by Message-ID
+  // Deduplicate by Message-ID, PER INBOX.
+  //
+  // Scoped to `recipient` because one message addressed to two of our inboxes
+  // is two deliveries, not a duplicate: the two copies carry the same
+  // Message-ID, and matching on that alone dropped the second inbox's copy on
+  // the floor. The duplicate this check actually exists to absorb — the same
+  // message offered to the SAME inbox twice, by a retry or a replayed Gmail
+  // history page — is still caught, and the `emails_message_recipient_unique`
+  // index backs it so a race between two callers cannot slip a copy past.
   if (parsed.messageId) {
     const existing = await db
       .select({ id: emails.id })
       .from(emails)
-      .where(eq(emails.messageId, parsed.messageId))
+      .where(
+        and(
+          eq(emails.messageId, parsed.messageId),
+          eq(emails.recipient, recipientCanonical),
+        ),
+      )
       .limit(1);
     if (existing.length > 0) {
-      console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);
-      return;
+      console.log(
+        `Duplicate email with Message-ID ${parsed.messageId} for ${recipientCanonical}`,
+      );
+      return { status: "duplicate", emailId: existing[0]!.id };
     }
   }
 
@@ -124,13 +162,34 @@ export async function ingestParsedEmail(
     .limit(1);
   const actualPersonId = personRow[0]!.id;
 
-  // Process attachments first (need IDs for CID rewriting)
+  // PLAN the attachments — ids, keys and the CID map — without storing
+  // anything yet. The ids are minted here because the CID rewrite below needs
+  // them, and nothing else about this step requires I/O.
+  //
+  // The storing itself happens AFTER the `emails` insert. It used to happen
+  // before, and a failure in between — a D1 blip, `SQLITE_TOOBIG` on a very
+  // large body, the scheduled handler hitting the CPU limit mid-record — left
+  // `attachments` rows and R2 objects pointing at an `emails` row that was
+  // never written. Unreachable and uncollectable: every delete path
+  // (`lib/delete-email.ts`, `people-router.ts`) finds attachments BY an email
+  // or a person, so nothing ever sees them. Worse, the retry minted a fresh
+  // `emailId`, re-uploaded the bytes and inserted another orphan — 96 cron
+  // ticks a day, forever, for one deterministically failing message.
   const cidMap: Record<string, string> = {};
   const emailId = nanoid();
 
   // Enforce attachment limits
   const cappedAttachments = parsed.attachments.slice(0, MAX_ATTACHMENTS);
   let totalAttachmentBytes = 0;
+  const plannedAttachments: Array<{
+    id: string;
+    r2Key: string;
+    filename: string;
+    contentId: string | null;
+    content: ArrayBuffer | Uint8Array;
+    contentType: string;
+    size: number;
+  }> = [];
 
   for (const att of cappedAttachments) {
     totalAttachmentBytes += att.content.byteLength;
@@ -143,24 +202,16 @@ export async function ingestParsedEmail(
 
     const safeFilename = sanitizeFilename(att.filename);
     const attachmentId = nanoid();
-    const r2Key = `attachments/${emailId}/${attachmentId}/${safeFilename}`;
-
-    await env.R2.put(r2Key, att.content, {
-      httpMetadata: { contentType: att.contentType },
-    });
-
     const isInline = att.disposition === "inline" && !!att.contentId;
 
-    await db.insert(attachments).values({
+    plannedAttachments.push({
       id: attachmentId,
-      emailId,
-      kind: "inbound",
+      r2Key: `attachments/${emailId}/${attachmentId}/${safeFilename}`,
       filename: safeFilename,
+      contentId: isInline ? att.contentId : null,
+      content: att.content,
       contentType: att.contentType,
       size: att.content.byteLength,
-      r2Key,
-      contentId: isInline ? att.contentId : null,
-      createdAt: now,
     });
 
     if (isInline && att.contentId) {
@@ -238,6 +289,28 @@ export async function ingestParsedEmail(
     receivedAt: now,
     createdAt: now,
   });
+
+  // Now store the attachments, against a row that exists. A failure from here
+  // on leaves this message on the timeline without some of its attachments —
+  // and the retry is caught by the per-inbox dedupe above, so it is a bounded
+  // loss reported as a skip, not an unbounded accumulation of orphans and a
+  // person's counters climbing by one per tick.
+  for (const att of plannedAttachments) {
+    await env.R2.put(att.r2Key, att.content, {
+      httpMetadata: { contentType: att.contentType },
+    });
+    await db.insert(attachments).values({
+      id: att.id,
+      emailId,
+      kind: "inbound",
+      filename: att.filename,
+      contentType: att.contentType,
+      size: att.size,
+      r2Key: att.r2Key,
+      contentId: att.contentId,
+      createdAt: now,
+    });
+  }
 
   // Notify connected WebSocket clients about the new email (per-user DOs).
   // Fan out to users with explicit permission for this inbox, plus admins
@@ -354,10 +427,28 @@ export async function ingestParsedEmail(
     knownInboxes: identityRows.map((r) => r.email),
   });
 
-  // Cancel any active sequences for this person
-  await cancelSequencesForPerson(db, actualPersonId);
+  // Cancel any active sequences for this person.
+  //
+  // Guarded, like the identical call in `mirrorSentMessage`, and for the same
+  // reason: the `emails` row above is already committed, so a throw here
+  // would stop the Gmail sync's run AND leave the retry hitting the per-inbox
+  // dedupe — the message would be skipped forever and the cancellation lost
+  // permanently, so the customer who just wrote in keeps getting automated
+  // follow-ups. A sequence that keeps running is worth an operator's
+  // attention; it is not worth discarding mail that is already on the
+  // timeline.
+  try {
+    await cancelSequencesForPerson(db, actualPersonId);
+  } catch (err) {
+    console.error(
+      `Stored the message from ${fromAddressCanonical} to ${recipientCanonical}, but cancelling their sequences failed; they may keep receiving automated follow-ups:`,
+      err instanceof Error ? err.message : "unknown error",
+    );
+  }
 
   console.log(
     `Processed email from ${fromAddressCanonical} to ${recipientCanonical} (${parsed.attachments.length} attachments)`,
   );
+
+  return { status: "stored", emailId };
 }
