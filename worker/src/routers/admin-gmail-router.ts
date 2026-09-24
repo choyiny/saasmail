@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
+import { users } from "../db/auth.schema";
 import { encryptSecret } from "../lib/crypto";
 import { buildAuthUrl, exchangeCode, getProfile } from "../lib/gmail/oauth";
 import { signState, verifyState } from "../lib/gmail/state";
@@ -45,6 +46,19 @@ const AccountSchema = z.object({
   lastSyncedAt: z.number().nullable(),
   lastError: z.string().nullable(),
   createdAt: z.number(),
+  /**
+   * The admin who last connected or reconnected this mailbox, resolved from
+   * `gmail_accounts.connected_by`. Null on a row connected before the column
+   * existed; `name`/`email` are null when that user has since been deleted,
+   * since the column carries no foreign key and the id outlives the account.
+   */
+  connectedBy: z
+    .object({
+      id: z.string(),
+      name: z.string().nullable(),
+      email: z.string().nullable(),
+    })
+    .nullable(),
 });
 
 const connectRoute = createRoute({
@@ -191,9 +205,30 @@ adminGmailRouter.openapi(listRoute, async (c) => {
       lastSyncedAt: gmailAccounts.lastSyncedAt,
       lastError: gmailAccounts.lastError,
       createdAt: gmailAccounts.createdAt,
+      connectedById: gmailAccounts.connectedBy,
+      // Left join: `connected_by` carries no foreign key, so the admin who
+      // connected a mailbox can be gone while the row remains. An inner join
+      // would drop the mailbox from the list entirely.
+      connectedByName: users.name,
+      connectedByEmail: users.email,
     })
-    .from(gmailAccounts);
-  return c.json({ accounts: rows });
+    .from(gmailAccounts)
+    .leftJoin(users, eq(users.id, gmailAccounts.connectedBy));
+  return c.json({
+    accounts: rows.map(
+      ({ connectedById, connectedByName, connectedByEmail, ...account }) => ({
+        ...account,
+        connectedBy:
+          connectedById === null
+            ? null
+            : {
+                id: connectedById,
+                name: connectedByName,
+                email: connectedByEmail,
+              },
+      }),
+    ),
+  });
 });
 
 const disconnectRoute = createRoute({

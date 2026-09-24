@@ -226,6 +226,91 @@ describe("GET /api/admin/gmail", () => {
     expect(body).not.toContain("at-cached");
     expect(body).not.toContain("refreshTokenEncrypted");
   });
+
+  it("names the admin who connected each mailbox", async () => {
+    // The column was written on every connect and reconnect but was in no
+    // response, so nothing could ever read it: the row said who, and the API
+    // did not.
+    const { userId, apiKey } = await createTestUser({
+      id: "admin-jane",
+      role: "admin",
+      name: "Jane Ops",
+      email: "jane@example.com",
+    });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed-blob",
+      historyId: "1",
+      connectedBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    const body = (await res.json()) as {
+      accounts: Array<{
+        connectedBy: { id: string; name: string | null; email: string | null };
+      }>;
+    };
+    expect(body.accounts[0].connectedBy).toEqual({
+      id: "admin-jane",
+      name: "Jane Ops",
+      email: "jane@example.com",
+    });
+  });
+
+  it("keeps listing a mailbox whose connecting admin was deleted", async () => {
+    // `connected_by` carries no foreign key, so the id outlives the user. An
+    // inner join here would drop the mailbox from the list entirely — the
+    // account would vanish from the UI while still syncing.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed-blob",
+      historyId: "1",
+      connectedBy: "admin-long-gone",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    const body = (await res.json()) as {
+      accounts: Array<{
+        id: string;
+        connectedBy: { id: string; name: string | null } | null;
+      }>;
+    };
+    expect(body.accounts).toHaveLength(1);
+    expect(body.accounts[0].connectedBy).toEqual({
+      id: "admin-long-gone",
+      name: null,
+      email: null,
+    });
+  });
+
+  it("reports connectedBy as null on a row that predates the column", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed-blob",
+      historyId: "1",
+      connectedBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    const body = (await res.json()) as {
+      accounts: Array<{ connectedBy: unknown }>;
+    };
+    expect(body.accounts[0].connectedBy).toBeNull();
+  });
 });
 
 describe("DELETE /api/admin/gmail/{id}", () => {
