@@ -13,7 +13,12 @@ import {
 } from "./adapters";
 import { decodeCursor, encodeCursor } from "./cursor";
 import type { MessageCursorV1 } from "./cursor";
-import type { AttachmentRow, MessageKind, UnifiedMessage } from "./types";
+import type {
+  AttachmentRow,
+  MessageKind,
+  MessageRef,
+  UnifiedMessage,
+} from "./types";
 
 export type MessageSearchMode = "subject" | "fulltext";
 export type MessageFolder =
@@ -38,11 +43,14 @@ export interface MessageQuery {
   customerId?: string;
   conversationId?: string;
   messageRef?: MessageRef;
+  messageRefs?: MessageRef[];
+  threadKeys?: string[];
   direction?: "inbound" | "outbound";
   after?: number;
   before?: number;
   search?: string;
   searchMode?: MessageSearchMode;
+  from?: string;
   excludeBlocked?: boolean;
   /** Null requests the full matching result set; numeric limits are not service-capped. */
   limit?: number | null;
@@ -54,7 +62,8 @@ export interface MessageQuery {
   viewer?: { userId: string };
   withState?: boolean;
   folder?: MessageFolder;
-  starred?: true;
+  starred?: boolean;
+  seen?: boolean;
   unseen?: true;
   includeArchived?: boolean;
   includeTrashed?: boolean;
@@ -139,6 +148,9 @@ function conversationScope(
     : sql`AND ${column} = ${conversationId}`;
 }
 
+export const MESSAGE_REFS_PER_QUERY = 40;
+export const THREAD_KEYS_PER_QUERY = 20;
+
 function messageRefScope(
   kind: MessageKind,
   idColumn: SQL,
@@ -147,6 +159,42 @@ function messageRefScope(
   if (!ref) return sql``;
   if (ref.kind !== kind) return sql`AND 0`;
   return sql`AND ${idColumn} = ${ref.id}`;
+}
+
+function messageRefsScope(
+  kind: MessageKind,
+  idColumn: SQL,
+  refs: MessageRef[] | undefined,
+): SQL {
+  if (refs === undefined) return sql``;
+  const ids = [
+    ...new Set(refs.filter((ref) => ref.kind === kind).map((ref) => ref.id)),
+  ];
+  return ids.length === 0 ? sql`AND 0` : sql`AND ${idColumn} IN ${ids}`;
+}
+
+function threadKeysScope(
+  kind: MessageKind,
+  idColumn: SQL,
+  conversationIdColumn: SQL,
+  personIdColumn: SQL,
+  keys: string[] | undefined,
+): SQL {
+  if (keys === undefined) return sql``;
+  const conversationKey = conversationKeySql({
+    conversationId: conversationIdColumn,
+    personId: personIdColumn,
+  });
+  const threadKey = sql`COALESCE(${conversationKey}, ${kind} || ':' || ${idColumn})`;
+  const uniqueKeys = [...new Set(keys)];
+  return uniqueKeys.length === 0
+    ? sql`AND 0`
+    : sql`AND ${threadKey} IN ${uniqueKeys}`;
+}
+
+function fromScope(column: SQL, value: string | undefined): SQL {
+  if (value === undefined) return sql``;
+  return sql`AND lower(${column}) LIKE ${`%${escapeLike(value.toLowerCase())}%`} ESCAPE '\\'`;
 }
 
 function dateScope(
@@ -346,7 +394,11 @@ function stateScope(
   }
 
   const starred =
-    query.starred === true ? sql`AND mus.starred_at IS NOT NULL` : sql``;
+    query.starred === undefined
+      ? sql``
+      : query.starred
+        ? sql`AND mus.starred_at IS NOT NULL`
+        : sql`AND mus.starred_at IS NULL`;
   const unseen =
     query.unseen === true && kind === "received" && readColumn
       ? sql`AND (
@@ -354,8 +406,24 @@ function stateScope(
           OR (mus.message_id IS NOT NULL AND mus.seen_at IS NULL)
         )`
       : sql``;
+  let seen = sql``;
+  if (query.seen !== undefined) {
+    if (kind === "sent") {
+      seen = query.seen ? sql`` : sql`AND 0`;
+    } else if (readColumn) {
+      seen = query.seen
+        ? sql`AND (
+            (mus.message_id IS NULL AND ${readColumn} = 1)
+            OR (mus.message_id IS NOT NULL AND mus.seen_at IS NOT NULL)
+          )`
+        : sql`AND (
+            (mus.message_id IS NULL AND ${readColumn} = 0)
+            OR (mus.message_id IS NOT NULL AND mus.seen_at IS NULL)
+          )`;
+    }
+  }
 
-  return sql`${folderScope} ${starred} ${unseen}`;
+  return sql`${folderScope} ${starred} ${unseen} ${seen}`;
 }
 
 function campaignScope(query: MessageQuery): SQL {
@@ -512,7 +580,16 @@ function receivedArm(
       ${customerScope(sql`e.person_id`, query.customerId)}
       ${conversationScope(sql`e.conversation_id`, query.conversationId)}
       ${messageRefScope("received", sql`e.id`, query.messageRef)}
+      ${messageRefsScope("received", sql`e.id`, query.messageRefs)}
+      ${threadKeysScope(
+        "received",
+        sql`e.id`,
+        sql`e.conversation_id`,
+        sql`e.person_id`,
+        query.threadKeys,
+      )}
       ${dateScope(sql`e.received_at`, query.after, query.before)}
+      ${fromScope(sql`p.email`, query.from)}
       ${search.where}
       ${blockedScope(query.excludeBlocked ?? false)}
       ${stateScope(
@@ -599,7 +676,16 @@ function sentArm(
       ${customerScope(sql`se.person_id`, query.customerId)}
       ${conversationScope(sql`se.conversation_id`, query.conversationId)}
       ${messageRefScope("sent", sql`se.id`, query.messageRef)}
+      ${messageRefsScope("sent", sql`se.id`, query.messageRefs)}
+      ${threadKeysScope(
+        "sent",
+        sql`se.id`,
+        sql`se.conversation_id`,
+        sql`se.person_id`,
+        query.threadKeys,
+      )}
       ${dateScope(sql`se.sent_at`, query.after, query.before)}
+      ${fromScope(sql`se.from_address`, query.from)}
       ${sentSearch(query.search, query.searchMode ?? "subject")}
       ${blockedScope(query.excludeBlocked ?? false)}
       ${stateScope(query, "sent", sql`se.id`, sql`se.from_address`)}
@@ -893,8 +979,15 @@ export function buildMessageQuerySql(
     return null;
   }
 
-  if ((query.starred === true || query.unseen === true) && !query.viewer) {
-    throw new InvalidQueryError("starred and unseen filters require a viewer");
+  if (
+    (query.starred !== undefined ||
+      query.seen !== undefined ||
+      query.unseen === true) &&
+    !query.viewer
+  ) {
+    throw new InvalidQueryError(
+      "starred, seen and unseen filters require a viewer",
+    );
   }
   if (
     typeof query.folder === "object" &&
@@ -929,7 +1022,8 @@ export function buildMessageQuerySql(
     folder === "archive" ||
     folder === "junk" ||
     folder === "snoozed" ||
-    query.unseen === true;
+    query.unseen === true ||
+    query.seen === false;
   const forceSent = folder === "sent";
   const forceBoth =
     folder === "trash" || (folder !== undefined && typeof folder === "object");
@@ -983,6 +1077,22 @@ export async function queryMessages(
   allowed: AllowedInboxes,
   query: MessageQuery = {},
 ): Promise<MessagePage> {
+  if (
+    query.messageRefs !== undefined &&
+    query.messageRefs.length > MESSAGE_REFS_PER_QUERY
+  ) {
+    throw new Error(
+      `queryMessages messageRefs is limited to ${MESSAGE_REFS_PER_QUERY} per statement`,
+    );
+  }
+  if (
+    query.threadKeys !== undefined &&
+    query.threadKeys.length > THREAD_KEYS_PER_QUERY
+  ) {
+    throw new Error(
+      `queryMessages threadKeys is limited to ${THREAD_KEYS_PER_QUERY} per statement`,
+    );
+  }
   const built = buildMessageQuerySql(allowed, query);
   if (!built) {
     return { messages: [], nextCursor: null, hasMore: false };
@@ -1024,4 +1134,65 @@ export async function queryMessages(
     nextCursor,
     hasMore,
   };
+}
+
+export async function countMessages(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  query: MessageQuery = {},
+): Promise<number> {
+  const built = buildMessageQuerySql(allowed, {
+    ...query,
+    limit: null,
+    cursor: undefined,
+    offset: undefined,
+  });
+  if (!built) return 0;
+  const rows = await db.all<{ count: number }>(
+    sql`SELECT COUNT(*) AS count FROM (${built.statement})`,
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function countMessageThreads(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  query: MessageQuery = {},
+): Promise<number> {
+  const built = buildMessageQuerySql(allowed, {
+    ...query,
+    limit: null,
+    cursor: undefined,
+    offset: undefined,
+    withState: true,
+  });
+  if (!built) return 0;
+  const rows = await db.all<{ count: number }>(
+    sql`SELECT COUNT(DISTINCT COALESCE(conversation_key, kind || ':' || id)) AS count
+      FROM (${built.statement})`,
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+export async function queryMessageThreadKeys(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  query: MessageQuery = {},
+  limit = 257,
+): Promise<string[]> {
+  const built = buildMessageQuerySql(allowed, {
+    ...query,
+    limit: null,
+    cursor: undefined,
+    offset: undefined,
+    withState: true,
+  });
+  if (!built) return [];
+  const rows = await db.all<{ thread_key: string }>(
+    sql`SELECT DISTINCT COALESCE(conversation_key, kind || ':' || id) AS thread_key
+      FROM (${built.statement})
+      ORDER BY thread_key
+      LIMIT ${limit}`,
+  );
+  return rows.map((row) => row.thread_key);
 }

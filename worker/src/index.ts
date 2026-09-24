@@ -65,6 +65,7 @@ import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
 import { registerMcpRoutes } from "./mcp/http";
+import { registerJmapRoutes } from "./jmap/http";
 import {
   BEARER_AUTH_SCHEME,
   bearerAuthSecurityScheme,
@@ -309,6 +310,10 @@ app.route("/newsletter-images", publicAssetsRouter);
 
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);
+
+// Read-only JMAP discovery/API/download endpoints live outside /api/* and
+// therefore perform their own session/API-key, passkey, and inbox checks.
+registerJmapRoutes(app);
 
 // MCP endpoint + OAuth discovery. Registered before the SPA catch-all so
 // `/.well-known/*` isn't served index.html. `/mcp` authenticates with OAuth

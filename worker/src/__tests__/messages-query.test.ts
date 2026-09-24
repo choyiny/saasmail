@@ -60,6 +60,36 @@ describe("queryMessages", () => {
     });
   }
 
+  it("rejects messageRefs above the per-statement binding cap", async () => {
+    await expect(
+      queryMessages(
+        getDb(),
+        { isAdmin: true },
+        {
+          messageRefs: Array.from({ length: 41 }, (_, index) => ({
+            kind: "received" as const,
+            id: `recv-${index}`,
+          })),
+        },
+      ),
+    ).rejects.toThrow("messageRefs is limited to 40");
+  });
+
+  it("rejects threadKeys above the per-statement binding cap", async () => {
+    await expect(
+      queryMessages(
+        getDb(),
+        { isAdmin: true },
+        {
+          threadKeys: Array.from(
+            { length: 21 },
+            (_, index) => `thread-${index}`,
+          ),
+        },
+      ),
+    ).rejects.toThrow("threadKeys is limited to 20");
+  });
+
   it("merges both directions and scopes canonical inbox addresses correctly", async () => {
     await seedPair();
 
