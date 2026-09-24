@@ -10,7 +10,10 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { cancelSequencesForPerson } from "./cancel-sequence";
 import { computeConversationId, externalsOnly } from "./conversation-id";
 import { createEmailSender } from "./email-sender";
-import { createSenderForInbox } from "./email-sender/for-inbox";
+import {
+  createSenderForInbox,
+  GmailSenderUnavailableError,
+} from "./email-sender/for-inbox";
 import { GmailSender } from "./email-sender/providers/gmail";
 import type { EmailSender } from "./email-sender/types";
 import { formatFromAddress } from "./format-from-address";
@@ -403,9 +406,31 @@ export async function replyToEmail(
   // Resolved AFTER fromAddress is canonicalized: sender_identities.email is
   // stored lowercased, so looking this up before trimming/lowercasing would
   // silently miss the mapping and fall back to the configured provider with
-  // no error anywhere. createSenderForInbox never throws — every failure
-  // (unmapped address, revoked grant, etc.) degrades to that same fallback.
-  const sender = await createSenderForInbox(db, env, fromAddress);
+  // no error anywhere.
+  //
+  // An inbox that is NOT Gmail-mapped still degrades to the configured
+  // provider without a word, because that provider is its real transport. An
+  // inbox that IS Gmail-mapped and cannot produce a token throws instead, and
+  // lands here — because sending it through a different transport is the
+  // split identity the Gmail branch below exists to prevent, and answering
+  // 201 for a reply the outbox then marks "failed" tells the user it was sent
+  // when nothing was. Same outcome as any other failed Gmail reply: 502,
+  // nothing queued, the composer keeps the draft.
+  let sender: EmailSender;
+  try {
+    sender = await createSenderForInbox(db, env, fromAddress);
+  } catch (err) {
+    if (!(err instanceof GmailSenderUnavailableError)) throw err;
+    return {
+      ok: false,
+      code: "SEND_FAILED",
+      message:
+        `saasmail could not reach the Google mailbox behind ${fromAddress}, ` +
+        "so this reply was not sent and was not queued for retry. Send it " +
+        "again in a moment; if it keeps failing, reconnect this mailbox " +
+        "under Gmail settings.",
+    };
+  }
 
   // Resolve the original across both received and sent tables.
   const receivedRow = await db

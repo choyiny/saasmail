@@ -10,7 +10,10 @@ import {
 import { senderIdentities } from "../db/sender-identities.schema";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
 import { encryptSecret } from "../lib/crypto";
-import { createSenderForInbox } from "../lib/email-sender/for-inbox";
+import {
+  createSenderForInbox,
+  GmailSenderUnavailableError,
+} from "../lib/email-sender/for-inbox";
 import { getDb, applyMigrations, cleanDb } from "./helpers";
 
 const KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
@@ -132,24 +135,27 @@ describe("createSenderForInbox", () => {
     expect(sender.provider).toBe("gmail");
   });
 
-  it("falls back when the mapped gmail_accounts row is missing", async () => {
+  it("refuses rather than falling back when the mapped gmail_accounts row is missing", async () => {
     // No gmail_accounts row for "acct-missing" — a dangling gmailAccountId,
-    // reachable because there is no foreign-key check on that column.
+    // reachable because there is no foreign-key check on that column. The
+    // inbox still SAYS it sends through Google, so handing the reply to
+    // Resend would put a Workspace address behind a provider that domain's
+    // SPF/DKIM does not authorise.
     await seedIdentity({ source: "gmail", gmailAccountId: "acct-missing" });
 
-    const sender = await createSenderForInbox(
-      getDb(),
-      {
-        RESEND_API_KEY: "re_test",
-        ...GMAIL_ENV,
-      } as unknown as CloudflareBindings,
-      "support@acme.dev",
-    );
-
-    expect(sender.provider).toBe("resend");
+    await expect(
+      createSenderForInbox(
+        getDb(),
+        {
+          RESEND_API_KEY: "re_test",
+          ...GMAIL_ENV,
+        } as unknown as CloudflareBindings,
+        "support@acme.dev",
+      ),
+    ).rejects.toBeInstanceOf(GmailSenderUnavailableError);
   });
 
-  it("falls back rather than throwing when token refresh fails (revoked grant)", async () => {
+  it("refuses rather than falling back when a token cannot be resolved", async () => {
     await seedGmailAccount({ accessToken: null, expiresAt: null });
     await seedIdentity({ source: "gmail", gmailAccountId: "acct-1" });
     vi.stubGlobal(
@@ -161,6 +167,40 @@ describe("createSenderForInbox", () => {
             headers: { "content-type": "application/json" },
           }),
       ),
+    );
+
+    const err = await createSenderForInbox(
+      getDb(),
+      {
+        RESEND_API_KEY: "re_test",
+        ...GMAIL_ENV,
+      } as unknown as CloudflareBindings,
+      "support@acme.dev",
+    ).then(
+      (s) => s,
+      (e) => e,
+    );
+
+    expect(err).toBeInstanceOf(GmailSenderUnavailableError);
+    // A classification, never the underlying error's text: this frame ends
+    // in a D1 UPDATE that binds the access token and the sealed refresh
+    // token, and a D1 error carries its bound parameters.
+    expect((err as GmailSenderUnavailableError).code).toBe("invalid_grant");
+    expect((err as Error).message).not.toMatch(/rt-1|cached-at|bearer/i);
+  });
+
+  it("still falls back quietly for an inbox that is not Gmail-mapped at all", async () => {
+    // The distinction the refusals above depend on. A cloudflare-source
+    // inbox has no Google mailbox to fail to reach, and the configured
+    // provider IS its transport — refusing here would break replying on
+    // every ordinary inbox.
+    await seedGmailAccount();
+    await seedIdentity({ source: "cloudflare", gmailAccountId: null });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("Google must not be contacted for this inbox");
+      }),
     );
 
     const sender = await createSenderForInbox(

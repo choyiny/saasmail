@@ -724,9 +724,14 @@ describe("send router — Gmail reply routing", () => {
     expect(rows[0].gmailMessageId).toBe("18stale");
   });
 
-  it("a reply that FELL BACK off Gmail (revoked grant) still queues on a transient failure, unchanged", async () => {
-    // Gmail-mapped, but the cached token is gone and refresh will fail —
-    // createSenderForInbox falls back to the configured provider.
+  it("refuses a Gmail-mapped reply whose token cannot be resolved, instead of sending it through the configured provider", async () => {
+    // The reply used to fall back here, and that is the failure this pins.
+    // On this install the configured provider IS reachable (RESEND_API_KEY
+    // is set in the test env), so the old code sent a Workspace address's
+    // reply through Resend — DKIM-signed by the wrong service, absent from
+    // the user's own Gmail Sent folder, and retried on a 15-minute loop.
+    // On a Gmail-only install the same fallback is NoopSender, and the user
+    // got a 201 and a cleared draft for a reply that was never sent.
     await seedGmailAccount({ accessToken: null, expiresAt: null });
     await seedGmailIdentity();
 
@@ -745,22 +750,11 @@ describe("send router — Gmail reply routing", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("oauth2.googleapis.com")) {
-        // The revoked grant: token refresh itself fails, which is what
-        // forces the fallback in the first place.
-        return new Response(JSON.stringify({ error: "invalid_grant" }), {
-          status: 400,
-          headers: { "content-type": "application/json" },
-        });
+        // One failed request to Google's token endpoint. This is a transient
+        // blip, not a verdict about which transport this inbox uses.
+        return new Response("upstream unavailable", { status: 503 });
       }
-      // The configured provider (Resend, via RESEND_API_KEY in the test
-      // env) rejects transiently.
-      return new Response(
-        JSON.stringify({
-          name: "rate_limit_exceeded",
-          message: "Rate limit exceeded, please try again later",
-        }),
-        { status: 429, headers: { "content-type": "application/json" } },
-      );
+      throw new Error(`no other transport may be reached: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -773,27 +767,23 @@ describe("send router — Gmail reply routing", () => {
       }),
     });
 
-    // Queued exactly like any other provider's transient failure: 201 with
-    // a "retrying" status, not a hard error.
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { id: string; status: string };
-    expect(body.status).toBe("retrying");
+    // 502, not 201 — the composer keeps the draft open.
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/was not sent/i);
+    expect(body.error).not.toMatch(/rt-1|cached-at|bearer/i);
 
-    const outboxRows = await getDb()
-      .select()
-      .from(outboxEmails)
-      .where(eq(outboxEmails.sentEmailId, body.id));
-    expect(outboxRows).toHaveLength(1);
-    expect(outboxRows[0].status).toBe("pending");
-
-    const sentRows = await getDb()
-      .select()
-      .from(sentEmails)
-      .where(eq(sentEmails.id, body.id));
-    expect(sentRows).toHaveLength(1);
-    expect(sentRows[0].status).toBe("retrying");
-    // Confirms this really did fall back off Gmail: no gmail ids recorded.
-    expect(sentRows[0].gmailMessageId).toBeNull();
-    expect(sentRows[0].gmailThreadId).toBeNull();
+    // Nothing was written and nothing is in flight: no row claiming a send,
+    // and nothing for the cron to re-attempt through the wrong provider.
+    expect(await getDb().select().from(sentEmails)).toHaveLength(0);
+    expect(await getDb().select().from(outboxEmails)).toHaveLength(0);
+    // Only Google was contacted. A call to any other host would mean the
+    // reply had been handed to a transport this inbox does not send from.
+    // Compare the parsed host, not a substring of the URL: a substring match
+    // also accepts https://evil.example/?x=oauth2.googleapis.com, so it would
+    // pass for a request to exactly the host this assertion exists to rule out.
+    expect(
+      fetchMock.mock.calls.map(([u]) => new URL(String(u)).host),
+    ).toStrictEqual(fetchMock.mock.calls.map(() => "oauth2.googleapis.com"));
   });
 });
