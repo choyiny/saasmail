@@ -288,6 +288,13 @@
       "when": 1790262638067,
       "tag": "0040_needy_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1790262701626,
+      "tag": "0041_old_nighthawk",
+      "breakpoints": true
     }
   ]
 }

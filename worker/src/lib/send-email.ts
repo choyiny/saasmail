@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { attachments } from "../db/attachments.schema";
@@ -644,8 +644,22 @@ export async function replyToEmail(
     externalsReply,
   );
 
-  // Store sent email
-  await db.insert(sentEmails).values({
+  // Store sent email.
+  //
+  // Gmail files a message in the Sent folder the moment it answers 2xx, and
+  // its `messagesAdded` history record goes out with it — so a cron tick that
+  // lands between that 2xx and this insert sees a Sent message with no
+  // `sent_emails` row and mirrors our own reply onto the timeline as if a
+  // human had typed it in Gmail. `sent_emails_gmail_message_from_unique` now
+  // refuses a second row for the pair, which is what stops two ticks racing
+  // each other; it also means THIS insert would be the one to fail if a
+  // mirror got in first. The mirror's row is the lossy copy — no attachments,
+  // no draft body, no id the caller can be handed back — so the send path
+  // clears it and writes its own, and does both in one D1 batch so the mirror
+  // cannot slip between the two statements.
+  const gmailMessageIdForRow =
+    sender.provider === "gmail" ? (sendResult.result?.id ?? null) : null;
+  const sentEmailRow = {
     id,
     personId: origPersonId,
     fromAddress,
@@ -662,8 +676,7 @@ export async function replyToEmail(
     // timeline and uses gmailMessageId to recognize saasmail's own send and
     // skip it; without it, every reply sent through Gmail would come back
     // through that mirror and appear twice.
-    gmailMessageId:
-      sender.provider === "gmail" ? (sendResult.result?.id ?? null) : null,
+    gmailMessageId: gmailMessageIdForRow,
     gmailThreadId:
       sender.provider === "gmail"
         ? (sendResult.result?.threadId ?? null)
@@ -673,7 +686,23 @@ export async function replyToEmail(
     conversationId: conversationIdReply,
     sentAt: now,
     createdAt: now,
-  });
+  };
+
+  if (gmailMessageIdForRow) {
+    await db.batch([
+      db
+        .delete(sentEmails)
+        .where(
+          and(
+            eq(sentEmails.gmailMessageId, gmailMessageIdForRow),
+            eq(sentEmails.fromAddress, fromAddress),
+          ),
+        ),
+      db.insert(sentEmails).values(sentEmailRow),
+    ]);
+  } else {
+    await db.insert(sentEmails).values(sentEmailRow);
+  }
 
   // Persist attachments even on failure: a retrying/failed send must be able
   // to reload its attachment bytes from R2 on a later attempt.

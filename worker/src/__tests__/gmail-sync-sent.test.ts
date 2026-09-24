@@ -567,6 +567,58 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(await getDb().select().from(sentEmails)).toHaveLength(1);
   });
 
+  it("mirrors once when two overlapping ticks read the same cursor", async () => {
+    // Nothing leases the cron: `syncAllGmailAccounts` fans every account out
+    // under Promise.allSettled and two ticks can overlap freely. Both runs
+    // reach the echo SELECT before either has inserted, so the SELECT — which
+    // is only a read — cannot separate them. The unique index and the
+    // `onConflictDoNothing` on the insert are what do, and the skip is
+    // reported as a skip rather than raised as a failure.
+    await seedAccount();
+    await seedInbox();
+    const opts = {
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds: ["SENT"],
+          raw: rawSent({
+            to: "jane@example.com",
+            messageId: "<s-race@acme.dev>",
+          }),
+        },
+      },
+    };
+    stubGmail(opts);
+
+    // The same account row on purpose: two ticks both read the cursor before
+    // either writes it back.
+    const row = await account();
+    const [a, b] = await Promise.all([
+      syncAccount(
+        getDb(),
+        row,
+        env as unknown as CloudflareBindings,
+        fakeCtx(),
+        CFG,
+      ),
+      syncAccount(
+        getDb(),
+        row,
+        env as unknown as CloudflareBindings,
+        fakeCtx(),
+        CFG,
+      ),
+    ]);
+
+    const rows = await getDb().select().from(sentEmails);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].gmailMessageId).toBe("m1");
+    // Exactly one run may claim the mirror; the other skips. Neither fails.
+    expect(a.mirrored + b.mirrored).toBe(1);
+    expect(a.skipped + b.skipped).toBe(1);
+    expect(a.failed + b.failed).toBe(0);
+  });
+
   it("stores a row with no personId when the recipient is unknown", async () => {
     await seedAccount();
     await seedInbox();

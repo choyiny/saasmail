@@ -148,6 +148,93 @@ describe("send router — Gmail reply routing", () => {
     expect(rows[0].gmailThreadId).toBe("thread-parent-1");
   });
 
+  it("replaces a mirror the sync wrote while this send was in flight, and leaves another mailbox's alone", async () => {
+    // Gmail files a Sent copy the instant it answers 2xx, and emits the
+    // history record with it. A cron tick landing between that 2xx and this
+    // reply's `sent_emails` insert mirrors saasmail's own reply onto the
+    // timeline — one reply, two rows, permanently. The send path's row is the
+    // authoritative one (it has the draft body and the id handed back to the
+    // caller), so it clears the mirror for its own (Gmail id, inbox) pair.
+    await seedGmailAccount();
+    await seedGmailIdentity();
+
+    const person = await createTestPerson({
+      id: "p-race",
+      email: "customer-race@example.com",
+    });
+    await createTestEmail({
+      id: "rcv-race",
+      personId: person.id,
+      recipient: "support@acme.dev",
+      subject: "Question",
+      messageId: "parent-race@example.com",
+    });
+
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(sentEmails)
+      .values([
+        {
+          // What the racing cron tick wrote: same Gmail id, same inbox.
+          id: "mirrored-by-cron",
+          personId: person.id,
+          fromAddress: "support@acme.dev",
+          toAddress: "customer-race@example.com",
+          subject: "Re: Question",
+          bodyText: "mirrored from the Sent folder",
+          status: "sent",
+          gmailMessageId: "18race",
+          gmailThreadId: "thread-race",
+          sentAt: now,
+          createdAt: now,
+        },
+        {
+          // A DIFFERENT mailbox's row carrying the same id. Gmail message ids
+          // are unique per mailbox, not globally, so this is a real row that
+          // must survive untouched.
+          id: "other-mailbox",
+          personId: person.id,
+          fromAddress: "billing@acme.dev",
+          toAddress: "customer-race@example.com",
+          subject: "Unrelated",
+          bodyText: "another mailbox's message",
+          status: "sent",
+          gmailMessageId: "18race",
+          gmailThreadId: "thread-other",
+          sentAt: now,
+          createdAt: now,
+        },
+      ]);
+
+    vi.stubGlobal(
+      "fetch",
+      stubGmailSend({ id: "18race", threadId: "thread-race" }),
+    );
+
+    const res = await authFetch("/api/send/reply/rcv-race", {
+      apiKey,
+      method: "POST",
+      body: buildSendForm({
+        fromAddress: "support@acme.dev",
+        bodyHtml: "<p>Thanks for reaching out.</p>",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: string };
+
+    const rows = await getDb()
+      .select()
+      .from(sentEmails)
+      .where(eq(sentEmails.gmailMessageId, "18race"));
+    // One row for support@, one for billing@ — never two for support@.
+    expect(rows.map((r) => r.id).sort()).toEqual(
+      ["other-mailbox", body.id].sort(),
+    );
+    const ours = rows.find((r) => r.fromAddress === "support@acme.dev")!;
+    expect(ours.id).toBe(body.id);
+    expect(ours.bodyHtml).toBe("<p>Thanks for reaching out.</p>");
+  });
+
   it("drops a parent thread id that belongs to a DIFFERENT Gmail mailbox", async () => {
     // Gmail thread ids are per-mailbox. Handing one mailbox's thread to
     // another's users/me/messages/send gets a 400, which is terminal, and a
