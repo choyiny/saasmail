@@ -35,12 +35,13 @@ export function shouldEnqueueSuggestedReply(options: {
   autoFiledSpam: boolean;
   modelConfigured: boolean;
   headers: Record<string, string>;
+  senderAddress: string;
 }): boolean {
   return (
     options.agentAutodraft === 1 &&
     !options.autoFiledSpam &&
     options.modelConfigured &&
-    !isAutomatedInbound(options.headers)
+    !isAutomatedInbound(options.headers, options.senderAddress)
   );
 }
 
@@ -289,6 +290,7 @@ export async function handleEmail(
       autoFiledSpam,
       modelConfigured: selectModel(env).ok,
       headers: parsed.headers,
+      senderAddress: fromAddressCanonical,
     })
   ) {
     ctx.waitUntil(

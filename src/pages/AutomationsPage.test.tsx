@@ -37,6 +37,7 @@ function rule(id: string, name: string, position: number) {
       },
     ],
     actions: [{ type: "archive" as const }],
+    warnings: [],
     position,
     stopProcessing: false,
     enabled: true,
@@ -203,6 +204,27 @@ describe("AutomationsPage", () => {
       screen.getByText(
         "Won't reply to automated mail, your own addresses, blocked/suppressed senders, or the same sender more than once per 24h.",
       ),
+    ).toBeTruthy();
+  });
+
+  it("shows a warning badge and dangling action message", async () => {
+    api.fetchRules.mockResolvedValue([
+      {
+        ...rule("dangling-rule", "Dangling", 0),
+        actions: [
+          { type: "move_to_folder" as const, mailboxId: "missing-folder" },
+        ],
+        warnings: [{ actionIndex: 0, code: "missing_folder" as const }],
+      },
+    ]);
+    render(<AutomationsPage />);
+
+    const badge = await screen.findByTestId("automation-warning-badge");
+    expect(badge.textContent).toContain("1 warning");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Dangling" }));
+    expect(
+      await screen.findByText("Folder was deleted; this action does nothing"),
     ).toBeTruthy();
   });
 

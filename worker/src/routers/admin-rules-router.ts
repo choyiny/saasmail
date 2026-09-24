@@ -1,7 +1,11 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { attachments } from "../db/attachments.schema";
+import { users } from "../db/auth.schema";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
+import { mailboxes } from "../db/mailboxes.schema";
 import { emails } from "../db/emails.schema";
 import { people } from "../db/people.schema";
 import { rules } from "../db/rules.schema";
@@ -21,6 +25,12 @@ export const adminRulesRouter = new OpenAPIHono<{
 }>();
 
 const ErrorSchema = z.object({ error: z.string() });
+const RuleWarningSchema = z.object({
+  actionIndex: z.number().int().nonnegative(),
+  code: z.enum(["missing_folder", "assignee_unavailable"]),
+});
+type RuleWarning = z.infer<typeof RuleWarningSchema>;
+
 const RuleSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -28,6 +38,7 @@ const RuleSchema = z.object({
   trigger: z.literal("message.received"),
   conditions: z.array(RuleConditionSchema),
   actions: z.array(RuleActionSchema),
+  warnings: z.array(RuleWarningSchema),
   position: z.number().int(),
   stopProcessing: z.boolean(),
   enabled: z.boolean(),
@@ -65,13 +76,115 @@ const UpdateRuleSchema = z
     message: "At least one field is required",
   });
 
-function apiRule(row: typeof rules.$inferSelect): z.infer<typeof RuleSchema> {
+const WARNING_LOOKUP_BATCH_SIZE = 40;
+
+function apiRule(
+  row: typeof rules.$inferSelect,
+  warnings: RuleWarning[] = [],
+): z.infer<typeof RuleSchema> {
   return {
     ...row,
     trigger: "message.received",
+    warnings,
     stopProcessing: row.stopProcessing === 1,
     enabled: row.enabled === 1,
   };
+}
+
+async function computeRuleWarnings(
+  db: DrizzleD1Database<any>,
+  rows: Array<typeof rules.$inferSelect>,
+): Promise<Map<string, RuleWarning[]>> {
+  const folderIds = new Set<string>();
+  const assigneeIds = new Set<string>();
+  for (const row of rows) {
+    for (const action of row.actions) {
+      if (action.type === "move_to_folder") folderIds.add(action.mailboxId);
+      if (action.type === "assign") assigneeIds.add(action.userId);
+    }
+  }
+
+  const mailboxById = new Map<string, { id: string; inbox: string }>();
+  const folderList = [...folderIds];
+  for (
+    let start = 0;
+    start < folderList.length;
+    start += WARNING_LOOKUP_BATCH_SIZE
+  ) {
+    const batch = folderList.slice(start, start + WARNING_LOOKUP_BATCH_SIZE);
+    const found = await db
+      .select({ id: mailboxes.id, inbox: mailboxes.inbox })
+      .from(mailboxes)
+      .where(inArray(mailboxes.id, batch));
+    for (const mailbox of found) mailboxById.set(mailbox.id, mailbox);
+  }
+
+  const userById = new Map<string, { id: string; role: string | null }>();
+  const assigneeList = [...assigneeIds];
+  for (
+    let start = 0;
+    start < assigneeList.length;
+    start += WARNING_LOOKUP_BATCH_SIZE
+  ) {
+    const batch = assigneeList.slice(start, start + WARNING_LOOKUP_BATCH_SIZE);
+    const found = await db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(inArray(users.id, batch));
+    for (const user of found) userById.set(user.id, user);
+  }
+
+  const permissionsByUser = new Map<string, Set<string>>();
+  for (
+    let start = 0;
+    start < assigneeList.length;
+    start += WARNING_LOOKUP_BATCH_SIZE
+  ) {
+    const batch = assigneeList.slice(start, start + WARNING_LOOKUP_BATCH_SIZE);
+    const found = await db
+      .select({
+        userId: inboxPermissions.userId,
+        email: inboxPermissions.email,
+      })
+      .from(inboxPermissions)
+      .where(inArray(inboxPermissions.userId, batch));
+    for (const permission of found) {
+      const inboxes =
+        permissionsByUser.get(permission.userId) ?? new Set<string>();
+      inboxes.add(permission.email.trim().toLowerCase());
+      permissionsByUser.set(permission.userId, inboxes);
+    }
+  }
+
+  const result = new Map<string, RuleWarning[]>();
+  for (const row of rows) {
+    const ruleInbox = row.inbox?.trim().toLowerCase() ?? null;
+    const warnings: RuleWarning[] = [];
+    row.actions.forEach((action, actionIndex) => {
+      if (action.type === "move_to_folder") {
+        const mailbox = mailboxById.get(action.mailboxId);
+        if (
+          !ruleInbox ||
+          !mailbox ||
+          mailbox.inbox.trim().toLowerCase() !== ruleInbox
+        ) {
+          warnings.push({ actionIndex, code: "missing_folder" });
+        }
+      }
+      if (action.type === "assign") {
+        const user = userById.get(action.userId);
+        const available =
+          user?.role === "admin" ||
+          (!!user &&
+            !!ruleInbox &&
+            permissionsByUser.get(user.id)?.has(ruleInbox) === true);
+        if (!available)
+          warnings.push({ actionIndex, code: "assignee_unavailable" });
+      }
+    });
+    result.set(row.id, warnings);
+  }
+  return result;
 }
 
 function mapRuleError(error: unknown): { error: string } | null {
@@ -91,12 +204,42 @@ const listRoute = createRoute({
 });
 
 adminRulesRouter.openapi(listRoute, async (c) => {
-  const rows = await c
-    .get("db")
+  const db = c.get("db");
+  const rows = await db
     .select()
     .from(rules)
     .orderBy(asc(rules.position), asc(rules.id));
-  return c.json(rows.map(apiRule), 200);
+  const warnings = await computeRuleWarnings(db, rows);
+  return c.json(
+    rows.map((row) => apiRule(row, warnings.get(row.id) ?? [])),
+    200,
+  );
+});
+
+const getRuleRoute = createRoute({
+  method: "get",
+  path: "/{id}",
+  tags: ["Admin", "Rules"],
+  request: { params: z.object({ id: z.string().min(1) }) },
+  responses: {
+    200: {
+      description: "Automation rule",
+      content: { "application/json": { schema: RuleSchema } },
+    },
+    404: {
+      description: "Rule not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
+});
+
+adminRulesRouter.openapi(getRuleRoute, async (c) => {
+  const db = c.get("db");
+  const { id } = c.req.valid("param");
+  const [row] = await db.select().from(rules).where(eq(rules.id, id)).limit(1);
+  if (!row) return c.json({ error: "Rule not found" }, 404);
+  const warnings = await computeRuleWarnings(db, [row]);
+  return c.json(apiRule(row, warnings.get(row.id) ?? []), 200);
 });
 
 const createRuleRoute = createRoute({

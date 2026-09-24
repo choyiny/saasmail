@@ -26,6 +26,7 @@ import {
   type RuleAction,
   type RuleCondition,
   type RuleTestResult,
+  type RuleWarning,
 } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import {
@@ -143,6 +144,12 @@ function actionSummary(action: RuleAction): string {
   return action.type;
 }
 
+function warningMessage(warning: RuleWarning): string {
+  return warning.code === "missing_folder"
+    ? "Folder was deleted; this action does nothing"
+    : "Assignee is unavailable; this action does nothing";
+}
+
 function emptyDraft(position: number): AutomationRuleInput {
   return {
     name: "",
@@ -170,6 +177,7 @@ export default function AutomationsPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [actionWarnings, setActionWarnings] = useState<RuleWarning[]>([]);
   const [draft, setDraft] = useState<AutomationRuleInput>(() => emptyDraft(0));
   const [saving, setSaving] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -234,6 +242,7 @@ export default function AutomationsPage() {
     const nextPosition =
       rules.reduce((max, rule) => Math.max(max, rule.position), -1) + 1;
     setEditingId(null);
+    setActionWarnings([]);
     setDraft(emptyDraft(nextPosition));
     setServerError(null);
     setTestMessage("");
@@ -243,6 +252,7 @@ export default function AutomationsPage() {
 
   function openEdit(rule: AutomationRule) {
     setEditingId(rule.id);
+    setActionWarnings(rule.warnings);
     setDraft({
       name: rule.name,
       inbox: rule.inbox,
@@ -280,6 +290,9 @@ export default function AutomationsPage() {
         currentIndex === index ? update(action) : action,
       ),
     }));
+    setActionWarnings((current) =>
+      current.filter((warning) => warning.actionIndex !== index),
+    );
   }
 
   function changeScope(inbox: string | null) {
@@ -297,6 +310,7 @@ export default function AutomationsPage() {
             )
           : current.actions,
     }));
+    setActionWarnings([]);
     setServerError(null);
   }
 
@@ -463,6 +477,15 @@ export default function AutomationsPage() {
                     <span className="rounded bg-bg-muted px-1.5 py-0.5 text-[10px] text-text-secondary">
                       {rule.inbox ?? "All inboxes"}
                     </span>
+                    {rule.warnings.length > 0 && (
+                      <span
+                        data-testid="automation-warning-badge"
+                        className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                      >
+                        {rule.warnings.length}{" "}
+                        {rule.warnings.length === 1 ? "warning" : "warnings"}
+                      </span>
+                    )}
                   </div>
                   <p className="mt-1 text-xs text-text-tertiary">
                     {rule.conditions.length === 0
@@ -846,6 +869,16 @@ export default function AutomationsPage() {
                     </select>
 
                     <div>
+                      {actionWarnings
+                        .filter((warning) => warning.actionIndex === index)
+                        .map((warning) => (
+                          <p
+                            key={warning.code}
+                            className="mb-2 text-[11px] font-medium text-amber-700"
+                          >
+                            {warningMessage(warning)}
+                          </p>
+                        ))}
                       {action.type === "move_to_folder" && (
                         <select
                           aria-label={"Action " + String(index + 1) + " folder"}
@@ -982,14 +1015,15 @@ export default function AutomationsPage() {
                       type="button"
                       aria-label={"Remove action " + String(index + 1)}
                       disabled={draft.actions.length <= 1}
-                      onClick={() =>
+                      onClick={() => {
                         setDraft((current) => ({
                           ...current,
                           actions: current.actions.filter(
                             (_, currentIndex) => currentIndex !== index,
                           ),
-                        }))
-                      }
+                        }));
+                        setActionWarnings([]);
+                      }}
                       className="rounded p-1.5 text-text-tertiary hover:bg-bg-muted hover:text-red-600 disabled:opacity-30"
                     >
                       <Trash2 className="h-4 w-4" />

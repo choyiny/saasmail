@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { inboxConversationState } from "../db/inbox-conversation-state.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { mailboxMessageState } from "../db/mailbox-message-state.schema";
@@ -189,6 +189,119 @@ describe("admin rule routes", () => {
       apiKey: member.apiKey,
     });
     expect(res.status).toBe(403);
+  });
+
+  it("rejects a missing folder", async () => {
+    const admin = await createTestUser({
+      id: "missing-folder-admin",
+      role: "admin",
+    });
+    const res = await authFetch("/api/admin/rules", {
+      apiKey: admin.apiKey,
+      method: "POST",
+      body: JSON.stringify(
+        ruleBody({
+          actions: [{ type: "move_to_folder", mailboxId: "missing-folder" }],
+        }),
+      ),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: "move_to_folder mailbox must belong to the rule inbox",
+    });
+  });
+
+  it("surfaces dangling warnings and mailbox rule counts", async () => {
+    const admin = await createTestUser({
+      id: "warning-admin",
+      role: "admin",
+      email: "warning-admin@example.com",
+    });
+    const assignee = await createTestUser({
+      id: "warning-assignee",
+      role: "member",
+      email: "warning-assignee@example.com",
+    });
+    await grant(assignee.userId, INBOX);
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(mailboxes).values({
+      id: "warning-folder",
+      inbox: INBOX,
+      name: "Warnings",
+      role: null,
+      sortOrder: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    let res = await authFetch("/api/admin/rules", {
+      apiKey: admin.apiKey,
+      method: "POST",
+      body: JSON.stringify(
+        ruleBody({
+          name: "Folder warning",
+          actions: [{ type: "move_to_folder", mailboxId: "warning-folder" }],
+        }),
+      ),
+    });
+    expect(res.status).toBe(201);
+    const folderRule = (await res.json()) as { id: string };
+
+    res = await authFetch("/api/admin/rules", {
+      apiKey: admin.apiKey,
+      method: "POST",
+      body: JSON.stringify(
+        ruleBody({
+          name: "Assignee warning",
+          position: 1,
+          actions: [{ type: "assign", userId: assignee.userId }],
+        }),
+      ),
+    });
+    expect(res.status).toBe(201);
+    const assigneeRule = (await res.json()) as { id: string };
+
+    res = await authFetch(`/api/mailboxes?inbox=${encodeURIComponent(INBOX)}`, {
+      apiKey: admin.apiKey,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      mailboxes: [
+        expect.objectContaining({ id: "warning-folder", ruleCount: 1 }),
+      ],
+    });
+
+    await getDb().delete(mailboxes).where(eq(mailboxes.id, "warning-folder"));
+    await getDb()
+      .delete(inboxPermissions)
+      .where(
+        and(
+          eq(inboxPermissions.userId, assignee.userId),
+          eq(inboxPermissions.email, INBOX),
+        ),
+      );
+
+    res = await authFetch("/api/admin/rules", { apiKey: admin.apiKey });
+    expect(res.status).toBe(200);
+    const listed = (await res.json()) as Array<{
+      id: string;
+      warnings: Array<{ actionIndex: number; code: string }>;
+    }>;
+    expect(listed.find((row) => row.id === folderRule.id)?.warnings).toEqual([
+      { actionIndex: 0, code: "missing_folder" },
+    ]);
+    expect(listed.find((row) => row.id === assigneeRule.id)?.warnings).toEqual([
+      { actionIndex: 0, code: "assignee_unavailable" },
+    ]);
+
+    res = await authFetch(`/api/admin/rules/${folderRule.id}`, {
+      apiKey: admin.apiKey,
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      id: folderRule.id,
+      warnings: [{ actionIndex: 0, code: "missing_folder" }],
+    });
   });
 
   it("rejects a folder from another inbox", async () => {

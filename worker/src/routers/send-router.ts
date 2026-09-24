@@ -85,7 +85,7 @@ export const SendEmailSchema = z
     // receipts). Marketing-style sends default to false and respect the list.
     transactional: z.boolean().optional().default(false).openapi({
       description:
-        "When true, bypasses the suppression list (for transactional mail like password resets, OTPs, and receipts). Defaults to false, which respects the suppression list.",
+        "When true, bypasses the suppression list and skips the List-Unsubscribe headers and unsubscribe footer. Use for transactional or 1:1 mail such as password resets, OTPs, receipts, and person-to-person messages. Defaults to false, which respects suppression and adds unsubscribe metadata.",
     }),
   })
   .openapi("SendEmailSchema");

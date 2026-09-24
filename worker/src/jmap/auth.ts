@@ -9,6 +9,7 @@ import { passkeyRequired } from "../middleware/require-passkey";
 export type JmapAccess = {
   user: any;
   allowed: AllowedInboxes;
+  authMethod: "session" | "apiKey";
 };
 
 export function problem(
@@ -64,5 +65,6 @@ export async function authenticateJmap(
   return {
     user: resolved.user,
     allowed: await resolveAllowedInboxes(db, resolved.user),
+    authMethod: resolved.authMethod,
   };
 }

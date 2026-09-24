@@ -73,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Automation reference safety:** deleted folders and unavailable assignees are surfaced as rule warnings; missing-folder actions log and skip without blocking later actions, and folder deletion warns how many automation rules will become dangling.
+- **Automated inbound guards:** suggested replies and rule auto-replies now reject bounce/report signals, auto-response headers, and common no-reply sender local-parts in addition to the existing list/bulk headers.
+- **Auto-reply deduplication:** migration `0052` keeps the latest legacy rate-limit row per rule/sender, enforces uniqueness, and the 24-hour claim now atomically updates that single row.
+- **JMAP conformance:** negative Email/Mailbox query positions are offsets from the end, unknown requested `/get` properties return `invalidArguments`, and cookie-authenticated JMAP POSTs require JSON plus a trusted Origin when one is supplied.
+- **Transactional send guidance:** docs and OpenAPI now make clear that 1:1 `/api/send` and MCP mail should use `transactional: true` to omit unsubscribe metadata; this is documentation-only and does not change send behavior.
+
 - **QA data correctness:** canonicalize every persisted outbound inbox key used by sequences, campaigns, templates, lists, drafts, the outbox, and sent history so mixed-case sender addresses cannot disappear from permission-scoped Sent or JMAP reads. Migration `0051` repairs existing rows.
 - **Customer identity safety:** merging two existing customer graphs is admin-only after both people pass visibility checks; self-links are rejected, agent approvals identify merges, and PersonDetail surfaces the server error inline.
 - **Bulk message state writes:** state and folder mutations use bounded multi-row statements inside D1 batches instead of one sequential write per message/folder pair.

@@ -1,4 +1,9 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { rules } from "./rules.schema";
 
 export const autoReplyLog = sqliteTable(
@@ -11,10 +16,9 @@ export const autoReplyLog = sqliteTable(
     sentAt: integer("sent_at").notNull(),
   },
   (table) => [
-    index("auto_reply_log_rule_sender_sent_idx").on(
+    uniqueIndex("auto_reply_log_rule_sender_unique").on(
       table.ruleId,
       table.sender,
-      table.sentAt,
     ),
   ],
 );

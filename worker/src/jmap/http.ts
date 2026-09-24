@@ -40,6 +40,58 @@ function requestError(
   );
 }
 
+function configuredOrigins(env: CloudflareBindings): Set<string> {
+  const values = [
+    env.BASE_URL,
+    ...String(env.TRUSTED_ORIGINS ?? "").split(","),
+  ];
+  const origins = new Set<string>();
+  for (const value of values) {
+    const candidate = String(value).trim();
+    if (!candidate) continue;
+    try {
+      origins.add(new URL(candidate).origin);
+    } catch {
+      // Ignore malformed configuration entries; they cannot authorize an Origin.
+    }
+  }
+  return origins;
+}
+
+export function validateJmapPostRequest(
+  request: Request,
+  env: CloudflareBindings,
+  authMethod: "session" | "apiKey",
+): Response | null {
+  if (authMethod !== "session") return null;
+
+  const mediaType = request.headers
+    .get("Content-Type")
+    ?.split(";", 1)[0]
+    ?.trim()
+    .toLowerCase();
+  if (mediaType !== "application/json") {
+    return requestError(
+      400,
+      "notJSON",
+      "Invalid JSON",
+      "Session-authenticated JMAP requests require Content-Type application/json.",
+    );
+  }
+
+  const origin = request.headers.get("Origin");
+  if (origin && !configuredOrigins(env).has(origin)) {
+    return problem(
+      403,
+      "about:blank",
+      "Forbidden",
+      "The request Origin is not trusted.",
+    );
+  }
+
+  return null;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -206,6 +258,13 @@ export function registerJmapRoutes(
   app.post("/jmap/api", async (c) => {
     const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));
     if (auth instanceof Response) return auth;
+
+    const requestGuard = validateJmapPostRequest(
+      c.req.raw,
+      c.env,
+      auth.authMethod,
+    );
+    if (requestGuard) return requestGuard;
 
     const request = await readJmapRequest(c.req.raw);
     if (request instanceof Response) return request;

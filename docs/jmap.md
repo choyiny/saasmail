@@ -55,7 +55,11 @@ For clients that ask for endpoints manually, use `https://your-domain.example/jm
 
 The Session advertises a 10 MB request limit, 16 method calls per request, 256 objects per `/get`, 256 objects per `/set`, four concurrent requests, and `i;ascii-casemap` collation. Result references (`#property`) are supported, including wildcard JSON-pointer paths used to feed one method response into a later call in the same request.
 
-Upload, EventSource push, Email creation/destruction, mailbox mutation, EmailSubmission, search snippets, raw-message blob download, and body-part blob download are not implemented. Thread/changes, Identity/changes, and query-change calculation are also not implemented. Draft rows are not yet projected into JMAP Email objects. The API does not add a scheduler or maintain separate mailbox state; reads go through the same `queryMessages()` and state tables used by the saasmail UI and HTTP API.
+Upload, EventSource push, Email creation/destruction, mailbox mutation, EmailSubmission, search snippets, raw-message blob download, and body-part blob download are not implemented. Thread/changes, Identity/changes, and query-change calculation are also not implemented. Draft rows are not yet projected into JMAP Email objects.
+
+`Email/get` accepts the full RFC 8621 Email property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors, so standard clients may request their normal property lists. `messageId` and `inReplyTo` are returned when they are already present in the unified message row. Properties the current unified model cannot supply cheaply — including raw-message `blobId`, `references`, `sender`, `bcc`, `replyTo`, `bodyStructure`, `headers`, and dynamic `header:*` selectors — are returned as `null`. These nulls are a deliberate compatibility deviation from the stricter RFC field types until those values are modeled; names outside the RFC property set still return `invalidArguments`.
+
+The API does not add a scheduler or maintain separate mailbox state; reads go through the same `queryMessages()` and state tables used by the saasmail UI and HTTP API.
 
 ---
 

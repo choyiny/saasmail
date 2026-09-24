@@ -61,7 +61,6 @@ function positionLimit(
   if (
     typeof position !== "number" ||
     !Number.isInteger(position) ||
-    position < 0 ||
     typeof limit !== "number" ||
     !Number.isInteger(limit) ||
     limit < 0
@@ -70,6 +69,45 @@ function positionLimit(
   }
   return { position, limit };
 }
+
+function validProperties(
+  properties: unknown,
+  supported: ReadonlySet<string>,
+): boolean {
+  return (
+    properties === undefined ||
+    properties === null ||
+    (Array.isArray(properties) &&
+      properties.every(
+        (property) => typeof property === "string" && supported.has(property),
+      ))
+  );
+}
+
+const MAILBOX_PROPERTIES = new Set([
+  "id",
+  "name",
+  "parentId",
+  "role",
+  "sortOrder",
+  "totalEmails",
+  "unreadEmails",
+  "totalThreads",
+  "unreadThreads",
+  "myRights",
+  "isSubscribed",
+]);
+const THREAD_PROPERTIES = new Set(["id", "emailIds"]);
+const IDENTITY_PROPERTIES = new Set([
+  "id",
+  "name",
+  "email",
+  "replyTo",
+  "bcc",
+  "textSignature",
+  "htmlSignature",
+  "mayDelete",
+]);
 
 function filterProperties(
   object: Record<string, unknown>,
@@ -132,6 +170,8 @@ export async function makeSession(
         },
       },
     },
+    // RFC 8620 keys primaryAccounts by capabilities present in
+    // accountCapabilities. Core is session-level and is not listed there.
     primaryAccounts: {
       [MAIL_CAPABILITY]: user.id,
     },
@@ -152,6 +192,9 @@ async function mailboxGet(
 ): Promise<MethodResult> {
   const account = accountError(args.accountId, userId);
   if (account) return account;
+  if (!validProperties(args.properties, MAILBOX_PROPERTIES)) {
+    return methodError("invalidArguments", undefined, ["properties"]);
+  }
   const ids = args.ids;
   if (
     ids !== undefined &&
@@ -223,6 +266,10 @@ async function mailboxQuery(
 
   const all = await listJmapMailboxes(db, allowed, userId);
   const ids = all.map((mailbox) => mailbox.id as string);
+  const position =
+    window.position < 0
+      ? Math.max(0, ids.length + window.position)
+      : window.position;
   return {
     ok: true,
     name: "Mailbox/query",
@@ -230,8 +277,8 @@ async function mailboxQuery(
       accountId: userId,
       queryState: await jmapState(db, allowed, userId),
       canCalculateChanges: false,
-      position: window.position,
-      ids: ids.slice(window.position, window.position + window.limit),
+      position,
+      ids: ids.slice(position, position + window.limit),
       total: ids.length,
     },
   };
@@ -245,6 +292,9 @@ async function threadGet(
 ): Promise<MethodResult> {
   const account = accountError(args.accountId, userId);
   if (account) return account;
+  if (!validProperties(args.properties, THREAD_PROPERTIES)) {
+    return methodError("invalidArguments", undefined, ["properties"]);
+  }
   const ids = args.ids;
   if (
     ids !== undefined &&
@@ -344,6 +394,9 @@ async function identityGet(
 ): Promise<MethodResult> {
   const account = accountError(args.accountId, userId);
   if (account) return account;
+  if (!validProperties(args.properties, IDENTITY_PROPERTIES)) {
+    return methodError("invalidArguments", undefined, ["properties"]);
+  }
   const ids = args.ids;
   if (
     ids !== undefined &&

@@ -163,7 +163,12 @@ export default function MailFolderRail({
   }
 
   async function deleteCustomFolder(mailbox: Mailbox) {
-    if (!window.confirm(`Delete folder "${mailbox.name}"?`)) return;
+    const automationWarning =
+      mailbox.ruleCount > 0
+        ? `\n\n${mailbox.ruleCount} automation ${mailbox.ruleCount === 1 ? "rule files" : "rules file"} mail into this folder. They'll stop filing until an admin updates them.`
+        : "";
+    if (!window.confirm(`Delete folder "${mailbox.name}"?${automationWarning}`))
+      return;
 
     setFolderActionId(mailbox.id);
     try {

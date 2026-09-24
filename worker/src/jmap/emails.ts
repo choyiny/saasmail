@@ -151,6 +151,99 @@ function approximateSize(message: UnifiedMessage): number {
   );
 }
 
+const EMAIL_PROPERTIES = new Set([
+  "id",
+  "blobId",
+  "threadId",
+  "mailboxIds",
+  "keywords",
+  "size",
+  "receivedAt",
+  "messageId",
+  "inReplyTo",
+  "references",
+  "sender",
+  "from",
+  "to",
+  "cc",
+  "bcc",
+  "replyTo",
+  "subject",
+  "sentAt",
+  "hasAttachment",
+  "preview",
+  "bodyValues",
+  "textBody",
+  "htmlBody",
+  "attachments",
+  "bodyStructure",
+  "headers",
+]);
+
+const EMAIL_HEADER_FORMS = new Set([
+  "asRaw",
+  "asText",
+  "asAddresses",
+  "asGroupedAddresses",
+  "asMessageIds",
+  "asDate",
+  "asURLs",
+]);
+
+function validHeaderName(value: string): boolean {
+  if (value.length === 0) return false;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (!((code >= 33 && code <= 57) || (code >= 59 && code <= 126))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function validHeaderProperty(property: string): boolean {
+  const parts = property.split(":");
+  if (parts[0] !== "header" || parts.length < 2 || parts.length > 4) {
+    return false;
+  }
+  if (!validHeaderName(parts[1]!)) return false;
+
+  let index = 2;
+  if (index < parts.length && parts[index] !== "all") {
+    if (!EMAIL_HEADER_FORMS.has(parts[index]!)) return false;
+    index += 1;
+  }
+  if (index < parts.length) {
+    if (parts[index] !== "all") return false;
+    index += 1;
+  }
+  return index === parts.length;
+}
+
+function validEmailProperties(properties: unknown): boolean {
+  return (
+    properties === undefined ||
+    properties === null ||
+    (Array.isArray(properties) &&
+      properties.every(
+        (property) =>
+          typeof property === "string" &&
+          (EMAIL_PROPERTIES.has(property) || validHeaderProperty(property)),
+      ))
+  );
+}
+
+function messageIds(value: string | null): string[] | null {
+  if (!value) return null;
+  const ids = value
+    .split(/\s+/)
+    .map((part) =>
+      part.startsWith("<") && part.endsWith(">") ? part.slice(1, -1) : part,
+    )
+    .filter((part) => part.length > 0);
+  return ids.length > 0 ? ids : null;
+}
+
 function supportedProperties(
   full: Record<string, unknown>,
   properties: unknown,
@@ -165,7 +258,7 @@ function supportedProperties(
 
   const selected: Record<string, unknown> = { id: full.id };
   for (const property of properties as string[]) {
-    if (property in full) selected[property] = full[property];
+    selected[property] = property in full ? full[property] : null;
   }
   return selected;
 }
@@ -186,27 +279,36 @@ export function toJmapEmail(
   const from = emailAddress(message.from);
   const full: Record<string, unknown> = {
     id,
+    blobId: null,
     threadId: jmapThreadId(message),
     mailboxIds: jmapMailboxIds(message),
     keywords: jmapKeywords(message),
     size: approximateSize(message),
     receivedAt: utcDate(message.occurredAt),
-    sentAt:
-      message.direction === "outbound" ? utcDate(message.occurredAt) : null,
+    messageId: messageIds(message.messageId),
+    inReplyTo: messageIds(message.inReplyTo),
+    references: null,
+    sender: null,
     from: from ? [from] : [],
     to: [emailAddress(message.to)],
     cc: message.cc.map((address) => emailAddress(address)),
+    bcc: null,
+    replyTo: null,
     subject: message.subject ?? "",
-    preview,
+    sentAt:
+      message.direction === "outbound" ? utcDate(message.occurredAt) : null,
     hasAttachment: attachments.length > 0,
-    textBody,
-    htmlBody,
-    attachments: attachments.map(attachmentPart),
+    preview,
     bodyValues: bodyValues(
       message,
       args.fetchTextBodyValues === true,
       args.fetchHTMLBodyValues === true,
     ),
+    textBody,
+    htmlBody,
+    attachments: attachments.map(attachmentPart),
+    bodyStructure: null,
+    headers: null,
   };
   return supportedProperties(full, args.properties);
 }
@@ -263,6 +365,10 @@ export async function emailGet(
   accountId: string,
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown> | JmapMethodError> {
+  if (!validEmailProperties(args.properties)) {
+    return { type: "invalidArguments", properties: ["properties"] };
+  }
+
   const ids = args.ids;
   if (
     ids !== undefined &&
@@ -480,7 +586,6 @@ export async function emailQuery(
   if (
     typeof position !== "number" ||
     !Number.isInteger(position) ||
-    position < 0 ||
     typeof requestedLimit !== "number" ||
     !Number.isInteger(requestedLimit) ||
     requestedLimit < 0
@@ -525,6 +630,21 @@ export async function emailQuery(
   }
 
   const queryState = await jmapState(db, allowed, userId);
+  let total: number | undefined;
+  if (position < 0 || args.calculateTotal === true) {
+    total = impossible
+      ? 0
+      : await countMessages(db, allowed, {
+          ...queryExtra,
+          limit: undefined,
+          offset: undefined,
+        });
+  }
+
+  const resolvedPosition =
+    position < 0 ? Math.max(0, (total ?? 0) + position) : position;
+  queryExtra = { ...queryExtra, offset: resolvedPosition };
+
   let ids: string[] = [];
   if (!impossible && limit > 0) {
     const page = await queryMessages(db, allowed, queryExtra);
@@ -535,17 +655,11 @@ export async function emailQuery(
     accountId,
     queryState,
     canCalculateChanges: false,
-    position,
+    position: resolvedPosition,
     ids,
   };
   if (args.calculateTotal === true) {
-    result.total = impossible
-      ? 0
-      : await countMessages(db, allowed, {
-          ...queryExtra,
-          limit: undefined,
-          offset: undefined,
-        });
+    result.total = total;
   }
   return result;
 }

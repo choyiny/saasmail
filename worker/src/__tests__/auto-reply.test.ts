@@ -48,10 +48,13 @@ function fakeSender(
   return { sender, sent, send };
 }
 
-async function seed(rawHeaders: Record<string, string> = {}) {
+async function seed(
+  rawHeaders: Record<string, string> = {},
+  senderAddress = CUSTOMER,
+) {
   await createTestPerson({
     id: "auto-reply-person",
-    email: CUSTOMER,
+    email: senderAddress,
   });
   await createTestEmail({
     id: "auto-reply-email",
@@ -117,6 +120,18 @@ describe("auto-reply guards", () => {
     [{ "List-Unsubscribe": "<mailto:leave@example.com>" }],
   ])("skips automated inbound mail %o", async (headers) => {
     await seed(headers);
+    const { sender } = fakeSender();
+    await expectNoAttempt(sender);
+  });
+
+  it.each([
+    "mailer-daemon@example.com",
+    "postmaster+dsn@example.com",
+    "noreply@example.com",
+    "no-reply+tag@example.com",
+    "do-not-reply@example.com",
+  ])("skips automated sender %s", async (senderAddress) => {
+    await seed({}, senderAddress);
     const { sender } = fakeSender();
     await expectNoAttempt(sender);
   });
@@ -200,7 +215,64 @@ describe("auto-reply guards", () => {
       .select()
       .from(autoReplyLog)
       .where(eq(autoReplyLog.ruleId, "auto-reply-rule"));
-    expect(logs).toHaveLength(2);
+    expect(logs).toEqual([
+      expect.objectContaining({
+        ruleId: "auto-reply-rule",
+        sender: CUSTOMER,
+        sentAt: NOW + 24 * 60 * 60,
+      }),
+    ]);
+  });
+
+  it("migration deduplicates legacy rows and keeps the latest sent_at", async () => {
+    await seed();
+
+    await env.DB.prepare(
+      "DROP INDEX IF EXISTS auto_reply_log_rule_sender_unique",
+    ).run();
+    await env.DB.prepare(
+      "CREATE INDEX auto_reply_log_rule_sender_sent_idx ON auto_reply_log(rule_id, sender, sent_at)",
+    ).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO auto_reply_log (rule_id, sender, sent_at) VALUES (?, ?, ?)",
+      ).bind("auto-reply-rule", CUSTOMER, NOW - 20),
+      env.DB.prepare(
+        "INSERT INTO auto_reply_log (rule_id, sender, sent_at) VALUES (?, ?, ?)",
+      ).bind("auto-reply-rule", CUSTOMER, NOW - 10),
+    ]);
+
+    await env.DB.prepare(
+      `
+      DELETE FROM auto_reply_log
+      WHERE rowid NOT IN (
+        SELECT (
+          SELECT latest.rowid
+          FROM auto_reply_log AS latest
+          WHERE latest.rule_id = grouped.rule_id
+            AND latest.sender = grouped.sender
+          ORDER BY latest.sent_at DESC, latest.rowid DESC
+          LIMIT 1
+        )
+        FROM auto_reply_log AS grouped
+        GROUP BY grouped.rule_id, grouped.sender
+      )
+    `,
+    ).run();
+    await env.DB.prepare(
+      "DROP INDEX auto_reply_log_rule_sender_sent_idx",
+    ).run();
+    await env.DB.prepare(
+      "CREATE UNIQUE INDEX auto_reply_log_rule_sender_unique ON auto_reply_log(rule_id, sender)",
+    ).run();
+
+    expect(await getDb().select().from(autoReplyLog)).toEqual([
+      expect.objectContaining({
+        ruleId: "auto-reply-rule",
+        sender: CUSTOMER,
+        sentAt: NOW - 10,
+      }),
+    ]);
   });
 });
 

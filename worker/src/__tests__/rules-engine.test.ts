@@ -309,7 +309,7 @@ describe("inbound rule evaluation semantics", () => {
     getSpy.mockRestore();
   });
 
-  it("continues later actions when one action fails", async () => {
+  it("skips a missing folder action cleanly and continues later actions", async () => {
     await addRule({
       id: "failure-rule",
       actions: [
@@ -317,7 +317,15 @@ describe("inbound rule evaluation semantics", () => {
         { type: "archive" },
       ],
     });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await deliver("failure@example.com");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("rule failure-rule"),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("mailbox missing-folder"),
+    );
+    warnSpy.mockRestore();
     const email = await getDb().query.emails.findFirst({
       where: (row, { eq }) => eq(row.messageId, "<failure@example.com>"),
     });

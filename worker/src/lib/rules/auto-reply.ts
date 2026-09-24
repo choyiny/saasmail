@@ -91,7 +91,7 @@ export async function runAutoReply(
   }
 
   const senderAddress = person.email.trim().toLowerCase();
-  if (isAutomatedInbound(parseHeaders(email.rawHeaders))) {
+  if (isAutomatedInbound(parseHeaders(email.rawHeaders), senderAddress)) {
     skipped(input, "automated inbound mail");
     return;
   }
@@ -135,17 +135,12 @@ export async function runAutoReply(
     return;
   }
 
-  const cutoff = now - 24 * 60 * 60;
   const claim = await db.run(sql`
     INSERT INTO auto_reply_log (rule_id, sender, sent_at)
-    SELECT ${input.ruleId}, ${senderAddress}, ${now}
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM auto_reply_log
-      WHERE rule_id = ${input.ruleId}
-        AND sender = ${senderAddress}
-        AND sent_at > ${cutoff}
-    )
+    VALUES (${input.ruleId}, ${senderAddress}, ${now})
+    ON CONFLICT(rule_id, sender) DO UPDATE
+      SET sent_at = excluded.sent_at
+      WHERE auto_reply_log.sent_at <= excluded.sent_at - 86400
   `);
   if ((claim.meta?.changes ?? 0) === 0) {
     skipped(input, "sender was auto-replied to within 24h");

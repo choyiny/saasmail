@@ -557,6 +557,7 @@ export interface Mailbox {
   createdBy: string | null;
   createdAt: number;
   updatedAt: number;
+  ruleCount: number;
 }
 
 export async function fetchMailboxes(inbox: string): Promise<Mailbox[]> {
@@ -1361,6 +1362,11 @@ export type RuleAction =
   | { type: "assign"; userId: string }
   | { type: "auto_reply"; subject?: string; bodyText: string };
 
+export type RuleWarning = {
+  actionIndex: number;
+  code: "missing_folder" | "assignee_unavailable";
+};
+
 export interface AutomationRule {
   id: string;
   name: string;
@@ -1368,6 +1374,7 @@ export interface AutomationRule {
   trigger: "message.received";
   conditions: RuleCondition[];
   actions: RuleAction[];
+  warnings: RuleWarning[];
   position: number;
   stopProcessing: boolean;
   enabled: boolean;

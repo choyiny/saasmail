@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { mailboxes } from "../../db/mailboxes.schema";
 import { rules } from "../../db/rules.schema";
 import {
   assignConversations,
@@ -48,11 +49,25 @@ async function runAction(
     case "mark_spam":
       await setMailboxState(db, allowed, null, refs, { spam: true });
       return { markedSpam: true };
-    case "move_to_folder":
+    case "move_to_folder": {
+      const [mailbox] = await db
+        .select({ id: mailboxes.id })
+        .from(mailboxes)
+        .where(
+          and(eq(mailboxes.id, action.mailboxId), eq(mailboxes.inbox, inbox)),
+        )
+        .limit(1);
+      if (!mailbox) {
+        console.warn(
+          `[rules] move_to_folder skipped for rule ${ruleId}: mailbox ${action.mailboxId} is missing`,
+        );
+        return {};
+      }
       await setMailboxMembership(db, allowed, null, refs, {
         add: [action.mailboxId],
       });
       return {};
+    }
     case "snooze": {
       const now = input.now ?? Math.floor(Date.now() / 1000);
       await snoozeConversations(
