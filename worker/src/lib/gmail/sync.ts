@@ -408,11 +408,15 @@ async function mirrorSentMessage(
   // own send coming home. Without this check every reply a user sends would
   // appear on the timeline twice.
   //
-  // It doubles as this mirror's idempotency key: a row written below stores
-  // the same id, so replaying a history page re-skips the message instead of
-  // inserting a second copy. (`emails` gets that for free from the UNIQUE
-  // Message-ID dedupe inside `ingestParsedEmail`; `sent_emails` has no such
-  // constraint, so the id is the only thing standing in for it.)
+  // It reads as this mirror's idempotency key, and on its own it is NOT one:
+  // a SELECT cannot exclude a write that has not happened yet. The send path
+  // writes its `sent_emails` row AFTER Gmail has accepted the message, and
+  // Gmail files a Sent copy the instant it returns that 2xx — so a tick
+  // inside that window finds nothing here and mirrors our own reply. Two
+  // overlapping ticks reproduce it for any message. What actually holds the
+  // invariant is `sent_emails_gmail_message_from_unique` plus the
+  // `onConflictDoNothing` on the insert below; this stays as the cheap path
+  // that skips before paying for a parse.
   //
   // Scoped to this account's inbox: Gmail documents message ids as immutable
   // per MAILBOX, not globally unique, so with two connected mailboxes an
@@ -505,29 +509,49 @@ async function mirrorSentMessage(
   // When the message was actually sent, not when we got around to pulling it.
   const sentAt = parseDateHeader(header(parsed.headers, "date")) ?? now;
 
-  await db.insert(sentEmails).values({
-    id: nanoid(),
-    personId: personRow[0]?.id ?? null,
-    // The mapped inbox, not the Gmail account's own address: the timeline
-    // groups sent mail by `from_address`, and the inbox is what the rest of
-    // the thread is filed under.
-    fromAddress: inbox,
-    toAddress,
-    subject: parsed.subject,
-    bodyHtml: parsed.bodyHtml,
-    bodyText: parsed.bodyText,
-    inReplyTo: header(parsed.headers, "in-reply-to") ?? null,
-    messageId: parsed.messageId,
-    status: "sent",
-    cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
-    conversationId,
-    gmailMessageId,
-    gmailThreadId: message.threadId || null,
-    // `sentAt` orders the timeline, so it is the message's own time.
-    // `createdAt` is when this row appeared here, which is now.
-    sentAt,
-    createdAt: now,
-  });
+  // `onConflictDoNothing` + `returning` is what makes this mirror actually
+  // idempotent: the unique index refuses a second row for this (Gmail id,
+  // inbox) pair, and an empty `returning` is how we learn it did. So a tick
+  // that raced the send path — or another tick — writes nothing and reports a
+  // skip, instead of putting the same reply on the timeline twice forever.
+  //
+  // Not a failure: a row that is already there is the outcome this function
+  // wanted. Throwing would stall the account on a message that needs nothing
+  // doing.
+  const inserted = await db
+    .insert(sentEmails)
+    .values({
+      id: nanoid(),
+      personId: personRow[0]?.id ?? null,
+      // The mapped inbox, not the Gmail account's own address: the timeline
+      // groups sent mail by `from_address`, and the inbox is what the rest of
+      // the thread is filed under.
+      fromAddress: inbox,
+      toAddress,
+      subject: parsed.subject,
+      bodyHtml: parsed.bodyHtml,
+      bodyText: parsed.bodyText,
+      inReplyTo: header(parsed.headers, "in-reply-to") ?? null,
+      messageId: parsed.messageId,
+      status: "sent",
+      cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
+      conversationId,
+      gmailMessageId,
+      gmailThreadId: message.threadId || null,
+      // `sentAt` orders the timeline, so it is the message's own time.
+      // `createdAt` is when this row appeared here, which is now.
+      sentAt,
+      createdAt: now,
+    })
+    .onConflictDoNothing()
+    .returning({ id: sentEmails.id });
+
+  if (inserted.length === 0) {
+    console.log(
+      `Gmail sync for ${inbox}: sent message ${gmailMessageId} is already on the timeline; not mirrored again.`,
+    );
+    return false;
+  }
 
   // A rep who answered this lead from their phone has made contact, so the
   // automated follow-ups must stop — exactly as they do for inbound mail
