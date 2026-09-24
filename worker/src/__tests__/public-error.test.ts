@@ -36,6 +36,31 @@ describe("publicAuthFailure", () => {
     expect(failure.internal).toBe(err.message);
   });
 
+  it("treats a 5xx APIError as internal, not as something the visitor can act on", () => {
+    // `APIError` is also how better-auth raises its OWN internal failures —
+    // `to-auth-endpoints.mjs` wraps a BetterAuthError's message into a 500
+    // APIError. Keying only on the class forwarded that text to an
+    // unauthenticated visitor under a rule written for form-facing 4xx.
+    const err = new APIError("INTERNAL_SERVER_ERROR", {
+      message: 'D1_ERROR near "INSERT INTO accounts": syntax error',
+    });
+    const failure = publicAuthFailure(err, FALLBACK);
+    expect(failure.body).toBe(FALLBACK);
+    expect(failure.body).not.toMatch(/D1_ERROR|accounts|INSERT/i);
+    expect(failure.internal).toBe(err.message);
+  });
+
+  it("still forwards a 4xx APIError that is not BAD_REQUEST", () => {
+    // The tightening is on the status, not on the code: a 403 or a 429 is
+    // still something the visitor can act on.
+    const err = new APIError("TOO_MANY_REQUESTS", {
+      message: "Too many attempts. Try again later.",
+    });
+    const failure = publicAuthFailure(err, FALLBACK);
+    expect(failure.body).toBe("Too many attempts. Try again later.");
+    expect(failure.internal).toBeNull();
+  });
+
   it("treats a non-Error throw as internal too", () => {
     const failure = publicAuthFailure("boom", FALLBACK);
     expect(failure.body).toBe(FALLBACK);
