@@ -17,6 +17,7 @@ import { suppressions } from "./suppressions.schema";
 import { blocklist } from "./blocklist.schema";
 import { outboxEmails } from "./outbox-emails.schema";
 import { drafts } from "./drafts.schema";
+import { gmailAccounts } from "./gmail-accounts.schema";
 
 export const schema = {
   ...authSchema,
@@ -38,4 +39,5 @@ export const schema = {
   blocklist,
   outboxEmails,
   drafts,
+  gmailAccounts,
 } as const;
