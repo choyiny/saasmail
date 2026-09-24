@@ -92,6 +92,7 @@ Edit `.dev.vars`:
 - `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending, Bavimail, or Postmark)
 - `BETTER_AUTH_SECRET` — **required**; generate a random string (`openssl rand -hex 32`). Signs sessions and protects the OAuth signing keys used by the MCP endpoint. Set this before deploying: without it the auth library silently falls back to a publicly known default value.
 - `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
+- `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY` — only for the [Gmail integration](gmail.md). Leave them blank unless you are connecting a Google Workspace mailbox; the Gmail routes answer `503` without all three
 
 For production, set these as Cloudflare secrets:
 
@@ -102,6 +103,11 @@ wrangler secret put RESEND_API_KEY      # only if using Resend
 wrangler secret put BAVIMAIL_API_KEY    # only if using Bavimail
 wrangler secret put BAVIMAIL_ALIAS_ID   # only if using Bavimail
 wrangler secret put POSTMARK_API_KEY    # only if using Postmark
+
+# only for the Gmail integration — see docs/gmail.md
+wrangler secret put GOOGLE_OAUTH_CLIENT_ID
+wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET
+openssl rand -base64 32 | wrangler secret put TOKEN_ENCRYPTION_KEY
 ```
 
 The full list of secrets and what each one does is in [Configuration](configuration.md#devvars).

@@ -9,8 +9,8 @@ yarn dev
 # Run tests
 yarn test
 
-# Type-check
-yarn tsc --noEmit
+# Type-check (project references — `--noEmit` checks nothing and exits 0)
+yarn tsc -b
 
 # Generate a migration after schema changes
 yarn db:generate
@@ -25,7 +25,21 @@ yarn db:seed:dev
 yarn db:studio:dev
 ```
 
-Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script populates `seeds/demo.sql` so you can exercise the inbox UI without real inbound email.
+`yarn dev` serves both the SPA and the worker on **`http://localhost:8080`**.
+
+Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script populates `seeds/demo.sql` so you can exercise the inbox UI without real inbound email. The one exception is a [Gmail-mapped inbox](gmail.md): mail is pulled from the Gmail API rather than pushed to the worker, so it is the only way to watch real inbound mail land on a local instance. Setting that up is [Gmail on a local instance](gmail-local-setup.md).
+
+## Firing the cron by hand
+
+The worker's `scheduled` handler runs every 15 minutes in production. It dispatches due sequence emails, processes the retry outbox, and syncs every connected Gmail mailbox — and it is the only caller of the Gmail sync, so there is no route, button or script that syncs one mailbox on demand.
+
+The Vite dev server forwards Miniflare's trigger endpoint, so this runs the whole handler immediately against a running `yarn dev`:
+
+```bash
+curl "http://localhost:8080/cdn-cgi/mf/scheduled"
+```
+
+**Verified from the Vite plugin and Miniflare sources, not executed** — confirm it on first use. A successful trigger answers `200` with the body `ok` and the `yarn dev` terminal prints the handler's own log lines; HTML or a `404` coming back means the request never reached the handler. The endpoint also accepts `?cron=…`, `?time=<unix-ms>` and `?format=json`.
 
 ## API explorer
 
@@ -55,4 +69,4 @@ Requirements in `.dev.vars`: `DEMO_MODE=1` and `DISABLE_PASSKEY_GATE=true` — b
 
 ---
 
-**See also:** [AGENTS.md](../AGENTS.md) for CI gates, Prettier, and the migration workflow · [CONTRIBUTING.md](../CONTRIBUTING.md) · [Architecture](architecture.md)
+**See also:** [AGENTS.md](../AGENTS.md) for CI gates, Prettier, and the migration workflow · [CONTRIBUTING.md](../CONTRIBUTING.md) · [Architecture](architecture.md) · [Gmail on a local instance](gmail-local-setup.md)
