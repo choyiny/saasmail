@@ -947,7 +947,13 @@ export interface GmailAccount {
 
 export async function fetchGmailAccounts(): Promise<GmailAccount[]> {
   // The endpoint wraps the list: { accounts: [...] }.
-  const res = await apiFetch<{ accounts: GmailAccount[] }>("/api/admin/gmail/");
+  //
+  // No trailing slash. Hono matches paths exactly and does no trailing-slash
+  // normalisation, so `/api/admin/gmail/` matches nothing and falls through
+  // to the SPA catch-all — which in production answers `index.html` with a
+  // 200, so `res.json()` throws a parse error rather than a clean 404. The
+  // shipped contract test sends this literal string through the real worker.
+  const res = await apiFetch<{ accounts: GmailAccount[] }>("/api/admin/gmail");
   return res.accounts;
 }
 
