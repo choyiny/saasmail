@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { users } from "../db/auth.schema";
 import { invitations } from "../db/invitations.schema";
+import { publicAuthFailure } from "../lib/public-error";
 import { createAuth } from "../auth";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
@@ -126,9 +127,17 @@ invitesRouter.openapi(acceptInviteRoute, async (c) => {
       body: { email, password, name, role: invite.role },
     });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Account creation failed";
-    return c.json({ error: message }, 400);
+    // This route is public — the visitor is not signed in — so only
+    // better-auth's own form-facing text may be forwarded. See
+    // lib/public-error.ts for what that means and why.
+    const failure = publicAuthFailure(
+      err,
+      "Account creation failed. Please try again.",
+    );
+    if (failure.internal !== null) {
+      console.error(`[invites] account creation failed: ${failure.internal}`);
+    }
+    return c.json({ error: failure.body }, 400);
   }
 
   await db

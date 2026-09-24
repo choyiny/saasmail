@@ -107,6 +107,52 @@ export async function listHistory(
   };
 }
 
+/**
+ * Every address this account may put in a From: header — its own mailbox plus
+ * each usable "Send mail as" alias — lowercased and trimmed so callers can
+ * compare against a stored address without re-normalising.
+ *
+ * An alias the operator added but has not confirmed yet comes back with
+ * `verificationStatus: "pending"`, and Gmail refuses to send from it, so it is
+ * dropped: including it would let a mapping pass this check and then die on
+ * the first real reply, which is the whole failure this list exists to catch.
+ * "pending" is the only status that means "cannot send". Gmail documents the
+ * field as populated for custom from-aliases only, so the account's own
+ * address and Workspace-managed aliases report
+ * `verificationStatusUnspecified` — or omit the field — while being perfectly
+ * sendable, and demanding a literal "accepted" would reject them.
+ *
+ * Mapping an inbox to an account that cannot send as it produces a mapping
+ * that only fails when a real reply goes out, so the mapping route checks this
+ * up front. The thrown message never carries the token: an error from here is
+ * shown to an admin and written to logs.
+ */
+export async function listSendAs(accessToken: string): Promise<string[]> {
+  const res = await fetch(new URL(`${BASE}/settings/sendAs`), {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    throw new GmailApiError(
+      res.status,
+      classify(res.status, false),
+      `Gmail settings.sendAs.list returned ${res.status}`,
+    );
+  }
+
+  const payload = (await readJson(res)) ?? {};
+  const entries = Array.isArray(payload.sendAs) ? payload.sendAs : [];
+  const addresses: string[] = [];
+  for (const entry of entries) {
+    const address = entry?.sendAsEmail;
+    if (typeof address !== "string") continue;
+    if (entry?.verificationStatus === "pending") continue;
+    const normalized = address.trim().toLowerCase();
+    if (normalized) addresses.push(normalized);
+  }
+  return addresses;
+}
+
 function base64UrlToArrayBuffer(b64url: string): ArrayBuffer {
   const b64 = b64url.replace(/-/g, "+").replace(/_/g, "/");
   const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);

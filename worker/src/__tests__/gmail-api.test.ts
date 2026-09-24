@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { listHistory, getMessage, GmailApiError } from "../lib/gmail/api";
+import {
+  listHistory,
+  getMessage,
+  listSendAs,
+  GmailApiError,
+} from "../lib/gmail/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -193,5 +198,80 @@ describe("getMessage", () => {
     expect(new TextDecoder().decode(msg!.raw)).toBe("");
     expect(msg!.labelIds).toEqual([]);
     expect(msg!.threadId).toBe("");
+  });
+});
+
+describe("listSendAs", () => {
+  it("returns every sendAs address, trimmed and lowercased", async () => {
+    const fn = stub(200, {
+      sendAs: [
+        { sendAsEmail: "Collector@Acme.DEV", isPrimary: true },
+        { sendAsEmail: "  Support@Acme.dev  " },
+        { displayName: "no address at all" },
+      ],
+    });
+
+    // Callers compare against a stored inbox address; normalising here is what
+    // stops a correct mapping being rejected over letter case.
+    expect(await listSendAs("at")).toEqual([
+      "collector@acme.dev",
+      "support@acme.dev",
+    ]);
+    expect(String(fn.mock.calls[0][0])).toBe(
+      "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+    );
+  });
+
+  it("drops an alias whose verification is still pending", async () => {
+    // Gmail returns a half-set-up "Send mail as" alias in this list but
+    // refuses to send from it, so treating it as usable would let a mapping
+    // pass the check and then fail on the first real reply.
+    stub(200, {
+      sendAs: [
+        { sendAsEmail: "collector@acme.dev", isPrimary: true },
+        { sendAsEmail: "confirmed@acme.dev", verificationStatus: "accepted" },
+        { sendAsEmail: "unconfirmed@acme.dev", verificationStatus: "pending" },
+      ],
+    });
+
+    expect(await listSendAs("at")).toEqual([
+      "collector@acme.dev",
+      "confirmed@acme.dev",
+    ]);
+  });
+
+  it("keeps an address Gmail reports no verification status for", async () => {
+    // The field is only populated for custom from-aliases. The account's own
+    // address and Workspace-managed aliases come back unspecified (or without
+    // the field) and are sendable — requiring a literal "accepted" would
+    // reject the primary address of every connected mailbox.
+    stub(200, {
+      sendAs: [
+        {
+          sendAsEmail: "collector@acme.dev",
+          isPrimary: true,
+          verificationStatus: "verificationStatusUnspecified",
+        },
+        { sendAsEmail: "domain-alias@acme.dev" },
+      ],
+    });
+
+    expect(await listSendAs("at")).toEqual([
+      "collector@acme.dev",
+      "domain-alias@acme.dev",
+    ]);
+  });
+
+  it("throws a GmailApiError on a non-2xx without echoing the token", async () => {
+    stub(403, { error: { message: "insufficient permissions" } });
+    const err = await listSendAs("super-secret-token").catch((e) => e);
+    expect(err).toBeInstanceOf(GmailApiError);
+    expect(err.status).toBe(403);
+    expect(err.message).not.toContain("super-secret-token");
+  });
+
+  it("returns an empty list when the body has no sendAs array", async () => {
+    stub(200, "<html>not json</html>");
+    expect(await listSendAs("at")).toEqual([]);
   });
 });

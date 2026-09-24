@@ -8,13 +8,31 @@ import {
   MAX_SIGNATURE_HTML_LENGTH,
   sanitizeSignatureHtml,
 } from "../lib/sanitize-signature";
+import { GmailApiError, listSendAs } from "../lib/gmail/api";
+import { GoogleAuthError } from "../lib/gmail/oauth";
+import { getAccessToken } from "../lib/gmail/token";
 import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
 import type { Variables } from "../variables";
 
+type InboxesEnv = CloudflareBindings & {
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  TOKEN_ENCRYPTION_KEY?: string;
+};
+
 export const adminInboxesRouter = new OpenAPIHono<{
-  Bindings: CloudflareBindings;
+  Bindings: InboxesEnv;
   Variables: Variables;
 }>();
+
+/** The secrets a Gmail token refresh needs, or null when unconfigured. */
+function gmailConfig(env: InboxesEnv) {
+  const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
+  const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const encryptionKey = env.TOKEN_ENCRYPTION_KEY;
+  if (!clientId || !clientSecret || !encryptionKey) return null;
+  return { clientId, clientSecret, encryptionKey };
+}
 
 const InboxRowSchema = z.object({
   email: z.string(),
@@ -244,7 +262,24 @@ const patchInboxRoute = createRoute({
     ),
     400: {
       description:
-        "Invalid forward destination, invalid source, or a group address was supplied",
+        "Invalid forward destination, invalid source, a group address was supplied, or the connected Google account cannot send as this inbox",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
+    502: {
+      description:
+        "Gmail could not be reached to verify the mapping; nothing was saved",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
+    503: {
+      description: "Gmail integration is not configured on this instance",
       content: {
         "application/json": {
           schema: z.object({ error: z.string() }),
@@ -256,9 +291,16 @@ const patchInboxRoute = createRoute({
 
 adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   const db = c.get("db");
-  const { email } = c.req.valid("param");
+  const { email: emailParam } = c.req.valid("param");
   const body = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
+
+  // Normalise the address the way every other site does (`POST /` above, the
+  // send path's inbox lookup, forwardTo below). Without this a PATCH to
+  // `Support@Acme.dev` writes a row the send path — which lowercases before
+  // looking up — can never find, so a mapping could pass the sendAs check
+  // below and still be dead on arrival.
+  const email = emailParam.trim().toLowerCase();
 
   // Google Group routing was attempted in this slice and withdrawn after
   // adversarial review found List-ID and Delivered-To are both
@@ -363,11 +405,87 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
   // this again at send time (and also catches forwards aimed at *other* inboxes
   // on this instance, which may not exist yet when the rule is saved).
-  if (nextForwardTo !== null && nextForwardTo === email.trim().toLowerCase()) {
+  if (nextForwardTo !== null && nextForwardTo === email) {
     return c.json(
       { error: "Forward destination cannot be the inbox itself" },
       400,
     );
+  }
+
+  // A Gmail source with no mailbox names nothing to sync from, and the
+  // sendAs check below is skipped for it because there is no account to ask —
+  // so without this it is the one way to write an unverified "gmail" row.
+  // Not reachable from the UI, which always sends both fields together.
+  if (nextSource === "gmail" && nextGmailAccountId === null) {
+    return c.json(
+      {
+        error:
+          'A Gmail inbox must name the connected mailbox it reads from. Send gmailAccountId alongside source: "gmail", or use source: "cloudflare" to unmap it.',
+      },
+      400,
+    );
+  }
+
+  // A Gmail mapping is only usable if the connected account may actually put
+  // this address in a From: header. Until this check existed, a wrong mapping
+  // was saved happily and only surfaced when a real reply bounced.
+  //
+  // Keyed on the RESULTING mapping, not on `body.source`. Entering this block
+  // only when the request carried `source` is what let
+  // `{"gmailAccountId": "..."}` write a mapping with no `sendAs` call at all
+  // — the gate skipped entirely by the one field that creates the thing it
+  // gates. A non-null `nextGmailAccountId` now implies `nextSource ===
+  // "gmail"` by construction above, so this is the whole condition.
+  //
+  // Still only when the mapping is new or changed: re-checking on every
+  // unrelated edit would make renaming an inbox fail whenever Gmail is
+  // unreachable, and an unchanged mapping was already checked when it was
+  // saved.
+  if (
+    nextGmailAccountId !== null &&
+    (currentRow?.source !== "gmail" ||
+      currentRow?.gmailAccountId !== nextGmailAccountId)
+  ) {
+    const cfg = gmailConfig(c.env);
+    if (!cfg) {
+      return c.json({ error: "Gmail integration is not configured" }, 503);
+    }
+
+    let sendAs: string[];
+    try {
+      const accessToken = await getAccessToken(db, nextGmailAccountId, cfg);
+      sendAs = await listSendAs(accessToken);
+    } catch (e) {
+      // Log a code, never the error's free text and never the token: this
+      // path holds an access token, and an admin-facing message plus a log
+      // line are both places it must never reach.
+      const reason =
+        e instanceof GmailApiError || e instanceof GoogleAuthError
+          ? e.code
+          : "sendas_check_failed";
+      console.error(
+        `[admin-inboxes] could not verify the Gmail mapping for ${email} (account ${nextGmailAccountId}): ${reason}`,
+      );
+      // Refuse rather than save something unverified — an unchecked mapping
+      // that looks checked is exactly the failure this guard exists to stop.
+      return c.json(
+        {
+          error: `Could not verify that ${email} can be sent from the connected Google account, so the mapping was not saved. Please try again.`,
+        },
+        502,
+      );
+    }
+
+    // Both sides are normalised: `listSendAs` lowercases Gmail's, and `email`
+    // was normalised at the top of this handler.
+    if (!sendAs.includes(email)) {
+      return c.json(
+        {
+          error: `The connected Google account cannot send as ${email}, so the mapping was not saved. Add ${email} under "Send mail as" in that account's Gmail settings, verify it, then map this inbox again.`,
+        },
+        400,
+      );
+    }
   }
 
   // The mailbox this inbox's stored Gmail thread ids came from is about to

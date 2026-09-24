@@ -15,19 +15,32 @@ import {
   deleteInbox,
   fetchAdminInboxes,
   fetchAdminUsers,
+  fetchGmailAccounts,
   updateInboxAssignments,
   updateInboxSettings,
   type AdminInbox,
   type AdminUser,
+  type GmailAccount,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+interface AdminInboxTableProps {
+  /**
+   * Bumped by the page when a Google mailbox is connected or disconnected.
+   * A change re-reads both lists: the mailbox options here, and the inboxes
+   * themselves, since disconnecting unmaps the inboxes that read from it.
+   */
+  gmailVersion?: number;
+}
 
 /**
  * Admin "Inboxes" table. Real table layout with bulk select + bulk
  * actions, inline display-name editing (blur-to-save), mode toggle
  * per row, and inline member-assignment chips.
  */
-export default function AdminInboxTable() {
+export default function AdminInboxTable({
+  gmailVersion = 0,
+}: AdminInboxTableProps = {}) {
   const [inboxes, setInboxes] = useState<AdminInbox[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,6 +58,13 @@ export default function AdminInboxTable() {
   const [forwardErrors, setForwardErrors] = useState<Record<string, string>>(
     {},
   );
+  // Connected Google mailboxes an inbox can be pointed at.
+  const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
+  const [gmailAccountsFailed, setGmailAccountsFailed] = useState(false);
+  // Per-inbox source-mapping errors, keyed by inbox. The server's message is
+  // kept word for word — on a rejected mapping it is the only actionable part.
+  const [sourceErrors, setSourceErrors] = useState<Record<string, string>>({});
+  const [sourceSavingFor, setSourceSavingFor] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([fetchAdminInboxes(), fetchAdminUsers()])
@@ -54,6 +74,46 @@ export default function AdminInboxTable() {
       })
       .finally(() => setLoading(false));
   }, []);
+
+  // Separate from the load above: a Gmail outage must not stop the table
+  // rendering, it just means no mailbox can be picked right now. Re-runs when
+  // the page signals that the connected set changed, so the options here do
+  // not go on offering a mailbox that was just disconnected.
+  useEffect(() => {
+    let cancelled = false;
+    fetchGmailAccounts()
+      .then((rows) => {
+        if (!cancelled) {
+          setGmailAccounts(rows);
+          // A later success has to clear an earlier failure, or one blip
+          // would lock every mapped row until a reload.
+          setGmailAccountsFailed(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setGmailAccountsFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gmailVersion]);
+
+  // A disconnect unmaps inboxes server-side, so the rows themselves are stale
+  // too. Only on a change, never on first mount — the load above covers that.
+  useEffect(() => {
+    if (gmailVersion === 0) return;
+    let cancelled = false;
+    fetchAdminInboxes()
+      .then((rows) => {
+        if (!cancelled) setInboxes(rows);
+      })
+      .catch(() => {
+        /* The table keeps what it has; the next action reports its own error. */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gmailVersion]);
 
   const members = useMemo(
     () => users.filter((u) => u.role !== "admin"),
@@ -102,7 +162,16 @@ export default function AdminInboxTable() {
                   }
                 : r,
             )
-          : [...prev, created].sort((a, b) => a.email.localeCompare(b.email)),
+          : [
+              ...prev,
+              // A new inbox is always a Cloudflare one; the create response
+              // doesn't carry the source fields.
+              {
+                ...created,
+                source: "cloudflare" as const,
+                gmailAccountId: null,
+              },
+            ].sort((a, b) => a.email.localeCompare(b.email)),
       );
       setNewEmail("");
       setNewDisplayName("");
@@ -139,8 +208,8 @@ export default function AdminInboxTable() {
     const next = trimmed === "" ? null : trimmed;
     if (next === inbox.forwardTo) return;
 
-    // Validate client-side so the admin gets a specific message — apiFetch
-    // collapses error responses to "API error: 400".
+    // Validate client-side so the admin is told before a round trip; the
+    // server's own wording is kept either way.
     if (next !== null) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next)) {
         setForwardErrors((p) => ({
@@ -215,6 +284,72 @@ export default function AdminInboxTable() {
         ),
       );
       console.error("Failed to update inbox mode", err);
+    }
+  }
+
+  /**
+   * Point an inbox at a connected Google mailbox, or back at Cloudflare.
+   *
+   * `value` is the select's value: "cloudflare", or a connected mailbox id.
+   * Switching to Cloudflare clears `gmailAccountId` explicitly — leaving the
+   * old id behind would store a row that claims a mailbox it no longer uses.
+   *
+   * The server re-checks that the mailbox can actually send as this address
+   * and rejects the mapping (400/502/503) with the row untouched. Its message
+   * is shown verbatim: it names the address and says what to do about it.
+   */
+  async function handleSetSource(inbox: AdminInbox, value: string) {
+    const nextSource = value === "cloudflare" ? "cloudflare" : "gmail";
+    const nextAccountId = value === "cloudflare" ? null : value;
+    if (inbox.source === nextSource && inbox.gmailAccountId === nextAccountId) {
+      return;
+    }
+
+    const before = {
+      source: inbox.source,
+      gmailAccountId: inbox.gmailAccountId,
+    };
+    setSourceErrors((p) => {
+      const { [inbox.email]: _drop, ...rest } = p;
+      return rest;
+    });
+    setSourceSavingFor(inbox.email);
+    setInboxes((all) =>
+      all.map((r) =>
+        r.email === inbox.email
+          ? { ...r, source: nextSource, gmailAccountId: nextAccountId }
+          : r,
+      ),
+    );
+
+    try {
+      const res = await updateInboxSettings(inbox.email, {
+        source: nextSource,
+        gmailAccountId: nextAccountId,
+      });
+      setInboxes((all) =>
+        all.map((r) =>
+          r.email === inbox.email
+            ? { ...r, source: res.source, gmailAccountId: res.gmailAccountId }
+            : r,
+        ),
+      );
+    } catch (err) {
+      // Nothing was saved, so put the control back where it was.
+      setInboxes((all) =>
+        all.map((r) => (r.email === inbox.email ? { ...r, ...before } : r)),
+      );
+      setSourceErrors((p) => ({
+        ...p,
+        [inbox.email]:
+          err instanceof Error && err.message.trim() !== ""
+            ? err.message
+            : "Couldn't change the source for this inbox.",
+      }));
+    } finally {
+      setSourceSavingFor((current) =>
+        current === inbox.email ? null : current,
+      );
     }
   }
 
@@ -415,6 +550,7 @@ export default function AdminInboxTable() {
                   <th className="px-3 py-2.5 font-semibold">Display name</th>
                   <th className="px-3 py-2.5 font-semibold">Signature</th>
                   <th className="px-3 py-2.5 font-semibold">Mode</th>
+                  <th className="px-3 py-2.5 font-semibold">Source</th>
                   <th className="px-3 py-2.5 font-semibold">Forward to</th>
                   <th className="px-3 py-2.5 font-semibold">Members</th>
                   <th className="w-16 px-3 py-2.5 text-right font-semibold">
@@ -525,6 +661,18 @@ export default function AdminInboxTable() {
                         </div>
                       </td>
 
+                      {/* Source — Cloudflare, or a connected Google mailbox */}
+                      <td className="px-3 py-2.5">
+                        <SourceSelect
+                          inbox={inbox}
+                          accounts={gmailAccounts}
+                          accountsFailed={gmailAccountsFailed}
+                          saving={sourceSavingFor === inbox.email}
+                          error={sourceErrors[inbox.email]}
+                          onChange={(v) => handleSetSource(inbox, v)}
+                        />
+                      </td>
+
                       {/* Forward to (inline editable, blur to save) */}
                       <td className="px-3 py-2.5">
                         <ForwardToInput
@@ -607,7 +755,12 @@ export default function AdminInboxTable() {
           bounce with <span className="font-mono">550 5.7.1 … (S3150)</span>.
           Copies are sent from this inbox's address with the original sender in{" "}
           <span className="font-mono">Reply-To</span>, so they authenticate on
-          your own domain.
+          your own domain.{" "}
+          <span className="font-medium text-text-secondary">Source</span> picks
+          where this inbox&apos;s mail comes from: Cloudflare Email Routing, or
+          a connected Google mailbox that can send as this address. Google only
+          accepts an address listed — and verified — under that mailbox&apos;s
+          &quot;Send mail as&quot;, so a mapping it refuses is not saved.
         </p>
       )}
     </div>
@@ -645,6 +798,108 @@ function DisplayNameInput({ inbox, onCommit }: DisplayNameInputProps) {
       data-testid="inbox-display-name-input"
       className="h-8 w-full rounded-[6px] border border-transparent bg-transparent px-2 text-sm text-text-primary placeholder:font-light placeholder:italic placeholder:text-text-tertiary hover:border-border focus:border-border focus:bg-card focus:outline-none focus:ring-2 focus:ring-text-primary/15"
     />
+  );
+}
+
+interface SourceSelectProps {
+  inbox: AdminInbox;
+  accounts: GmailAccount[];
+  accountsFailed: boolean;
+  saving: boolean;
+  error?: string;
+  onChange: (value: string) => void;
+}
+
+/**
+ * Where an inbox's mail comes from: Cloudflare Email Routing, or one of the
+ * connected Google mailboxes. Options carry the mailbox id as their value but
+ * show its address — the id means nothing to an admin.
+ */
+function SourceSelect({
+  inbox,
+  accounts,
+  accountsFailed,
+  saving,
+  error,
+  onChange,
+}: SourceSelectProps) {
+  const mappedId =
+    inbox.source === "gmail" ? (inbox.gmailAccountId ?? null) : null;
+  // A mapping can outlive the mailbox it points at, but "the mailbox is gone"
+  // and "we could not ask" are different facts and must not share a label.
+  // The option text is the only thing visible on a closed <select>, so
+  // labelling an unchecked mapping "no longer connected" invites the operator
+  // to unmap a working inbox because of a network blip — and switching back
+  // to Cloudflare is a real PATCH that really unmaps it.
+  //
+  // `known` matters on its own because a failed *re*-fetch keeps the rows from
+  // the last good load: the list is out of date, but it can still name this
+  // mapping, and showing an opaque id instead would be worse than the id-less
+  // truth. Only a mapping the list cannot resolve at all is "Couldn't check".
+  const known = mappedId !== null && accounts.some((a) => a.id === mappedId);
+  const unverifiable = mappedId !== null && accountsFailed && !known;
+  const orphaned = mappedId !== null && !accountsFailed && !known;
+  // Every mapped row is locked while the list is known to be out of date,
+  // named or not: changing it is a real PATCH, and a stale list cannot tell a
+  // live mapping from a dead one. `accounts.length === 0` does NOT imply this
+  // any more — the first load can succeed and a later one fail.
+  const staleMapping = mappedId !== null && accountsFailed;
+  const value = mappedId ?? "cloudflare";
+
+  return (
+    <div className="min-w-[170px]">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.currentTarget.value)}
+        disabled={
+          saving || staleMapping || (accounts.length === 0 && !orphaned)
+        }
+        aria-label={`Mail source for ${inbox.email}`}
+        aria-invalid={error ? true : undefined}
+        data-testid="inbox-source-select"
+        data-inbox-email={inbox.email}
+        className={cn(
+          "h-8 w-full rounded-[6px] border bg-transparent px-2 text-xs text-text-primary focus:bg-card focus:outline-none focus:ring-2 disabled:opacity-60",
+          error
+            ? "border-destructive focus:ring-destructive/20"
+            : "border-transparent hover:border-border focus:border-border focus:ring-text-primary/15",
+        )}
+      >
+        <option value="cloudflare">Cloudflare</option>
+        {unverifiable && mappedId !== null && (
+          <option value={mappedId}>
+            Couldn&apos;t check — still mapped to {mappedId}
+          </option>
+        )}
+        {orphaned && mappedId !== null && (
+          <option value={mappedId}>Mailbox no longer connected</option>
+        )}
+        {accounts.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.emailAddress}
+          </option>
+        ))}
+        {accounts.length === 0 && (
+          <option value="__unavailable" disabled>
+            {accountsFailed
+              ? "Couldn't load connected mailboxes"
+              : "Connect a Google mailbox first"}
+          </option>
+        )}
+      </select>
+      {error && (
+        // The server's rejection runs to ~220 characters and names the exact
+        // Gmail setting to change, so it has to be read, not squinted at: it
+        // gets body-sized text and a width of its own rather than the 170px
+        // the column is sized to.
+        <div
+          data-testid="inbox-source-error"
+          className="mt-1 w-[260px] max-w-[60vw] rounded-[6px] bg-destructive/10 px-2 py-1.5 text-xs font-light leading-relaxed text-destructive"
+        >
+          {error}
+        </div>
+      )}
+    </div>
   );
 }
 

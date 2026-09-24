@@ -1,7 +1,17 @@
 import { defineConfig } from "vitest/config";
 import { cloudflarePool } from "@cloudflare/vitest-pool-workers";
+import path from "path";
 
 export default defineConfig({
+  // The frontend's `@/…` alias, so a worker test can import the REAL
+  // `src/lib/api.ts` and send its real path strings at the real worker
+  // (`__tests__/frontend-api-contract.test.ts`). Without this the client
+  // module cannot resolve its own `@/lib/error-message` import.
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
   test: {
     globals: true,
     include: ["worker/src/__tests__/**/*.test.ts"],
