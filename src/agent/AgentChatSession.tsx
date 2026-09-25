@@ -11,6 +11,7 @@ import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { ChevronDown, ChevronRight, RotateCcw, Square } from "lucide-react";
 import { AgentMarkdown } from "@/agent/AgentMarkdown";
 import { useAgentContext } from "@/agent/AgentContext";
+import { useTranscriptCatchUp } from "@/agent/transcriptCatchUp";
 import {
   fetchAgentApprovalSummary,
   fetchDraft,
@@ -164,15 +165,21 @@ function ToolBadge({
   const status =
     state === "output-available"
       ? "done"
-      : state === "output-error" || state === "output-denied"
+      : state === "output-error"
         ? "error"
-        : state === "approval-requested"
-          ? "approval"
-          : state === "approval-responded"
-            ? approvalDecision
-              ? "approved"
-              : "denied"
-            : "running";
+        : state === "output-denied"
+          ? // A reason means the system settled it (e.g. an expired approval);
+            // without one, the user pressed Deny.
+            approvalReason
+            ? "error"
+            : "denied"
+          : state === "approval-requested"
+            ? "approval"
+            : state === "approval-responded"
+              ? approvalDecision
+                ? "approved"
+                : "denied"
+              : "running";
   const outputRecord = record(output);
   const inputRecord = record(input);
   const [approvalSummary, setApprovalSummary] = useState<string | null>(null);
@@ -368,12 +375,17 @@ export default function AgentChatSession({
     isStreaming,
     addToolApprovalResponse,
     clearError,
+    setMessages,
   } = useAgentChat({
     agent,
     body: () => ({ context: contextRef.current }),
+    // The server transcript is authoritative; setMessages only adopts it
+    // locally (useTranscriptCatchUp) and must not echo it back.
+    syncMessagesToServer: false,
   });
 
   const busy = isStreaming || status === "submitted";
+  useTranscriptCatchUp({ agent, messages, setMessages, busy });
   const terminalToolStreamError = terminalToolCallIdFromStreamError(
     error,
     messages,

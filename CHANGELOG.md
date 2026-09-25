@@ -80,6 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Durable agent approvals:** signed approval metadata now survives the chat library's persistence rebuild through a bounded Durable Object-side ledger; missing or mismatched ledger entries expire visibly instead of leaving an inert "Approved" card, while tampered tool input still fails signature verification.
+- **Agent answer after a mid-turn reload:** if the page reloads just as an agent turn finishes, the panel now picks up the persisted answer instead of showing only the question until the next reload.
+- **Denied agent actions:** a tool the user denied is labelled "denied" instead of "error", and the agent is told to say it did not act because the user declined rather than calling it a failure.
+- **Send API content type:** `POST /api/send` and `/api/send/reply/{emailId}` with a non-multipart body (for example JSON) return 400 with a message naming the expected `multipart/form-data` shape instead of an unhandled 500.
 - **Agent approval continuation on the client:** approving an agent action no longer flashes "No tool invocation found" with a Retry button. The install-time AI SDK compatibility patch now also makes `@ai-sdk/react`'s `useChat` transport proxy forward Cloudflare's tool-continuation flag, so the continuation extends the existing assistant message. Deploys must run `yarn install` with scripts enabled.
 - **Agent panel layout:** the desktop panel is bounded to the dashboard viewport, long transcripts scroll inside the panel with the composer pinned, and Markdown tables scroll horizontally instead of widening the panel.
 - **Agent E2E configuration:** the not-configured hint test now stubs agent status explicitly instead of depending on local Workers AI bindings.

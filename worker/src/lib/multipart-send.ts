@@ -25,7 +25,8 @@ export type SendParseError =
     }
   | { kind: "too-many-files"; limit: number; provided: number }
   | { kind: "too-large"; limitBytes: number; providedBytes: number }
-  | { kind: "missing-payload" };
+  | { kind: "missing-payload" }
+  | { kind: "not-multipart" };
 
 /**
  * Parse a multipart/form-data body for the send routes.
@@ -44,7 +45,14 @@ export async function parseSendBody<T>(
 ): Promise<
   { ok: true; value: ParsedSendBody<T> } | { ok: false; err: SendParseError }
 > {
-  const form = await c.req.formData();
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    // A JSON (or other non-form) body makes formData() throw; that is a
+    // caller error, not a server fault.
+    return { ok: false, err: { kind: "not-multipart" } };
+  }
 
   const payloadRaw = form.get("payload");
   if (typeof payloadRaw !== "string") {
@@ -125,6 +133,14 @@ export function sendParseErrorResponse(err: SendParseError): {
   switch (err.kind) {
     case "missing-payload":
       return { status: 400, body: { error: "Missing 'payload' field" } };
+    case "not-multipart":
+      return {
+        status: 400,
+        body: {
+          error:
+            "Request body must be multipart/form-data with a JSON 'payload' field",
+        },
+      };
     case "invalid-payload":
       return {
         status: 400,

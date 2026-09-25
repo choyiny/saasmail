@@ -194,6 +194,49 @@ describe("AgentChatSession approvals", () => {
     expect(screen.queryByText("Denied")).toBeNull();
   });
 
+  it("labels a user-denied tool as denied, not as an error", async () => {
+    renderWithParts([
+      {
+        type: "tool-add_to_list",
+        toolCallId: "approval-call-user-denied",
+        state: "output-denied",
+        input: { listId: "beta", email: "jane@acme.com" },
+        approval: { id: "approval-id-user-denied", approved: false },
+      },
+    ]);
+
+    expect(screen.getByTestId("agent-tool-add_to_list").textContent).toContain(
+      "denied",
+    );
+    expect(
+      screen.getByTestId("agent-tool-add_to_list").textContent,
+    ).not.toContain("error");
+    expect(screen.getByText("Denied")).toBeTruthy();
+  });
+
+  it("keeps the error label for a system-settled (expired) denial", async () => {
+    vi.mocked(api.fetchAgentApprovalSummary).mockRejectedValue(
+      new Error("not found"),
+    );
+    renderWithParts([
+      {
+        type: "tool-link_customer",
+        toolCallId: "approval-call-expired-label",
+        state: "output-denied",
+        input: { personId: "person-1", otherPersonId: "person-2" },
+        approval: {
+          id: "approval-id-expired-label",
+          approved: false,
+          reason: "This approval expired. Ask the agent again.",
+        },
+      },
+    ]);
+
+    expect(
+      screen.getByTestId("agent-tool-link_customer").textContent,
+    ).toContain("error");
+  });
+
   it("falls back to tool args and shows the recorded decision", async () => {
     vi.mocked(api.fetchAgentApprovalSummary).mockRejectedValue(
       new Error("not found"),
