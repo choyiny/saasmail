@@ -573,7 +573,7 @@ export async function streamMailAgentTurn({
         await approvalLedger.record(entries);
       }
 
-      const settledToolCallIds = terminalToolCallIdsFromStep(toolResults);
+      const settledToolCallIds = terminalToolCallIdsFromStep(content);
       if (settledToolCallIds.length > 0) {
         await approvalLedger.removeByToolCallIds(settledToolCallIds);
       }

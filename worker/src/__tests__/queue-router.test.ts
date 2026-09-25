@@ -1,22 +1,30 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import { applyMigrations, cleanDb } from "./helpers";
-import { classifyQueueMessage, handleQueueBatch } from "../lib/queue-router";
+import {
+  classifyQueueMessage,
+  handleQueueBatch,
+  SUGGEST_REPLY_MAX_ATTEMPTS,
+} from "../lib/queue-router";
 
 beforeAll(applyMigrations);
 beforeEach(cleanDb);
 
 /** Minimal stand-in for a Cloudflare `MessageBatch`, recording ack/retry. */
-function fakeBatch(bodies: unknown[]) {
+function fakeBatch(bodies: unknown[], attempts = 1) {
   const acked: number[] = [];
   const retried: number[] = [];
+  const retryDelays: Array<number | undefined> = [];
   const messages = bodies.map((body, i) => ({
     id: String(i),
     timestamp: new Date(),
     body,
-    attempts: 1,
+    attempts,
     ack: () => void acked.push(i),
-    retry: () => void retried.push(i),
+    retry: (options?: { delaySeconds?: number }) => {
+      retried.push(i);
+      retryDelays.push(options?.delaySeconds);
+    },
   }));
   return {
     batch: {
@@ -27,6 +35,7 @@ function fakeBatch(bodies: unknown[]) {
     } as unknown as MessageBatch<unknown>,
     acked,
     retried,
+    retryDelays,
   };
 }
 
@@ -111,6 +120,64 @@ describe("handleQueueBatch", () => {
 
     expect(acked).toEqual([0, 1]);
     expect(retried).toEqual([]);
+  });
+
+  it("retries a transient suggested-reply failure before the attempt cap", async () => {
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runSuggestedReply = vi
+      .fn()
+      .mockRejectedValue(new Error("provider timeout"));
+    const { batch, acked, retried, retryDelays } = fakeBatch(
+      [{ type: "suggest_reply", emailId: "email-1" }],
+      SUGGEST_REPLY_MAX_ATTEMPTS - 1,
+    );
+
+    await handleQueueBatch(batch, env as unknown as CloudflareBindings, {
+      runSuggestedReply,
+    });
+
+    expect(runSuggestedReply).toHaveBeenCalledTimes(1);
+    expect(retried).toEqual([0]);
+    expect(retryDelays).toEqual([30]);
+    expect(acked).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it("acks and logs a suggested-reply failure at the third total attempt", async () => {
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    const runSuggestedReply = vi
+      .fn()
+      .mockRejectedValue(new Error("provider timeout"));
+    const { batch, acked, retried } = fakeBatch(
+      [{ type: "suggest_reply", emailId: "email-1" }],
+      SUGGEST_REPLY_MAX_ATTEMPTS,
+    );
+
+    await handleQueueBatch(batch, env as unknown as CloudflareBindings, {
+      runSuggestedReply,
+    });
+
+    expect(retried).toEqual([]);
+    expect(acked).toEqual([0]);
+    expect(warn).toHaveBeenCalledWith(
+      `[queue] suggest_reply failed after ${SUGGEST_REPLY_MAX_ATTEMPTS} attempts; acking:`,
+      expect.any(Error),
+    );
+    warn.mockRestore();
+  });
+
+  it("acks a deterministic suggested-reply skip without retrying", async () => {
+    const runSuggestedReply = vi.fn().mockResolvedValue(undefined);
+    const { batch, acked, retried } = fakeBatch([
+      { type: "suggest_reply", emailId: "email-1" },
+    ]);
+
+    await handleQueueBatch(batch, env as unknown as CloudflareBindings, {
+      runSuggestedReply,
+    });
+
+    expect(retried).toEqual([]);
+    expect(acked).toEqual([0]);
   });
 
   it("retries a message whose handler throws, leaving the rest acked", async () => {

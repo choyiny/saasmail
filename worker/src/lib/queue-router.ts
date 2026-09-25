@@ -36,6 +36,9 @@ export type QueueMessageBody =
   | CampaignSendMessage
   | SuggestReplyMessage;
 
+export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
+const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
+
 export type QueueMessageKind =
   | "sequence_email"
   | "list_import"
@@ -95,6 +98,9 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
 export async function handleQueueBatch(
   batch: MessageBatch<unknown>,
   env: CloudflareBindings,
+  overrides: {
+    runSuggestedReply?: typeof runSuggestedReply;
+  } = {},
 ): Promise<void> {
   if (isDemoMode(env)) {
     // No queue binding exists in demo, so this should never fire — ack anything
@@ -105,6 +111,7 @@ export async function handleQueueBatch(
 
   const db = createDb(env);
   const sender = createEmailSender(env);
+  const suggestedReplyRunner = overrides.runSuggestedReply ?? runSuggestedReply;
 
   for (const msg of batch.messages) {
     const kind = classifyQueueMessage(msg.body);
@@ -136,12 +143,27 @@ export async function handleQueueBatch(
         await sendCampaignRecipient(db, env, sender, body.campaignRecipientId);
       } else {
         const body = msg.body as SuggestReplyMessage;
-        await runSuggestedReply(db, env, body.emailId);
+        await suggestedReplyRunner(db, env, body.emailId);
       }
       msg.ack();
     } catch (err) {
-      console.error(`[queue] ${kind} failed:`, err);
-      msg.retry();
+      if (
+        kind === "suggest_reply" &&
+        msg.attempts >= SUGGEST_REPLY_MAX_ATTEMPTS
+      ) {
+        console.error(
+          `[queue] suggest_reply failed after ${msg.attempts} attempts; acking:`,
+          err,
+        );
+        msg.ack();
+      } else {
+        console.error(`[queue] ${kind} failed:`, err);
+        if (kind === "suggest_reply") {
+          msg.retry({ delaySeconds: SUGGEST_REPLY_RETRY_DELAY_SECONDS });
+        } else {
+          msg.retry();
+        }
+      }
     }
   }
 }

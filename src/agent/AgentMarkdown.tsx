@@ -38,6 +38,8 @@ export function renderAgentMarkdown(markdown: string): string {
   const sanitized = DOMPurify.sanitize(parsed, {
     ALLOWED_TAGS: AGENT_MARKDOWN_TAGS,
     ALLOWED_ATTR: ["href", "title", "target", "rel"],
+    ALLOW_DATA_ATTR: false,
+    ALLOW_ARIA_ATTR: false,
   });
 
   const template = document.createElement("template");

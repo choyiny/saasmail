@@ -386,7 +386,10 @@ describe("agent session runtime", () => {
             { type: "text-end" as const, id: "approval-continuation-text" },
             {
               type: "finish" as const,
-              finishReason: { unified: "stop" as const, raw: "stop" },
+              finishReason: {
+                unified: "stop" as const,
+                raw: "stop",
+              },
               usage: MOCK_USAGE,
             },
           ]),
@@ -1011,6 +1014,86 @@ describe("agent session runtime", () => {
 });
 
 describe("agent model loop", () => {
+  it("removes approval ledger entries when a step ends in tool-error content", async () => {
+    const toolCallId = "ledger-terminal-tool-error";
+    const { ledger, entries } = createMemoryApprovalLedger([
+      {
+        approvalId: "ledger-terminal-approval",
+        toolCallId,
+        toolName: "failing_action",
+        signature: "signature",
+        hasInputSchemaInput: false,
+        createdAt: 1,
+      },
+    ]);
+    let call = 0;
+    const model = new MockLanguageModelV4({
+      doStream: async () => {
+        call++;
+        if (call === 1) {
+          return {
+            stream: convertArrayToReadableStream([
+              {
+                type: "tool-call" as const,
+                toolCallId,
+                toolName: "failing_action",
+                input: JSON.stringify({ value: "boom" }),
+              },
+              {
+                type: "finish" as const,
+                finishReason: {
+                  unified: "tool-calls" as const,
+                  raw: "tool-calls",
+                },
+                usage: MOCK_USAGE,
+              },
+            ]),
+          };
+        }
+        return {
+          stream: convertArrayToReadableStream([
+            { type: "text-start" as const, id: "after-tool-error" },
+            {
+              type: "text-delta" as const,
+              id: "after-tool-error",
+              delta: "Recovered.",
+            },
+            { type: "text-end" as const, id: "after-tool-error" },
+            {
+              type: "finish" as const,
+              finishReason: { unified: "stop" as const, raw: "stop" },
+              usage: MOCK_USAGE,
+            },
+          ]),
+        };
+      },
+    });
+
+    const result = await streamMailAgentTurn({
+      model,
+      messages: [
+        {
+          id: "ledger-terminal-user",
+          role: "user",
+          parts: [{ type: "text", text: "Run the failing action." }],
+        },
+      ],
+      tools: {
+        failing_action: tool({
+          inputSchema: z.object({ value: z.string() }),
+          execute: async (): Promise<{ success: true }> => {
+            throw new Error("expected failure");
+          },
+        }),
+      },
+      instructions: "Test instructions",
+      approvalLedger: ledger,
+    });
+    await result.consumeStream();
+
+    expect(entries.size).toBe(0);
+  });
+
   it("pauses an approval-gated tool without executing it", async () => {
     const executions: string[] = [];
     const model = new MockLanguageModelV4({

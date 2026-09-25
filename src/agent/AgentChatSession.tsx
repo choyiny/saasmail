@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAgent } from "agents/react";
-import { getToolName, isToolUIPart, type UIMessage } from "ai";
+import {
+  getToolName,
+  isToolUIPart,
+  UIMessageStreamError,
+  type UIMessage,
+} from "ai";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { ChevronDown, ChevronRight, RotateCcw, Square } from "lucide-react";
 import { AgentMarkdown } from "@/agent/AgentMarkdown";
@@ -13,6 +18,32 @@ import {
 } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import type { ComposePrefill } from "@/pages/ComposeModal";
+
+const TERMINAL_TOOL_STATES = new Set([
+  "output-available",
+  "output-error",
+  "output-denied",
+]);
+
+function terminalToolCallIdFromStreamError(
+  error: unknown,
+  messages: UIMessage[],
+): string | null {
+  if (!UIMessageStreamError.isInstance(error)) return null;
+  if (!error.message.startsWith("No tool invocation found")) return null;
+  const toolCallId = error.message.match(/tool call ID "([^"]+)"/)?.[1];
+  if (!toolCallId) return null;
+
+  const isTerminal = messages.some((message) =>
+    message.parts.some(
+      (part) =>
+        isToolUIPart(part) &&
+        (part as { toolCallId?: string }).toolCallId === toolCallId &&
+        TERMINAL_TOOL_STATES.has((part as { state?: string }).state ?? ""),
+    ),
+  );
+  return isTerminal ? toolCallId : null;
+}
 
 type OpenCompose = (prefill?: ComposePrefill, contextKey?: string) => void;
 
@@ -30,6 +61,28 @@ function messageText(message: UIMessage): string {
     )
     .map((part) => part.text)
     .join("");
+}
+
+function shouldShowThinking(message: UIMessage): boolean {
+  let lastToolIndex = -1;
+  let hasInProgressReasoning = false;
+
+  message.parts.forEach((part, index) => {
+    if (isToolUIPart(part)) lastToolIndex = index;
+    if (
+      part.type === "reasoning" &&
+      (part as { state?: string }).state !== "done"
+    ) {
+      hasInProgressReasoning = true;
+    }
+  });
+
+  if (hasInProgressReasoning) return true;
+  if (lastToolIndex < 0) return false;
+
+  return !message.parts
+    .slice(lastToolIndex + 1)
+    .some((part) => part.type === "text" && part.text.trim().length > 0);
 }
 
 function fallbackReasoningIndexes(message: UIMessage): Set<number> {
@@ -314,18 +367,28 @@ export default function AgentChatSession({
     status,
     isStreaming,
     addToolApprovalResponse,
+    clearError,
   } = useAgentChat({
     agent,
     body: () => ({ context: contextRef.current }),
   });
 
   const busy = isStreaming || status === "submitted";
+  const terminalToolStreamError = terminalToolCallIdFromStreamError(
+    error,
+    messages,
+  );
+  const visibleError = terminalToolStreamError ? undefined : error;
+
+  useEffect(() => {
+    if (terminalToolStreamError) clearError();
+  }, [clearError, terminalToolStreamError]);
 
   useEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript || !transcriptSticksToBottomRef.current) return;
     transcript.scrollTop = transcript.scrollHeight;
-  }, [error, messages, status]);
+  }, [messages, status, visibleError]);
 
   function handleTranscriptScroll() {
     const transcript = transcriptRef.current;
@@ -372,6 +435,10 @@ export default function AgentChatSession({
             message.role === "assistant" && !isCurrentStreamingMessage
               ? fallbackReasoningIndexes(message)
               : new Set<number>();
+          const showThinking =
+            message.role === "assistant" &&
+            isCurrentStreamingMessage &&
+            shouldShowThinking(message);
 
           return (
             <div
@@ -387,52 +454,63 @@ export default function AgentChatSession({
                   {messageText(message)}
                 </p>
               ) : (
-                message.parts.map((part, index) => {
-                  if (part.type === "text") {
-                    return (
-                      <AgentMarkdown
-                        key={`${message.id}-text-${index}`}
-                        text={part.text}
-                      />
-                    );
-                  }
-                  if (
-                    part.type === "reasoning" &&
-                    fallbackReasoning.has(index)
-                  ) {
-                    return (
-                      <AgentMarkdown
-                        key={`${message.id}-reasoning-${index}`}
-                        text={part.text}
-                      />
-                    );
-                  }
-                  if (isToolUIPart(part)) {
-                    return (
-                      <ToolBadge
-                        key={
-                          (part as { toolCallId?: string }).toolCallId ??
-                          `${message.id}-tool-${index}`
-                        }
-                        part={part}
-                        onOpenCompose={onOpenCompose}
-                        onApproval={addToolApprovalResponse}
-                      />
-                    );
-                  }
-                  return null;
-                })
+                <>
+                  {message.parts.map((part, index) => {
+                    if (part.type === "text") {
+                      return (
+                        <AgentMarkdown
+                          key={`${message.id}-text-${index}`}
+                          text={part.text}
+                        />
+                      );
+                    }
+                    if (
+                      part.type === "reasoning" &&
+                      fallbackReasoning.has(index)
+                    ) {
+                      return (
+                        <AgentMarkdown
+                          key={`${message.id}-reasoning-${index}`}
+                          text={part.text}
+                        />
+                      );
+                    }
+                    if (isToolUIPart(part)) {
+                      return (
+                        <ToolBadge
+                          key={
+                            (part as { toolCallId?: string }).toolCallId ??
+                            `${message.id}-tool-${index}`
+                          }
+                          part={part}
+                          onOpenCompose={onOpenCompose}
+                          onApproval={addToolApprovalResponse}
+                        />
+                      );
+                    }
+                    return null;
+                  })}
+                  {showThinking && (
+                    <p
+                      data-testid="agent-thinking"
+                      aria-live="polite"
+                      className="mt-2 text-xs text-text-tertiary"
+                    >
+                      Thinking…
+                    </p>
+                  )}
+                </>
               )}
             </div>
           );
         })}
 
-        {error && (
+        {visibleError && (
           <div
             data-testid="agent-chat-error"
             className="rounded-[6px] border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-700"
           >
-            {error.message}
+            {visibleError.message}
           </div>
         )}
       </div>
@@ -447,7 +525,7 @@ export default function AgentChatSession({
           className="min-h-20 w-full resize-none rounded-[6px] border border-border bg-bg px-3 py-2 text-sm text-text-primary outline-none"
         />
         <div className="mt-2 flex items-center justify-end gap-2">
-          {error && (
+          {visibleError && (
             <button
               type="button"
               onClick={() => void regenerate()}
