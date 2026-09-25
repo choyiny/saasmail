@@ -273,6 +273,19 @@ creating a broken new assistant message. At most five approved CRM actions
 execute in one user turn; further calls return a guard error instructing the
 model to ask the user before doing more.
 
+When the user presses **Deny**, the tool part ends as `output-denied` and the
+panel labels it **denied**; an `output-denied` part that carries a reason (an
+expired approval) keeps the **error** label and shows the reason. The agent's
+instructions treat a denied result as the user declining, so it reports that it
+did not make the change rather than calling it a failure.
+
+The panel resumes an in-progress turn after a page reload. If the page reloads
+just as a turn finishes, its initial transcript can be fetched before the
+answer is persisted while the resume handshake already reports no active
+stream. In that case, when the transcript ends on an unanswered user message,
+the panel re-reads the persisted transcript once and shows it if it strictly
+extends what the panel has (`src/agent/transcriptCatchUp.ts`).
+
 A reply draft never overwrites a non-empty human autosave. If a user already has
 content in `reply:<emailId>`, the agent returns
 `{ saved: false, reason: "existing_draft", ... }` and leaves that draft
