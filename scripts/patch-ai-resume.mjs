@@ -1,8 +1,9 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const EXPECTED_AI_VERSION = "7.0.109";
+const EXPECTED_AI_REACT_VERSION = "4.0.112";
 const ACTIVE_RESUME_ANCHOR =
   'const activeResumeRequest = trigger === "resume-stream"';
 const ABORT_AND_ACTIVE =
@@ -13,6 +14,15 @@ const ORIGINAL_LAST_MESSAGE =
   'lastMessage: trigger === "resume-stream" || trigger === "regenerate-message" ? void 0 : this.state.snapshot(lastMessage),';
 const PATCHED_LAST_MESSAGE =
   'lastMessage: trigger === "regenerate-message" || (trigger === "resume-stream" && !seedToolContinuation) ? void 0 : this.state.snapshot(lastMessage),';
+
+// `useChat` hands the Chat a proxy transport instead of the transport it was
+// given, so the seed check above can't see `_expectToolContinuation` on
+// Cloudflare's WebSocketChatTransport unless the proxy forwards it.
+const REACT_PROXY_ANCHOR =
+  "reconnectToStream: (reconnectOptions) => getTransport().reconnectToStream(reconnectOptions)\n    },";
+const REACT_PROXY_FORWARD =
+  "get _expectToolContinuation() {\n        return getTransport()._expectToolContinuation;\n      }";
+const PATCHED_REACT_PROXY = `reconnectToStream: (reconnectOptions) => getTransport().reconnectToStream(reconnectOptions),\n      ${REACT_PROXY_FORWARD}\n    },`;
 
 function occurrences(source, needle) {
   return source.split(needle).length - 1;
@@ -54,9 +64,26 @@ export function transformAiResumeSource(source) {
   return withSeed.replace(ORIGINAL_LAST_MESSAGE, PATCHED_LAST_MESSAGE);
 }
 
-export async function patchInstalledAi({ root = process.cwd() } = {}) {
-  const packagePath = resolve(root, "node_modules/ai/package.json");
-  const distPath = resolve(root, "node_modules/ai/dist/index.js");
+export function transformAiReactTransportSource(source) {
+  const originalCount = occurrences(source, REACT_PROXY_ANCHOR);
+  const forwardCount = occurrences(source, REACT_PROXY_FORWARD);
+
+  if (originalCount === 0 && forwardCount === 1) {
+    return source;
+  }
+
+  if (originalCount !== 1 || forwardCount !== 0) {
+    throw new Error(
+      `@ai-sdk/react transport proxy anchors are inconsistent (original=${originalCount}, forward=${forwardCount}). Re-check docs/updating.md before changing the pinned AI SDK version.`,
+    );
+  }
+
+  return source.replace(REACT_PROXY_ANCHOR, PATCHED_REACT_PROXY);
+}
+
+async function patchPackage({ root, name, version, file, transform }) {
+  const packagePath = resolve(root, "node_modules", name, "package.json");
+  const distPath = resolve(root, "node_modules", name, file);
 
   let packageJson;
   try {
@@ -68,19 +95,48 @@ export async function patchInstalledAi({ root = process.cwd() } = {}) {
     );
   }
 
-  if (packageJson.version !== EXPECTED_AI_VERSION) {
+  if (packageJson.version !== version) {
     throw new Error(
-      `Expected ai@${EXPECTED_AI_VERSION}, found ai@${String(packageJson.version)}. Re-check docs/updating.md before changing the pinned AI SDK version.`,
+      `Expected ${name}@${version}, found ${name}@${String(packageJson.version)}. Re-check docs/updating.md before changing the pinned AI SDK version.`,
     );
   }
 
   const source = await readFile(distPath, "utf8");
-  const patched = transformAiResumeSource(source);
-  if (patched !== source) {
-    await writeFile(distPath, patched, "utf8");
-    console.log(`[patch-ai-resume] patched ai@${EXPECTED_AI_VERSION}`);
-  } else {
-    console.log(`[patch-ai-resume] ai@${EXPECTED_AI_VERSION} already patched`);
+  const patched = transform(source);
+  if (patched === source) {
+    console.log(`[patch-ai-resume] ${name}@${version} already patched`);
+    return false;
+  }
+  await writeFile(distPath, patched, "utf8");
+  console.log(`[patch-ai-resume] patched ${name}@${version}`);
+  return true;
+}
+
+export async function patchInstalledAi({ root = process.cwd() } = {}) {
+  const changed = [
+    await patchPackage({
+      root,
+      name: "ai",
+      version: EXPECTED_AI_VERSION,
+      file: "dist/index.js",
+      transform: transformAiResumeSource,
+    }),
+    await patchPackage({
+      root,
+      name: "@ai-sdk/react",
+      version: EXPECTED_AI_REACT_VERSION,
+      file: "dist/index.js",
+      transform: transformAiReactTransportSource,
+    }),
+  ];
+
+  // Vite's dependency pre-bundle cache is keyed on the lockfile, not on file
+  // contents, so `yarn dev` would keep serving the unpatched copies.
+  if (changed.some(Boolean)) {
+    await rm(resolve(root, "node_modules/.vite"), {
+      recursive: true,
+      force: true,
+    });
   }
 }
 

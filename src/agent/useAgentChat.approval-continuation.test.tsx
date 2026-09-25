@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import {
   act,
   fireEvent,
@@ -79,7 +78,10 @@ describe("useAgentChat approval continuation", () => {
     function Harness() {
       const chat = useAgentChat({
         agent,
-        getInitialMessages: () => Promise.resolve(initialMessages),
+        // Seed the transcript synchronously: an async getInitialMessages makes
+        // useAgentChat suspend, and CI can time out on the Suspense fallback.
+        getInitialMessages: null,
+        messages: initialMessages,
         resume: false,
       });
       const assistant = chat.messages.find(
@@ -118,11 +120,7 @@ describe("useAgentChat approval continuation", () => {
       );
     }
 
-    render(
-      <Suspense fallback={<div>Loading</div>}>
-        <Harness />
-      </Suspense>,
-    );
+    render(<Harness />);
 
     await waitFor(() =>
       expect(screen.getByTestId("tool-state").textContent).toBe(

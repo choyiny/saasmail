@@ -24,13 +24,22 @@ This release carries `scripts/patch-ai-resume.mjs`, run by `postinstall`. AI SDK
 `agents@0.24.0` / `@cloudflare/ai-chat@0.12.0` still use that API for tool
 approval continuations and strip the continuation start chunk's `messageId`.
 
-The install-time script patches only `node_modules/ai/dist/index.js` for the
-pinned `ai@7.0.109`, restoring the previous-message seed only while
-Cloudflare's `WebSocketChatTransport` has marked a tool continuation. Ordinary
-page-load resume keeps AI SDK 7.0.109 behavior. The script is idempotent and
-fails installation if the AI version or either exact patch anchor changes; do
-not bump `ai` until this section and the compatibility patch have been
-re-validated.
+The install-time script patches two files:
+
+- `node_modules/ai/dist/index.js` (pinned `ai@7.0.109`): restores the
+  previous-message seed only while Cloudflare's `WebSocketChatTransport` has
+  marked a tool continuation.
+- `node_modules/@ai-sdk/react/dist/index.js` (pinned `@ai-sdk/react@4.0.112`):
+  `useChat` wraps the transport in a proxy, so the proxy forwards the
+  `_expectToolContinuation` flag. Without this, the seed check never sees it.
+
+Ordinary page-load resume keeps AI SDK 7.0.109 behavior. The script is
+idempotent, clears Vite's `node_modules/.vite` pre-bundle cache when it changes
+a file, and fails installation if either version or any exact patch anchor
+changes. Do not bump `ai` or `@ai-sdk/react` until this section and the
+compatibility patch have been re-validated;
+`src/agent/useAgentChat.approval-continuation.test.tsx` must fail without the
+patch and pass with it.
 
 Remove the script and `postinstall` hook once a released Cloudflare Agents /
 AI Chat pair explicitly supports AI SDK >= 7.0.61 approval continuations

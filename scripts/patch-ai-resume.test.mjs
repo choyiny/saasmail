@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { transformAiResumeSource } from "./patch-ai-resume.mjs";
+import {
+  transformAiReactTransportSource,
+  transformAiResumeSource,
+} from "./patch-ai-resume.mjs";
 
 const FIXTURE = `
   async makeRequest({ trigger }) {
@@ -12,6 +15,16 @@ const FIXTURE = `
       })
     };
   }
+`;
+
+const REACT_FIXTURE = `
+  const chatOptions = {
+    ...options,
+    transport: {
+      sendMessages: (sendOptions) => getTransport().sendMessages(sendOptions),
+      reconnectToStream: (reconnectOptions) => getTransport().reconnectToStream(reconnectOptions)
+    },
+    onToolCall: (arg) => {
 `;
 
 describe("patch-ai-resume", () => {
@@ -47,5 +60,22 @@ describe("patch-ai-resume", () => {
         ),
       ),
     ).toThrow(/anchors are inconsistent/);
+  });
+
+  it("forwards the continuation flag through the useChat transport proxy", () => {
+    const patched = transformAiReactTransportSource(REACT_FIXTURE);
+
+    expect(patched).toContain(
+      "get _expectToolContinuation() {\n        return getTransport()._expectToolContinuation;\n      }",
+    );
+    expect(transformAiReactTransportSource(patched)).toBe(patched);
+  });
+
+  it("throws when the useChat transport proxy anchor is missing", () => {
+    expect(() =>
+      transformAiReactTransportSource(
+        REACT_FIXTURE.replace("reconnectToStream:", "reconnect:"),
+      ),
+    ).toThrow(/transport proxy anchors are inconsistent/);
   });
 });
