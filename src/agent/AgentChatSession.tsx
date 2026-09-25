@@ -102,6 +102,10 @@ function ToolBadge({
   const approvalId = typeof approval?.id === "string" ? approval.id : null;
   const approvalDecision =
     typeof approval?.approved === "boolean" ? approval.approved : null;
+  const approvalReason =
+    typeof approval?.reason === "string" && approval.reason.trim()
+      ? approval.reason.trim()
+      : null;
   const hasApproval = approvalId !== null;
   const needsApproval = state === "approval-requested" && approvalId !== null;
   const status =
@@ -177,7 +181,7 @@ function ToolBadge({
   }
 
   return (
-    <div className="my-2 rounded-[6px] border border-border bg-bg-muted/50 text-xs">
+    <div className="my-2 min-w-0 rounded-[6px] border border-border bg-bg-muted/50 text-xs">
       <button
         type="button"
         data-testid={`agent-tool-${toolName}`}
@@ -224,11 +228,17 @@ function ToolBadge({
               </button>
             </div>
           )}
-          {!needsApproval && approvalDecision !== null && (
-            <p className="font-medium text-text-secondary">
-              {approvalDecision ? "Approved" : "Denied"}
-            </p>
-          )}
+          {!needsApproval &&
+            (approvalDecision !== null ||
+              (state === "output-denied" && approvalReason !== null)) && (
+              <p className="font-medium text-text-secondary">
+                {state === "output-denied" && approvalReason
+                  ? approvalReason
+                  : approvalDecision
+                    ? "Approved"
+                    : (approvalReason ?? "Denied")}
+              </p>
+            )}
         </div>
       )}
 
@@ -287,6 +297,8 @@ export default function AgentChatSession({
   const contextRef = useRef(context);
   contextRef.current = context;
   const [input, setInput] = useState("");
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const transcriptSticksToBottomRef = useRef(true);
 
   const agent = useAgent({
     agent: "MailAgent",
@@ -309,6 +321,20 @@ export default function AgentChatSession({
 
   const busy = isStreaming || status === "submitted";
 
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript || !transcriptSticksToBottomRef.current) return;
+    transcript.scrollTop = transcript.scrollHeight;
+  }, [error, messages, status]);
+
+  function handleTranscriptScroll() {
+    const transcript = transcriptRef.current;
+    if (!transcript) return;
+    const distanceFromBottom =
+      transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight;
+    transcriptSticksToBottomRef.current = distanceFromBottom <= 48;
+  }
+
   function submit(event: React.FormEvent) {
     event.preventDefault();
     const text = input.trim();
@@ -325,10 +351,12 @@ export default function AgentChatSession({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div
+        ref={transcriptRef}
         data-testid="agent-transcript"
-        className="smooth-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-3"
+        onScroll={handleTranscriptScroll}
+        className="smooth-scroll min-h-0 min-w-0 flex-1 space-y-3 overflow-y-auto p-3"
       >
         {messages.length === 0 && (
           <div className="flex h-full min-h-32 items-center justify-center text-center text-xs text-text-tertiary">
@@ -350,8 +378,8 @@ export default function AgentChatSession({
               key={message.id}
               className={
                 message.role === "user"
-                  ? "ml-8 rounded-[8px] bg-bg-muted p-2.5 text-sm text-text-primary"
-                  : "mr-2 rounded-[8px] border border-border bg-card p-2.5"
+                  ? "ml-8 min-w-0 rounded-[8px] bg-bg-muted p-2.5 text-sm text-text-primary"
+                  : "mr-2 min-w-0 rounded-[8px] border border-border bg-card p-2.5"
               }
             >
               {message.role === "user" ? (

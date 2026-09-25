@@ -79,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Durable agent approvals:** signed approval metadata now survives the chat library's persistence rebuild through a bounded Durable Object-side ledger; missing or mismatched ledger entries expire visibly instead of leaving an inert "Approved" card, while tampered tool input still fails signature verification.
+- **Agent panel layout:** the desktop panel is bounded to the dashboard viewport, long transcripts scroll inside the panel with the composer pinned, and Markdown tables scroll horizontally instead of widening the panel.
+- **Agent E2E configuration:** the not-configured hint test now stubs agent status explicitly instead of depending on local Workers AI bindings.
+- **Suggested reply grounding:** drafting instructions prohibit invented navigation, prices, policies, dates, links, signatures, and placeholders; placeholder-bearing drafts fail closed after safe trailing placeholder cleanup.
+
 - **First-admin onboarding sign-in:** setup now uses Better Auth's email sign-in method after creating the first administrator, so successful setup signs the new admin in automatically instead of falling through to the login page because the old client method mapped to a nonexistent endpoint.
 - **Automation reference safety:** deleted folders and unavailable assignees are surfaced as rule warnings; missing-folder actions log and skip without blocking later actions, and folder deletion warns how many automation rules will become dangling.
 - **Automated inbound guards:** suggested replies and rule auto-replies now reject bounce/report signals, auto-response headers, and common no-reply sender local-parts in addition to the existing list/bulk headers.

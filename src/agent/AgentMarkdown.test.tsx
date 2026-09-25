@@ -21,4 +21,16 @@ describe("agent markdown sanitizer", () => {
     expect(safe).toContain('target="_blank"');
     expect(safe).toContain('rel="noopener noreferrer"');
   });
+  it("wraps tables for horizontal scrolling after sanitizing attributes", () => {
+    const html = renderAgentMarkdown(
+      '<table onclick="alert(1)" style="width:9999px"><tr><th style="color:red">Name</th><td data-bad="1">Value</td></tr></table>',
+    );
+
+    expect(html).toContain(
+      '<div class="agent-md-table overflow-x-auto"><table>',
+    );
+    expect(html).not.toContain("onclick");
+    expect(html).not.toContain("style=");
+    expect(html).not.toContain("data-bad");
+  });
 });

@@ -203,9 +203,9 @@ export default function AgentPanel({
     <aside
       data-agent-panel
       aria-label="Mail agent"
-      className="fixed inset-0 z-[70] flex min-h-0 flex-col border-l border-border bg-card md:static md:z-auto md:w-[400px] md:shrink-0"
+      className="fixed inset-0 z-[70] flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-border bg-card md:sticky md:inset-x-auto md:bottom-auto md:top-16 md:z-auto md:h-[calc(100dvh-4rem)] md:w-[400px] md:shrink-0 md:self-start"
     >
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
         <div>
           <h2 className="text-sm font-semibold text-text-primary">
             Mail agent
@@ -226,7 +226,7 @@ export default function AgentPanel({
         </button>
       </div>
 
-      <div className="border-b border-border p-3">
+      <div className="shrink-0 border-b border-border p-3">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -341,7 +341,7 @@ export default function AgentPanel({
             </div>
           )}
 
-          <div className="border-t border-border p-3">
+          <div className="shrink-0 border-t border-border p-3">
             <textarea
               data-testid="agent-composer"
               aria-label="Message the mail agent"

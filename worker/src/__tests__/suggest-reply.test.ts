@@ -6,7 +6,10 @@ import { emails } from "../db/emails.schema";
 import { customerPeople, customers } from "../db/customers.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { suggestedReplies } from "../db/suggested-replies.schema";
-import { runSuggestedReply } from "../lib/agent/suggest-reply";
+import {
+  postProcessSuggestedReply,
+  runSuggestedReply,
+} from "../lib/agent/suggest-reply";
 import {
   applyMigrations,
   cleanDb,
@@ -68,6 +71,33 @@ function textModel(outputs: string[]) {
     }),
   });
 }
+
+describe("suggested reply post-processing", () => {
+  it("drops a trailing placeholder and its closing phrase", () => {
+    expect(
+      postProcessSuggestedReply(
+        "Thanks for the details.\n\nBest regards,\n[Your Name]",
+      ),
+    ).toEqual({
+      bodyText: "Thanks for the details.",
+      hasPlaceholder: false,
+    });
+    expect(
+      postProcessSuggestedReply("I can help with that.\n[Company]"),
+    ).toEqual({
+      bodyText: "I can help with that.",
+      hasPlaceholder: false,
+    });
+  });
+
+  it("flags placeholders that remain inside substantive copy", () => {
+    expect(
+      postProcessSuggestedReply(
+        "Please visit [Company Portal] and ask for [Your Name] if you need help.",
+      ).hasPlaceholder,
+    ).toBe(true);
+  });
+});
 
 describe("suggested reply consumer", () => {
   it.each(["FLAG", "MAYBE", "UNSAFE"])(
@@ -399,6 +429,53 @@ describe("suggested reply consumer", () => {
     const generationCall = JSON.stringify(model.doGenerateCalls[1]);
     expect(generationCall).toContain("linked-history-visible-token");
     expect(generationCall).not.toContain("linked-history-denied-token");
+  });
+
+  it("skips a draft when a placeholder remains in the body", async () => {
+    const { emailId } = await seed("placeholder-draft-email");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const model = textModel([
+      "SAFE",
+      "Open Settings, then Billing and ask [Your Name] for help.",
+    ]);
+
+    await runSuggestedReply(
+      getDb(),
+      env as unknown as CloudflareBindings,
+      emailId,
+      model,
+    );
+
+    expect(
+      await getDb()
+        .select()
+        .from(suggestedReplies)
+        .where(eq(suggestedReplies.emailId, emailId)),
+    ).toHaveLength(0);
+    expect(warn).toHaveBeenCalledWith(
+      "[suggested-reply] generation contained a bracketed placeholder; skipping",
+    );
+    warn.mockRestore();
+  });
+
+  it("tells the drafting model not to invent facts or add a signature", async () => {
+    const { emailId } = await seed("grounded-prompt-email");
+    const model = textModel(["SAFE", "We will follow up with the details."]);
+
+    await runSuggestedReply(
+      getDb(),
+      env as unknown as CloudflareBindings,
+      emailId,
+      model,
+    );
+
+    const generationCall = JSON.stringify(model.doGenerateCalls[1]);
+    expect(generationCall).toContain(
+      "Only state facts that appear in the quoted messages or the inbox instructions",
+    );
+    expect(generationCall).toContain(
+      "The configured inbox signature is added when the reply is sent",
+    );
   });
 
   it("is idempotent on redelivery", async () => {

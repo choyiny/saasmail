@@ -59,8 +59,13 @@ The drafting call has no tools. The current message and up to 10 recent messages
 from the same person in the same inbox are quoted as untrusted data, and each
 body is truncated to 4000 characters. Inbox **Agent instructions**, when set,
 are included as trusted administrator guidance. The result is stored as plain
-text for a human to review, use, edit, or dismiss. **Nothing is ever sent by
-this feature.**
+text for a human to review, use, edit, or dismiss. Drafting instructions require
+facts to come from the quoted messages or trusted inbox instructions; unknown
+answers should be acknowledged rather than invented. Suggested replies omit
+signatures because the configured inbox signature is appended by the reply
+composer when the human sends. Trailing placeholder-only sign-offs are removed,
+while placeholders embedded in substantive copy make the suggestion fail
+closed. **Nothing is ever sent by this feature.**
 
 Cost per eligible message is therefore one screening call plus one generation
 call. The screen and draft calls disable reasoning for providers that support
@@ -238,6 +243,26 @@ it invalidates still-pending cards rather than executing them with a stale
 signature. An unsigned or stale card shows "This approval expired. Ask the
 agent again."; the tool is not executed, and a later user turn treats the
 incomplete old approval as denied so the session remains usable.
+
+The pinned `agents` 0.24.0 / `@cloudflare/ai-chat` 0.12.0 persistence path
+rebuilds approval UI parts without the AI SDK signature metadata. `MailAgent`
+therefore keeps the signed approval fields in a separate
+`agent_approval_ledger` table in the same Durable Object SQLite store. A
+continuation restores metadata only when the approval id, tool-call id, and tool
+name all match the ledger row; the AI SDK then verifies the original HMAC
+against the current tool input before execution. The server never re-signs a
+client-supplied transcript. Terminal tool results delete their ledger rows, and
+recording a new approval also prunes rows older than seven days.
+
+Expired approvals are persisted as terminal `output-denied` parts before the
+continuation response is returned. In `@cloudflare/ai-chat` 0.12.0, a
+continuation clones the last assistant message from the DO's current
+`this.messages` and persists that clone after the stream, including the error
+path. Because the repair write is awaited first, that clone already contains the
+terminal denial. In addition, `agents` 0.24.0 `reconcileMessages()` overlays
+server terminal states, including `output-denied`, onto stale client
+`approval-responded` snapshots, so a delayed client cannot restore an
+approved state.
 
 Execution happens only after a valid approval and re-reads the user's current
 role and inbox permissions, so access revoked while the card is waiting is

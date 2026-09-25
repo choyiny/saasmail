@@ -43,9 +43,10 @@ beforeEach(() => {
   });
 });
 
-function renderWithParts(
+function mockAgentChat(
   parts: Record<string, unknown>[],
   status: "ready" | "submitted" | "streaming" = "ready",
+  error: Error | null = null,
 ) {
   sdk.useAgentChat.mockReturnValue({
     messages: [
@@ -59,10 +60,18 @@ function renderWithParts(
     stop: vi.fn(),
     regenerate: vi.fn(),
     addToolApprovalResponse: sdk.approval,
-    error: null,
+    error,
     status,
     isStreaming: status !== "ready",
   });
+}
+
+function renderWithParts(
+  parts: Record<string, unknown>[],
+  status: "ready" | "submitted" | "streaming" = "ready",
+  error: Error | null = null,
+) {
+  mockAgentChat(parts, status, error);
 
   return render(
     <MemoryRouter>
@@ -133,6 +142,54 @@ describe("AgentChatSession approvals", () => {
     });
   });
 
+  it("shows the persisted reason for an expired denied approval", async () => {
+    vi.mocked(api.fetchAgentApprovalSummary).mockRejectedValue(
+      new Error("not found"),
+    );
+    renderWithParts([
+      {
+        type: "tool-link_customer",
+        toolCallId: "approval-call-expired",
+        state: "approval-responded",
+        input: { personId: "person-1", otherPersonId: "person-2" },
+        approval: {
+          id: "approval-id-expired",
+          approved: false,
+          reason: "This approval expired. Ask the agent again.",
+        },
+      },
+    ]);
+
+    expect(
+      screen.getByText("This approval expired. Ask the agent again."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Denied")).toBeNull();
+  });
+
+  it("shows the persisted reason for an output-denied expired approval", async () => {
+    vi.mocked(api.fetchAgentApprovalSummary).mockRejectedValue(
+      new Error("not found"),
+    );
+    renderWithParts([
+      {
+        type: "tool-link_customer",
+        toolCallId: "approval-call-output-denied",
+        state: "output-denied",
+        input: { personId: "person-1", otherPersonId: "person-2" },
+        approval: {
+          id: "approval-id-output-denied",
+          approved: false,
+          reason: "This approval expired. Ask the agent again.",
+        },
+      },
+    ]);
+
+    expect(
+      screen.getByText("This approval expired. Ask the agent again."),
+    ).toBeTruthy();
+    expect(screen.queryByText("Denied")).toBeNull();
+  });
+
   it("falls back to tool args and shows the recorded decision", async () => {
     vi.mocked(api.fetchAgentApprovalSummary).mockRejectedValue(
       new Error("not found"),
@@ -153,6 +210,66 @@ describe("AgentChatSession approvals", () => {
         screen.getByTestId("agent-approval-link_customer").textContent,
       ).toContain("link_customer"),
     );
+  });
+});
+
+describe("AgentChatSession continuation errors and scrolling", () => {
+  it("renders an approval-signature continuation error from useAgentChat", () => {
+    renderWithParts(
+      [],
+      "ready",
+      new Error("This approval expired. Ask the agent again."),
+    );
+
+    expect(
+      screen.getByText("This approval expired. Ask the agent again."),
+    ).toBeTruthy();
+  });
+
+  it("auto-scrolls new content unless the user has scrolled up", () => {
+    const view = renderWithParts([{ type: "text", text: "First answer." }]);
+    const transcript = screen.getByTestId("agent-transcript") as HTMLDivElement;
+    let scrollHeight = 1000;
+    Object.defineProperty(transcript, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(transcript, "clientHeight", {
+      configurable: true,
+      value: 200,
+    });
+
+    transcript.scrollTop = 790;
+    fireEvent.scroll(transcript);
+    scrollHeight = 1200;
+    mockAgentChat([{ type: "text", text: "First answer.\nSecond chunk." }]);
+    view.rerender(
+      <MemoryRouter>
+        <AgentChatSession
+          session={session}
+          onOpenCompose={() => {}}
+          onFirstUserMessage={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(transcript.scrollTop).toBe(1200);
+
+    transcript.scrollTop = 100;
+    fireEvent.scroll(transcript);
+    scrollHeight = 1400;
+    mockAgentChat([
+      { type: "text", text: "First answer.\nSecond chunk.\nThird chunk." },
+    ]);
+    view.rerender(
+      <MemoryRouter>
+        <AgentChatSession
+          session={session}
+          onOpenCompose={() => {}}
+          onFirstUserMessage={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(transcript.scrollTop).toBe(100);
   });
 });
 

@@ -2,7 +2,13 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env, exports } from "cloudflare:workers";
 import { makeSignature } from "better-auth/crypto";
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test";
-import { tool } from "ai";
+import { tool, type UIMessage } from "ai";
+import {
+  applyChunkToParts,
+  applyToolUpdate,
+  reconcileMessages,
+  toolApprovalUpdate,
+} from "agents/chat";
 import { sessions } from "../db/auth.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
@@ -12,8 +18,11 @@ import {
   buildMailAgentInstructions,
   countCompletedApprovalActions,
   deriveAgentApprovalSecret,
+  prepareApprovalMessages,
   runMailAgentChat,
   streamMailAgentTurn,
+  type AgentApprovalLedger,
+  type AgentApprovalLedgerEntry,
 } from "../agent/mail-agent";
 import { createAgentTools } from "../lib/agent/tools";
 import {
@@ -25,6 +34,54 @@ import {
   createTestUser,
   getDb,
 } from "./helpers";
+
+function createMemoryApprovalLedger(seed: AgentApprovalLedgerEntry[] = []): {
+  ledger: AgentApprovalLedger;
+  entries: Map<string, AgentApprovalLedgerEntry>;
+} {
+  const entries = new Map(seed.map((entry) => [entry.approvalId, entry]));
+  const ledger: AgentApprovalLedger = {
+    record: async (nextEntries) => {
+      for (const entry of nextEntries) {
+        if (!entries.has(entry.approvalId)) {
+          entries.set(entry.approvalId, entry);
+        }
+      }
+    },
+    lookup: async (approvalIds) =>
+      approvalIds
+        .map((approvalId) => entries.get(approvalId))
+        .filter(
+          (entry): entry is AgentApprovalLedgerEntry => entry !== undefined,
+        ),
+    remove: async (approvalIds) => {
+      for (const approvalId of approvalIds) entries.delete(approvalId);
+    },
+    removeByToolCallIds: async (toolCallIds) => {
+      const wanted = new Set(toolCallIds);
+      for (const [approvalId, entry] of entries) {
+        if (wanted.has(entry.toolCallId)) entries.delete(approvalId);
+      }
+    },
+  };
+  return { ledger, entries };
+}
+
+async function persistApprovalRequest(
+  result: Awaited<ReturnType<typeof streamMailAgentTurn>>,
+  toolCallId: string,
+): Promise<UIMessage["parts"]> {
+  const parts: UIMessage["parts"] = [];
+  for await (const chunk of result.toUIMessageStream()) {
+    applyChunkToParts(parts, chunk);
+  }
+  const updated = applyToolUpdate(
+    parts as Array<Record<string, unknown>>,
+    toolApprovalUpdate(toolCallId, true),
+  );
+  if (!updated) throw new Error("approval request was not reconstructed");
+  return updated.parts as UIMessage["parts"];
+}
 
 const MOCK_USAGE = {
   inputTokens: {
@@ -335,6 +392,8 @@ describe("agent session runtime", () => {
           ]),
         }),
       });
+      // This remains the SDK-shape test: the approved UI part is hand-built
+      // with its signature, unlike the persisted-path regression above.
       const messages = [
         {
           id: "approval-continuation-user",
@@ -379,6 +438,443 @@ describe("agent session runtime", () => {
       );
     },
   );
+
+  it("restores a persisted approval from the ledger and executes the gated action", async () => {
+    const member = await createTestUser({
+      id: "agent-ledger-persist-member",
+      email: "agent-ledger-persist-member@example.com",
+      role: "member",
+    });
+    const sessionRes = await authFetch("/api/agent/sessions", {
+      method: "POST",
+      apiKey: member.apiKey,
+      body: JSON.stringify({ title: "Persisted approval" }),
+    });
+    const session = (await sessionRes.json()) as { instanceName: string };
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    const inbox = "agent-ledger-persist@example.com";
+    await db.insert(inboxPermissions).values({
+      userId: member.userId,
+      email: inbox,
+      createdAt: now,
+      createdBy: null,
+    });
+    const person = await createTestPerson({
+      id: "agent-ledger-persist-person",
+      email: "agent-ledger-persist-customer@example.net",
+    });
+    const emailId = "agent-ledger-persist-email";
+    await createTestEmail({
+      id: emailId,
+      personId: person.id,
+      recipient: inbox,
+      messageId: `${emailId}@example.net`,
+    });
+
+    const toolCallId =
+      "functions.assign_conversation:3::cf-wai-tool-call::persisted-ledger";
+    const toolInput = {
+      ref: `received:${emailId}`,
+      userId: member.userId,
+    };
+    const { ledger, entries } = createMemoryApprovalLedger();
+    const requestModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          {
+            type: "tool-call" as const,
+            toolCallId,
+            toolName: "assign_conversation",
+            input: JSON.stringify(toolInput),
+          },
+          {
+            type: "finish" as const,
+            finishReason: {
+              unified: "tool-calls" as const,
+              raw: "tool-calls",
+            },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+    const approvalSecret = await deriveAgentApprovalSecret(
+      (env as any).BETTER_AUTH_SECRET as string,
+    );
+    const pending = await streamMailAgentTurn({
+      model: requestModel,
+      messages: [
+        {
+          id: "persisted-ledger-user",
+          role: "user",
+          parts: [{ type: "text", text: "Assign this conversation." }],
+        },
+      ],
+      tools: {
+        assign_conversation: tool({
+          inputSchema: z.object({
+            ref: z.string(),
+            userId: z.string().nullable(),
+          }),
+          needsApproval: true,
+          execute: async (): Promise<{ success: true }> => {
+            throw new Error("approval request must not execute");
+          },
+        }),
+      },
+      instructions: "Test instructions",
+      toolApprovalSecret: approvalSecret,
+      approvalLedger: ledger,
+    });
+    const persistedParts = await persistApprovalRequest(pending, toolCallId);
+    const persistedTool = persistedParts.find(
+      (part) =>
+        "toolCallId" in part &&
+        (part as { toolCallId?: string }).toolCallId === toolCallId,
+    ) as
+      | {
+          state?: string;
+          approval?: Record<string, unknown>;
+        }
+      | undefined;
+
+    expect(entries.size).toBe(1);
+    expect(persistedTool?.state).toBe("approval-responded");
+    expect(persistedTool?.approval?.approved).toBe(true);
+    // agents/chat's persistence builder intentionally reproduces the production
+    // bug here: it drops the approval signature before toolApprovalUpdate runs.
+    expect(persistedTool?.approval?.signature).toBeUndefined();
+
+    const finalModel = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: "text-start" as const, id: "persisted-ledger-text" },
+          {
+            type: "text-delta" as const,
+            id: "persisted-ledger-text",
+            delta: "Assignment complete.",
+          },
+          { type: "text-end" as const, id: "persisted-ledger-text" },
+          {
+            type: "finish" as const,
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+    const response = await runMailAgentChat({
+      db,
+      env: {
+        BETTER_AUTH_SECRET: (env as any).BETTER_AUTH_SECRET as string,
+      },
+      instanceName: session.instanceName,
+      messages: [
+        {
+          id: "persisted-ledger-user",
+          role: "user",
+          parts: [{ type: "text", text: "Assign this conversation." }],
+        },
+        {
+          id: "persisted-ledger-assistant",
+          role: "assistant",
+          parts: persistedParts,
+        },
+      ],
+      modelOverride: finalModel,
+      approvalLedger: ledger,
+      persistMessages: async () => {
+        throw new Error("valid ledger restoration must not rewrite transcript");
+      },
+    });
+    const streamed = await response.text();
+
+    expect(streamed).not.toContain('"type":"error"');
+    expect(streamed).toContain("Assignment complete.");
+    expect(
+      (await db.select().from(inboxConversationState)).some(
+        (row) => row.inbox === inbox && row.assignedUserId === member.userId,
+      ),
+    ).toBe(true);
+    expect(entries.size).toBe(0);
+  });
+
+  it("persists a ledger-miss approval as expired instead of throwing", async () => {
+    const member = await createTestUser({
+      id: "agent-ledger-miss-member",
+      email: "agent-ledger-miss-member@example.com",
+      role: "member",
+    });
+    const sessionRes = await authFetch("/api/agent/sessions", {
+      method: "POST",
+      apiKey: member.apiKey,
+      body: JSON.stringify({ title: "Expired approval" }),
+    });
+    const session = (await sessionRes.json()) as { instanceName: string };
+    const { ledger } = createMemoryApprovalLedger();
+    const messages: UIMessage[] = [
+      {
+        id: "ledger-miss-user",
+        role: "user",
+        parts: [{ type: "text", text: "Do it." }],
+      },
+      {
+        id: "ledger-miss-assistant",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-assign_conversation",
+            toolCallId: "ledger-miss-call",
+            state: "approval-responded",
+            input: { ref: "received:missing", userId: member.userId },
+            approval: { id: "ledger-miss-id", approved: true },
+          } as any,
+        ],
+      },
+    ];
+    let persisted: UIMessage[] | null = null;
+    const model = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: convertArrayToReadableStream([
+          { type: "text-start" as const, id: "ledger-miss-text" },
+          {
+            type: "text-delta" as const,
+            id: "ledger-miss-text",
+            delta: "Please ask again.",
+          },
+          { type: "text-end" as const, id: "ledger-miss-text" },
+          {
+            type: "finish" as const,
+            finishReason: { unified: "stop" as const, raw: "stop" },
+            usage: MOCK_USAGE,
+          },
+        ]),
+      }),
+    });
+
+    const response = await runMailAgentChat({
+      db: getDb(),
+      env: {
+        BETTER_AUTH_SECRET: (env as any).BETTER_AUTH_SECRET as string,
+      },
+      instanceName: session.instanceName,
+      messages,
+      modelOverride: model,
+      approvalLedger: ledger,
+      persistMessages: async (nextMessages) => {
+        persisted = nextMessages;
+      },
+    });
+    await response.text();
+
+    const repairedPart = persisted?.[1]?.parts[0] as
+      | {
+          state?: string;
+          approval?: { approved?: boolean; reason?: string };
+        }
+      | undefined;
+    expect(repairedPart?.state).toBe("output-denied");
+    expect(repairedPart?.approval).toEqual(
+      expect.objectContaining({
+        approved: false,
+        reason: "This approval expired. Ask the agent again.",
+      }),
+    );
+  });
+
+  it.each([
+    ["tool call", "different-call", "assign_conversation"],
+    ["tool name", "mismatch-call", "link_customer"],
+  ] as const)(
+    "does not restore approval metadata when the ledger %s mismatches",
+    async (_label, ledgerToolCallId, ledgerToolName) => {
+      const approvalId = "mismatch-approval";
+      const toolCallId = "mismatch-call";
+      const { ledger } = createMemoryApprovalLedger([
+        {
+          approvalId,
+          toolCallId: ledgerToolCallId,
+          toolName: ledgerToolName,
+          signature: "valid-looking-signature",
+          hasInputSchemaInput: false,
+          createdAt: Math.floor(Date.now() / 1000),
+        },
+      ]);
+      const prepared = await prepareApprovalMessages(
+        [
+          {
+            id: "mismatch-user",
+            role: "user",
+            parts: [{ type: "text", text: "Do it." }],
+          },
+          {
+            id: "mismatch-assistant",
+            role: "assistant",
+            parts: [
+              {
+                type: "tool-assign_conversation",
+                toolCallId,
+                state: "approval-responded",
+                input: { ref: "received:one", userId: null },
+                approval: { id: approvalId, approved: true },
+              } as any,
+            ],
+          },
+        ],
+        ledger,
+      );
+
+      const repairedPart = prepared.messages[1].parts[0] as {
+        state?: string;
+        approval?: Record<string, unknown>;
+      };
+      expect(repairedPart.state).toBe("output-denied");
+      expect(repairedPart.approval?.signature).toBeUndefined();
+      expect(repairedPart.approval).toEqual(
+        expect.objectContaining({
+          approved: false,
+          reason: "This approval expired. Ask the agent again.",
+        }),
+      );
+    },
+  );
+
+  it("rejects tampered tool input even when the ledger restores a valid signature", async () => {
+    const member = await createTestUser({
+      id: "agent-ledger-tamper-member",
+      email: "agent-ledger-tamper-member@example.com",
+      role: "member",
+    });
+    const sessionRes = await authFetch("/api/agent/sessions", {
+      method: "POST",
+      apiKey: member.apiKey,
+      body: JSON.stringify({ title: "Tampered approval" }),
+    });
+    const session = (await sessionRes.json()) as { instanceName: string };
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    const inbox = "agent-ledger-tamper@example.com";
+    await db.insert(inboxPermissions).values({
+      userId: member.userId,
+      email: inbox,
+      createdAt: now,
+      createdBy: null,
+    });
+    const firstPerson = await createTestPerson({
+      id: "agent-ledger-tamper-person-1",
+      email: "agent-ledger-tamper-one@example.net",
+    });
+    const secondPerson = await createTestPerson({
+      id: "agent-ledger-tamper-person-2",
+      email: "agent-ledger-tamper-two@example.net",
+    });
+    await createTestEmail({
+      id: "agent-ledger-tamper-email-1",
+      personId: firstPerson.id,
+      recipient: inbox,
+      messageId: "agent-ledger-tamper-email-1@example.net",
+    });
+    await createTestEmail({
+      id: "agent-ledger-tamper-email-2",
+      personId: secondPerson.id,
+      recipient: inbox,
+      messageId: "agent-ledger-tamper-email-2@example.net",
+    });
+
+    const toolCallId =
+      "functions.assign_conversation:3::cf-wai-tool-call::tampered-ledger";
+    const { ledger } = createMemoryApprovalLedger();
+    const approvalSecret = await deriveAgentApprovalSecret(
+      (env as any).BETTER_AUTH_SECRET as string,
+    );
+    const pending = await streamMailAgentTurn({
+      model: new MockLanguageModelV4({
+        doStream: async () => ({
+          stream: convertArrayToReadableStream([
+            {
+              type: "tool-call" as const,
+              toolCallId,
+              toolName: "assign_conversation",
+              input: JSON.stringify({
+                ref: "received:agent-ledger-tamper-email-1",
+                userId: member.userId,
+              }),
+            },
+            {
+              type: "finish" as const,
+              finishReason: {
+                unified: "tool-calls" as const,
+                raw: "tool-calls",
+              },
+              usage: MOCK_USAGE,
+            },
+          ]),
+        }),
+      }),
+      messages: [
+        {
+          id: "tampered-ledger-user",
+          role: "user",
+          parts: [{ type: "text", text: "Assign the first message." }],
+        },
+      ],
+      tools: {
+        assign_conversation: tool({
+          inputSchema: z.object({
+            ref: z.string(),
+            userId: z.string().nullable(),
+          }),
+          needsApproval: true,
+          execute: async (): Promise<{ success: true }> => {
+            throw new Error("approval request must not execute");
+          },
+        }),
+      },
+      instructions: "Test instructions",
+      toolApprovalSecret: approvalSecret,
+      approvalLedger: ledger,
+    });
+    const persistedParts = await persistApprovalRequest(pending, toolCallId);
+    const tamperedParts = persistedParts.map((part) =>
+      "toolCallId" in part &&
+      (part as { toolCallId?: string }).toolCallId === toolCallId
+        ? ({
+            ...part,
+            input: {
+              ref: "received:agent-ledger-tamper-email-2",
+              userId: member.userId,
+            },
+          } as typeof part)
+        : part,
+    );
+
+    const response = await runMailAgentChat({
+      db,
+      env: {
+        BETTER_AUTH_SECRET: (env as any).BETTER_AUTH_SECRET as string,
+      },
+      instanceName: session.instanceName,
+      messages: [
+        {
+          id: "tampered-ledger-user",
+          role: "user",
+          parts: [{ type: "text", text: "Assign the first message." }],
+        },
+        {
+          id: "tampered-ledger-assistant",
+          role: "assistant",
+          parts: tamperedParts,
+        },
+      ],
+      modelOverride: new MockLanguageModelV4(),
+      approvalLedger: ledger,
+    });
+    const streamed = await response.text();
+
+    expect(streamed).toContain("This approval expired. Ask the agent again.");
+    expect(await db.select().from(inboxConversationState)).toHaveLength(0);
+  });
 
   it("rejects a turn after its agent session is deleted", async () => {
     const alice = await createTestUser({
@@ -891,6 +1387,7 @@ describe("agent model loop", () => {
         ]),
       }),
     });
+    let historicalRepair: UIMessage[] | null = null;
     const nextResponse = await runMailAgentChat({
       db,
       env: {
@@ -906,13 +1403,85 @@ describe("agent model loop", () => {
         },
       ],
       modelOverride: nextModel,
+      persistMessages: async (nextMessages) => {
+        historicalRepair = nextMessages;
+      },
     });
     const nextBody = await nextResponse.text();
 
+    const historicalPart = historicalRepair?.[1]?.parts[0] as
+      | {
+          state?: string;
+          approval?: { approved?: boolean; reason?: string };
+        }
+      | undefined;
+    expect(historicalPart?.state).toBe("output-denied");
+    expect(historicalPart?.approval).toEqual(
+      expect.objectContaining({
+        approved: false,
+        reason: "This approval expired. Ask the agent again.",
+      }),
+    );
     expect(nextBody).toContain("The session is still usable.");
+    expect(nextBody).not.toContain('"type":"error"');
     expect(nextBody).not.toContain("InvalidToolApprovalSignatureError");
     expect(nextModel.doStreamCalls).toHaveLength(1);
     expect(await db.select().from(inboxConversationState)).toEqual([]);
+  });
+
+  it("keeps a terminal expired repair when a stale client still submits approved", () => {
+    const toolCallId = "stale-client-approved-call";
+    const serverMessages: UIMessage[] = [
+      {
+        id: "server-assistant",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-assign_conversation",
+            toolCallId,
+            state: "output-denied",
+            input: { ref: "received:one", userId: null },
+            approval: {
+              id: "stale-client-approved-id",
+              approved: false,
+              reason: "This approval expired. Ask the agent again.",
+            },
+          } as any,
+        ],
+      },
+    ];
+    const incoming: UIMessage[] = [
+      {
+        id: "server-assistant",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-assign_conversation",
+            toolCallId,
+            state: "approval-responded",
+            input: { ref: "received:one", userId: null },
+            approval: {
+              id: "stale-client-approved-id",
+              approved: true,
+            },
+          } as any,
+        ],
+      },
+    ];
+
+    const reconciled = reconcileMessages(incoming, serverMessages);
+    const part = reconciled[0]?.parts[0] as {
+      state?: string;
+      approval?: { approved?: boolean; reason?: string };
+    };
+
+    expect(part.state).toBe("output-denied");
+    expect(part.approval).toEqual(
+      expect.objectContaining({
+        approved: false,
+        reason: "This approval expired. Ask the agent again.",
+      }),
+    );
   });
 
   it("derives a stable 32-byte approval key from BETTER_AUTH_SECRET", async () => {
