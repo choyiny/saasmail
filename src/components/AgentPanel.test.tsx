@@ -162,6 +162,33 @@ describe("AgentPanel", () => {
     );
   });
 
+  it("keeps a session created before the initial session list arrives", async () => {
+    let resolveList: (value: {
+      sessions: api.AgentSession[];
+    }) => void = () => {};
+    vi.mocked(api.fetchAgentSessions).mockReturnValue(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      }),
+    );
+    vi.mocked(api.createAgentSession).mockResolvedValue(
+      session("new", "Fresh", 3),
+    );
+
+    renderPanel();
+    fireEvent.click(screen.getByTestId("agent-new-session"));
+    expect(await screen.findByText("Fresh")).toBeTruthy();
+
+    // The list was requested before the session existed, so it lacks it.
+    resolveList({
+      sessions: [session("older", "Older", 1), session("newer", "Newer", 2)],
+    });
+
+    expect(await screen.findByText("Newer")).toBeTruthy();
+    expect(screen.getByText("Fresh")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Rename Fresh" })).toBeTruthy();
+  });
+
   it("titles only an untitled session from the first user message", async () => {
     const untitled = session("untitled", null, 3);
     vi.mocked(api.fetchAgentSessions).mockResolvedValue({

@@ -53,12 +53,21 @@ export default function AgentPanel({
     Promise.all([fetchAgentStatus(), fetchAgentSessions()])
       .then(([nextStatus, result]) => {
         if (cancelled) return;
-        const sorted = newestFirst(result.sessions);
         setStatus(nextStatus);
-        setSessions(sorted);
-        setActiveId(
-          sorted.find((session) => session.archivedAt === null)?.id ?? null,
+        // A session created with New before this list arrived must survive
+        // it, and stay the active one.
+        const loadedIds = new Set(result.sessions.map((s) => s.id));
+        setSessions((current) =>
+          newestFirst([
+            ...current.filter((s) => !loadedIds.has(s.id)),
+            ...result.sessions,
+          ]),
         );
+        const firstOpen =
+          newestFirst(result.sessions).find(
+            (session) => session.archivedAt === null,
+          )?.id ?? null;
+        setActiveId((current) => current ?? firstOpen);
       })
       .catch((error) => {
         if (cancelled) return;

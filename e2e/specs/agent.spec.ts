@@ -118,6 +118,25 @@ test.describe.serial("native agent panel", () => {
     const title = uniqueName("agent-session");
 
     await page.goto("/");
+    // Earlier tests in this serial file can leave untitled sessions behind,
+    // and every untitled row has a "Rename session" button. Start clean.
+    await page.evaluate(async () => {
+      const res = await fetch("/api/agent/sessions");
+      const { sessions } = (await res.json()) as {
+        sessions: { id: string; archivedAt: number | null }[];
+      };
+      await Promise.all(
+        sessions
+          .filter((session) => session.archivedAt === null)
+          .map((session) =>
+            fetch(`/api/agent/sessions/${encodeURIComponent(session.id)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ archived: true }),
+            }),
+          ),
+      );
+    });
     await page.getByRole("button", { name: /^Toggle mail agent/ }).click();
     await page.getByTestId("agent-new-session").click();
     await expect(
