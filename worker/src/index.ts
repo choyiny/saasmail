@@ -36,6 +36,7 @@ import { sequencesRouter } from "./routers/sequences-router";
 import { handleScheduled } from "./lib/sequence-processor";
 import { handleQueueBatch } from "./lib/queue-router";
 import { processOutbox } from "./lib/outbox";
+import { reapOrphanSentAttachments } from "./lib/sent-attachments";
 import { runNewsletterMaintenance } from "./lib/newsletter-cron";
 import { pruneJmapChanges } from "./jmap/changes";
 import { notificationsRouter } from "./routers/notifications-router";
@@ -396,6 +397,15 @@ export default {
         .then(() =>
           pruneJmapChanges(createDb(env), Math.floor(Date.now() / 1000)).catch(
             (err) => console.error("[cron] JMAP pruning failed:", err),
+          ),
+        )
+        .then(() =>
+          reapOrphanSentAttachments(
+            createDb(env),
+            env,
+            Math.floor(Date.now() / 1000),
+          ).catch((err) =>
+            console.error("[cron] sent attachment reaping failed:", err),
           ),
         ),
     );

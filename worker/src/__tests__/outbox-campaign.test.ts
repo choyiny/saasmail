@@ -6,6 +6,7 @@ import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import {
   attemptOutboxRow,
+  bookkeepingOwnerOf,
   finalizeOutboxRow,
   sendViaOutbox,
   processOutbox,
@@ -256,5 +257,131 @@ describe("attemptOutboxRow — campaign retry that finally succeeds", () => {
       .from(sentEmails)
       .where(eq(sentEmails.id, "se-1"));
     expect(se[0].status).toBe("sent");
+  });
+});
+
+describe("bookkeeping ownership", () => {
+  it("derives the owner, treating legacy campaign rows as campaign-owned", () => {
+    expect(
+      bookkeepingOwnerOf({
+        bookkeepingOwner: null,
+        campaignRecipientId: "cr-1",
+      }),
+    ).toBe("campaign");
+    expect(
+      bookkeepingOwnerOf({
+        bookkeepingOwner: "jmap",
+        campaignRecipientId: null,
+      }),
+    ).toBe("jmap");
+    expect(
+      bookkeepingOwnerOf({ bookkeepingOwner: null, campaignRecipientId: null }),
+    ).toBeNull();
+  });
+
+  it("holds a jmap-owned row on inline provider success", async () => {
+    const sender = fakeSender(OK);
+    const result = await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender,
+      sentEmailId: "se-jmap-1",
+      bookkeepingOwner: "jmap",
+      fromAddress: "me@saasmail.test",
+      from: "Me <me@saasmail.test>",
+      to: "to@example.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      transactional: true,
+    });
+    expect(result.outcome).toBe("sent");
+    const [row] = await getDb()
+      .select()
+      .from(outboxEmails)
+      .where(eq(outboxEmails.id, result.outboxId));
+    expect(row.status).toBe("bookkeeping_pending");
+    expect(row.bookkeepingOwner).toBe("jmap");
+  });
+
+  it("holds a jmap-owned row when a retry finally succeeds", async () => {
+    const first = fakeSender(TRANSIENT);
+    const result = await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender: first,
+      sentEmailId: "se-jmap-2",
+      bookkeepingOwner: "jmap",
+      fromAddress: "me@saasmail.test",
+      from: "Me <me@saasmail.test>",
+      to: "to@example.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      transactional: true,
+    });
+    await getDb()
+      .update(outboxEmails)
+      .set({ nextRetryAt: 0 })
+      .where(eq(outboxEmails.id, result.outboxId));
+    expect(
+      await attemptOutboxRow(getDb(), env, fakeSender(OK), result.outboxId),
+    ).toBe("sent");
+    const [row] = await getDb()
+      .select()
+      .from(outboxEmails)
+      .where(eq(outboxEmails.id, result.outboxId));
+    expect(row.status).toBe("bookkeeping_pending");
+  });
+
+  it("still holds a legacy in-flight campaign row (owner column null) on retry success", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(outboxEmails).values({
+      id: "ob-legacy",
+      sentEmailId: "se-legacy",
+      campaignRecipientId: "cr-legacy",
+      bookkeepingOwner: null,
+      fromAddress: "me@saasmail.test",
+      toAddress: "to@example.com",
+      subject: "Campaign",
+      bodyHtml: "<p>x</p>",
+      transactional: 0,
+      status: "pending",
+      attempts: 1,
+      nextRetryAt: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+    expect(
+      await attemptOutboxRow(
+        getDb(),
+        env as unknown as CloudflareBindings,
+        fakeSender(OK),
+        "ob-legacy",
+      ),
+    ).toBe("sent");
+    const [row] = await getDb()
+      .select()
+      .from(outboxEmails)
+      .where(eq(outboxEmails.id, "ob-legacy"));
+    expect(row.status).toBe("bookkeeping_pending");
+  });
+
+  it("still deletes an unowned row on success", async () => {
+    const result = await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender: fakeSender(OK),
+      sentEmailId: "se-plain",
+      fromAddress: "me@saasmail.test",
+      from: "Me <me@saasmail.test>",
+      to: "to@example.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      transactional: true,
+    });
+    const rows = await getDb()
+      .select()
+      .from(outboxEmails)
+      .where(eq(outboxEmails.id, result.outboxId));
+    expect(rows).toHaveLength(0);
   });
 });

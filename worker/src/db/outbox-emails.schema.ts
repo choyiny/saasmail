@@ -25,6 +25,12 @@ export const outboxEmails = sqliteTable(
      * Mirrors `sequenceEmailId`; null for sequence and transactional mail.
      */
     campaignRecipientId: text("campaign_recipient_id"),
+    /**
+     * Who must finish bookkeeping before a provider-accepted row may be
+     * deleted: 'campaign' | 'jmap' | null. Legacy campaign rows have this null
+     * and are recognised by `campaign_recipient_id` (see bookkeepingOwnerOf).
+     */
+    bookkeepingOwner: text("bookkeeping_owner"),
     /** Bare lowercase inbox address — the inbox-scoping key. */
     fromAddress: text("from_address").notNull(),
     toAddress: text("to_address").notNull(),
@@ -43,8 +49,8 @@ export const outboxEmails = sqliteTable(
     transactional: integer("transactional").notNull().default(0),
     /**
      * pending (awaiting retry) | failed (terminal, kept for the tab) |
-     * bookkeeping_pending (campaign only: the provider ACCEPTED the message and
-     * the row is being held until the caller's own bookkeeping completes).
+     * bookkeeping_pending (owned rows only: the provider ACCEPTED the message
+     * and the row is being held until the owner's own bookkeeping completes).
      *
      * A `bookkeeping_pending` row must never be re-sent — the message is
      * already delivered. The retry processor resolves it by re-running only the

@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sent attachments survive a crash mid-send:** compose and reply now store attachments before the provider call (database record first, then R2), so an outbox retry after a Worker crash always resends them. Suppressed or failed-to-start sends clean up both the records and the R2 objects, and the hourly cron removes attachments left by a send that never reached the outbox.
+
 ### Upgrading to the mailbox/agent/JMAP release
 
-- Apply D1 migrations `0037` through `0052` with `yarn db:migrate:prod`.
+- Apply D1 migrations `0037` through `0053` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies.
 - Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
 - Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
 

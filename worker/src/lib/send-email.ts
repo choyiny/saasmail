@@ -1,7 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
-import { attachments } from "../db/attachments.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { emails } from "../db/emails.schema";
 import { people } from "../db/people.schema";
@@ -16,6 +15,11 @@ import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
+import {
+  discardSentAttachments,
+  discardSentAttachmentsUnlessQueued,
+  stageSentAttachments,
+} from "./sent-attachments";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -42,6 +46,8 @@ export type SendEmailParams = {
   payload: SendEmailPayload;
   files: ParsedFile[];
   allowed: AllowedInboxes;
+  /** Test seam; defaults to the configured provider. */
+  sender?: EmailSender;
 };
 
 export type SendEmailSuccess = {
@@ -138,42 +144,6 @@ async function fetchInternalDomains(db: Db): Promise<string[]> {
   ) as string[];
 }
 
-async function persistSentAttachments(
-  db: Db,
-  env: CloudflareBindings,
-  sentEmailId: string,
-  files: ParsedFile[],
-  now: number,
-): Promise<string[]> {
-  if (files.length === 0) return [];
-  const rows = files.map((f) => {
-    const attachmentId = nanoid();
-    const r2Key = `attachments/sent/${sentEmailId}/${attachmentId}/${f.filename}`;
-    return { attachmentId, r2Key, file: f };
-  });
-  await Promise.all(
-    rows.map((r) =>
-      env.R2.put(r.r2Key, r.file.bytes, {
-        httpMetadata: { contentType: r.file.contentType },
-      }),
-    ),
-  );
-  await db.insert(attachments).values(
-    rows.map((r) => ({
-      id: r.attachmentId,
-      emailId: sentEmailId,
-      kind: "sent" as const,
-      filename: r.file.filename,
-      contentType: r.file.contentType,
-      size: r.file.size,
-      r2Key: r.r2Key,
-      contentId: null,
-      createdAt: now,
-    })),
-  );
-  return rows.map((r) => r.attachmentId);
-}
-
 /**
  * Compose and send a new email, persisting attachments and the sent_emails
  * row. Callers own multipart parsing and hand over the already-parsed
@@ -186,7 +156,7 @@ export async function sendEmail(
   params: SendEmailParams,
 ): Promise<SendEmailResult> {
   const { db, env, payload: raw, files, allowed } = params;
-  const sender = createEmailSender(env);
+  const sender = params.sender ?? createEmailSender(env);
 
   const fromAddress = raw.fromAddress.trim().toLowerCase();
   const to = raw.to.trim().toLowerCase();
@@ -212,30 +182,45 @@ export async function sendEmail(
       : undefined;
 
   const id = nanoid();
-  const { outcome, send: sendResult } = await sendViaOutbox({
-    db,
-    env,
-    sender,
-    sentEmailId: id,
-    fromAddress,
-    from: formattedFrom,
-    to,
-    cc,
-    subject,
-    html: bodyHtml,
-    text: bodyText,
-    headers: {
-      "Message-ID": messageId,
-      ...(replyTo ? { "Reply-To": replyTo } : {}),
-    },
-    attachments: attachmentList,
-    transactional,
-  });
+  // Stage BEFORE the provider call: the outbox retry loader reads these rows,
+  // so a crash after the outbox insert must never leave them missing.
+  const attachmentIds = await stageSentAttachments(db, env, id, files, now);
+  let outcome: OutboxOutcome;
+  let sendResult: Awaited<ReturnType<typeof sendViaOutbox>>["send"];
+  try {
+    ({ outcome, send: sendResult } = await sendViaOutbox({
+      db,
+      env,
+      sender,
+      sentEmailId: id,
+      fromAddress,
+      from: formattedFrom,
+      to,
+      cc,
+      subject,
+      html: bodyHtml,
+      text: bodyText,
+      headers: {
+        "Message-ID": messageId,
+        ...(replyTo ? { "Reply-To": replyTo } : {}),
+      },
+      attachments: attachmentList,
+      transactional,
+    }));
+  } catch (err) {
+    await discardSentAttachmentsUnlessQueued(db, env, id);
+    throw err;
+  }
 
   // Every recipient was suppressed — no send happened. Skip sent_emails write,
   // but still cancel any pending sequence enrollments for the recipient so we
   // stop scheduling steps that will all individually re-suppress at dispatch.
   if (sendResult.delivered.length === 0) {
+    // The attachments were staged before suppression was known, so nothing
+    // references them now. Drop rows and objects, or every suppressed send
+    // with a file would leak storage.
+    await discardSentAttachments(db, env, id);
+
     const existingPerson = await db
       .select({ id: people.id })
       .from(people)
@@ -323,9 +308,8 @@ export async function sendEmail(
     createdAt: now,
   });
 
-  // Persist attachments even on failure: a retrying/failed send must be able
-  // to reload its attachment bytes from R2 on a later attempt.
-  const attachmentIds = await persistSentAttachments(db, env, id, files, now);
+  // Attachments were staged above, before the provider call, so a retrying or
+  // failed send can always reload its attachment bytes on a later attempt.
 
   await cancelSequencesForPerson(db, personId);
 
@@ -495,43 +479,53 @@ export async function replyToEmail(
   // the unsubscribe footer / List-Unsubscribe header (this is a reply, not
   // a bulk send).
   const id = nanoid();
-  const { outcome, send: sendResult } = await sendViaOutbox({
-    db,
-    env,
-    sender,
-    sentEmailId: id,
-    fromAddress,
-    from: formattedFrom,
-    to: toAddress,
-    cc,
-    subject: finalSubject,
-    html: finalBodyHtml,
-    ...(bodyText !== undefined ? { text: bodyText } : {}),
-    headers: {
-      ...(params.extraHeaders ?? {}),
-      "Message-ID": messageId,
-      ...(origInReplyToMessageId
+  // Same ordering rule as compose: stage before the provider call so an outbox
+  // retry after a crash still resends the files.
+  const attachmentIds = await stageSentAttachments(db, env, id, files, now);
+  let outcome: OutboxOutcome;
+  let sendResult: Awaited<ReturnType<typeof sendViaOutbox>>["send"];
+  try {
+    ({ outcome, send: sendResult } = await sendViaOutbox({
+      db,
+      env,
+      sender,
+      sentEmailId: id,
+      fromAddress,
+      from: formattedFrom,
+      to: toAddress,
+      cc,
+      subject: finalSubject,
+      html: finalBodyHtml,
+      ...(bodyText !== undefined ? { text: bodyText } : {}),
+      headers: {
+        ...(params.extraHeaders ?? {}),
+        "Message-ID": messageId,
+        ...(origInReplyToMessageId
+          ? {
+              "In-Reply-To": origInReplyToMessageId,
+              References: origInReplyToMessageId,
+            }
+          : {}),
+        ...(replyTo ? { "Reply-To": replyTo } : {}),
+      },
+      ...(files.length > 0
         ? {
-            "In-Reply-To": origInReplyToMessageId,
-            References: origInReplyToMessageId,
+            attachments: files.map((f) => ({
+              filename: f.filename,
+              contentType: f.contentType,
+              content: f.bytes,
+            })),
           }
         : {}),
-      ...(replyTo ? { "Reply-To": replyTo } : {}),
-    },
-    ...(files.length > 0
-      ? {
-          attachments: files.map((f) => ({
-            filename: f.filename,
-            contentType: f.contentType,
-            content: f.bytes,
-          })),
-        }
-      : {}),
-    transactional: true,
-    ...(params.retryOnFailure === undefined
-      ? {}
-      : { retryOnFailure: params.retryOnFailure }),
-  });
+      transactional: true,
+      ...(params.retryOnFailure === undefined
+        ? {}
+        : { retryOnFailure: params.retryOnFailure }),
+    }));
+  } catch (err) {
+    await discardSentAttachmentsUnlessQueued(db, env, id);
+    throw err;
+  }
 
   // Compute conversation_id for this reply.
   const internalDomainsReply = await fetchInternalDomains(db);
@@ -563,9 +557,9 @@ export async function replyToEmail(
     createdAt: now,
   });
 
-  // Persist attachments even on failure: a retrying/failed send must be able
-  // to reload its attachment bytes from R2 on a later attempt.
-  const attachmentIds = await persistSentAttachments(db, env, id, files, now);
+  // Attachments were staged above, before the provider call.
+  // Replies are transactional, so they are never suppressed; if a future change
+  // adds a suppressed branch here it must call discardSentAttachments too.
 
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, origPersonId);

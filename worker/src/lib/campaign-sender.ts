@@ -441,6 +441,10 @@ export async function sendCampaignRecipient(
     sender,
     sentEmailId,
     campaignRecipientId,
+    // Explicit, so the campaign hold no longer depends on inferring ownership
+    // from campaignRecipientId. The reconciliation sweep still filters on
+    // campaign_recipient_id, so a JMAP-owned row is never swept as a campaign.
+    bookkeepingOwner: "campaign",
     fromAddress,
     from: await formatFromAddress(db, fromAddress),
     to: recipient.email,

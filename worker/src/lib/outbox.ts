@@ -27,6 +27,25 @@ const OUTBOX_BATCH_LIMIT = 200;
 
 export type OutboxOutcome = "sent" | "suppressed" | "retrying" | "failed";
 
+/** Subsystem that must confirm its bookkeeping before an accepted row goes. */
+export type BookkeepingOwner = "campaign" | "jmap";
+
+/**
+ * The owner that must confirm its bookkeeping before a provider-accepted row
+ * may be deleted. Rows written before `bookkeeping_owner` existed have it null;
+ * a set `campaign_recipient_id` still marks them as campaign-owned, so rows in
+ * flight at deploy keep their hold without a data backfill.
+ */
+export function bookkeepingOwnerOf(row: {
+  bookkeepingOwner: string | null;
+  campaignRecipientId: string | null;
+}): BookkeepingOwner | null {
+  if (row.bookkeepingOwner === "campaign" || row.bookkeepingOwner === "jmap") {
+    return row.bookkeepingOwner;
+  }
+  return row.campaignRecipientId ? "campaign" : null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
 
@@ -45,6 +64,12 @@ export interface OutboxSendParams {
    * evidence that the message was already accepted.
    */
   campaignRecipientId?: string | null;
+  /**
+   * Holds a provider-accepted row as `bookkeeping_pending` until the owner
+   * confirms (finalizeOutboxRow). Campaign sends may omit it: a set
+   * campaignRecipientId implies 'campaign'.
+   */
+  bookkeepingOwner?: BookkeepingOwner | null;
   /** Bare lowercase inbox address (scoping key; re-formatted on retry). */
   fromAddress: string;
   /** Formatted "Name <addr>" for the wire. */
@@ -93,6 +118,7 @@ export async function sendViaOutbox(
     sentEmailId,
     sequenceEmailId,
     campaignRecipientId,
+    bookkeepingOwner,
     fromAddress: rawFromAddress,
     from,
     to,
@@ -111,12 +137,17 @@ export async function sendViaOutbox(
   const fromAddress = rawFromAddress.trim().toLowerCase();
   const now = Math.floor(Date.now() / 1000);
   const outboxId = nanoid();
+  const owner = bookkeepingOwnerOf({
+    bookkeepingOwner: bookkeepingOwner ?? null,
+    campaignRecipientId: campaignRecipientId ?? null,
+  });
 
   await db.insert(outboxEmails).values({
     id: outboxId,
     sentEmailId,
     sequenceEmailId: sequenceEmailId ?? null,
     campaignRecipientId: campaignRecipientId ?? null,
+    bookkeepingOwner: owner,
     fromAddress,
     toAddress: to,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
@@ -175,12 +206,12 @@ export async function sendViaOutbox(
 
   const result = send.result!;
   if (!result.error) {
-    if (campaignRecipientId) {
-      // The provider has ACCEPTED this message. Deleting now would erase the
-      // only durable evidence of that, and a crash before the campaign writes
-      // its sent_emails / campaign_recipients rows would look exactly like a
-      // send that never happened — which is how you get a duplicate. Hold the
-      // row until the caller confirms its bookkeeping is done.
+    if (owner) {
+      // The provider has ACCEPTED this message and an owner still owes
+      // bookkeeping. Deleting now would erase the only durable evidence of
+      // that, and a crash before the owner writes its own rows would look
+      // exactly like a send that never happened — which is how you get a
+      // duplicate. Hold the row until the owner confirms.
       await db
         .update(outboxEmails)
         .set({ status: "bookkeeping_pending", attempts: 1, updatedAt: after })
@@ -356,10 +387,10 @@ export async function attemptOutboxRow(
         row.sentEmailId,
       );
     }
-    if (row.campaignRecipientId) {
+    if (bookkeepingOwnerOf(row)) {
       // Same reasoning as the inline path: a retry that finally succeeds still
-      // owes the campaign its bookkeeping, so hand the row to the campaign
-      // reconciliation sweep rather than deleting it here.
+      // owes its owner the bookkeeping, so hand the row over rather than
+      // deleting it here.
       await db
         .update(outboxEmails)
         .set({ status: "bookkeeping_pending", updatedAt: after })
