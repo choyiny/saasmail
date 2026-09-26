@@ -152,6 +152,17 @@ export function parseAttachmentBlobId(id: string): string | null {
   return decodeReversible(id, "A", "Q");
 }
 
+/** Upload blobs (RFC 8620 §6.1). The payload is the jmap_blobs row id. */
+export function publicUploadBlobId(id: string): string {
+  const encoded = reversible("U", "u", id);
+  if (!encoded) throw new Error("upload id too long for a JMAP id");
+  return encoded;
+}
+
+export function parseUploadBlobId(id: string): string | null {
+  return decodeReversible(id, "U", "u");
+}
+
 export function publicBodyPartBlobId(
   publicEmailId: string,
   part: "text" | "html",

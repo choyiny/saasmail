@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrading to the mailbox/agent/JMAP release
 
-- Apply D1 migrations `0037` through `0053` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies.
+- Apply D1 migrations `0037` through `0054` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. JMAP blob upload additionally needs the `jmap_blobs` table from `0054`.
 - Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
 - Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
 
@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Templates are unchanged for the transactional and sequence paths, where a template genuinely is the content and carries a `{{variable}}` send contract. Creating a campaign now redirects to the campaign itself rather than back to the list, and a campaign with an empty body is refused at send time instead of mailing a blank page.
 
 ### Added
+
+- **JMAP blob upload.** `POST /jmap/upload/{accountId}/` stores a file for later use in drafts (RFC 8620 §6.1), capped at the configured provider's attachment limit (now advertised in the JMAP Session), readable only by its uploader, and deleted after 24 hours. Downloads now honour the `name` and `type` URL variables, and `createdIds` / `#creationId` references work across method calls. Apply migration `0054_jmap_blobs` (the upgrade line's migration range moves up by one).
 
 - **JMAP change tracking and safe Email state writes.** JMAP now keeps a 30-day permission-scoped change log, supports Email/changes and Mailbox/changes, and accepts update-only Email/set calls for seen/flagged state and mailbox membership. Snooze remains app-only and invisible to JMAP; Email creation/destruction and EmailSubmission remain unsupported.
 

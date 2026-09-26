@@ -42,3 +42,4 @@ export * from "./rules.schema";
 export * from "./auto-reply-log.schema";
 export * from "./customers.schema";
 export * from "./jmap-changes.schema";
+export * from "./jmap-blobs.schema";

@@ -5,6 +5,7 @@ import {
   parseBodyPartBlobId,
   parseEmailId,
   parseThreadId,
+  parseUploadBlobId,
   publicAccountId,
   publicAttachmentBlobId,
   publicBodyPartBlobId,
@@ -14,6 +15,7 @@ import {
   publicIdentityId,
   publicSystemMailboxId,
   publicThreadId,
+  publicUploadBlobId,
   sha256Base64url,
 } from "../jmap/public-ids";
 
@@ -116,6 +118,25 @@ describe("JMAP public ids", () => {
     expect(part).toBe("PRid_with_underscores_html");
     expect(parseBodyPartBlobId(part)).toEqual({ emailId: email, part: "html" });
     expect(parseBodyPartBlobId("PRabc_json")).toBeNull();
+  });
+
+  it("round-trips upload blob ids and keeps them apart from attachments", () => {
+    expect(publicUploadBlobId("V1StGXR8_Z5jdHi6B-myT")).toBe(
+      "UV1StGXR8_Z5jdHi6B-myT",
+    );
+    expect(parseUploadBlobId("UV1StGXR8_Z5jdHi6B-myT")).toBe(
+      "V1StGXR8_Z5jdHi6B-myT",
+    );
+    const odd = publicUploadBlobId("has space/and:colon");
+    expect(odd).toMatch(JMAP_ID_PATTERN);
+    expect(odd.startsWith("u")).toBe(true);
+    expect(parseUploadBlobId(odd)).toBe("has space/and:colon");
+    for (const bad of ["", "U", "u", "u!!", "Aatt_1", "Pnope_text"]) {
+      expect(parseUploadBlobId(bad)).toBeNull();
+    }
+    // Families never decode as each other.
+    expect(parseAttachmentBlobId(publicUploadBlobId("x1"))).toBeNull();
+    expect(parseUploadBlobId(publicAttachmentBlobId("x1"))).toBeNull();
   });
 
   it("maps change-log object ids", () => {

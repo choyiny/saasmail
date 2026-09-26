@@ -1,8 +1,7 @@
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { sanitizeFilename } from "../lib/sanitize-filename";
-import { findReadableAttachment } from "../routers/attachments-router";
 import type { Variables } from "../variables";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { createEmailSender } from "../lib/email-sender";
 import { authenticateJmap, problem } from "./auth";
 import {
   CORE_CAPABILITY,
@@ -11,9 +10,20 @@ import {
   MAX_SIZE_REQUEST,
   SUPPORTED_CAPABILITIES,
 } from "./constants";
-import { executeMethod, makeSession } from "./methods";
-import { parseAttachmentBlobId, publicAccountId } from "./public-ids";
+import { executeMethod, makeSession, type JmapMethodContext } from "./methods";
+import { publicAccountId } from "./public-ids";
 import { applyResultReferences, type MethodResponse } from "./result-reference";
+import { recordCreated, resolveCallCreationRefs } from "./creation-refs";
+import {
+  parseDeclaredLength,
+  storeUpload,
+  uploadTooLargeProblem,
+} from "./upload";
+import {
+  downloadContentType,
+  downloadFilename,
+  resolveReadableBlob,
+} from "./blobs";
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -41,7 +51,7 @@ function requestError(
   );
 }
 
-function configuredOrigins(env: CloudflareBindings): Set<string> {
+export function configuredOrigins(env: CloudflareBindings): Set<string> {
   const values = [
     env.BASE_URL,
     ...String(env.TRUSTED_ORIGINS ?? "").split(","),
@@ -90,6 +100,29 @@ export function validateJmapPostRequest(
     );
   }
 
+  return null;
+}
+
+/**
+ * Uploads are not JSON, so the API guard doesn't fit. A session cookie is
+ * ambient authority: require an Origin, and a trusted one (spec §6). Bearer
+ * callers are not browsers and may omit it.
+ */
+export function validateJmapUploadOrigin(
+  request: Request,
+  env: CloudflareBindings,
+  authMethod: "session" | "apiKey",
+): Response | null {
+  if (authMethod !== "session") return null;
+  const origin = request.headers.get("Origin");
+  if (!origin || !configuredOrigins(env).has(origin)) {
+    return problem(
+      403,
+      "about:blank",
+      "Forbidden",
+      "Session-authenticated uploads require a trusted Origin.",
+    );
+  }
   return null;
 }
 
@@ -209,6 +242,7 @@ export async function executeJmapCalls(
   user: any,
   using: string[],
   methodCalls: [string, Record<string, unknown>, string][],
+  ctx: JmapMethodContext,
   executor: typeof executeMethod = executeMethod,
 ): Promise<MethodResponse[]> {
   const methodResponses: MethodResponse[] = [];
@@ -218,8 +252,8 @@ export async function executeJmapCalls(
       continue;
     }
 
-    const args = applyResultReferences(rawArgs, methodResponses);
-    if (!args) {
+    const referenced = applyResultReferences(rawArgs, methodResponses);
+    if (!referenced) {
       methodResponses.push([
         "error",
         { type: "invalidResultReference" },
@@ -227,13 +261,19 @@ export async function executeJmapCalls(
       ]);
       continue;
     }
+    // Creates from earlier calls (RFC 8620 §5.3); each /set handles its own
+    // same-call references.
+    const args = resolveCallCreationRefs(referenced, ctx.createdIds);
 
     try {
-      const result = await executor(db, allowed, user, name, args);
+      const result = await executor(db, allowed, user, name, args, ctx);
       if ("error" in result) {
         methodResponses.push(["error", result.error, callId]);
       } else {
         methodResponses.push([result.name, result.result, callId]);
+        if (result.name.endsWith("/set")) {
+          recordCreated(result.result, ctx.createdIds);
+        }
       }
     } catch {
       methodResponses.push(["error", { type: "serverFail" }, callId]);
@@ -252,7 +292,7 @@ export function registerJmapRoutes(
     const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));
     if (auth instanceof Response) return auth;
     return jsonResponse(
-      await makeSession(c.get("db"), auth.allowed, auth.user),
+      await makeSession(c.get("db"), auth.allowed, auth.user, c.env),
     );
   });
 
@@ -270,21 +310,74 @@ export function registerJmapRoutes(
     const request = await readJmapRequest(c.req.raw);
     if (request instanceof Response) return request;
 
+    const ctx: JmapMethodContext = {
+      env: c.env,
+      createdIds: new Map(Object.entries(request.createdIds ?? {})),
+    };
     const methodResponses = await executeJmapCalls(
       c.get("db"),
       auth.allowed,
       auth.user,
       request.using,
       request.methodCalls,
+      ctx,
     );
 
-    const session = await makeSession(c.get("db"), auth.allowed, auth.user);
+    const session = await makeSession(
+      c.get("db"),
+      auth.allowed,
+      auth.user,
+      c.env,
+    );
     return jsonResponse({
       methodResponses,
-      ...(request.createdIds ? { createdIds: request.createdIds } : {}),
+      // RFC 8620 §3.4: only when the request sent createdIds, with every
+      // id it passed plus the ones created here.
+      ...(request.createdIds
+        ? { createdIds: Object.fromEntries(ctx.createdIds) }
+        : {}),
       sessionState: session.state,
     });
   });
+
+  // Hono is strict about trailing slashes, and the advertised template ends
+  // with one, so register both spellings.
+  for (const path of ["/jmap/upload/:accountId", "/jmap/upload/:accountId/"]) {
+    app.post(path, async (c) => {
+      const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));
+      if (auth instanceof Response) return auth;
+
+      const originGuard = validateJmapUploadOrigin(
+        c.req.raw,
+        c.env,
+        auth.authMethod,
+      );
+      if (originGuard) return originGuard;
+
+      const accountId = publicAccountId(auth.user.id);
+      if (c.req.param("accountId") !== accountId) {
+        return problem(
+          403,
+          "about:blank",
+          "Forbidden",
+          "Uploads are only accepted for your own account.",
+        );
+      }
+
+      const result = await storeUpload(c.get("db"), c.env, {
+        userId: auth.user.id,
+        accountId,
+        contentType: c.req.header("Content-Type") ?? null,
+        declaredLength: parseDeclaredLength(c.req.header("Content-Length")),
+        body: c.req.raw.body,
+        maxBytes: createEmailSender(c.env).maxAttachmentBytes(),
+      });
+      if (result.tooLargeLimit !== null) {
+        return uploadTooLargeProblem(result.tooLargeLimit);
+      }
+      return jsonResponse(result.blob, 201);
+    });
+  }
 
   app.get("/jmap/download/:accountId/:blobId/:name", async (c) => {
     const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));
@@ -294,35 +387,35 @@ export function registerJmapRoutes(
       return problem(404, "about:blank", "Not found");
     }
 
-    const attachmentId = parseAttachmentBlobId(c.req.param("blobId"));
-    if (!attachmentId) {
-      return problem(404, "about:blank", "Not found");
-    }
-
-    const attachment = await findReadableAttachment(
+    const blob = await resolveReadableBlob(
       c.get("db"),
       auth.allowed,
-      attachmentId,
+      auth.user.id,
+      c.req.param("blobId"),
     );
-    if (!attachment) {
-      return problem(404, "about:blank", "Not found");
+    if (!blob) return problem(404, "about:blank", "Not found");
+
+    // Strict mode is off: read the union through an explicit shape.
+    const source = blob.source as { r2Key?: string; bytes?: Uint8Array };
+    let body: BodyInit;
+    let length: number;
+    if (source.bytes) {
+      body = source.bytes as BodyInit;
+      length = source.bytes.byteLength;
+    } else {
+      const object = await c.env.R2.get(source.r2Key!);
+      if (!object) return problem(404, "about:blank", "Not found");
+      body = object.body;
+      length = object.size;
     }
 
-    const object = await c.env.R2.get(attachment.r2Key);
-    if (!object) {
-      return problem(404, "about:blank", "Not found");
-    }
-
-    const safeFilename = sanitizeFilename(attachment.filename).replaceAll(
-      '"',
-      "_",
-    );
-    return new Response(object.body, {
+    const filename = downloadFilename(c.req.param("name"), blob.name);
+    return new Response(body, {
       headers: {
-        "Content-Type": attachment.contentType,
-        "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`,
-        "Content-Length": attachment.size.toString(),
-        "Cache-Control": "private, max-age=31536000, immutable",
+        "Content-Type": downloadContentType(c.req.query("type"), blob.type),
+        "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        "Content-Length": length.toString(),
+        "Cache-Control": "private, immutable, max-age=31536000",
         "X-Content-Type-Options": "nosniff",
       },
     });

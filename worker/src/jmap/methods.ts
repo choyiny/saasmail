@@ -1,4 +1,5 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { createEmailSender } from "../lib/email-sender";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 import {
   queryMessages,
@@ -13,6 +14,7 @@ import {
   MAX_OBJECTS_IN_SET,
   MAX_SIZE_REQUEST,
 } from "./constants";
+import type { CreatedIds } from "./creation-refs";
 import {
   emailGet,
   emailQuery,
@@ -36,6 +38,13 @@ const MAX_EMAILS_IN_THREAD_GET = 1024;
 export type MethodResult =
   | { ok: true; name: string; result: Record<string, unknown> }
   | { ok: false; error: Record<string, unknown> };
+
+/** Per-request state every method can use. */
+export type JmapMethodContext = {
+  env: CloudflareBindings;
+  /** Creation id -> server id for this request (RFC 8620 §3.3). */
+  createdIds: CreatedIds;
+};
 
 function methodError(
   type: string,
@@ -137,13 +146,17 @@ export async function makeSession(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
   user: any,
+  env: CloudflareBindings,
 ): Promise<Record<string, unknown>> {
   const accountId = publicAccountId(user.id);
+  // One limit for uploads and for an Email's attachments: whatever the
+  // configured provider accepts as attachments (spec §2).
+  const maxUpload = createEmailSender(env).maxAttachmentBytes();
   return {
     capabilities: {
       [CORE_CAPABILITY]: {
-        maxSizeUpload: 0,
-        maxConcurrentUpload: 0,
+        maxSizeUpload: maxUpload,
+        maxConcurrentUpload: 4,
         maxSizeRequest: MAX_SIZE_REQUEST,
         maxConcurrentRequests: 4,
         maxCallsInRequest: MAX_CALLS_IN_REQUEST,
@@ -163,7 +176,7 @@ export async function makeSession(
             maxMailboxesPerEmail: null,
             maxMailboxDepth: null,
             maxSizeMailboxName: 255,
-            maxSizeAttachmentsPerEmail: 0,
+            maxSizeAttachmentsPerEmail: maxUpload,
             emailQuerySortOptions: ["receivedAt"],
             mayCreateTopLevelMailbox: false,
           },
@@ -178,7 +191,7 @@ export async function makeSession(
     username: user.email ?? user.id,
     apiUrl: "/jmap/api",
     downloadUrl: "/jmap/download/{accountId}/{blobId}/{name}?type={type}",
-    uploadUrl: "",
+    uploadUrl: "/jmap/upload/{accountId}/",
     eventSourceUrl: "",
     state: await jmapState(db, allowed, user.id),
   };
@@ -477,6 +490,7 @@ export async function executeMethod(
   user: any,
   name: string,
   args: Record<string, unknown>,
+  ctx: JmapMethodContext,
 ): Promise<MethodResult> {
   if (name === "Core/echo") {
     return { ok: true, name, result: args };

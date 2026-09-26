@@ -379,6 +379,13 @@
       "when": 1790386837425,
       "tag": "0053_outbox_bookkeeping_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1790447666452,
+      "tag": "0054_jmap_blobs",
+      "breakpoints": true
     }
   ]
 }

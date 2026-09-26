@@ -39,6 +39,7 @@ import { processOutbox } from "./lib/outbox";
 import { reapOrphanSentAttachments } from "./lib/sent-attachments";
 import { runNewsletterMaintenance } from "./lib/newsletter-cron";
 import { pruneJmapChanges } from "./jmap/changes";
+import { reapExpiredUploads } from "./jmap/upload";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -406,6 +407,15 @@ export default {
             Math.floor(Date.now() / 1000),
           ).catch((err) =>
             console.error("[cron] sent attachment reaping failed:", err),
+          ),
+        )
+        .then(() =>
+          reapExpiredUploads(
+            createDb(env),
+            env,
+            Math.floor(Date.now() / 1000),
+          ).catch((err) =>
+            console.error("[cron] JMAP upload reaping failed:", err),
           ),
         ),
     );

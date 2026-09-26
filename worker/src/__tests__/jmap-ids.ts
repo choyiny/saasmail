@@ -10,6 +10,7 @@ import {
   publicIdentityId,
   publicSystemMailboxId,
   publicThreadId,
+  publicUploadBlobId,
 } from "../jmap/public-ids";
 
 export const acct = (userId: string) => publicAccountId(userId);
@@ -22,6 +23,7 @@ export const thread = (internalKey: string) => publicThreadId(internalKey);
 export const idn = (email: string) => publicIdentityId(email);
 export const att = (attachmentId: string) =>
   publicAttachmentBlobId(attachmentId);
+export const upl = (uploadId: string) => publicUploadBlobId(uploadId);
 
 const ID_KEYS = new Set([
   "id",

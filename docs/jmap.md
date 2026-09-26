@@ -8,7 +8,8 @@ saasmail exposes a bounded subset of [JMAP Core (RFC 8620)](https://www.rfc-edit
 
 - `GET /.well-known/jmap` — authenticated JMAP Session resource.
 - `POST /jmap/api` — JMAP method calls.
-- `GET /jmap/download/{accountId}/{blobId}/{name}?type={type}` — attachment download.
+- `POST /jmap/upload/{accountId}/` — blob upload (RFC 8620 §6.1). Returns `201` with `{ accountId, blobId, type, size }`.
+- `GET /jmap/download/{accountId}/{blobId}/{name}?type={type}` — blob download. The response uses `name` as the filename and `type` as the `Content-Type` (RFC 8620 §6.2), always with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`.
 
 Authenticate with the same credentials as the HTTP API: either a signed-in session cookie or `Authorization: Bearer sk_...`. Session-cookie callers have the same passkey-registration gate as `/api/*`; API keys retain their normal issuance-time passkey guarantee. Every object is scoped through the caller's allowed inboxes. Objects outside that scope are reported as not found rather than disclosed.
 
@@ -25,6 +26,14 @@ State strings moved with the ids: they are now `j2-<seq>-<issuedAt>-<fp>`. A cli
 The web UI, the HTTP API and MCP are unaffected: the internal `received:<id>` / `sent:<id>` message references they use are unchanged, and only the JMAP boundary encodes and decodes.
 
 Body-part blob ids (`P<email id>_text` / `P<email id>_html`) are not downloadable yet — the same pre-existing gap as before. See "Limits and known gaps" below.
+
+## Uploads and blobs
+
+Uploads accept any content, including an empty body, up to the Session's `maxSizeUpload`. That value is the configured provider's attachment limit, and the same value is advertised as `maxSizeAttachmentsPerEmail`. A larger body gets `413` with a problem body whose `maxSize` is the limit. The server counts the octets it reads, so a missing or wrong `Content-Length` doesn't help. A request for another account gets `403`. A browser session (cookie) upload must carry an `Origin` from the deployment's trusted origins, or it gets `403`. API-key uploads don't need one.
+
+An uploaded blob (`U…`) is readable only by the user who uploaded it and is deleted after 24 hours. Use it in a draft before then; a draft keeps its own copy. Attachment blobs (`A…`) follow the inbox permissions of their message. Body-part (`P…`) and raw-message blobs are not downloadable yet.
+
+Creation references work across calls in one request: a later call may use `#creationId` in `ids`, `destroy` and `update` keys to name a record created earlier. `createdIds` is accepted on the request and echoed on the response, per RFC 8620 §3.3. No method creates records yet; drafts arrive next.
 
 ## Supported methods
 
@@ -67,7 +76,7 @@ For clients that ask for endpoints manually, use `https://your-domain.example/jm
 
 The Session advertises a 10 MB request limit, 16 method calls per request, 256 objects per `/get`, 256 objects per `/set`, four concurrent requests, and `i;ascii-casemap` collation. Result references (`#property`) are supported, including wildcard JSON-pointer paths used to feed one method response into a later call in the same request.
 
-Upload, EventSource push, Email creation/destruction, mailbox mutation, EmailSubmission, search snippets, raw-message blob download, and body-part blob download are not implemented. Thread/changes, Identity/changes, and query-change calculation are also not implemented. Draft rows are not yet projected into JMAP Email objects.
+EventSource push, Email creation/destruction, mailbox mutation, EmailSubmission, search snippets, raw-message blob download, and body-part blob download are not implemented. Thread/changes, Identity/changes, and query-change calculation are also not implemented. Draft rows are not yet projected into JMAP Email objects.
 
 `Email/get` accepts the full RFC 8621 Email property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors, so standard clients may request their normal property lists. `messageId` and `inReplyTo` are returned when they are already present in the unified message row. Properties the current unified model cannot supply cheaply — including raw-message `blobId`, `references`, `sender`, `bcc`, `replyTo`, `bodyStructure`, `headers`, and dynamic `header:*` selectors — are returned as `null`. These nulls are a deliberate compatibility deviation from the stricter RFC field types until those values are modeled; names outside the RFC property set still return `invalidArguments`.
 

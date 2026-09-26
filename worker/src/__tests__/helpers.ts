@@ -101,6 +101,9 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS jmap_changes_inbox_user_seq_idx ON jmap_changes(inbox, user_id, seq)`,
     `CREATE INDEX IF NOT EXISTS jmap_changes_user_seq_idx ON jmap_changes(user_id, seq)`,
     `CREATE INDEX IF NOT EXISTS jmap_changes_created_at_idx ON jmap_changes(created_at)`,
+    `CREATE TABLE IF NOT EXISTS jmap_blobs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS jmap_blobs_user_idx ON jmap_blobs(user_id)`,
+    `CREATE INDEX IF NOT EXISTS jmap_blobs_created_at_idx ON jmap_blobs(created_at)`,
     `CREATE TRIGGER IF NOT EXISTS jmap_emails_insert AFTER INSERT ON emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'received:' || NEW.id, NEW.recipient, NULL, 'c', CAST(strftime('%s','now') AS INTEGER)); END`,
     `CREATE TRIGGER IF NOT EXISTS jmap_emails_update AFTER UPDATE ON emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'received:' || NEW.id, NEW.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER)); END`,
     `CREATE TRIGGER IF NOT EXISTS jmap_emails_delete AFTER DELETE ON emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'received:' || OLD.id, OLD.recipient, NULL, 'd', CAST(strftime('%s','now') AS INTEGER)); END`,
@@ -489,6 +492,7 @@ export async function cleanDb() {
     DELETE FROM accounts;
     DELETE FROM verifications;
     DELETE FROM jwkss;
+    DELETE FROM jmap_blobs;
     DELETE FROM users;
     DELETE FROM jmap_changes;
   `);

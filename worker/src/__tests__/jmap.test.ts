@@ -22,6 +22,7 @@ import {
   MAX_CALLS_IN_REQUEST,
 } from "../jmap/constants";
 import { executeJmapCalls, validateJmapPostRequest } from "../jmap/http";
+import { createEmailSender } from "../lib/email-sender";
 import {
   acct,
   att,
@@ -113,7 +114,19 @@ describe("JMAP", () => {
     expect(session.downloadUrl).toBe(
       "/jmap/download/{accountId}/{blobId}/{name}?type={type}",
     );
-    expect(session.uploadUrl).toBe("");
+    expect(session.uploadUrl).toBe("/jmap/upload/{accountId}/");
+    const maxUpload = createEmailSender(
+      env as unknown as CloudflareBindings,
+    ).maxAttachmentBytes();
+    expect(maxUpload).toBeGreaterThan(0);
+    expect(session.capabilities[CORE_CAPABILITY]).toMatchObject({
+      maxSizeUpload: maxUpload,
+      maxConcurrentUpload: 4,
+    });
+    expect(
+      session.accounts[acct(userId)].accountCapabilities[MAIL_CAPABILITY]
+        .maxSizeAttachmentsPerEmail,
+    ).toBe(maxUpload);
     expect(session.eventSourceUrl).toBe("");
     expect(session.capabilities[CORE_CAPABILITY]).toMatchObject({
       maxSizeRequest: 10_000_000,
@@ -1030,6 +1043,7 @@ describe("JMAP", () => {
         ["Core/boom", {}, "boom"],
         ["Core/echo", { ok: true }, "next"],
       ],
+      { env: env as unknown as CloudflareBindings, createdIds: new Map() },
       async (_db, _allowed, _user, name, args) => {
         if (name === "Core/boom") throw new Error("boom");
         return { ok: true, name, result: args };
