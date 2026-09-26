@@ -412,6 +412,7 @@ export default function InboxPage() {
           recipientCount: 1,
           recipients: [],
           hasAttachment: 0,
+          linkedCount: 0,
         });
       })
       .catch(() => {});

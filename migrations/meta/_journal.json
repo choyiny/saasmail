@@ -246,6 +246,139 @@
       "when": 1788062708146,
       "tag": "0034_closed_krista_starr",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1788622787422,
+      "tag": "0035_newsletter_module",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788622898280,
+      "tag": "0036_newsletter_custom_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1790093013515,
+      "tag": "0037_canonicalize_inbox_addresses",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1790095791018,
+      "tag": "0038_sequence_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1790095896925,
+      "tag": "0039_backfill_sequence_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1790103305138,
+      "tag": "0040_message_state_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1790103490979,
+      "tag": "0041_message_state_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1790108525741,
+      "tag": "0042_conversation_snooze",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1790122426243,
+      "tag": "0043_tiresome_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1790130000000,
+      "tag": "0044_agent_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1790144903481,
+      "tag": "0045_organic_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1790158258699,
+      "tag": "0046_suggested_replies",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1790167463748,
+      "tag": "0047_rules_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1790176697607,
+      "tag": "0048_auto_reply_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1790179814892,
+      "tag": "0049_identity_graph",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1790197000000,
+      "tag": "0050_jmap_changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1790263000000,
+      "tag": "0051_canonical_from_address",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1790269371861,
+      "tag": "0052_auto_reply_log_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1790386837425,
+      "tag": "0053_outbox_bookkeeping_owner",
+      "breakpoints": true
     }
   ]
 }

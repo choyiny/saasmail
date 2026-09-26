@@ -13,6 +13,8 @@ export const TEST_IDS = {
   inboxCreateEmail: "inbox-create-email",
   inboxCreateDisplayName: "inbox-create-display-name",
   inboxDisplayNameInput: "inbox-display-name-input",
+  inboxAgentInstructions: "inbox-agent-instructions",
+  inboxAgentInstructionsCount: "inbox-agent-instructions-count",
   inboxModeToggle: "inbox-mode-toggle",
   inboxDeleteButton: "inbox-delete-button",
   inboxMemberToggle: "inbox-member-toggle",
@@ -21,6 +23,14 @@ export const TEST_IDS = {
   sequenceRow: "sequence-row",
   sequenceStepRow: "sequence-step-row",
   enrollmentRow: "enrollment-row",
+
+  // Newsletters
+  listRow: "list-row",
+  memberRow: "member-row",
+  formRow: "form-row",
+  campaignRow: "campaign-row",
+  campaignStatus: "campaign-status",
+  campaignSend: "campaign-send",
 
   // Templates
   templateRow: "template-row",
@@ -44,6 +54,17 @@ export const TEST_IDS = {
   // Reply
   replySendButton: "reply-send-button",
   replyComposer: "reply-composer",
+
+  // Mailbox
+  mailMessageRow: "mail-message-row",
+  mailReadingPane: "mail-reading-pane",
+  mailReadingStar: "mail-reading-star",
+  mailReadingArchive: "mail-reading-archive",
+  mailReadingTrash: "mail-reading-trash",
+  mailCreateFolderInput: "mail-create-folder-input",
+  mailCreateFolderButton: "mail-create-folder-button",
+  mailMoveFolder: "mail-move-folder",
+  mailBulkArchive: "mail-bulk-archive",
 
   // API keys
   apiKeyRow: "api-key-row",

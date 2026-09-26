@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { encodeDisplayName } from "../lib/format-from-address";
+import { parseFrom } from "../lib/email-sender/shared";
 
 describe("encodeDisplayName", () => {
   it("leaves a plain display name as a bare atom sequence", () => {
@@ -25,5 +26,28 @@ describe("encodeDisplayName", () => {
       '"Bob \\"The Builder\\""',
     );
     expect(encodeDisplayName("back\\slash, inc")).toBe('"back\\\\slash, inc"');
+  });
+});
+
+describe("parseFrom", () => {
+  it.each([
+    ["Privacy @ Snowlan", "Privacy @ Snowlan"],
+    ["Ada, VP of Engineering", "Ada, VP of Engineering"],
+    ['Bob "The Builder"', 'Bob "The Builder"'],
+    ["back\\slash, inc", "back\\slash, inc"],
+    ["The Support Team", "The Support Team"],
+  ])("round-trips %s through encodeDisplayName", (name, expected) => {
+    expect(parseFrom(`${encodeDisplayName(name)} <hello@example.com>`)).toEqual(
+      {
+        name: expected,
+        address: "hello@example.com",
+      },
+    );
+  });
+
+  it("parses a bare address without inventing a display name", () => {
+    expect(parseFrom("hello@example.com")).toEqual({
+      address: "hello@example.com",
+    });
   });
 });

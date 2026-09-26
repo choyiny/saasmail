@@ -17,6 +17,10 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
 - `vars.BASE_URL` — Your deployed URL (used for OAuth redirects and BetterAuth)
 - `vars.TRUSTED_ORIGINS` — CORS allowed origins
 - `vars.COOKIE_PREFIX` — Prefix for better-auth session cookies
+- `vars.DB_LOG_QUERIES` — Optional Drizzle query logging toggle. It is off by
+  default; set it to exactly `"true"` only while debugging. **Warning:** query
+  logging includes bound SQL parameters, so Workers logs may contain email
+  addresses, subjects, token hashes, or other sensitive values.
 - `vars.VAPID_PUBLIC_KEY` / `vars.VAPID_SUBJECT` — public VAPID config for
   browser push notifications. Generate with `yarn vapid:generate` and store
   the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank
@@ -28,11 +32,17 @@ To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used a
 
 Local development secrets. Created from `.dev.vars.example`. This file is gitignored.
 
+- `vars.PROVIDER_DAILY_SEND_LIMIT` — optional. Refuses to start a newsletter
+  campaign that would push the sending identity past this many messages in 24
+  hours. Unset by default, in which case the check is skipped entirely. Set it
+  to your provider's real daily quota so an oversized blast is refused up front
+  rather than discovered half-delivered.
 - `BAVIMAIL_API_KEY` — Bavimail API bearer token (required for Bavimail, must be paired with `BAVIMAIL_ALIAS_ID`)
 - `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
 - `POSTMARK_API_KEY` — Postmark server API token (if using Postmark)
 - `RESEND_API_KEY` — Resend API key (if using Resend)
-- `BETTER_AUTH_SECRET` — Secret for session signing
+- `BETTER_AUTH_SECRET` — Secret for session signing. The native agent also derives a stable 32-byte HKDF-SHA256 tool-approval signing key from it (info: `saasmail/agent-tool-approval/v1`), so pending approval cards remain verifiable across Durable Object reloads and hibernation.
+- `AGENT_APPROVAL_SECRET` — Optional dedicated secret for native-agent approval signatures. When set, it overrides the key derived from `BETTER_AUTH_SECRET`. Set in production with `wrangler secret put AGENT_APPROVAL_SECRET`. Rotating either effective secret invalidates approval cards that were still pending.
 - `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the [suppressions/unsubscribe](suppressions.md) feature.
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. **Never set this in production.**
 

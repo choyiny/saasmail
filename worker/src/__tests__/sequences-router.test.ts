@@ -171,6 +171,29 @@ describe("sequences router", () => {
   });
 
   describe("POST /api/sequences/:id/enroll", () => {
+    it("canonicalizes a mixed-case sending inbox before storing the enrollment", async () => {
+      const seq = await createSequenceWithTemplates();
+      await createTestPerson({ id: "mixed-case-person", email: "a@test.com" });
+
+      const res = await authFetch(`/api/sequences/${seq.id}/enroll`, {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({
+          personId: "mixed-case-person",
+          fromAddress: "Hello@Example.com",
+        }),
+      });
+      expect(res.status).toBe(201);
+      const data = await res.json();
+      expect(data.enrollment.fromAddress).toBe("hello@example.com");
+
+      const rows = await getDb()
+        .select()
+        .from(sequenceEnrollments)
+        .where(eq(sequenceEnrollments.id, data.enrollment.id));
+      expect(rows[0].fromAddress).toBe("hello@example.com");
+    });
+
     it("enrolls a person and creates scheduled emails", async () => {
       const seq = await createSequenceWithTemplates();
       await createTestPerson({ id: "s1", email: "a@test.com" });

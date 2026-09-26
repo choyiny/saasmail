@@ -1,6 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { users } from "../db/auth.schema";
 import { sessions } from "../db/auth.schema";
 import { people } from "../db/people.schema";
@@ -23,7 +22,7 @@ import {
 import { hashKey } from "../lib/crypto";
 
 export function getDb() {
-  return drizzle(env.DB, { schema });
+  return createDb(env);
 }
 
 /**
@@ -51,13 +50,20 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS oauth_consents (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, scopes TEXT NOT NULL, created_at INTEGER, updated_at INTEGER)`,
     `CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT, last_email_at INTEGER NOT NULL, unread_count INTEGER NOT NULL DEFAULT 0, total_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS people_last_email_at_idx ON people(last_email_at)`,
+    `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, display_name TEXT, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS customer_people (customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE, person_id TEXT NOT NULL UNIQUE REFERENCES people(id) ON DELETE CASCADE, linked_by TEXT REFERENCES users(id) ON DELETE SET NULL, linked_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS customer_people_customer_idx ON customer_people(customer_id)`,
     `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT UNIQUE, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
-    `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, conversation_id TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, conversation_id TEXT, campaign_id TEXT, sequence_id TEXT, sequence_enrollment_id TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_person_sent_idx ON sent_emails(person_id, sent_at)`,
+    `CREATE INDEX IF NOT EXISTS sent_emails_from_sent_idx ON sent_emails(from_address, sent_at)`,
+    `CREATE INDEX IF NOT EXISTS sent_emails_sequence_sent_idx ON sent_emails(sequence_id, sent_at)`,
     `CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, email_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'inbound', filename TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, content_id TEXT, created_at INTEGER NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, from_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, format TEXT NOT NULL DEFAULT 'html', body_json TEXT, from_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS newsletter_assets (id TEXT PRIMARY KEY, r2_key TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS newsletter_assets_sha256_idx ON newsletter_assets(sha256)`,
     `CREATE TABLE IF NOT EXISTS api_keys (id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'member', email TEXT, expires_at INTEGER NOT NULL, used_by TEXT REFERENCES users(id) ON DELETE SET NULL, used_at INTEGER, created_by TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS sequences (id TEXT PRIMARY KEY, name TEXT NOT NULL, steps TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -65,9 +71,54 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS enrollments_person_status_idx ON sequence_enrollments(person_id, status)`,
     `CREATE TABLE IF NOT EXISTS sequence_emails (id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL, step_order INTEGER NOT NULL, template_slug TEXT NOT NULL, scheduled_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', sent_at INTEGER, sent_email_id TEXT)`,
     `CREATE INDEX IF NOT EXISTS seq_emails_status_scheduled_idx ON sequence_emails(status, scheduled_at)`,
-    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, spam_threshold REAL, agent_instructions TEXT, agent_autodraft INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS inbox_permissions (user_id TEXT NOT NULL, email TEXT NOT NULL, created_at INTEGER NOT NULL, created_by TEXT, PRIMARY KEY(user_id, email), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)`,
     `CREATE INDEX IF NOT EXISTS inbox_permissions_email_idx ON inbox_permissions(email)`,
+    `CREATE TABLE IF NOT EXISTS message_user_state (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, message_kind TEXT NOT NULL, message_id TEXT NOT NULL, seen_at INTEGER, starred_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, message_kind, message_id))`,
+    `CREATE INDEX IF NOT EXISTS message_user_state_user_starred_idx ON message_user_state(user_id, starred_at)`,
+    `CREATE TABLE IF NOT EXISTS mailbox_message_state (inbox TEXT NOT NULL, message_kind TEXT NOT NULL, message_id TEXT NOT NULL, archived_at INTEGER, spam_at INTEGER, trashed_at INTEGER, updated_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(message_kind, message_id))`,
+    `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_trashed_idx ON mailbox_message_state(inbox, trashed_at)`,
+    `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_spam_idx ON mailbox_message_state(inbox, spam_at)`,
+    `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_archived_idx ON mailbox_message_state(inbox, archived_at)`,
+    `CREATE TABLE IF NOT EXISTS mailboxes (id TEXT PRIMARY KEY NOT NULL, inbox TEXT NOT NULL, name TEXT NOT NULL, role TEXT, parent_id TEXT REFERENCES mailboxes(id) ON DELETE CASCADE, sort_order INTEGER NOT NULL DEFAULT 0, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS mailboxes_inbox_parent_name_unique ON mailboxes(inbox, parent_id, name)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS mailboxes_root_name_unique ON mailboxes(inbox, name) WHERE parent_id IS NULL`,
+    `CREATE TABLE IF NOT EXISTS message_mailboxes (message_kind TEXT NOT NULL, message_id TEXT NOT NULL, mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE, added_by TEXT, added_at INTEGER NOT NULL, PRIMARY KEY(message_kind, message_id, mailbox_id))`,
+    `CREATE INDEX IF NOT EXISTS message_mailboxes_mailbox_added_idx ON message_mailboxes(mailbox_id, added_at)`,
+    `CREATE TABLE IF NOT EXISTS inbox_conversation_state (inbox TEXT NOT NULL, conversation_key TEXT NOT NULL, snoozed_until INTEGER, snoozed_by TEXT REFERENCES users(id) ON DELETE SET NULL, assigned_user_id TEXT REFERENCES users(id) ON DELETE SET NULL, assigned_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY(inbox, conversation_key))`,
+    `CREATE INDEX IF NOT EXISTS inbox_conversation_state_inbox_snoozed_idx ON inbox_conversation_state(inbox, snoozed_until)`,
+    `CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, inbox TEXT, trigger TEXT NOT NULL DEFAULT 'message.received', conditions TEXT NOT NULL, actions TEXT NOT NULL, position INTEGER NOT NULL, stop_processing INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1, match_count INTEGER NOT NULL DEFAULT 0, last_matched_at INTEGER, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS rules_enabled_position_idx ON rules(enabled, position)`,
+    `CREATE TABLE IF NOT EXISTS auto_reply_log (rule_id TEXT NOT NULL REFERENCES rules(id) ON DELETE CASCADE, sender TEXT NOT NULL, sent_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS auto_reply_log_rule_sender_unique ON auto_reply_log(rule_id, sender)`,
+    `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_insert BEFORE INSERT ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_update BEFORE UPDATE OF message_kind ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS mailbox_message_state_kind_insert BEFORE INSERT ON mailbox_message_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS mailbox_message_state_kind_update BEFORE UPDATE OF message_kind ON mailbox_message_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS message_mailboxes_kind_insert BEFORE INSERT ON message_mailboxes WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS message_mailboxes_kind_update BEFORE UPDATE OF message_kind ON message_mailboxes WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TABLE IF NOT EXISTS jmap_changes (seq INTEGER PRIMARY KEY AUTOINCREMENT, object_type TEXT NOT NULL, object_id TEXT NOT NULL, inbox TEXT, user_id TEXT, op TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS jmap_changes_inbox_user_seq_idx ON jmap_changes(inbox, user_id, seq)`,
+    `CREATE INDEX IF NOT EXISTS jmap_changes_user_seq_idx ON jmap_changes(user_id, seq)`,
+    `CREATE INDEX IF NOT EXISTS jmap_changes_created_at_idx ON jmap_changes(created_at)`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_emails_insert AFTER INSERT ON emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'received:' || NEW.id, NEW.recipient, NULL, 'c', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_emails_update AFTER UPDATE ON emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'received:' || NEW.id, NEW.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_emails_delete AFTER DELETE ON emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'received:' || OLD.id, OLD.recipient, NULL, 'd', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_sent_emails_insert AFTER INSERT ON sent_emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'sent:' || NEW.id, NEW.from_address, NULL, 'c', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_sent_emails_update AFTER UPDATE ON sent_emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'sent:' || NEW.id, NEW.from_address, NULL, 'u', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_sent_emails_delete AFTER DELETE ON sent_emails BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'sent:' || OLD.id, OLD.from_address, NULL, 'd', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_message_user_state_insert AFTER INSERT ON message_user_state BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || NEW.message_id, e.recipient, NEW.user_id, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE NEW.message_kind = 'received' AND e.id = NEW.message_id UNION ALL SELECT 'email', 'sent:' || NEW.message_id, se.from_address, NEW.user_id, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE NEW.message_kind = 'sent' AND se.id = NEW.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_message_user_state_update AFTER UPDATE ON message_user_state BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || NEW.message_id, e.recipient, NEW.user_id, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE NEW.message_kind = 'received' AND e.id = NEW.message_id UNION ALL SELECT 'email', 'sent:' || NEW.message_id, se.from_address, NEW.user_id, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE NEW.message_kind = 'sent' AND se.id = NEW.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_message_user_state_delete AFTER DELETE ON message_user_state BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || OLD.message_id, e.recipient, OLD.user_id, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE OLD.message_kind = 'received' AND e.id = OLD.message_id UNION ALL SELECT 'email', 'sent:' || OLD.message_id, se.from_address, OLD.user_id, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE OLD.message_kind = 'sent' AND se.id = OLD.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_mailbox_message_state_insert AFTER INSERT ON mailbox_message_state BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || NEW.message_id, e.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE NEW.message_kind = 'received' AND e.id = NEW.message_id UNION ALL SELECT 'email', 'sent:' || NEW.message_id, se.from_address, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE NEW.message_kind = 'sent' AND se.id = NEW.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_mailbox_message_state_update AFTER UPDATE ON mailbox_message_state BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || NEW.message_id, e.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE NEW.message_kind = 'received' AND e.id = NEW.message_id UNION ALL SELECT 'email', 'sent:' || NEW.message_id, se.from_address, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE NEW.message_kind = 'sent' AND se.id = NEW.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_mailbox_message_state_delete AFTER DELETE ON mailbox_message_state BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || OLD.message_id, e.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE OLD.message_kind = 'received' AND e.id = OLD.message_id UNION ALL SELECT 'email', 'sent:' || OLD.message_id, se.from_address, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE OLD.message_kind = 'sent' AND se.id = OLD.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_message_mailboxes_insert AFTER INSERT ON message_mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || NEW.message_id, e.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE NEW.message_kind = 'received' AND e.id = NEW.message_id UNION ALL SELECT 'email', 'sent:' || NEW.message_id, se.from_address, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE NEW.message_kind = 'sent' AND se.id = NEW.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_message_mailboxes_update AFTER UPDATE ON message_mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || NEW.message_id, e.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE NEW.message_kind = 'received' AND e.id = NEW.message_id UNION ALL SELECT 'email', 'sent:' || NEW.message_id, se.from_address, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE NEW.message_kind = 'sent' AND se.id = NEW.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_message_mailboxes_delete AFTER DELETE ON message_mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) SELECT 'email', 'received:' || OLD.message_id, e.recipient, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM emails e WHERE OLD.message_kind = 'received' AND e.id = OLD.message_id UNION ALL SELECT 'email', 'sent:' || OLD.message_id, se.from_address, NULL, 'u', CAST(strftime('%s','now') AS INTEGER) FROM sent_emails se WHERE OLD.message_kind = 'sent' AND se.id = OLD.message_id; END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_mailboxes_insert AFTER INSERT ON mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('mailbox', 'mbx:' || NEW.id, NEW.inbox, NULL, 'c', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_mailboxes_update AFTER UPDATE ON mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('mailbox', 'mbx:' || NEW.id, NEW.inbox, NULL, 'u', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_mailboxes_delete AFTER DELETE ON mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('mailbox', 'mbx:' || OLD.id, OLD.inbox, NULL, 'd', CAST(strftime('%s','now') AS INTEGER)); END`,
     `CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions(endpoint)`,
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER NOT NULL, updated_by TEXT)`,
@@ -76,11 +127,54 @@ export async function applyMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS suppressions_email_unique ON suppressions(email)`,
     `CREATE TABLE IF NOT EXISTS blocklist (id TEXT PRIMARY KEY, type TEXT NOT NULL, value TEXT NOT NULL, note TEXT, created_by TEXT, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS blocklist_type_value_unique ON blocklist(type, value)`,
-    `CREATE TABLE IF NOT EXISTS outbox_emails (id TEXT PRIMARY KEY, sent_email_id TEXT NOT NULL, sequence_email_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, cc TEXT, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, headers TEXT, transactional INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, next_retry_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS outbox_emails (id TEXT PRIMARY KEY, sent_email_id TEXT NOT NULL, sequence_email_id TEXT, campaign_recipient_id TEXT, bookkeeping_owner TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, cc TEXT, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, headers TEXT, transactional INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, next_retry_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS outbox_status_retry_idx ON outbox_emails(status, next_retry_at)`,
     `CREATE INDEX IF NOT EXISTS outbox_from_idx ON outbox_emails(from_address)`,
     `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, context_key TEXT NOT NULL, from_address TEXT, to_address TEXT, cc TEXT, subject TEXT, body_html TEXT, body_text TEXT, reply_to_email_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS agent_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, title TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, archived_at INTEGER)`,
+    `CREATE INDEX IF NOT EXISTS agent_sessions_user_updated_idx ON agent_sessions(user_id, updated_at)`,
+    `CREATE TABLE IF NOT EXISTS suggested_replies (id TEXT PRIMARY KEY, email_id TEXT NOT NULL UNIQUE REFERENCES emails(id) ON DELETE CASCADE, inbox TEXT NOT NULL, body_text TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS suggested_replies_inbox_status_idx ON suggested_replies(inbox, status)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS drafts_user_context_idx ON drafts(user_id, context_key)`,
+    // Newsletter module (migration 0035).
+    `CREATE TABLE IF NOT EXISTS async_jobs (id TEXT PRIMARY KEY, job_type TEXT NOT NULL, ref_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'running', cursor TEXT, storage_key TEXT, total_rows INTEGER, processed_rows INTEGER NOT NULL DEFAULT 0, imported_count INTEGER NOT NULL DEFAULT 0, skipped_count INTEGER NOT NULL DEFAULT 0, error_summary TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS async_jobs_ref_idx ON async_jobs(job_type, ref_id)`,
+    `CREATE INDEX IF NOT EXISTS async_jobs_status_idx ON async_jobs(status)`,
+    `CREATE TABLE IF NOT EXISTS contacts (id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT, person_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_unique ON contacts(email)`,
+    `CREATE INDEX IF NOT EXISTS contacts_person_id_idx ON contacts(person_id)`,
+    `CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, from_address TEXT NOT NULL, double_opt_in INTEGER NOT NULL DEFAULT 0, confirmation_template_slug TEXT, archived_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS lists_from_address_idx ON lists(from_address)`,
+    `CREATE INDEX IF NOT EXISTS lists_archived_at_idx ON lists(archived_at)`,
+    `CREATE TABLE IF NOT EXISTS list_members (id TEXT PRIMARY KEY, list_id TEXT NOT NULL, contact_id TEXT NOT NULL, email TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', source TEXT NOT NULL, form_id TEXT, submitted_ip TEXT, consent_source TEXT NOT NULL, consent_at INTEGER, import_job_id TEXT, subscribed_at INTEGER, confirmed_at INTEGER, unsubscribed_at INTEGER, unsubscribe_reason TEXT, created_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS list_members_list_contact_unique ON list_members(list_id, contact_id)`,
+    `CREATE INDEX IF NOT EXISTS list_members_list_status_id_idx ON list_members(list_id, status, id)`,
+    `CREATE INDEX IF NOT EXISTS list_members_email_idx ON list_members(email)`,
+    `CREATE TABLE IF NOT EXISTS subscribe_forms (id TEXT PRIMARY KEY, list_id TEXT NOT NULL, name TEXT NOT NULL, show_name_field INTEGER NOT NULL DEFAULT 1, name_required INTEGER NOT NULL DEFAULT 0, success_message TEXT NOT NULL DEFAULT 'Thanks for subscribing!', redirect_url TEXT, allowed_origins TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_forms_list_idx ON subscribe_forms(list_id)`,
+    `CREATE TABLE IF NOT EXISTS subscribe_attempts (id TEXT PRIMARY KEY, form_id TEXT NOT NULL, email_hash TEXT NOT NULL, ip TEXT NOT NULL, attempt_type TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_attempts_form_email_idx ON subscribe_attempts(form_id, email_hash, created_at)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_attempts_ip_idx ON subscribe_attempts(ip, created_at)`,
+    `CREATE INDEX IF NOT EXISTS subscribe_attempts_created_idx ON subscribe_attempts(created_at)`,
+    `CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, subject TEXT NOT NULL, template_slug TEXT, format TEXT NOT NULL DEFAULT 'html', body_json TEXT, body_html TEXT NOT NULL DEFAULT '', from_address TEXT NOT NULL, list_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', scheduled_at INTEGER, content_snapshot_at INTEGER, subject_snapshot TEXT, html_snapshot TEXT, text_body_override TEXT, text_snapshot TEXT, from_address_snapshot TEXT, template_revision TEXT, unsubscribe_domain_key_version INTEGER NOT NULL DEFAULT 1, fan_out_cursor TEXT, fan_out_job_id TEXT, sent_at INTEGER, stats_targeted INTEGER NOT NULL DEFAULT 0, stats_delivered INTEGER NOT NULL DEFAULT 0, stats_suppressed INTEGER NOT NULL DEFAULT 0, stats_retryable_failed INTEGER NOT NULL DEFAULT 0, stats_permanent_failed INTEGER NOT NULL DEFAULT 0, stats_unique_openers INTEGER NOT NULL DEFAULT 0, stats_unique_clicks INTEGER NOT NULL DEFAULT 0, stats_unsubscribes INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS campaigns_list_idx ON campaigns(list_id)`,
+    `CREATE INDEX IF NOT EXISTS campaigns_from_address_idx ON campaigns(from_address)`,
+    `CREATE INDEX IF NOT EXISTS campaigns_status_scheduled_idx ON campaigns(status, scheduled_at)`,
+    `CREATE TABLE IF NOT EXISTS campaign_recipients (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, contact_id TEXT NOT NULL, email TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', idempotency_key TEXT NOT NULL, outbox_id TEXT, sent_email_id TEXT, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, queued_at INTEGER NOT NULL, processed_at INTEGER)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS campaign_recipients_campaign_contact_unique ON campaign_recipients(campaign_id, contact_id)`,
+    `CREATE INDEX IF NOT EXISTS campaign_recipients_campaign_status_idx ON campaign_recipients(campaign_id, status)`,
+    `CREATE TABLE IF NOT EXISTS campaign_links (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, url TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS campaign_links_campaign_url_unique ON campaign_links(campaign_id, url)`,
+    `CREATE TABLE IF NOT EXISTS campaign_events (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, contact_id TEXT NOT NULL, email TEXT NOT NULL, event_type TEXT NOT NULL, campaign_link_id TEXT, occurred_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS campaign_events_campaign_type_idx ON campaign_events(campaign_id, event_type)`,
+    `CREATE INDEX IF NOT EXISTS campaign_events_campaign_occurred_idx ON campaign_events(campaign_id, occurred_at)`,
+    // The partial unique indexes are the actual dedup mechanism (migration
+    // 0038); a plain composite index would not enforce it, so the test schema
+    // must carry them or dedup tests would pass against a weaker table.
+    `CREATE UNIQUE INDEX IF NOT EXISTS campaign_events_open_unique ON campaign_events(campaign_id, contact_id) WHERE event_type = 'open'`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS campaign_events_click_unique ON campaign_events(campaign_id, contact_id, campaign_link_id) WHERE event_type = 'click'`,
+    `CREATE TABLE IF NOT EXISTS campaign_unsubscribe_attributions (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, list_member_id TEXT NOT NULL, occurred_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS campaign_unsub_attr_campaign_member_unique ON campaign_unsubscribe_attributions(campaign_id, list_member_id)`,
   ];
 
   for (const sql of statements) {
@@ -200,6 +294,79 @@ export async function createTestEmail(
   return email;
 }
 
+/** Create a test sent email. */
+export async function createTestSentEmail(
+  opts: {
+    id?: string;
+    personId?: string | null;
+    fromAddress?: string;
+    toAddress?: string;
+    subject?: string;
+    bodyHtml?: string | null;
+    bodyText?: string | null;
+    inReplyTo?: string | null;
+    messageId?: string | null;
+    status?: string;
+    cc?: string | null;
+    conversationId?: string | null;
+    campaignId?: string | null;
+    sentAt?: number;
+  } = {},
+) {
+  const db = getDb();
+  const now = opts.sentAt ?? Math.floor(Date.now() / 1000);
+  const email = {
+    id: opts.id ?? "sent-email-1",
+    personId: opts.personId ?? null,
+    fromAddress: opts.fromAddress ?? "inbox@saasmail.test",
+    toAddress: opts.toAddress ?? "alice@example.com",
+    subject: opts.subject ?? "Test Subject",
+    bodyHtml: opts.bodyHtml ?? "<p>Hello</p>",
+    bodyText: opts.bodyText ?? "Hello",
+    inReplyTo: opts.inReplyTo ?? null,
+    messageId: opts.messageId ?? null,
+    status: opts.status ?? "sent",
+    cc: opts.cc ?? null,
+    conversationId: opts.conversationId ?? null,
+    campaignId: opts.campaignId ?? null,
+    sentAt: now,
+    createdAt: now,
+  };
+  await db.insert(sentEmails).values(email);
+  return email;
+}
+
+/** Create a test attachment for an inbound or sent message. */
+export async function createTestAttachment(
+  opts: {
+    id?: string;
+    emailId?: string;
+    kind?: "inbound" | "sent";
+    filename?: string;
+    contentType?: string;
+    size?: number;
+    r2Key?: string;
+    contentId?: string | null;
+    createdAt?: number;
+  } = {},
+) {
+  const db = getDb();
+  const createdAt = opts.createdAt ?? Math.floor(Date.now() / 1000);
+  const attachment = {
+    id: opts.id ?? "attachment-1",
+    emailId: opts.emailId ?? "email-1",
+    kind: opts.kind ?? "inbound",
+    filename: opts.filename ?? "file.txt",
+    contentType: opts.contentType ?? "text/plain",
+    size: opts.size ?? 1,
+    r2Key: opts.r2Key ?? "attachments/file.txt",
+    contentId: opts.contentId ?? null,
+    createdAt,
+  };
+  await db.insert(attachments).values(attachment);
+  return attachment;
+}
+
 /** Create a test email template. */
 export async function createTestTemplate(
   opts: {
@@ -272,6 +439,28 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM auto_reply_log;
+    DELETE FROM rules;
+    DELETE FROM customer_people;
+    DELETE FROM customers;
+    DELETE FROM inbox_conversation_state;
+    DELETE FROM message_mailboxes;
+    DELETE FROM mailboxes;
+    DELETE FROM mailbox_message_state;
+    DELETE FROM message_user_state;
+    DELETE FROM campaign_unsubscribe_attributions;
+    DELETE FROM campaign_events;
+    DELETE FROM campaign_links;
+    DELETE FROM campaign_recipients;
+    DELETE FROM campaigns;
+    DELETE FROM subscribe_attempts;
+    DELETE FROM subscribe_forms;
+    DELETE FROM list_members;
+    DELETE FROM lists;
+    DELETE FROM contacts;
+    DELETE FROM async_jobs;
+    DELETE FROM agent_sessions;
+    DELETE FROM suggested_replies;
     DELETE FROM drafts;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;
@@ -286,6 +475,7 @@ export async function cleanDb() {
     DELETE FROM sent_emails;
     DELETE FROM emails;
     DELETE FROM people;
+    DELETE FROM newsletter_assets;
     DELETE FROM email_templates;
     DELETE FROM api_keys;
     DELETE FROM invitations;
@@ -300,5 +490,6 @@ export async function cleanDb() {
     DELETE FROM verifications;
     DELETE FROM jwkss;
     DELETE FROM users;
+    DELETE FROM jmap_changes;
   `);
 }

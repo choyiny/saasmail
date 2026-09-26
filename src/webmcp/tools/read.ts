@@ -1,41 +1,6 @@
 import type { WebMcpToolDescriptor } from "../types";
 import { ok, okJson, fail } from "../result";
-
-const PLAYBOOK_INTRO = `You are operating saasmail — a shared customer inbox — through its in-page WebMCP tools, as the signed-in user, in their browser.
-
-MANDATORY FIRST ACTION: before running ANY other tool for a task, call visualize_plan with every step you intend to take, each { label, status: "pending" }. Do not read, reply, or enroll until the plan is on screen — inference is slow, and the plan (on the "Agent Plan" tab) is how the user follows along. This is required, not optional.
-
-HOW TO WORK
-1. Pick a workflow below (or ask the user which).
-2. Call visualize_plan FIRST (see above) with all the steps as "pending".
-3. As you go, call visualize_plan again with the SAME steps, flipping each to "active" when you start it and "done" (or "error") when it finishes. Call it as often as you like — it just replaces the plan.
-4. WebMCP never sends or deletes on its own. Replies become drafts the user sends; enrollment is the only direct write.
-
-WORKFLOWS (call get_playbook again with { workflow: "<name>" } for detail)
-- summarize_unread — Summarize all unread email.
-- reply_unread — Draft replies to unread email.
-- enroll_by_criteria — Enroll contacts matching a criterion into a sequence.`;
-
-const PLAYBOOKS: Record<string, string> = {
-  summarize_unread: `SUMMARIZE ALL UNREAD EMAIL
-
-STEP 0 (required, do this before anything else): call visualize_plan with a "Find unread" step plus one "Summarize unread from <name>" step per contact you expect, all status "pending", then a final "Write summary" step. You may not know the contacts yet — start with { title: "Summarize unread", steps: [{ label: "Find unread mail", status: "active" }] } and expand the plan after step 1.
-1. list_conversations({ unread: true }) — the contacts/threads that have unread mail. Now flesh out the plan (one step per person) via visualize_plan.
-2. For each returned person: mark that step "active" (the Agent Plan tab surfaces the current recipient), list_emails({ personId }) and keep messages where isRead is false; read_email({ emailId }) for full bodies; then mark the step "done". Work through them all — don't stop at a handful.
-3. Write the summary and deliver it via the final visualize_plan call's \`result\` field, so it renders on the Agent Plan tab. Mark "Write summary" done.`,
-  reply_unread: `DRAFT REPLIES TO UNREAD EMAIL
-
-STEP 0 (required, do this before anything else): call visualize_plan with a "Find unread" step (status "active") plus, once known, one "Draft reply to <name>" step per contact, all "pending".
-1. list_conversations({ unread: true }) to find who has unread mail; expand the plan with a step per contact via visualize_plan.
-2. For each: mark its step "active", list_emails({ personId }) for the unread message(s), read_email for context.
-3. reply_email({ emailId, bodyHtml }) to draft a reply, then mark the step "done". This does NOT send — it saves a draft and opens the Drafts view for the user to review and send. Never claim a reply was sent — the user sends it.`,
-  enroll_by_criteria: `ENROLL CONTACTS INTO A SEQUENCE BY CRITERIA
-
-STEP 0 (required, do this before anything else): call visualize_plan with "Find sequence", "Find matching contacts", then one "Enroll <name>" step per match — start with the first two "pending"/"active" and add the enroll steps once you know the matches.
-1. list_sequences() to find the target sequence and its id.
-2. list_contacts({ q }) / list_conversations() to find contacts matching the user's criterion (e.g. a domain, unread, recent); expand the plan with one enroll step per match.
-3. For each match: mark its step "active", enroll_in_sequence({ personId, sequenceId }) — enrolls immediately (no confirmation) and schedules the drip; the contact lands in the Sequenced view — then mark "done".`,
-};
+import { PLAYBOOK_INTRO, PLAYBOOKS } from "@worker/lib/agent/playbook";
 
 export interface ReadDeps {
   fetchGroupedPeople: (p?: any) => Promise<any>;
@@ -48,7 +13,12 @@ export interface ReadDeps {
   fetchSequences: () => Promise<any>;
   fetchStats: (recipient?: string) => Promise<any>;
   searchEmails: (p: { q: string; [k: string]: any }) => Promise<any>;
+  fetchMessages?: (p?: any) => Promise<any>;
   getSession: () => Promise<any>;
+  fetchLists: (p?: any) => Promise<any>;
+  fetchList: (id: string) => Promise<any>;
+  fetchCampaigns: () => Promise<any>;
+  fetchCampaign: (id: string) => Promise<any>;
 }
 
 export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
@@ -217,6 +187,33 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
       },
     },
     {
+      name: "list_messages",
+      description:
+        "List unified received and sent messages with state, folder filters, cursor pagination, and attachment counts.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          inbox: { type: "string" },
+          folder: {
+            type: "string",
+            enum: ["inbox", "sent", "archive", "junk", "trash", "snoozed"],
+          },
+          mailboxId: { type: "string" },
+          starred: { type: "boolean" },
+          unseen: { type: "boolean" },
+          personId: { type: "string" },
+          q: { type: "string" },
+          cursor: { type: "string" },
+          limit: { type: "number" },
+          excludeCampaignSends: { type: "boolean" },
+        },
+      },
+      execute: async (args) => {
+        if (!deps.fetchMessages) return fail("Message listing is unavailable.");
+        return okJson(await deps.fetchMessages(args));
+      },
+    },
+    {
       name: "read_email",
       description: "Get one email in full, including body and attachments.",
       inputSchema: {
@@ -290,6 +287,71 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
       description: "List drip sequences the user can enroll contacts into.",
       inputSchema: { type: "object", properties: {} },
       execute: async () => okJson(await deps.fetchSequences()),
+    },
+    // --- Newsletters: read only ---------------------------------------------
+    //
+    // There are deliberately no newsletter *action* tools. Sending is
+    // irreversible and reaches thousands of strangers at once; an agent that
+    // can trigger a blast is precisely the capability that should stay behind
+    // a human click. These four let an agent report on newsletters, not run
+    // them.
+    {
+      name: "list_newsletter_lists",
+      description:
+        "List the newsletter subscriber lists. Read-only: WebMCP cannot create lists, add members, or send campaigns.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          includeArchived: {
+            type: "boolean",
+            description:
+              "Include lists that were archived because they have campaign history.",
+          },
+        },
+      },
+      execute: async (args: any) =>
+        okJson(
+          await deps.fetchLists({ includeArchived: !!args?.includeArchived }),
+        ),
+    },
+    {
+      name: "get_newsletter_list",
+      description:
+        "Get one subscriber list with its member counts by status (subscribed, pending, unsubscribed).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          listId: { type: "string", description: "The list's id." },
+        },
+        required: ["listId"],
+      },
+      execute: async (args: any) => {
+        if (!args?.listId) return fail("listId is required");
+        return okJson(await deps.fetchList(args.listId));
+      },
+    },
+    {
+      name: "list_campaigns",
+      description:
+        "List newsletter campaigns, newest first, with their current status (draft, scheduled, sending, sent, completed_with_failures, stalled, cancelled).",
+      inputSchema: { type: "object", properties: {} },
+      execute: async () => okJson(await deps.fetchCampaigns()),
+    },
+    {
+      name: "get_campaign_stats",
+      description:
+        "Get one campaign's live stats: targeted, delivered, suppressed, failures, unsubscribes, and approximate unique opens and clicks. Opens and clicks are best-effort — Apple Mail Privacy Protection pre-fetches tracking pixels and some proxies pre-fetch links, so both over-count. Report them as approximate.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          campaignId: { type: "string", description: "The campaign's id." },
+        },
+        required: ["campaignId"],
+      },
+      execute: async (args: any) => {
+        if (!args?.campaignId) return fail("campaignId is required");
+        return okJson(await deps.fetchCampaign(args.campaignId));
+      },
     },
   ];
 }

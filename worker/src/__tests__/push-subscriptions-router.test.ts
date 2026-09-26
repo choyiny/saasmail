@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { env } from "cloudflare:workers";
 import { applyMigrations, cleanDb, createTestUser, authFetch } from "./helpers";
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { eq } from "drizzle-orm";
 import { pushSubscriptions } from "../db/push-subscriptions.schema";
 
@@ -48,7 +47,7 @@ describe("push subscription routes", () => {
       body: JSON.stringify(SUB_BODY),
     });
     expect(res.status).toBe(201);
-    const db = drizzle(env.DB, { schema });
+    const db = createDb(env);
     const rows = await db
       .select()
       .from(pushSubscriptions)
@@ -79,7 +78,7 @@ describe("push subscription routes", () => {
       body: JSON.stringify(SUB_BODY),
     });
     expect(res.status).toBe(201);
-    const db = drizzle(env.DB, { schema });
+    const db = createDb(env);
     const rows = await db
       .select()
       .from(pushSubscriptions)
@@ -132,7 +131,7 @@ describe("push subscription routes", () => {
       body: JSON.stringify({ endpoint: SUB_BODY.endpoint }),
     });
     expect(res.status).toBe(204);
-    const db = drizzle(env.DB, { schema });
+    const db = createDb(env);
     const rows = await db
       .select()
       .from(pushSubscriptions)

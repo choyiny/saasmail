@@ -1,11 +1,13 @@
 import { defineConfig } from "vitest/config";
-import { cloudflarePool } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 
 export default defineConfig({
-  test: {
-    globals: true,
-    include: ["worker/src/__tests__/**/*.test.ts"],
-    pool: cloudflarePool({
+  plugins: [
+    cloudflareTest({
+      // Workers AI is remote-only in Miniflare. Keep the production/CI
+      // wrangler binding, but don't open a remote Cloudflare session just to
+      // start local unit tests; agent provider tests inject their own fake AI.
+      remoteBindings: false,
       wrangler: {
         configPath: "./wrangler.jsonc",
       },
@@ -36,5 +38,15 @@ export default defineConfig({
         },
       },
     }),
+  ],
+  test: {
+    globals: true,
+    include: ["worker/src/__tests__/**/*.test.ts"],
+    // Every test here boots a real workerd instance and talks to a real D1, and
+    // CI runs the whole suite on a two-core runner. Vitest's 5s default is a
+    // measure of contention rather than of any individual test: the file that
+    // times out in CI runs 27 tests in ~700ms locally. Bounded well below the
+    // job timeout so a genuine hang still fails rather than hanging the run.
+    testTimeout: 20_000,
   },
 });

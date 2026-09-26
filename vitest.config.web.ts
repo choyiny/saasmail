@@ -5,7 +5,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    include: ["src/**/*.test.{ts,tsx}"],
+    execArgv: ["--no-experimental-webstorage"],
+    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
   },
   resolve: {
     alias: {

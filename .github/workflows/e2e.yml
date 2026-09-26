@@ -21,7 +21,16 @@ jobs:
         run: yarn install --frozen-lockfile
 
       - name: Seed wrangler.jsonc (gitignored; needed by vite dev)
-        run: cp wrangler.jsonc.ci wrangler.jsonc
+        run: |
+          cp wrangler.jsonc.ci wrangler.jsonc
+          # Workers AI is remote-only and this suite does not exercise the
+          # native agent. Keep the binding in wrangler.jsonc.ci, but remove it
+          # from this temporary local-dev copy so CI needs no Cloudflare token.
+          sed -i '/"ai": { "binding": "AI" },/d' wrangler.jsonc
+          if grep -q '"binding": "AI"' wrangler.jsonc; then
+            echo "AI binding still present" >&2
+            exit 1
+          fi
 
       - name: Create empty assets dir (referenced by wrangler.jsonc)
         run: mkdir -p dist/client

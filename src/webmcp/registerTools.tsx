@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth-client";
 import { renderPreview } from "@/lib/template-syntax";
 import {
@@ -14,11 +13,18 @@ import {
   fetchSequences,
   fetchStats,
   searchEmails,
+  fetchMessages,
+  setMessageState,
   markEmailRead,
   saveDraft,
   enrollPerson,
+  fetchLists,
+  fetchList,
+  fetchCampaigns,
+  fetchCampaign,
 } from "@/lib/api";
 import { dispatchInboxRefresh } from "@/lib/inbox-events";
+import { dispatchMailRefresh } from "@/lib/mail-events";
 import { dispatchAgentPlan } from "@/lib/agent-plan";
 import { useWebMcpTools } from "./useWebMcpTool";
 import { useWebMcpBridge } from "./bridge";
@@ -27,10 +33,10 @@ import { createActionTools } from "./tools/actions";
 import { withActivity } from "./activity";
 import { WebMcpActivityFeed } from "./WebMcpActivityFeed";
 
-// 12 read tools + 8 action tools. Pinned by
+// 17 read tools + 9 action tools. Pinned by
 // src/webmcp/__tests__/registerTools.test.tsx so this can't silently drift
 // from the tool factories it's built from.
-export const WEBMCP_TOOL_COUNT = 20;
+export const WEBMCP_TOOL_COUNT = 26;
 
 /**
  * Registers every WebMCP read + action tool with the runtime for the
@@ -41,10 +47,8 @@ export const WEBMCP_TOOL_COUNT = 20;
  */
 export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
   const bridge = useWebMcpBridge();
-  const qc = useQueryClient();
 
   const tools = useMemo(() => {
-    const invalidate = () => qc.invalidateQueries();
     const read = createReadTools({
       fetchGroupedPeople,
       fetchPerson,
@@ -56,23 +60,29 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchSequences,
       fetchStats,
       searchEmails,
+      fetchMessages,
       getSession: () => authClient.getSession(),
+      fetchLists,
+      fetchList,
+      fetchCampaigns,
+      fetchCampaign,
     });
     const actions = createActionTools({
       bridge,
       fetchPeople,
       fetchEmail,
       markEmailRead,
+      setMessageState,
       enrollPerson,
       saveDraft,
       fetchTemplate,
       renderTemplate: (tpl, vars) => renderPreview(tpl, vars),
-      invalidate,
       refreshInbox: dispatchInboxRefresh,
+      refreshMail: dispatchMailRefresh,
       showPlan: dispatchAgentPlan,
     });
     return [...read, ...actions].map(withActivity);
-  }, [bridge, qc]);
+  }, [bridge]);
 
   useWebMcpTools(tools, enabled);
   return <WebMcpActivityFeed />;

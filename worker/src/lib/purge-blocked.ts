@@ -7,6 +7,11 @@ import {
   deleteEmailWithAttachments,
   SYSTEM_INBOX_ACCESS,
 } from "./delete-email";
+import { deleteMessageState } from "./messages/state";
+import {
+  collectPersonGroupConversations,
+  deletePersonConversationState,
+} from "./messages/conversation-state";
 
 /**
  * Hard-delete every email + person whose address matches any block rule, and
@@ -29,6 +34,11 @@ export async function purgeBlockedMail(
 
   let emailsDeleted = 0;
   for (const { id: personId } of blockedPeople) {
+    const groupConversations = await collectPersonGroupConversations(
+      db,
+      personId,
+    );
+
     // Received emails (with R2 attachment cleanup).
     const received = await db
       .select({ id: emails.id })
@@ -46,7 +56,16 @@ export async function purgeBlockedMail(
       if (res) emailsDeleted++;
     }
     // Any sent emails attributed to this person.
+    const sent = await db
+      .select({ id: sentEmails.id })
+      .from(sentEmails)
+      .where(eq(sentEmails.personId, personId));
+    await deleteMessageState(
+      db,
+      sent.map((message) => ({ kind: "sent" as const, id: message.id })),
+    );
     await db.delete(sentEmails).where(eq(sentEmails.personId, personId));
+    await deletePersonConversationState(db, personId, groupConversations);
     // Finally the person row.
     await db.delete(people).where(eq(people.id, personId));
   }

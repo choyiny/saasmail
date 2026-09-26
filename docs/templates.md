@@ -76,6 +76,68 @@ variables into Required, Optional, and Sections, and rendering a live preview
 with sample values in place of the raw tokens — so what you see while editing
 matches what a real send does.
 
+## Block templates
+
+A template is authored one of two ways, recorded in its `format` column:
+
+| Format  | Authored as                 | Stored in  |
+| ------- | --------------------------- | ---------- |
+| `html`  | Raw HTML in the code editor | `bodyHtml` |
+| `block` | A visual block editor       | `bodyJson` |
+
+**`bodyHtml` is still what gets sent, always.** A block template compiles into
+it on save, in the worker. Campaign snapshots, sequence steps, the send API,
+variable analysis and link rewriting all read `bodyHtml` and never learn that
+blocks exist — which is why block templates need no special handling anywhere
+downstream.
+
+Seven block types: heading, paragraph, list, quote, image, button, separator.
+Multi-column layouts are not supported.
+
+### What you can write inside a block
+
+Rich text in a block is restricted to what renders reliably in email:
+**bold, italic, underline, strikethrough, and links.** Everything else is
+removed on save — the server sanitizes block content on every write path, so an
+API caller gets the same treatment as the editor.
+
+`{{variable}}` tags work exactly as they do in an HTML template. The compiler
+never interprets them; they pass through into the compiled HTML and are
+substituted per recipient at send time. A tag may also stand in for a whole URL
+— `{{unsubscribe_url}}` as a link target is the common case.
+
+### API
+
+```jsonc
+POST /api/email-templates
+{
+  "slug": "weekly",
+  "name": "Weekly digest",
+  "subject": "This week",
+  "format": "block",
+  "bodyJson": { "version": 1, "blocks": [ ... ] }
+}
+```
+
+`bodyHtml` is **rejected** on a block template — the server compiles it, and
+accepting both would let the two representations drift.
+
+### Converting
+
+`block` → `html` is allowed and **one-way**: the compiled HTML is kept and the
+block document is dropped. `html` → `block` is refused with `422`, because
+parsing arbitrary email HTML back into blocks would quietly discard layout you
+cannot see is gone. Start a new template instead.
+
+### Images
+
+Images in a block template are uploaded, never embedded. `POST
+/api/newsletter-assets` stores the raw bytes and returns a public URL under
+`/newsletter-images/{id}`; the format is determined from the file header, so a
+non-image is refused whatever it claims to be. PNG, JPEG, GIF and WebP, 5 MB
+each. A `data:` URI in a block document is rejected — Gmail strips them, and the
+bytes would be duplicated into every recipient's copy.
+
 ## Upgrading: escaping is now the default
 
 Variables were previously substituted raw. They are now HTML-escaped in the

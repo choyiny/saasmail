@@ -43,7 +43,7 @@ export default function PublicLayout() {
               softness={0.4}
               intensity={0.7}
               noise={0.2}
-              shape="circle"
+              shape="wave"
               speed={0.4}
               scale={1.2}
               rotation={200}

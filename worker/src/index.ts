@@ -1,17 +1,20 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { routeAgentRequest } from "agents";
 import { swaggerUI } from "@hono/swagger-ui";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { injectDb } from "./db/middleware";
+import { createDb } from "./db/client";
 import { createAuth } from "./auth";
-import { apiKeys } from "./db/api-keys.schema";
 import { users } from "./db/auth.schema";
 import { eq } from "drizzle-orm";
-import { hashKey } from "./lib/crypto";
 import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
+import { customersRouter } from "./routers/customers-router";
 import { emailsRouter } from "./routers/emails-router";
 import { conversationsRouter } from "./routers/conversations-router";
+import { messagesRouter } from "./routers/messages-router";
+import { mailboxesRouter } from "./routers/mailboxes-router";
 import {
   sendRouter,
   CcEntrySchema,
@@ -24,23 +27,40 @@ import { setupRouter } from "./routers/setup-router";
 import { emailTemplatesRouter } from "./routers/email-templates-router";
 import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
+import { adminRulesRouter } from "./routers/admin-rules-router";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
-import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
-import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { handleScheduled } from "./lib/sequence-processor";
+import { handleQueueBatch } from "./lib/queue-router";
 import { processOutbox } from "./lib/outbox";
+import { reapOrphanSentAttachments } from "./lib/sent-attachments";
+import { runNewsletterMaintenance } from "./lib/newsletter-cron";
+import { pruneJmapChanges } from "./jmap/changes";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
+import { contactsRouter } from "./routers/contacts-router";
+import { publicTrackRouter } from "./routers/public-track-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
+import { agentSessionsRouter } from "./routers/agent-sessions-router";
+import { agentStatusRouter } from "./routers/agent-status-router";
+import { agentApprovalRouter } from "./routers/agent-approval-router";
+import { suggestedRepliesRouter } from "./routers/suggested-replies-router";
+import { listsRouter } from "./routers/lists-router";
+import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
+import { campaignsRouter } from "./routers/campaigns-router";
+import { publicSubscribeRouter } from "./routers/public-subscribe-router";
+import { newsletterAssetsRouter } from "./routers/newsletter-assets-router";
+import { publicAssetsRouter } from "./routers/public-assets-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
+export { MailAgent } from "./agent/mail-agent";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
@@ -48,11 +68,14 @@ import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
 import { registerMcpRoutes } from "./mcp/http";
+import { registerJmapRoutes } from "./jmap/http";
 import {
   BEARER_AUTH_SCHEME,
   bearerAuthSecurityScheme,
   openapiInfoDescription,
 } from "./lib/openapi-auth";
+import { resolveRequestAuth } from "./lib/request-auth";
+import { authorizeMailAgentRequest } from "./agent/auth";
 
 const app = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -155,50 +178,20 @@ app.all("/api/auth/*", (c) => {
   return auth.handler(c.req.raw);
 });
 
-// Session resolution for all API routes
+// Session/API-key resolution for all API routes. The same resolver is reused by
+// the MailAgent routing hooks so agent traffic cannot drift onto a second auth
+// implementation.
 app.use("/api/*", async (c, next) => {
   if (isUnauthenticatedPath(c.req.path)) return next();
 
-  // Try session cookie first
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({
-    headers: c.req.raw.headers,
-  });
-  if (session) {
-    c.set("user", session.user);
-    c.set("authMethod", "session");
-    return next();
+  const resolved = await resolveRequestAuth(c.req.raw, c.env, c.get("db"));
+  if (!resolved) {
+    return c.json({ error: "Unauthorized" }, 401);
   }
 
-  // Try Bearer token (API key)
-  const authHeader = c.req.header("Authorization");
-  if (authHeader?.startsWith("Bearer sk_")) {
-    const token = authHeader.slice(7); // Remove "Bearer "
-    const tokenHash = await hashKey(token);
-
-    const db = c.get("db");
-    const rows = await db
-      .select({ userId: apiKeys.userId })
-      .from(apiKeys)
-      .where(eq(apiKeys.keyHash, tokenHash))
-      .limit(1);
-
-    if (rows.length > 0) {
-      const userRows = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, rows[0].userId))
-        .limit(1);
-
-      if (userRows.length > 0) {
-        c.set("user", userRows[0]);
-        c.set("authMethod", "apiKey");
-        return next();
-      }
-    }
-  }
-
-  return c.json({ error: "Unauthorized" }, 401);
+  c.set("user", resolved.user);
+  c.set("authMethod", resolved.authMethod);
+  return next();
 });
 
 // Enforce passkey registration for session-cookie users. Runs before
@@ -229,8 +222,11 @@ const requireAdmin: MiddlewareHandler<{
 
 // API Routes
 app.route("/api/people", peopleRouter);
+app.route("/api/customers", customersRouter);
 app.route("/api/emails", emailsRouter);
 app.route("/api/conversations", conversationsRouter);
+app.route("/api/messages", messagesRouter);
+app.route("/api/mailboxes", mailboxesRouter);
 app.route("/api/send", sendRouter);
 app.route("/api/attachments", attachmentsRouter);
 app.route("/api/stats", statsRouter);
@@ -244,11 +240,31 @@ app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
+app.route("/api/agent/status", agentStatusRouter);
+app.route("/api/agent/approval-summary", agentApprovalRouter);
+app.route("/api/agent/sessions", agentSessionsRouter);
+app.route("/api/suggested-replies", suggestedRepliesRouter);
+app.route("/api/lists", listsRouter);
+
+// Subscribe forms are admin-only per the Authorization Matrix: a form is a
+// public write surface onto a list, so creating one is a higher bar than
+// editing the list itself.
+app.use("/api/subscribe-forms", requireAdmin);
+app.use("/api/subscribe-forms/*", requireAdmin);
+app.route("/api/subscribe-forms", subscribeFormsRouter);
+app.route("/api/campaigns", campaignsRouter);
+app.route("/api/newsletter-assets", newsletterAssetsRouter);
+
+// Subject-access and erasure. Admin only: these read and rewrite an
+// identified person's whole newsletter history.
+app.use("/api/contacts/*", requireAdmin);
+app.route("/api/contacts", contactsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
+app.route("/api/admin/rules", adminRulesRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a
@@ -278,14 +294,53 @@ app.route("/api/unsubscribe", unsubscribeRouter);
 // GET requests don't match the router and fall through to the SPA assets handler.
 app.route("/unsubscribe", unsubscribeRouter);
 
+// Public subscribe endpoints — no auth at all. Mounted outside `/api` so the
+// session/passkey/inbox middleware (scoped to `/api/*`) never applies, matching
+// the `/unsubscribe` precedent above.
+app.route("/subscribe", publicSubscribeRouter);
+
+// Open pixel and click redirect. Must be reachable by anyone holding a valid
+// token — the requests come from mail clients and image proxies, which carry
+// no session — so this is mounted outside `/api` alongside the other public
+// token-authenticated routes.
+app.route("/track", publicTrackRouter);
+
+// Newsletter images. Fetched by subscribers' mail clients months after a
+// send, with no session and no API key, so this sits outside `/api` for the
+// same reason `/track` does. NOT mounted at `/assets` — that is where Vite
+// emits the SPA bundle. Hardening lives in the router.
+app.route("/newsletter-images", publicAssetsRouter);
+
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);
+
+// Read-only JMAP discovery/API/download endpoints live outside /api/* and
+// therefore perform their own session/API-key, passkey, and inbox checks.
+registerJmapRoutes(app);
 
 // MCP endpoint + OAuth discovery. Registered before the SPA catch-all so
 // `/.well-known/*` isn't served index.html. `/mcp` authenticates with OAuth
 // bearer tokens via mcpHandler rather than the session/API-key pipeline, and
 // it sits outside `/api/*` so that middleware never applies to it.
 registerMcpRoutes(app);
+
+// Native agent traffic lives outside /api/* but uses the exact same
+// session/API-key resolver in both SDK auth hooks. Scope this route to the
+// MailAgent binding so other Durable Objects are never exposed by the generic
+// Agents SDK router.
+app.all("/agents/mail-agent/*", async (c) => {
+  const authorize = (
+    request: Request,
+    route: { className: string; name: string },
+  ) => authorizeMailAgentRequest(request, route, c.env, c.get("db"));
+
+  const response = await routeAgentRequest(c.req.raw, c.env, {
+    onBeforeConnect: authorize,
+    onBeforeRequest: authorize,
+  });
+
+  return response ?? c.json({ error: "Not found" }, 404);
+});
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
@@ -332,13 +387,30 @@ export default {
     ctx.waitUntil(
       handleScheduled(env)
         .catch((err) => console.error("[cron] sequence dispatch failed:", err))
-        .then(() => processOutbox(env)),
+        .then(() => processOutbox(env))
+        // Newsletter retention sweep. Chained after the delivery work and
+        // separately caught so a cleanup failure can never stop mail going out.
+        .then(() => runNewsletterMaintenance(env))
+        .catch((err) =>
+          console.error("[cron] outbox/newsletter maintenance failed:", err),
+        )
+        .then(() =>
+          pruneJmapChanges(createDb(env), Math.floor(Date.now() / 1000)).catch(
+            (err) => console.error("[cron] JMAP pruning failed:", err),
+          ),
+        )
+        .then(() =>
+          reapOrphanSentAttachments(
+            createDb(env),
+            env,
+            Math.floor(Date.now() / 1000),
+          ).catch((err) =>
+            console.error("[cron] sent attachment reaping failed:", err),
+          ),
+        ),
     );
   },
-  async queue(
-    batch: MessageBatch<SequenceEmailMessage>,
-    env: CloudflareBindings,
-  ) {
+  async queue(batch: MessageBatch<unknown>, env: CloudflareBindings) {
     await handleQueueBatch(batch, env);
   },
 };

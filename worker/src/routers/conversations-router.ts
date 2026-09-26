@@ -1,11 +1,9 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import { emails } from "../db/emails.schema";
-import { sentEmails } from "../db/sent-emails.schema";
-import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
 import { json200Response } from "../lib/helpers";
-import { parseCc } from "../lib/queries/emails";
+import { queryMessages } from "../lib/messages/query";
 import { EmailSchema } from "./emails-router";
 import type { Variables } from "../variables";
 
@@ -52,69 +50,33 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
   const { id } = c.req.valid("param");
   const allowed = c.get("allowedInboxes")!;
 
-  // Pull all received + sent emails for this conversation.
-  const received = await db
-    .select({
-      id: emails.id,
-      personId: emails.personId,
-      recipient: emails.recipient,
-      subject: emails.subject,
-      bodyHtml: emails.bodyHtml,
-      bodyText: emails.bodyText,
-      isRead: emails.isRead,
-      cc: emails.cc,
-      timestamp: emails.receivedAt,
-    })
-    .from(emails)
-    .where(eq(emails.conversationId, id));
+  // This endpoint historically returns the entire conversation. The unified
+  // service supports an explicit unbounded read for internal callers so the
+  // message union/sort runs once rather than once per 100-row chunk.
+  const page = await queryMessages(db, allowed, {
+    conversationId: id,
+    order: "asc",
+    limit: null,
+    withAttachmentCounts: true,
+    withAttachments: true,
+  });
+  const messages = page.messages;
 
-  const sent = await db
-    .select({
-      id: sentEmails.id,
-      personId: sentEmails.personId,
-      fromAddress: sentEmails.fromAddress,
-      toAddress: sentEmails.toAddress,
-      subject: sentEmails.subject,
-      bodyHtml: sentEmails.bodyHtml,
-      bodyText: sentEmails.bodyText,
-      cc: sentEmails.cc,
-      timestamp: sentEmails.sentAt,
-    })
-    .from(sentEmails)
-    .where(eq(sentEmails.conversationId, id));
-
-  if (received.length === 0 && sent.length === 0) {
+  if (messages.length === 0) {
     return c.json({ error: "Conversation not found" }, 404);
   }
 
-  // Scope check: at least one email in this conversation must reference an
-  // inbox the caller is allowed to see. Admin sees everything.
-  if (!allowed.isAdmin) {
-    const allowedSet = new Set(allowed.inboxes);
-    const inScope =
-      received.some((e) => allowedSet.has(e.recipient)) ||
-      sent.some((e) => allowedSet.has(e.fromAddress));
-    if (!inScope) {
-      return c.json({ error: "Conversation not found" }, 404);
-    }
-  }
+  const inbox = messages[messages.length - 1]?.inbox ?? "";
 
-  // Resolve the canonical inbox for the conversation. The seed model treats
-  // the (conversation_id, inbox) tuple as the group key, so we pick the inbox
-  // tied to the most recent email (mirroring the grouped list endpoint).
-  const allRows = [
-    ...received.map((e) => ({ inbox: e.recipient, ts: e.timestamp })),
-    ...sent.map((e) => ({ inbox: e.fromAddress, ts: e.timestamp })),
+  const personIds = [
+    ...new Set(
+      messages
+        .map((message) => message.personId)
+        .filter((personId): personId is string => !!personId),
+    ),
   ];
-  allRows.sort((a, b) => b.ts - a.ts);
-  const inbox = allRows[0]?.inbox ?? "";
-
-  // Build participants list (senders who posted into this thread).
-  const personIds = new Set<string>();
-  for (const e of received) if (e.personId) personIds.add(e.personId);
-  for (const e of sent) if (e.personId) personIds.add(e.personId);
   const participants =
-    personIds.size > 0
+    personIds.length > 0
       ? await db
           .select({
             id: people.id,
@@ -122,110 +84,28 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
             name: people.name,
           })
           .from(people)
-          .where(inArray(people.id, Array.from(personIds)))
+          .where(inArray(people.id, personIds))
       : [];
 
-  // Build attachment lookup for received emails — same treatment as
-  // listPersonEmails so the response shape stays consistent.
-  const receivedIds = received.map((e) => e.id);
-  let attachmentCounts: Record<string, number> = {};
-  let attachmentDetails: Record<string, any[]> = {};
-  if (receivedIds.length > 0) {
-    const counts = await db
-      .select({
-        emailId: attachments.emailId,
-        count: sql<number>`COUNT(*)`,
-      })
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          receivedIds.map((rid) => sql`${rid}`),
-          sql`,`,
-        )})`,
-      )
-      .groupBy(attachments.emailId);
-    for (const row of counts) {
-      attachmentCounts[row.emailId] = row.count;
-    }
-    const attRows = await db
-      .select()
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          receivedIds.map((rid) => sql`${rid}`),
-          sql`,`,
-        )})`,
-      );
-    for (const att of attRows) {
-      if (!attachmentDetails[att.emailId]) {
-        attachmentDetails[att.emailId] = [];
-      }
-      attachmentDetails[att.emailId].push(att);
-    }
-  }
-
-  // Same lookup for sent emails so the thread surface includes outgoing
-  // attachments (Task 8). Sent rows only ever have kind='sent' attachment
-  // rows, so we don't filter by kind — mirrors the received path above.
-  const sentIds = sent.map((e) => e.id);
-  let sentAttachmentDetails: Record<string, any[]> = {};
-  if (sentIds.length > 0) {
-    const attRows = await db
-      .select()
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          sentIds.map((sid) => sql`${sid}`),
-          sql`,`,
-        )})`,
-      );
-    for (const att of attRows) {
-      if (!sentAttachmentDetails[att.emailId]) {
-        sentAttachmentDetails[att.emailId] = [];
-      }
-      sentAttachmentDetails[att.emailId].push(att);
-    }
-  }
-
-  const personEmailById = new Map(participants.map((p) => [p.id, p.email]));
-
-  // Merge into the same email shape as listPersonEmailsRoute, oldest first.
-  const merged = [
-    ...received.map((e) => ({
-      id: e.id,
-      type: "received" as const,
-      personId: e.personId ?? null,
-      recipient: e.recipient,
-      fromAddress: e.personId
-        ? (personEmailById.get(e.personId) ?? null)
-        : null,
-      toAddress: null,
-      subject: e.subject,
-      bodyHtml: e.bodyHtml,
-      bodyText: e.bodyText,
-      isRead: e.isRead,
-      cc: parseCc(e.cc),
-      timestamp: e.timestamp,
-      attachmentCount: attachmentCounts[e.id] ?? 0,
-      attachments: attachmentDetails[e.id] ?? [],
-    })),
-    ...sent.map((e) => ({
-      id: e.id,
-      type: "sent" as const,
-      personId: e.personId ?? null,
-      recipient: null,
-      fromAddress: e.fromAddress,
-      toAddress: e.toAddress,
-      subject: e.subject,
-      bodyHtml: e.bodyHtml,
-      bodyText: e.bodyText,
-      isRead: null,
-      cc: parseCc(e.cc),
-      timestamp: e.timestamp,
-      attachmentCount: sentAttachmentDetails[e.id]?.length ?? 0,
-      attachments: sentAttachmentDetails[e.id] ?? [],
-    })),
-  ].sort((a, b) => a.timestamp - b.timestamp);
+  const mapped = messages.map((message) => ({
+    id: message.ref.id,
+    type: message.ref.kind,
+    personId: message.personId,
+    recipient: message.ref.kind === "received" ? message.inbox : null,
+    fromAddress:
+      message.ref.kind === "received"
+        ? (message.from?.email ?? null)
+        : (message.from?.email ?? message.inbox),
+    toAddress: message.ref.kind === "sent" ? message.to.email : null,
+    subject: message.subject,
+    bodyHtml: message.bodyHtml,
+    bodyText: message.bodyText,
+    isRead: message.isRead === null ? null : message.isRead ? 1 : 0,
+    cc: message.cc,
+    timestamp: message.occurredAt,
+    attachmentCount: message.attachmentCount ?? 0,
+    attachments: message.attachments ?? [],
+  }));
 
   return c.json(
     {
@@ -234,7 +114,7 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
         inbox,
         participants,
       },
-      emails: merged,
+      emails: mapped,
     },
     200,
   );

@@ -20,6 +20,7 @@
       "database_id": "<your-d1-database-id>"
     }
   ],
+  "ai": { "binding": "AI" },
   "r2_buckets": [
     {
       "binding": "R2",
@@ -65,6 +66,10 @@
       {
         "name": "NOTIFICATIONS_HUB",
         "class_name": "NotificationsHub"
+      },
+      {
+        "name": "MAIL_AGENT",
+        "class_name": "MailAgent"
       }
     ]
   },
@@ -72,6 +77,10 @@
     {
       "tag": "v1",
       "new_classes": ["NotificationsHub"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MailAgent"]
     }
   ],
   "triggers": {
@@ -93,12 +102,24 @@
     // public/saasmail-logo.png to rebrand the favicon and in-app logo.
     "COOKIE_PREFIX": "saasmail",
 
+    // Drizzle SQL logging is disabled by default. Enabling it logs bound
+    // parameters, which can include email addresses, subjects, and secrets.
+    "DB_LOG_QUERIES": "false",
+
     /* push notifications */
     // VAPID_PRIVATE_KEY is a secret — set it with `wrangler secret put VAPID_PRIVATE_KEY`.
     // VAPID_PUBLIC_KEY and VAPID_SUBJECT are public config (safe to commit here).
     // Generate all three with `yarn vapid:generate`. Leave blank to disable push.
     "VAPID_PUBLIC_KEY": "",
-    "VAPID_SUBJECT": "mailto:admin@<your-domain>"
+    "VAPID_SUBJECT": "mailto:admin@<your-domain>",
+
+    /* newsletters */
+    // Refuses to start a campaign that would push the sending identity past
+    // this many messages in 24 hours. Unset by default: the check is skipped
+    // entirely, so nobody is committed to configuring it. Set it to your
+    // provider's actual daily quota and a blast that would blow through the
+    // limit is refused up front rather than half-delivered.
+    "PROVIDER_DAILY_SEND_LIMIT": ""
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

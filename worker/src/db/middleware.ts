@@ -1,9 +1,8 @@
-import { drizzle } from "drizzle-orm/d1";
 import type { Context, Next } from "hono";
-import { schema } from "./schema";
+import { createDb } from "./client";
 
 export async function injectDb(c: Context, next: Next) {
-  const db = drizzle(c.env.DB, { schema, logger: true });
+  const db = createDb(c.env);
   c.set("db", db);
   return await next();
 }

@@ -21,6 +21,9 @@ const InboxRowSchema = z.object({
   displayMode: z.enum(["thread", "chat"]),
   signatureHtml: z.string().nullable(),
   forwardTo: z.string().nullable(),
+  spamThreshold: z.number().nullable(),
+  agentInstructions: z.string().nullable(),
+  agentAutodraft: z.boolean(),
   assignedUserIds: z.array(z.string()),
 });
 
@@ -43,6 +46,9 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     displayMode: "thread" | "chat" | null;
     signatureHtml: string | null;
     forwardTo: string | null;
+    spamThreshold: number | null;
+    agentInstructions: string | null;
+    agentAutodraft: number | null;
     assignedUserIds: string | null;
   };
   const rows = await db.all<Row>(sql`
@@ -57,6 +63,9 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       s.display_mode AS displayMode,
       s.signature_html AS signatureHtml,
       s.forward_to AS forwardTo,
+      s.spam_threshold AS spamThreshold,
+      s.agent_instructions AS agentInstructions,
+      s.agent_autodraft AS agentAutodraft,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -77,6 +86,9 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       displayMode: r.displayMode ?? "chat",
       signatureHtml: r.signatureHtml,
       forwardTo: r.forwardTo,
+      spamThreshold: r.spamThreshold,
+      agentInstructions: r.agentInstructions,
+      agentAutodraft: r.agentAutodraft === 1,
       assignedUserIds: r.assignedUserIds ? JSON.parse(r.assignedUserIds) : [],
     })),
     200,
@@ -110,6 +122,9 @@ const createInboxRoute = createRoute({
         displayMode: z.enum(["thread", "chat"]),
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
+        spamThreshold: z.number().nullable(),
+        agentInstructions: z.string().nullable(),
+        agentAutodraft: z.boolean(),
         assignedUserIds: z.array(z.string()),
       }),
       "Created inbox",
@@ -157,6 +172,9 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
       displayMode,
       signatureHtml: null,
       forwardTo: null,
+      spamThreshold: null,
+      agentInstructions: null,
+      agentAutodraft: false,
       assignedUserIds: [],
     },
     201,
@@ -180,13 +198,19 @@ const PatchInboxBodySchema = z
     forwardTo: z
       .union([z.string().email(), z.literal(""), z.null()])
       .optional(),
+    spamThreshold: z.number().min(0).max(100).nullable().optional(),
+    agentInstructions: z.string().max(4000).optional(),
+    agentAutodraft: z.boolean().optional(),
   })
   .refine(
     (b) =>
       b.displayName !== undefined ||
       b.displayMode !== undefined ||
       b.signatureHtml !== undefined ||
-      b.forwardTo !== undefined,
+      b.forwardTo !== undefined ||
+      b.spamThreshold !== undefined ||
+      b.agentInstructions !== undefined ||
+      b.agentAutodraft !== undefined,
     "must update at least one field",
   );
 
@@ -195,7 +219,7 @@ const patchInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Update display name, display mode, signature HTML, and/or forward destination for an inbox. Row is deleted only when all four fields are at defaults (null + 'chat' + null + null).",
+    "Update display name, display mode, signature HTML, forward destination, spam threshold, agent instructions, and/or automatic suggested replies for an inbox. Row is deleted only when all fields are at defaults.",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -214,6 +238,9 @@ const patchInboxRoute = createRoute({
         displayMode: z.enum(["thread", "chat"]),
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
+        spamThreshold: z.number().nullable(),
+        agentInstructions: z.string().nullable(),
+        agentAutodraft: z.boolean(),
       }),
       "Updated",
     ),
@@ -230,7 +257,8 @@ const patchInboxRoute = createRoute({
 
 adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   const db = c.get("db");
-  const { email } = c.req.valid("param");
+  const { email: rawEmail } = c.req.valid("param");
+  const email = rawEmail.trim().toLowerCase();
   const body = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
@@ -269,12 +297,28 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         ? null
         : body.forwardTo.trim().toLowerCase()
       : (currentRow?.forwardTo ?? null);
+  const nextSpamThreshold =
+    body.spamThreshold !== undefined
+      ? body.spamThreshold
+      : (currentRow?.spamThreshold ?? null);
+  const nextAgentInstructions =
+    body.agentInstructions !== undefined
+      ? body.agentInstructions.trim() === ""
+        ? null
+        : body.agentInstructions
+      : (currentRow?.agentInstructions ?? null);
+  const nextAgentAutodraft =
+    body.agentAutodraft !== undefined
+      ? body.agentAutodraft
+        ? 1
+        : 0
+      : (currentRow?.agentAutodraft ?? 0);
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
   // this again at send time (and also catches forwards aimed at *other* inboxes
   // on this instance, which may not exist yet when the rule is saved).
-  if (nextForwardTo !== null && nextForwardTo === email.trim().toLowerCase()) {
+  if (nextForwardTo !== null && nextForwardTo === email) {
     return c.json(
       { error: "Forward destination cannot be the inbox itself" },
       400,
@@ -286,7 +330,10 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextDisplayName === null &&
     nextDisplayMode === "chat" &&
     nextSignatureHtml === null &&
-    nextForwardTo === null
+    nextForwardTo === null &&
+    nextSpamThreshold === null &&
+    nextAgentInstructions === null &&
+    nextAgentAutodraft === 0
   ) {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
     return c.json(
@@ -296,6 +343,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         displayMode: "chat",
         signatureHtml: null,
         forwardTo: null,
+        spamThreshold: null,
+        agentInstructions: null,
+        agentAutodraft: false,
       },
       200,
     );
@@ -309,6 +359,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       displayMode: nextDisplayMode,
       signatureHtml: nextSignatureHtml,
       forwardTo: nextForwardTo,
+      spamThreshold: nextSpamThreshold,
+      agentInstructions: nextAgentInstructions,
+      agentAutodraft: nextAgentAutodraft,
       createdAt: now,
       updatedAt: now,
     })
@@ -319,6 +372,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         displayMode: nextDisplayMode,
         signatureHtml: nextSignatureHtml,
         forwardTo: nextForwardTo,
+        spamThreshold: nextSpamThreshold,
+        agentInstructions: nextAgentInstructions,
+        agentAutodraft: nextAgentAutodraft,
         updatedAt: now,
       },
     });
@@ -330,6 +386,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       displayMode: nextDisplayMode,
       signatureHtml: nextSignatureHtml,
       forwardTo: nextForwardTo,
+      spamThreshold: nextSpamThreshold,
+      agentInstructions: nextAgentInstructions,
+      agentAutodraft: nextAgentAutodraft === 1,
     },
     200,
   );
@@ -362,7 +421,8 @@ const putAssignmentsRoute = createRoute({
 adminInboxesRouter.openapi(putAssignmentsRoute, async (c) => {
   const db = c.get("db");
   const currentUser = c.get("user");
-  const { email } = c.req.valid("param");
+  const { email: rawEmail } = c.req.valid("param");
+  const email = rawEmail.trim().toLowerCase();
   const { userIds } = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
@@ -404,7 +464,8 @@ const deleteInboxRoute = createRoute({
 
 adminInboxesRouter.openapi(deleteInboxRoute, async (c) => {
   const db = c.get("db");
-  const { email } = c.req.valid("param");
+  const { email: rawEmail } = c.req.valid("param");
+  const email = rawEmail.trim().toLowerCase();
 
   const existing = await db
     .select({ email: senderIdentities.email })

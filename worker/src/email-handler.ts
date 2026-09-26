@@ -1,7 +1,6 @@
-import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { schema } from "./db/schema";
+import { createDb } from "./db/client";
 import { people } from "./db/people.schema";
 import { emails } from "./db/emails.schema";
 import { attachments } from "./db/attachments.schema";
@@ -19,16 +18,38 @@ import {
 import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
 import { forwardInbound } from "./lib/inbound-forward";
+import { wakeConversation } from "./lib/messages/conversation-state";
+import { setSystemSpamState } from "./lib/messages/state";
+import { selectModel } from "./lib/agent/provider";
+import { isAutomatedInbound } from "./lib/automated-inbound";
+import { evaluateRules } from "./lib/rules/evaluate";
+
+export { isAutomatedInbound } from "./lib/automated-inbound";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+
+export function shouldEnqueueSuggestedReply(options: {
+  agentAutodraft: number | null | undefined;
+  autoFiledSpam: boolean;
+  modelConfigured: boolean;
+  headers: Record<string, string>;
+  senderAddress: string;
+}): boolean {
+  return (
+    options.agentAutodraft === 1 &&
+    !options.autoFiledSpam &&
+    options.modelConfigured &&
+    !isAutomatedInbound(options.headers, options.senderAddress)
+  );
+}
 
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
   ctx: ExecutionContext,
 ): Promise<void> {
-  const db = drizzle(env.DB, { schema, logger: true });
+  const db = createDb(env);
   const parsed = await parseEmail(message);
   const now = Math.floor(Date.now() / 1000);
 
@@ -170,6 +191,8 @@ export async function handleEmail(
       email: senderIdentities.email,
       displayName: senderIdentities.displayName,
       forwardTo: senderIdentities.forwardTo,
+      spamThreshold: senderIdentities.spamThreshold,
+      agentAutodraft: senderIdentities.agentAutodraft,
     })
     .from(senderIdentities);
 
@@ -216,67 +239,147 @@ export async function handleEmail(
     createdAt: now,
   });
 
-  // Notify connected WebSocket clients about the new email (per-user DOs).
-  // Fan out to users with explicit permission for this inbox, plus admins
-  // (capped) — all best-effort via ctx.waitUntil so push failures never
-  // block the inbound-email path.
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const [permRows, adminRows] = await Promise.all([
-          db
-            .select({ userId: inboxPermissions.userId })
-            .from(inboxPermissions)
-            .where(eq(inboxPermissions.email, recipientCanonical)),
-          db
-            .select({ id: users.id })
-            .from(users)
-            .where(eq(users.role, "admin"))
-            .limit(MAX_ADMIN_FANOUT + 1),
-        ]);
-        const { userIds, adminTruncated } = computeFanoutTargets({
-          permissionUserIds: permRows.map((r) => r.userId),
-          adminUserIds: adminRows.map((r) => r.id),
-        });
-        if (adminTruncated) {
-          console.warn(
-            `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
-          );
-        }
-        const deliverPayload = JSON.stringify({
-          inbox: recipientCanonical,
-          threadId: actualPersonId,
-          personId: actualPersonId,
-          senderName: parsed.from.name || fromAddressCanonical,
-          subject: parsed.subject ?? "",
-          bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
-        });
-        const results = await Promise.allSettled(
-          userIds.map((userId) => {
-            const hub = env.NOTIFICATIONS_HUB.get(
-              env.NOTIFICATIONS_HUB.idFromName(userId),
-            );
-            return hub.fetch(
-              new Request("http://do/deliver", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: deliverPayload,
-              }),
-            );
-          }),
-        );
-        const failures = results.filter((r) => r.status === "rejected").length;
-        if (failures > 0) {
-          console.warn(
-            `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
-          );
-        }
-      } catch (err) {
-        // Non-fatal: real-time push is best-effort.
-        console.warn("Real-time fanout error:", err);
-      }
-    })(),
+  const inboxIdentity = identityRows.find(
+    (row) => row.email.trim().toLowerCase() === recipientCanonical,
   );
+  let autoFiledSpam = false;
+  if (
+    inboxIdentity?.spamThreshold !== null &&
+    inboxIdentity?.spamThreshold !== undefined &&
+    parsed.spamScore !== null &&
+    parsed.spamScore >= inboxIdentity.spamThreshold
+  ) {
+    try {
+      await setSystemSpamState(db, recipientCanonical, emailId);
+      autoFiledSpam = true;
+    } catch (error) {
+      console.warn("Failed to auto-file inbound message as spam:", error);
+    }
+  }
+
+  let ruleSnoozed = false;
+  if (!autoFiledSpam) {
+    try {
+      const ruleResult = await evaluateRules(
+        db,
+        {
+          emailId,
+          inbox: recipientCanonical,
+          fromAddress: fromAddressCanonical,
+          subject: parsed.subject,
+          bodyText: parsed.bodyText,
+          bodyHtml,
+          hasAttachments: cappedAttachments.length > 0,
+          spamScore: parsed.spamScore,
+          headers: parsed.headers,
+          now,
+        },
+        { env, ctx },
+      );
+      autoFiledSpam ||= ruleResult.markedSpam;
+      ruleSnoozed = ruleResult.snoozed;
+    } catch (error) {
+      console.warn("Failed to evaluate inbound rules:", error);
+    }
+  }
+
+  if (
+    shouldEnqueueSuggestedReply({
+      agentAutodraft: inboxIdentity?.agentAutodraft,
+      autoFiledSpam,
+      modelConfigured: selectModel(env).ok,
+      headers: parsed.headers,
+      senderAddress: fromAddressCanonical,
+    })
+  ) {
+    ctx.waitUntil(
+      env.EMAIL_QUEUE.send({ type: "suggest_reply", emailId }).catch(
+        (error) => {
+          console.warn("Failed to enqueue suggested reply:", error);
+        },
+      ),
+    );
+  }
+
+  if (!autoFiledSpam) {
+    // A new non-spam inbound message wakes its conversation. Junk is silent:
+    // auto-filed spam must not resurface a snoozed customer conversation.
+    if (!ruleSnoozed) {
+      try {
+        await wakeConversation(
+          db,
+          recipientCanonical,
+          conversationId ?? `p:${actualPersonId}`,
+        );
+      } catch (error) {
+        console.warn("Failed to wake snoozed conversation:", error);
+      }
+    }
+
+    // Notify connected WebSocket clients about non-spam mail (per-user DOs).
+    // Fan out to users with explicit permission for this inbox, plus admins
+    // (capped) — all best-effort via ctx.waitUntil so push failures never
+    // block the inbound-email path.
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const [permRows, adminRows] = await Promise.all([
+            db
+              .select({ userId: inboxPermissions.userId })
+              .from(inboxPermissions)
+              .where(eq(inboxPermissions.email, recipientCanonical)),
+            db
+              .select({ id: users.id })
+              .from(users)
+              .where(eq(users.role, "admin"))
+              .limit(MAX_ADMIN_FANOUT + 1),
+          ]);
+          const { userIds, adminTruncated } = computeFanoutTargets({
+            permissionUserIds: permRows.map((r) => r.userId),
+            adminUserIds: adminRows.map((r) => r.id),
+          });
+          if (adminTruncated) {
+            console.warn(
+              `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
+            );
+          }
+          const deliverPayload = JSON.stringify({
+            inbox: recipientCanonical,
+            threadId: actualPersonId,
+            personId: actualPersonId,
+            senderName: parsed.from.name || fromAddressCanonical,
+            subject: parsed.subject ?? "",
+            bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
+          });
+          const results = await Promise.allSettled(
+            userIds.map((userId) => {
+              const hub = env.NOTIFICATIONS_HUB.get(
+                env.NOTIFICATIONS_HUB.idFromName(userId),
+              );
+              return hub.fetch(
+                new Request("http://do/deliver", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: deliverPayload,
+                }),
+              );
+            }),
+          );
+          const failures = results.filter(
+            (r) => r.status === "rejected",
+          ).length;
+          if (failures > 0) {
+            console.warn(
+              `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
+            );
+          }
+        } catch (err) {
+          // Non-fatal: real-time push is best-effort.
+          console.warn("Real-time fanout error:", err);
+        }
+      })(),
+    );
+  }
 
   // Best-effort outbound webhook for external automation (n8n / Make / etc.).
   // No-op unless an admin has configured a destination URL. Mirrors the push
@@ -311,9 +414,6 @@ export async function handleEmail(
   // rationale. Best-effort and non-blocking, like the webhook above — and it
   // sits after the blocklist and dedupe gates, so blocked senders and duplicate
   // deliveries are never forwarded.
-  const inboxIdentity = identityRows.find(
-    (r) => r.email.trim().toLowerCase() === recipientCanonical,
-  );
   forwardInbound(env, ctx, {
     inbox: recipientCanonical,
     forwardTo: inboxIdentity?.forwardTo ?? null,

@@ -15,6 +15,18 @@ so the [template syntax](templates.md#template-syntax) and its parse rules apply
 unchanged — a step whose template does not parse is marked `failed` rather than
 sending something half-formed.
 
+## Sequence provenance
+
+Every new sequence send that produces a `sent_emails` row records both
+`sequence_id` and `sequence_enrollment_id`. This applies to sent, retrying,
+failed, and crash-repair rows. An initially suppressed sequence step still
+creates no `sent_emails` row, matching the existing suppression behavior.
+
+Historical provenance is best-effort. The migration backfills rows linked by
+`sequence_emails.sent_email_id` and rows that still have a surviving
+`outbox_emails.sequence_email_id` link. Older failed or suppressed history
+with no durable backlink remains `NULL` by design.
+
 ---
 
 **See also:** [Email templates](templates.md) · [Suppressions and unsubscribe](suppressions.md) · the `/use-saasmail` Claude Code skill for enrolling contacts over the API

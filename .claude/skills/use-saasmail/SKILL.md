@@ -31,6 +31,8 @@ The other parameter that comes up in nearly every request is **`fromAddress`**. 
 - A `payload` field whose value is a **JSON-encoded string** of the email body.
 - Zero or more `files` fields, each an attachment.
 
+A JSON body is rejected with `400` (`Request body must be multipart/form-data with a JSON 'payload' field`).
+
 This shape is unusual but deliberate: it lets the same endpoint handle plain sends and sends with attached files without a separate route.
 
 ### Minimum payload
