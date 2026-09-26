@@ -2,6 +2,7 @@ import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { inboxScopeSql, type AllowedInboxes } from "../lib/inbox-permissions";
 import { listAllowedInboxAddresses } from "./mailboxes";
+import { JMAP_ID_FORMAT_VERSION } from "./public-ids";
 
 export async function opaqueState(value: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
@@ -64,7 +65,7 @@ export async function jmapState(
       (SELECT MAX(si.updated_at) FROM sender_identities si WHERE 1 = 1 ${identityScope}) AS identity_max
   `);
 
-  return opaqueState(rows[0] ?? {});
+  return opaqueState({ v: JMAP_ID_FORMAT_VERSION, ...(rows[0] ?? {}) });
 }
 
 export type ParsedJmapState = {
@@ -78,12 +79,14 @@ export function formatJmapState(
   issuedAt: number,
   fp: string,
 ): string {
-  return `j1-${seq}-${issuedAt}-${fp}`;
+  return `j${JMAP_ID_FORMAT_VERSION}-${seq}-${issuedAt}-${fp}`;
 }
 
 export function parseJmapState(value: unknown): ParsedJmapState | null {
   if (typeof value !== "string") return null;
-  const match = /^j1-(\d+)-(\d+)-([0-9a-f]{16})$/.exec(value);
+  const match = new RegExp(
+    `^j${JMAP_ID_FORMAT_VERSION}-(\\d+)-(\\d+)-([0-9a-f]{16})$`,
+  ).exec(value);
   if (!match) return null;
   const seq = Number(match[1]);
   const issuedAt = Number(match[2]);

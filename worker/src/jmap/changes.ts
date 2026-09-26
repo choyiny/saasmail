@@ -4,6 +4,7 @@ import { mailboxes } from "../db/mailboxes.schema";
 import { inboxScopeSql, type AllowedInboxes } from "../lib/inbox-permissions";
 import { SYSTEM_MAILBOX_ROLES } from "./constants";
 import { customMailboxId, systemMailboxId } from "./ids";
+import { publicIdForChangeObject } from "./public-ids";
 import {
   currentJmapState,
   formatJmapState,
@@ -271,9 +272,9 @@ export async function emailChanges(
     oldState: args.sinceState as string,
     newState,
     hasMoreChanges,
-    created: sets.created,
-    updated: sets.updated,
-    destroyed: sets.destroyed,
+    created: sets.created.map(publicIdForChangeObject),
+    updated: sets.updated.map(publicIdForChangeObject),
+    destroyed: sets.destroyed.map(publicIdForChangeObject),
     updatedProperties: null,
   };
 }
@@ -305,9 +306,9 @@ export async function mailboxChanges(
     "mailbox",
   );
   const sets = classify(mailboxRows);
-  const created = new Set(sets.created);
-  const destroyed = new Set(sets.destroyed);
-  const updated = new Set(sets.updated);
+  const created = new Set(sets.created.map(publicIdForChangeObject));
+  const destroyed = new Set(sets.destroyed.map(publicIdForChangeObject));
+  const updated = new Set(sets.updated.map(publicIdForChangeObject));
 
   const changedInboxes = await changedEmailInboxes(
     db,

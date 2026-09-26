@@ -18,6 +18,7 @@ import { processSequenceEmail } from "../lib/sequence-processor";
 import { queryMessages } from "../lib/messages/query";
 import type { EmailSender, SendEmailParams } from "../lib/email-sender";
 import { CORE_CAPABILITY, MAIL_CAPABILITY } from "../jmap/constants";
+import { acct, sid, sys } from "./jmap-ids";
 
 const INBOX = "hello@example.com";
 
@@ -119,8 +120,8 @@ describe("canonical sequence sending inboxes", () => {
           [
             "Email/query",
             {
-              accountId: userId,
-              filter: { inMailbox: `sys:${INBOX}:sent` },
+              accountId: acct(userId),
+              filter: { inMailbox: sys(INBOX, "sent") },
             },
             "q1",
           ],
@@ -131,6 +132,6 @@ describe("canonical sequence sending inboxes", () => {
     const result = (await response.json()) as {
       methodResponses: [string, { ids: string[] }, string][];
     };
-    expect(result.methodResponses[0][1].ids).toEqual([`sent:${sent[0].id}`]);
+    expect(result.methodResponses[0][1].ids).toEqual([sid(sent[0].id)]);
   });
 });

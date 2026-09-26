@@ -5,7 +5,6 @@ import {
   queryMessageThreadKeys,
   THREAD_KEYS_PER_QUERY,
 } from "../lib/messages/query";
-import { serializeMessageRef } from "../lib/messages/types";
 import {
   CORE_CAPABILITY,
   MAIL_CAPABILITY,
@@ -17,12 +16,19 @@ import {
 import {
   emailGet,
   emailQuery,
-  jmapThreadId,
+  jmapThreadKey,
   type JmapMethodError,
 } from "./emails";
 import { listJmapMailboxes, listUsableIdentities } from "./mailboxes";
 import { emailChanges, mailboxChanges } from "./changes";
 import { emailSet } from "./email-set";
+import {
+  parseThreadId,
+  publicAccountId,
+  publicEmailId,
+  publicIdentityId,
+  publicThreadId,
+} from "./public-ids";
 import { currentJmapState, jmapState } from "./state";
 
 const MAX_EMAILS_IN_THREAD_GET = 1024;
@@ -47,7 +53,7 @@ function methodError(
 }
 
 function accountError(accountId: unknown, userId: string): MethodResult | null {
-  if (typeof accountId !== "string" || accountId !== userId) {
+  if (typeof accountId !== "string" || accountId !== publicAccountId(userId)) {
     return methodError("accountNotFound");
   }
   return null;
@@ -127,18 +133,12 @@ function filterProperties(
   return result;
 }
 
-function identityId(email: string): string {
-  const bytes = new TextEncoder().encode(email.toLowerCase());
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `idn_${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}`;
-}
-
 export async function makeSession(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
   user: any,
 ): Promise<Record<string, unknown>> {
+  const accountId = publicAccountId(user.id);
   return {
     capabilities: {
       [CORE_CAPABILITY]: {
@@ -154,7 +154,7 @@ export async function makeSession(
       [MAIL_CAPABILITY]: {},
     },
     accounts: {
-      [user.id]: {
+      [accountId]: {
         name: user.name || user.email || user.id,
         isPersonal: true,
         isReadOnly: false,
@@ -173,7 +173,7 @@ export async function makeSession(
     // RFC 8620 keys primaryAccounts by capabilities present in
     // accountCapabilities. Core is session-level and is not listed there.
     primaryAccounts: {
-      [MAIL_CAPABILITY]: user.id,
+      [MAIL_CAPABILITY]: accountId,
     },
     username: user.email ?? user.id,
     apiUrl: "/jmap/api",
@@ -237,7 +237,7 @@ async function mailboxGet(
     ok: true,
     name: "Mailbox/get",
     result: {
-      accountId: userId,
+      accountId: publicAccountId(userId),
       state,
       list,
       notFound,
@@ -274,7 +274,7 @@ async function mailboxQuery(
     ok: true,
     name: "Mailbox/query",
     result: {
-      accountId: userId,
+      accountId: publicAccountId(userId),
       queryState: await jmapState(db, allowed, userId),
       canCalculateChanges: false,
       position,
@@ -308,22 +308,33 @@ async function threadGet(
   }
 
   const state = (await currentJmapState(db, allowed, userId)).state;
-  let requested: string[];
+  // Public id (as the client sent it, or as we emit it) -> internal thread key.
+  const keyByPublic = new Map<string, string>();
+  const requestedPublic: string[] = [];
   if (ids === undefined || ids === null) {
-    requested = await queryMessageThreadKeys(
+    const keys = await queryMessageThreadKeys(
       db,
       allowed,
       { viewer: { userId }, ignoreSnooze: true },
       MAX_OBJECTS_IN_GET + 1,
     );
-    if (requested.length > MAX_OBJECTS_IN_GET) {
+    if (keys.length > MAX_OBJECTS_IN_GET) {
       return methodError("requestTooLarge");
     }
+    for (const key of keys) {
+      const publicId = publicThreadId(key);
+      requestedPublic.push(publicId);
+      keyByPublic.set(publicId, key);
+    }
   } else {
-    requested = ids as string[];
+    for (const publicId of ids as string[]) {
+      requestedPublic.push(publicId);
+      const key = parseThreadId(publicId);
+      if (key !== null) keyByPublic.set(publicId, key);
+    }
   }
 
-  const queryKeys = [...new Set(requested)];
+  const queryKeys = [...new Set(keyByPublic.values())];
   const grouped = new Map<string, string[]>();
   let emailCount = 0;
 
@@ -352,22 +363,26 @@ async function threadGet(
     }
 
     for (const message of page.messages) {
-      const key = jmapThreadId(message);
+      const key = jmapThreadKey(message);
       const current = grouped.get(key) ?? [];
-      current.push(serializeMessageRef(message.ref));
+      current.push(publicEmailId(message.ref));
       grouped.set(key, current);
     }
   }
 
   const list: Record<string, unknown>[] = [];
   const notFound: string[] = [];
-  for (const id of requested) {
-    const emailIds = grouped.get(id);
+  for (const publicId of [...new Set(requestedPublic)]) {
+    const key = keyByPublic.get(publicId);
+    const emailIds = key === undefined ? undefined : grouped.get(key);
     if (!emailIds) {
-      notFound.push(id);
+      notFound.push(publicId);
       continue;
     }
-    const thread = filterProperties({ id, emailIds }, args.properties);
+    const thread = filterProperties(
+      { id: publicId, emailIds },
+      args.properties,
+    );
     if (!thread) {
       return methodError("invalidArguments", undefined, ["properties"]);
     }
@@ -378,7 +393,7 @@ async function threadGet(
     ok: true,
     name: "Thread/get",
     result: {
-      accountId: userId,
+      accountId: publicAccountId(userId),
       state,
       list,
       notFound,
@@ -411,7 +426,7 @@ async function identityGet(
 
   const rows = await listUsableIdentities(db, allowed);
   const all = rows.map((row) => ({
-    id: identityId(row.email),
+    id: publicIdentityId(row.email),
     name: row.displayName ?? row.email,
     email: row.email,
     replyTo: null,
@@ -448,7 +463,7 @@ async function identityGet(
     ok: true,
     name: "Identity/get",
     result: {
-      accountId: userId,
+      accountId: publicAccountId(userId),
       state: await jmapState(db, allowed, userId),
       list,
       notFound,
@@ -470,7 +485,13 @@ export async function executeMethod(
   if (name === "Email/set") {
     const account = accountError(args.accountId, user.id);
     if (account) return account;
-    const result = await emailSet(db, allowed, user.id, user.id, args);
+    const result = await emailSet(
+      db,
+      allowed,
+      user.id,
+      publicAccountId(user.id),
+      args,
+    );
     const error = result as JmapMethodError;
     if (typeof error.type === "string") {
       return methodError(error.type, error.description, error.properties);
@@ -483,8 +504,20 @@ export async function executeMethod(
     if (account) return account;
     const result =
       name === "Email/changes"
-        ? await emailChanges(db, allowed, user.id, user.id, args)
-        : await mailboxChanges(db, allowed, user.id, user.id, args);
+        ? await emailChanges(
+            db,
+            allowed,
+            user.id,
+            publicAccountId(user.id),
+            args,
+          )
+        : await mailboxChanges(
+            db,
+            allowed,
+            user.id,
+            publicAccountId(user.id),
+            args,
+          );
     const error = result as JmapMethodError;
     if (typeof error.type === "string") {
       return methodError(error.type, error.description, error.properties);
@@ -506,7 +539,13 @@ export async function executeMethod(
   if (name === "Email/get") {
     const account = accountError(args.accountId, user.id);
     if (account) return account;
-    const result = await emailGet(db, allowed, user.id, user.id, args);
+    const result = await emailGet(
+      db,
+      allowed,
+      user.id,
+      publicAccountId(user.id),
+      args,
+    );
     const error = result as JmapMethodError;
     if (typeof error.type === "string") {
       return methodError(error.type, error.description, error.properties);
@@ -516,7 +555,13 @@ export async function executeMethod(
   if (name === "Email/query") {
     const account = accountError(args.accountId, user.id);
     if (account) return account;
-    const result = await emailQuery(db, allowed, user.id, user.id, args);
+    const result = await emailQuery(
+      db,
+      allowed,
+      user.id,
+      publicAccountId(user.id),
+      args,
+    );
     const error = result as JmapMethodError;
     if (typeof error.type === "string") {
       return methodError(error.type, error.description, error.properties);

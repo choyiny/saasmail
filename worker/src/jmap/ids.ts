@@ -1,4 +1,5 @@
 import type { SystemMailboxRole } from "./constants";
+import { publicCustomMailboxId, publicSystemMailboxId } from "./public-ids";
 
 export type SystemMailboxId = {
   kind: "system";
@@ -11,13 +12,15 @@ export type CustomMailboxId = {
   id: string;
 };
 
+/** Public JMAP id of a system mailbox (see public-ids.ts). */
 export function systemMailboxId(
   inbox: string,
   role: SystemMailboxRole,
 ): string {
-  return `sys:${inbox.toLowerCase()}:${role}`;
+  return publicSystemMailboxId(inbox, role);
 }
 
+/** Public JMAP id of a custom folder (see public-ids.ts). */
 export function customMailboxId(id: string): string {
-  return `mbx:${id}`;
+  return publicCustomMailboxId(id);
 }

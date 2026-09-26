@@ -59,6 +59,7 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@modelcontextprotocol/sdk": "1.30.0",
     "@modelcontextprotocol/server": "2.0.0",
+    "@noble/hashes": "^2.0.1",
     "@opentelemetry/api": "^1.9.1",
     "@paper-design/shaders-react": "^0.0.76",
     "@radix-ui/react-avatar": "^1.2.6",

@@ -22,6 +22,16 @@ import {
   MAX_CALLS_IN_REQUEST,
 } from "../jmap/constants";
 import { executeJmapCalls, validateJmapPostRequest } from "../jmap/http";
+import {
+  acct,
+  att,
+  expectAllJmapIdsValid,
+  mbx,
+  rid,
+  sid,
+  sys,
+  thread,
+} from "./jmap-ids";
 
 const MINE = "mine@saasmail.test";
 const THEIRS = "theirs@saasmail.test";
@@ -114,11 +124,48 @@ describe("JMAP", () => {
       collationAlgorithms: ["i;ascii-casemap"],
     });
     expect(session.capabilities[MAIL_CAPABILITY]).toEqual({});
-    expect(session.accounts[userId]).toMatchObject({
+    expect(session.accounts[acct(userId)]).toMatchObject({
       isPersonal: true,
       isReadOnly: false,
     });
-    expect(session.primaryAccounts[MAIL_CAPABILITY]).toBe(userId);
+    expect(session.primaryAccounts[MAIL_CAPABILITY]).toBe(acct(userId));
+  });
+
+  it("advertises the v2 account id and rejects the old one", async () => {
+    const { userId, apiKey } = await createTestUser({ id: "jmap-reset-user" });
+    const session = await (
+      await authFetch("/.well-known/jmap", { apiKey })
+    ).json<Record<string, any>>();
+    expect(Object.keys(session.accounts)).toEqual([acct(userId)]);
+    expect(session.primaryAccounts["urn:ietf:params:jmap:mail"]).toBe(
+      acct(userId),
+    );
+
+    const oldId = await jmapJson(apiKey, [
+      ["Mailbox/get", { accountId: userId }, "m1"],
+    ]);
+    expect(oldId.methodResponses[0]).toEqual([
+      "error",
+      { type: "accountNotFound" },
+      "m1",
+    ]);
+    const download = await authFetch(
+      `/jmap/download/${userId}/${att("anything")}/x.txt`,
+      { apiKey },
+    );
+    expect(download.status).toBe(404);
+  });
+
+  it("answers a pre-upgrade j1 state with cannotCalculateChanges", async () => {
+    const { userId, apiKey } = await createTestUser({ id: "jmap-state-user" });
+    const res = await jmapJson(apiKey, [
+      [
+        "Email/changes",
+        { accountId: acct(userId), sinceState: "j1-5-1-0123456789abcdef" },
+        "c1",
+      ],
+    ]);
+    expect(res.methodResponses[0][1].type).toBe("cannotCalculateChanges");
   });
 
   it("guards cookie-authenticated POSTs while leaving Bearer requests unchanged", async () => {
@@ -251,25 +298,25 @@ describe("JMAP", () => {
     });
 
     const result = await jmapJson(apiKey, [
-      ["Mailbox/get", { accountId: userId }, "m1"],
-      ["Mailbox/query", { accountId: userId }, "m2"],
-      ["Identity/get", { accountId: userId }, "i1"],
+      ["Mailbox/get", { accountId: acct(userId) }, "m1"],
+      ["Mailbox/query", { accountId: acct(userId) }, "m2"],
+      ["Identity/get", { accountId: acct(userId) }, "i1"],
     ]);
 
     const mailboxGet = result.methodResponses[0][1];
     expect(mailboxGet.list.map((mailbox: any) => mailbox.id)).toEqual(
       expect.arrayContaining([
-        `sys:${MINE}:inbox`,
-        `sys:${MINE}:drafts`,
-        `sys:${MINE}:sent`,
-        `sys:${MINE}:archive`,
-        `sys:${MINE}:junk`,
-        `sys:${MINE}:trash`,
-        "mbx:folder-1",
+        sys(MINE, "inbox"),
+        sys(MINE, "drafts"),
+        sys(MINE, "sent"),
+        sys(MINE, "archive"),
+        sys(MINE, "junk"),
+        sys(MINE, "trash"),
+        mbx("folder-1"),
       ]),
     );
     const inbox = mailboxGet.list.find(
-      (mailbox: any) => mailbox.id === `sys:${MINE}:inbox`,
+      (mailbox: any) => mailbox.id === sys(MINE, "inbox"),
     );
     expect(inbox).toMatchObject({
       role: "inbox",
@@ -277,7 +324,7 @@ describe("JMAP", () => {
       unreadEmails: 1,
       myRights: { mayReadItems: true, mayDelete: false },
     });
-    expect(result.methodResponses[1][1].ids).toContain("mbx:folder-1");
+    expect(result.methodResponses[1][1].ids).toContain(mbx("folder-1"));
     expect(result.methodResponses[2][1].list).toEqual([
       expect.objectContaining({
         email: MINE,
@@ -294,22 +341,22 @@ describe("JMAP", () => {
     const result = await jmapJson(apiKey, [
       [
         "Email/get",
-        { accountId: userId, ids: [], properties: ["id", "bogus"] },
+        { accountId: acct(userId), ids: [], properties: ["id", "bogus"] },
         "e1",
       ],
       [
         "Mailbox/get",
-        { accountId: userId, ids: [], properties: ["id", "unknown"] },
+        { accountId: acct(userId), ids: [], properties: ["id", "unknown"] },
         "m1",
       ],
       [
         "Thread/get",
-        { accountId: userId, ids: [], properties: ["id", "unknown"] },
+        { accountId: acct(userId), ids: [], properties: ["id", "unknown"] },
         "t1",
       ],
       [
         "Identity/get",
-        { accountId: userId, ids: [], properties: ["id", "unknown"] },
+        { accountId: acct(userId), ids: [], properties: ["id", "unknown"] },
         "i1",
       ],
     ]);
@@ -350,8 +397,8 @@ describe("JMAP", () => {
       [
         "Email/get",
         {
-          accountId: userId,
-          ids: ["received:standard-properties-mail"],
+          accountId: acct(userId),
+          ids: [rid("standard-properties-mail")],
           properties: ["id", "blobId", "messageId", "header:List-Id:asText"],
         },
         "e1",
@@ -359,8 +406,8 @@ describe("JMAP", () => {
       [
         "Email/get",
         {
-          accountId: userId,
-          ids: ["sent:standard-properties-reply"],
+          accountId: acct(userId),
+          ids: [sid("standard-properties-reply")],
           properties: ["id", "inReplyTo"],
         },
         "e2",
@@ -370,7 +417,7 @@ describe("JMAP", () => {
     expect(result.methodResponses[0][0]).toBe("Email/get");
     expect(result.methodResponses[0][1].list).toEqual([
       {
-        id: "received:standard-properties-mail",
+        id: rid("standard-properties-mail"),
         blobId: null,
         messageId: ["a@x"],
         "header:List-Id:asText": null,
@@ -378,7 +425,7 @@ describe("JMAP", () => {
     ]);
     expect(result.methodResponses[1][1].list).toEqual([
       {
-        id: "sent:standard-properties-reply",
+        id: sid("standard-properties-reply"),
         inReplyTo: ["a@x", "b@y"],
       },
     ]);
@@ -421,8 +468,8 @@ describe("JMAP", () => {
       [
         "Email/get",
         {
-          accountId: userId,
-          ids: ["received:mail-1"],
+          accountId: acct(userId),
+          ids: [rid("mail-1")],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
         },
@@ -431,12 +478,12 @@ describe("JMAP", () => {
     ]);
     const email = result.methodResponses[0][1].list[0];
     expect(email).toMatchObject({
-      id: "received:mail-1",
+      id: rid("mail-1"),
       subject: "Hello JMAP",
       preview: "Visible plain text",
       hasAttachment: true,
       keywords: { $seen: true, $flagged: true },
-      mailboxIds: { [`sys:${MINE}:inbox`]: true },
+      mailboxIds: { [sys(MINE, "inbox")]: true },
       bodyValues: {
         text: { value: "Visible plain text" },
         html: { value: "<p>Hello</p>" },
@@ -444,7 +491,7 @@ describe("JMAP", () => {
     });
     expect(email.threadId).toBeTruthy();
     expect(email.attachments).toEqual([
-      expect.objectContaining({ blobId: "blob-1", name: "hello.txt" }),
+      expect.objectContaining({ blobId: att("blob-1"), name: "hello.txt" }),
     ]);
   });
 
@@ -474,9 +521,9 @@ describe("JMAP", () => {
       [
         "Email/query",
         {
-          accountId: userId,
+          accountId: acct(userId),
           filter: {
-            inMailbox: `sys:${MINE}:inbox`,
+            inMailbox: sys(MINE, "inbox"),
             text: "alpha",
             from: "alice@",
             hasKeyword: "$seen",
@@ -492,14 +539,14 @@ describe("JMAP", () => {
       [
         "Email/query",
         {
-          accountId: userId,
+          accountId: acct(userId),
           sort: [{ property: "receivedAt", isAscending: true }],
         },
         "q2",
       ],
     ]);
     expect(filtered.methodResponses[0][1]).toMatchObject({
-      ids: ["received:alice-mail"],
+      ids: [rid("alice-mail")],
       total: 1,
       canCalculateChanges: false,
     });
@@ -536,24 +583,36 @@ describe("JMAP", () => {
     });
 
     const result = await jmapJson(apiKey, [
-      ["Email/query", { accountId: userId, position: -1, limit: 1 }, "e1"],
-      ["Mailbox/query", { accountId: userId, position: -1, limit: 1 }, "m1"],
-      ["Email/query", { accountId: userId, position: -99, limit: 1 }, "e2"],
+      [
+        "Email/query",
+        { accountId: acct(userId), position: -1, limit: 1 },
+        "e1",
+      ],
+      [
+        "Mailbox/query",
+        { accountId: acct(userId), position: -1, limit: 1 },
+        "m1",
+      ],
+      [
+        "Email/query",
+        { accountId: acct(userId), position: -99, limit: 1 },
+        "e2",
+      ],
     ]);
 
     expect(result.methodResponses[0][1]).toMatchObject({
       position: 2,
-      ids: ["sent:negative-1"],
+      ids: [sid("negative-1")],
     });
     expect(result.methodResponses[0][1]).not.toHaveProperty("total");
     expect(result.methodResponses[1][1]).toMatchObject({
       position: 5,
-      ids: [`sys:${MINE}:trash`],
+      ids: [sys(MINE, "trash")],
       total: 6,
     });
     expect(result.methodResponses[2][1]).toMatchObject({
       position: 0,
-      ids: ["sent:negative-3"],
+      ids: [sid("negative-3")],
     });
   });
 
@@ -576,11 +635,11 @@ describe("JMAP", () => {
     });
 
     const result = await jmapJson(apiKey, [
-      ["Email/query", { accountId: userId }, "q1"],
+      ["Email/query", { accountId: acct(userId) }, "q1"],
       [
         "Email/get",
         {
-          accountId: userId,
+          accountId: acct(userId),
           "#ids": { resultOf: "q1", name: "Email/query", path: "/ids" },
         },
         "g1",
@@ -588,7 +647,7 @@ describe("JMAP", () => {
       [
         "Thread/get",
         {
-          accountId: userId,
+          accountId: acct(userId),
           "#ids": {
             resultOf: "g1",
             name: "Email/get",
@@ -603,8 +662,127 @@ describe("JMAP", () => {
     expect(result.methodResponses[1][1].list).toHaveLength(2);
     expect(result.methodResponses[2][0]).toBe("Thread/get");
     expect(result.methodResponses[2][1].list[0].emailIds).toEqual(
-      expect.arrayContaining(["received:received-1", "sent:sent-1"]),
+      expect.arrayContaining([rid("received-1"), sid("sent-1")]),
     );
+  });
+
+  it("emits only RFC 8620 ids across the whole read surface", async () => {
+    const { userId, apiKey } = await createTestUser({
+      id: "jmap-surface-user",
+    });
+    await addIdentity(MINE);
+    await createTestPerson({
+      id: "surface-person",
+      email: "alice@example.com",
+    });
+    await createTestEmail({
+      id: "surface-mail",
+      personId: "surface-person",
+      recipient: MINE,
+      conversationId: "surface-thread",
+    });
+    await createTestSentEmail({
+      id: "surface-sent",
+      personId: "surface-person",
+      fromAddress: MINE,
+      toAddress: "alice@example.com",
+      conversationId: "surface-thread",
+    });
+    const res = await jmapJson(apiKey, [
+      ["Mailbox/get", { accountId: acct(userId) }, "m"],
+      ["Mailbox/query", { accountId: acct(userId) }, "mq"],
+      ["Identity/get", { accountId: acct(userId) }, "i"],
+      ["Email/query", { accountId: acct(userId), limit: 50 }, "q"],
+      [
+        "Email/get",
+        {
+          accountId: acct(userId),
+          "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
+        },
+        "g",
+      ],
+      [
+        "Thread/get",
+        {
+          accountId: acct(userId),
+          "#ids": {
+            resultOf: "g",
+            name: "Email/get",
+            path: "/list/*/threadId",
+          },
+        },
+        "t",
+      ],
+    ]);
+    expectAllJmapIdsValid(res);
+    const get = res.methodResponses[4][1];
+    expect(get.list.length).toBeGreaterThan(0);
+    expect(get.notFound).toEqual([]);
+    const threads = res.methodResponses[5][1];
+    expect(threads.notFound).toEqual([]);
+    expect(threads.list.length).toBeGreaterThan(0);
+  });
+
+  it("treats malformed ids as not found", async () => {
+    const { userId, apiKey } = await createTestUser({
+      id: "jmap-malformed-user",
+    });
+    const res = await jmapJson(apiKey, [
+      [
+        "Email/get",
+        { accountId: acct(userId), ids: ["", "R", "r!!", "received:x"] },
+        "g",
+      ],
+      ["Thread/get", { accountId: acct(userId), ids: ["T", "nope"] }, "t"],
+    ]);
+    expect(res.methodResponses[0][1].notFound).toEqual([
+      "",
+      "R",
+      "r!!",
+      "received:x",
+    ]);
+    expect(res.methodResponses[1][1].notFound).toEqual(["T", "nope"]);
+  });
+
+  it("echoes the public account id from every method", async () => {
+    // A user id that is itself a valid JMAP id, so only the value (not the
+    // character set) can tell the internal and public account ids apart.
+    const { userId, apiKey } = await createTestUser({ id: "jmap-echo-user" });
+    const since = (name: string) => ({
+      resultOf: "g",
+      name,
+      path: "/state",
+    });
+    const res = await jmapJson(apiKey, [
+      ["Email/get", { accountId: acct(userId), ids: [] }, "g"],
+      ["Mailbox/get", { accountId: acct(userId), ids: [] }, "mg"],
+      ["Email/query", { accountId: acct(userId) }, "q"],
+      ["Email/set", { accountId: acct(userId), update: {} }, "s"],
+      [
+        "Email/changes",
+        { accountId: acct(userId), "#sinceState": since("Email/get") },
+        "c",
+      ],
+      [
+        "Mailbox/changes",
+        {
+          accountId: acct(userId),
+          "#sinceState": {
+            resultOf: "mg",
+            name: "Mailbox/get",
+            path: "/state",
+          },
+        },
+        "mc",
+      ],
+      ["Mailbox/query", { accountId: acct(userId) }, "mq"],
+      ["Thread/get", { accountId: acct(userId), ids: [] }, "t"],
+      ["Identity/get", { accountId: acct(userId) }, "i"],
+    ]);
+    for (const [name, result] of res.methodResponses) {
+      expect(name).not.toBe("error");
+      expect(result.accountId).toBe(acct(userId));
+    }
   });
 
   it("returns invalidResultReference and cannotCalculateChanges per call", async () => {
@@ -613,7 +791,7 @@ describe("JMAP", () => {
       [
         "Email/get",
         {
-          accountId: userId,
+          accountId: acct(userId),
           "#ids": { resultOf: "missing", name: "Email/query", path: "/ids" },
         },
         "bad-ref",
@@ -629,7 +807,7 @@ describe("JMAP", () => {
       "Identity/changes",
       "Identity/queryChanges",
     ].entries()) {
-      methodCalls.push([name, { accountId: userId }, `ch-${index}`]);
+      methodCalls.push([name, { accountId: acct(userId) }, `ch-${index}`]);
     }
 
     const result = await jmapJson(apiKey, methodCalls);
@@ -656,20 +834,20 @@ describe("JMAP", () => {
     const { userId, apiKey } = await createMember();
 
     const result = await jmapJson(apiKey, [
-      ["Email/get", { accountId: userId, ids: ["received:theirs-1"] }, "e1"],
+      ["Email/get", { accountId: acct(userId), ids: [rid("theirs-1")] }, "e1"],
       [
         "Mailbox/get",
-        { accountId: userId, ids: [`sys:${THEIRS}:inbox`] },
+        { accountId: acct(userId), ids: [sys(THEIRS, "inbox")] },
         "m1",
       ],
     ]);
     expect(result.methodResponses[0][1]).toMatchObject({
       list: [],
-      notFound: ["received:theirs-1"],
+      notFound: [rid("theirs-1")],
     });
     expect(result.methodResponses[1][1]).toMatchObject({
       list: [],
-      notFound: [`sys:${THEIRS}:inbox`],
+      notFound: [sys(THEIRS, "inbox")],
     });
   });
 
@@ -690,15 +868,15 @@ describe("JMAP", () => {
       [
         "Email/get",
         {
-          accountId: userId,
-          ids: ["sent:bulk-3", "sent:bulk-301"],
+          accountId: acct(userId),
+          ids: [sid("bulk-3"), sid("bulk-301")],
         },
         "g1",
       ],
       [
         "Email/get",
         {
-          accountId: userId,
+          accountId: acct(userId),
           ids: null,
         },
         "g2",
@@ -706,7 +884,7 @@ describe("JMAP", () => {
       [
         "Email/query",
         {
-          accountId: userId,
+          accountId: acct(userId),
           position: 10,
           limit: 5,
           calculateTotal: true,
@@ -717,7 +895,7 @@ describe("JMAP", () => {
 
     expect(
       selected.methodResponses[0][1].list.map((email: any) => email.id),
-    ).toEqual(expect.arrayContaining(["sent:bulk-3", "sent:bulk-301"]));
+    ).toEqual(expect.arrayContaining([sid("bulk-3"), sid("bulk-301")]));
     expect(selected.methodResponses[0][1].list).toHaveLength(2);
     expect(selected.methodResponses[1]).toEqual([
       "error",
@@ -727,11 +905,11 @@ describe("JMAP", () => {
     expect(selected.methodResponses[2][1]).toMatchObject({
       position: 10,
       ids: [
-        "sent:bulk-294",
-        "sent:bulk-293",
-        "sent:bulk-292",
-        "sent:bulk-291",
-        "sent:bulk-290",
+        sid("bulk-294"),
+        sid("bulk-293"),
+        sid("bulk-292"),
+        sid("bulk-291"),
+        sid("bulk-290"),
       ],
       total: 305,
     });
@@ -765,14 +943,14 @@ describe("JMAP", () => {
       if (index < 200) {
         const id = Math.floor(index / 2);
         return index % 2 === 0
-          ? `received:chunk-recv-${id}`
-          : `sent:chunk-sent-${id}`;
+          ? rid(`chunk-recv-${id}`)
+          : sid(`chunk-sent-${id}`);
       }
-      return `received:chunk-missing-${index}`;
+      return rid(`chunk-missing-${index}`);
     });
 
     const result = await jmapJson(apiKey, [
-      ["Email/get", { accountId: userId, ids: requestedIds }, "g1"],
+      ["Email/get", { accountId: acct(userId), ids: requestedIds }, "g1"],
     ]);
     const get = result.methodResponses[0][1];
 
@@ -798,12 +976,11 @@ describe("JMAP", () => {
       });
     }
 
-    const ids = Array.from(
-      { length: 60 },
-      (_, index) => `thread-chunk-${index}`,
+    const ids = Array.from({ length: 60 }, (_, index) =>
+      thread(`thread-chunk-${index}`),
     );
     const result = await jmapJson(apiKey, [
-      ["Thread/get", { accountId: userId, ids }, "t1"],
+      ["Thread/get", { accountId: acct(userId), ids }, "t1"],
     ]);
 
     expect(
@@ -828,12 +1005,11 @@ describe("JMAP", () => {
       });
     }
 
-    const ids = Array.from(
-      { length: 21 },
-      (_, index) => `thread-overflow-${index}`,
+    const ids = Array.from({ length: 21 }, (_, index) =>
+      thread(`thread-overflow-${index}`),
     );
     const result = await jmapJson(apiKey, [
-      ["Thread/get", { accountId: userId, ids }, "t1"],
+      ["Thread/get", { accountId: acct(userId), ids }, "t1"],
     ]);
 
     expect(result.methodResponses[0]).toEqual([
@@ -898,7 +1074,7 @@ describe("JMAP", () => {
     const { userId, apiKey } = await createMember();
 
     const readable = await authFetch(
-      `/jmap/download/${userId}/mine-blob/mine.txt?type=text/plain`,
+      `/jmap/download/${acct(userId)}/${att("mine-blob")}/mine.txt?type=text/plain`,
       { apiKey },
     );
     expect(readable.status).toBe(200);
@@ -906,7 +1082,7 @@ describe("JMAP", () => {
     expect(readable.headers.get("X-Content-Type-Options")).toBe("nosniff");
 
     const hidden = await authFetch(
-      `/jmap/download/${userId}/theirs-blob/theirs.txt?type=text/plain`,
+      `/jmap/download/${acct(userId)}/${att("theirs-blob")}/theirs.txt?type=text/plain`,
       { apiKey },
     );
     expect(hidden.status).toBe(404);

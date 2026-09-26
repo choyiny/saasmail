@@ -8,7 +8,6 @@ import {
   type MessageQuery,
 } from "../lib/messages/query";
 import {
-  parseMessageRef,
   serializeMessageRef,
   type AttachmentRow,
   type MessageRef,
@@ -16,6 +15,13 @@ import {
 } from "../lib/messages/types";
 import { customMailboxId, systemMailboxId } from "./ids";
 import { loadMailboxDescriptors, type MailboxDescriptor } from "./mailboxes";
+import {
+  parseEmailId,
+  publicAttachmentBlobId,
+  publicBodyPartBlobId,
+  publicEmailId,
+  publicThreadId,
+} from "./public-ids";
 import { currentJmapState, jmapState } from "./state";
 import { MAX_OBJECTS_IN_GET } from "./constants";
 
@@ -34,14 +40,14 @@ function utcDate(seconds: number): string {
 }
 
 function bodyPart(
-  messageId: string,
+  emailId: string,
   partId: "text" | "html",
   value: string,
   type: string,
 ): Record<string, unknown> {
   return {
     partId,
-    blobId: `body-${encodeURIComponent(messageId)}-${partId}`,
+    blobId: publicBodyPartBlobId(emailId, partId),
     size: byteLength(value),
     name: null,
     type,
@@ -56,7 +62,7 @@ function bodyPart(
 function attachmentPart(row: AttachmentRow): Record<string, unknown> {
   return {
     partId: `att-${row.id}`,
-    blobId: row.id,
+    blobId: publicAttachmentBlobId(row.id),
     size: row.size,
     name: row.filename,
     type: row.contentType,
@@ -68,8 +74,13 @@ function attachmentPart(row: AttachmentRow): Record<string, unknown> {
   };
 }
 
-export function jmapThreadId(message: UnifiedMessage): string {
+/** Internal thread key: what queryMessages' `threadKeys` filters on. */
+export function jmapThreadKey(message: UnifiedMessage): string {
   return message.state?.conversationKey ?? serializeMessageRef(message.ref);
+}
+
+export function jmapThreadId(message: UnifiedMessage): string {
+  return publicThreadId(jmapThreadKey(message));
 }
 
 function systemMailboxForMessage(message: UnifiedMessage): string | null {
@@ -267,7 +278,7 @@ export function toJmapEmail(
   message: UnifiedMessage,
   args: Record<string, unknown>,
 ): Record<string, unknown> | null {
-  const id = serializeMessageRef(message.ref);
+  const id = publicEmailId(message.ref);
   const attachments = message.attachments ?? [];
   const textBody = message.bodyText
     ? [bodyPart(id, "text", message.bodyText, "text/plain")]
@@ -337,8 +348,8 @@ export async function loadJmapEmailObjectsByIds(
 ): Promise<Map<string, UnifiedMessage>> {
   const refsById = new Map<string, MessageRef>();
   for (const id of ids) {
-    const ref = parseMessageRef(id);
-    if (ref) refsById.set(serializeMessageRef(ref), ref);
+    const ref = parseEmailId(id);
+    if (ref) refsById.set(publicEmailId(ref), ref);
   }
 
   const messages: UnifiedMessage[] = [];
@@ -354,7 +365,7 @@ export async function loadJmapEmailObjectsByIds(
   }
 
   return new Map(
-    messages.map((message) => [serializeMessageRef(message.ref), message]),
+    messages.map((message) => [publicEmailId(message.ref), message]),
   );
 }
 
@@ -402,7 +413,7 @@ export async function emailGet(
         : await queryEmailObjects(db, allowed, userId, {
             limit: MAX_OBJECTS_IN_GET,
           });
-    requestedIds = messages.map((message) => serializeMessageRef(message.ref));
+    requestedIds = messages.map((message) => publicEmailId(message.ref));
   } else {
     requestedIds = ids as string[];
     messages = [
@@ -413,7 +424,7 @@ export async function emailGet(
   }
 
   const byId = new Map(
-    messages.map((message) => [serializeMessageRef(message.ref), message]),
+    messages.map((message) => [publicEmailId(message.ref), message]),
   );
   const list: Record<string, unknown>[] = [];
   const notFound: string[] = [];
@@ -648,7 +659,7 @@ export async function emailQuery(
   let ids: string[] = [];
   if (!impossible && limit > 0) {
     const page = await queryMessages(db, allowed, queryExtra);
-    ids = page.messages.map((message) => serializeMessageRef(message.ref));
+    ids = page.messages.map((message) => publicEmailId(message.ref));
   }
 
   const result: Record<string, unknown> = {

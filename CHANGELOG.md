@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **JMAP ids are RFC 8620-valid (breaking for JMAP clients).** Every JMAP id now uses only `A-Za-z0-9-_` and is at most 255 octets; mailbox and identity ids no longer embed email addresses. Because this reallocates ids, the JMAP account id changed and state strings moved to `j2-`: connected JMAP clients must resync (drop their cache and refetch). The web UI and HTTP API are unaffected.
+
 - **Reply threading.** Manual replies now include a `References` header equal to `In-Reply-To` when the original Message-ID is available, improving standards-based thread reconstruction.
 
 - **Sequence sends now carry durable provenance in sent mail.** New sequence-created `sent_emails` rows record `sequence_id` and `sequence_enrollment_id`, and the unified message contract exposes both alongside `campaignId`. Historical rows are backfilled best-effort from durable sequence-step links and surviving outbox rows; older failed/suppressed sends without a backlink remain un-attributed. Initial suppression still creates no sent-mail row.

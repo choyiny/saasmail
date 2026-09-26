@@ -12,6 +12,7 @@ import {
   SUPPORTED_CAPABILITIES,
 } from "./constants";
 import { executeMethod, makeSession } from "./methods";
+import { parseAttachmentBlobId, publicAccountId } from "./public-ids";
 import { applyResultReferences, type MethodResponse } from "./result-reference";
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -289,14 +290,19 @@ export function registerJmapRoutes(
     const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));
     if (auth instanceof Response) return auth;
 
-    if (c.req.param("accountId") !== auth.user.id) {
+    if (c.req.param("accountId") !== publicAccountId(auth.user.id)) {
+      return problem(404, "about:blank", "Not found");
+    }
+
+    const attachmentId = parseAttachmentBlobId(c.req.param("blobId"));
+    if (!attachmentId) {
       return problem(404, "about:blank", "Not found");
     }
 
     const attachment = await findReadableAttachment(
       c.get("db"),
       auth.allowed,
-      c.req.param("blobId"),
+      attachmentId,
     );
     if (!attachment) {
       return problem(404, "about:blank", "Not found");
