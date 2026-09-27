@@ -12,7 +12,10 @@
 // Optional:
 //   JMAP_CC                  one Cc recipient
 //   JMAP_OLD_ACCOUNT_ID      the user id (the pre-reset JMAP account id); checks it is rejected
-//   JMAP_EXPECT_DELIVERY=1   poll JMAP_TO's saasmail inbox (the key's user must be able to read it)
+//   JMAP_EXPECT_DELIVERY=1   poll JMAP_TO's saasmail inbox (the key's user must be able to read it),
+//                            and send one more message: a follow-up to the first, whose delivered
+//                            In-Reply-To must be the Message-ID the first was delivered with (checked
+//                            by hand: the run prints both ids)
 //   JMAP_DELIVERY_TIMEOUT_S  delivery polling budget in seconds (default 120)
 //
 // Exit codes: 0 every check passed, 1 a check failed, 2 bad configuration.
@@ -503,6 +506,55 @@ async function sentEmailsWithSubject(ctx, env, subject) {
   return methodResponse(responses, "Email/get", "g").list.filter(
     (email) => email.subject === subject,
   );
+}
+
+/** Poll JMAP_TO's inbox for this run's message with `subject`, or fail. */
+async function awaitDelivery(ctx, env, step, subject) {
+  const { client, report, config } = ctx;
+  const inbox = findMailbox(env.mailboxes, "inbox", config.to);
+  if (!inbox) {
+    report.fail(
+      `${step}: delivery`,
+      `no Inbox mailbox of ${config.to} is visible to this API key`,
+    );
+  }
+  const deadline = Date.now() + config.deliveryTimeoutSeconds * 1000;
+  let delivered = null;
+  while (!delivered && Date.now() < deadline) {
+    const polled = await client.call([
+      [
+        "Email/query",
+        {
+          accountId: env.accountId,
+          filter: { inMailbox: inbox.id, after: ctx.windowStart },
+          limit: 50,
+        },
+        "q",
+      ],
+      [
+        "Email/get",
+        {
+          accountId: env.accountId,
+          "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
+          properties: ["id", "subject", "from", "messageId", "attachments"],
+        },
+        "g",
+      ],
+    ]);
+    delivered =
+      methodResponse(polled, "Email/get", "g").list.find(
+        (email) => email.subject === subject,
+      ) ?? null;
+    if (!delivered) await ctx.sleep(5000);
+  }
+  if (!delivered) {
+    report.fail(
+      `${step}: delivery`,
+      `nothing with subject "${subject}" reached ${config.to} within ${config.deliveryTimeoutSeconds}s`,
+    );
+  }
+  report.pass(`${step}: delivered to ${config.to}`, delivered.id);
+  return delivered;
 }
 
 async function stepSession(ctx) {
@@ -1041,57 +1093,20 @@ async function stepSent(ctx, env, sent) {
       `${step}: delivery`,
       "set JMAP_EXPECT_DELIVERY=1 when this key can read JMAP_TO's inbox",
     );
-    return;
+    return null;
   }
-  const inbox = findMailbox(env.mailboxes, "inbox", config.to);
-  if (!inbox) {
-    report.fail(
-      `${step}: delivery`,
-      `no Inbox mailbox of ${config.to} is visible to this API key`,
-    );
-  }
-  const deadline = Date.now() + config.deliveryTimeoutSeconds * 1000;
-  let delivered = null;
-  while (!delivered && Date.now() < deadline) {
-    const polled = await client.call([
-      [
-        "Email/query",
-        {
-          accountId: env.accountId,
-          filter: { inMailbox: inbox.id, after: ctx.windowStart },
-          limit: 50,
-        },
-        "q",
-      ],
-      [
-        "Email/get",
-        {
-          accountId: env.accountId,
-          "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
-          properties: ["id", "subject", "from", "messageId", "attachments"],
-        },
-        "g",
-      ],
-    ]);
-    delivered =
-      methodResponse(polled, "Email/get", "g").list.find(
-        (email) => email.subject === sent.subject,
-      ) ?? null;
-    if (!delivered) await ctx.sleep(5000);
-  }
-  if (!delivered) {
-    report.fail(
-      `${step}: delivery`,
-      `nothing with subject "${sent.subject}" reached ${config.to} within ${config.deliveryTimeoutSeconds}s`,
-    );
-  }
-  report.pass(`${step}: delivered to ${config.to}`, delivered.id);
+  const delivered = await awaitDelivery(ctx, env, step, sent.subject);
+  // The Sent Email keeps its own messageId (immutable); a provider may deliver
+  // the message under its own. Step 5b checks what matters: threading.
+  const own = sent.after.messageId?.[0];
+  const wire = delivered.messageId?.[0];
   report.check(
-    `${step}: the delivered Message-ID is the sent one`,
-    stableStringify(delivered.messageId) ===
-      stableStringify(sent.after.messageId),
-    delivered.messageId?.[0],
-    `${JSON.stringify(delivered.messageId)} vs ${JSON.stringify(sent.after.messageId)}`,
+    `${step}: the delivered Message-ID`,
+    typeof wire === "string" && wire.length > 0,
+    wire === own
+      ? `the Sent Email's own: ${wire}`
+      : `provider-assigned: ${wire} (the Sent Email keeps ${own})`,
+    JSON.stringify(delivered.messageId),
   );
   report.check(
     `${step}: the delivered From is ${config.from}`,
@@ -1110,6 +1125,69 @@ async function stepSent(ctx, env, sent) {
       cid === INLINE_CID,
     names.join(", "),
     JSON.stringify(delivered.attachments),
+  );
+  return delivered;
+}
+
+/**
+ * A follow-up to the Sent Email, citing its `messageId` as a JMAP client does.
+ * It joins the Sent Email's thread, and on the wire it must cite the Message-ID
+ * the first message was delivered with, so the recipient's client threads it.
+ */
+async function stepFollowUp(ctx, env, blobs, sent, deliveredOriginal) {
+  const { client, report } = ctx;
+  const step = "5b follow-up";
+  if (!deliveredOriginal) {
+    report.skip(`${step}: threading`, "needs JMAP_EXPECT_DELIVERY=1");
+    return;
+  }
+  const subject = `${ctx.marker} follow-up`;
+  const draft = draftEmail(ctx, env, blobs, { subject });
+  draft.inReplyTo = sent.after.messageId;
+  draft.references = [...draft.references, ...sent.after.messageId];
+  const responses = await client.call([
+    ["Email/set", { accountId: env.accountId, create: { draft } }, "0"],
+    [
+      "EmailSubmission/set",
+      {
+        accountId: env.accountId,
+        create: { sub: { emailId: "#draft", identityId: env.identity.id } },
+        onSuccessDestroyEmail: ["#sub"],
+      },
+      "1",
+    ],
+  ]);
+  const created = methodResponse(responses, "Email/set", "0").created?.draft;
+  if (!created) {
+    report.fail(
+      `${step}: draft create`,
+      JSON.stringify(methodResponse(responses, "Email/set", "0").notCreated),
+    );
+  }
+  ctx.liveDrafts.add(created.id);
+  const submitted = methodResponse(responses, "EmailSubmission/set", "1")
+    .created?.sub;
+  if (!submitted) {
+    report.fail(
+      `${step}: submission`,
+      JSON.stringify(
+        methodResponse(responses, "EmailSubmission/set", "1").notCreated,
+      ),
+    );
+  }
+  ctx.liveDrafts.delete(created.id);
+  report.check(
+    `${step}: the follow-up joins the Sent Email's thread`,
+    created.threadId === sent.after.threadId,
+    created.threadId,
+    `${created.threadId} vs ${sent.after.threadId}`,
+  );
+
+  const delivered = await awaitDelivery(ctx, env, step, subject);
+  // saasmail's JMAP view of received mail has no inReplyTo/references, so the
+  // delivered In-Reply-To is checked by hand: it must be this Message-ID.
+  ctx.log(
+    `NOTE  ${step}: check the delivered follow-up ${delivered.id} cites In-Reply-To ${deliveredOriginal.messageId[0]}`,
   );
 }
 
@@ -1460,7 +1538,8 @@ export async function run(
     const blobs = await stepUpload(ctx, env);
     await stepDraft(ctx, env, blobs);
     const sent = await stepRfcFlow(ctx, env, blobs);
-    await stepSent(ctx, env, sent);
+    const delivered = await stepSent(ctx, env, sent);
+    await stepFollowUp(ctx, env, blobs, sent, delivered);
     await stepDestroyVariant(ctx, env, blobs);
     await stepFlagVariant(ctx, env, blobs);
     await stepNegative(ctx, env, blobs);

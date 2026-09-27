@@ -15,6 +15,7 @@ import {
 } from "./send";
 import { formatFromAddress } from "./format-from-address";
 import { loadFrozenJmapSend } from "./jmap-frozen-send";
+import { deliveredMessageId } from "./message-id";
 import { isDemoMode } from "./is-dev";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
@@ -404,7 +405,17 @@ export async function attemptOutboxRow(
   if (!result.error) {
     await db
       .update(sentEmails)
-      .set({ status: "sent", resendId: result.id, sentAt: after })
+      .set({
+        status: "sent",
+        resendId: result.id,
+        sentAt: after,
+        // The provider may have replaced the Message-ID on this attempt; the
+        // row keeps the one recipients actually got. Without a provider id the
+        // row's submitted id stands.
+        ...(result.deliveredMessageId?.trim()
+          ? { messageId: deliveredMessageId("", result) }
+          : {}),
+      })
       .where(eq(sentEmails.id, row.sentEmailId));
     if (row.sequenceEmailId) {
       await resolveSequenceStep(

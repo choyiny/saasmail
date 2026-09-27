@@ -16,6 +16,7 @@ import type { AllowedInboxes } from "../lib/inbox-permissions";
 import type { OutboxSendResult } from "../lib/outbox";
 import {
   buildSubmissionMessage,
+  loadDeliveredMessageIds,
   parseContentJson,
   sendSubmission,
   submissionAttachmentFilename,
@@ -351,6 +352,7 @@ async function recordAcceptedSubmission(
     message,
     status: result.outcome,
     resendId: result.send.result?.id ?? null,
+    providerResult: result.send.result ?? null,
     now,
   });
   const personId = sentRow.personId!;
@@ -598,6 +600,7 @@ async function createSubmission(
     content,
     { email: identityEmail, displayName: identity.displayName ?? null },
     sendAttachments,
+    await loadDeliveredMessageIds(db, content),
   );
   let result: OutboxSendResult;
   try {

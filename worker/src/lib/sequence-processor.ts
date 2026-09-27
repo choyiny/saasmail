@@ -15,7 +15,7 @@ import {
   type TemplateVariables,
 } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
 import { sendViaOutbox } from "./outbox";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
@@ -289,7 +289,7 @@ export async function processSequenceEmail(
       subject: renderedSubject,
       bodyHtml: sendResult.renderedHtml ?? renderedHtml,
       bodyText: sendResult.renderedText ?? null,
-      messageId,
+      messageId: deliveredMessageId(messageId, result),
       resendId: result.id,
       status: outcome,
       sequenceId: enrollment.sequenceId,

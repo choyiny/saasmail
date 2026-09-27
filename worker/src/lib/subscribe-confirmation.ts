@@ -6,7 +6,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { interpolate } from "./interpolate";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
 import { sendWithSuppressionCheck } from "./send";
 import { signPayload } from "./signed-token";
 
@@ -174,7 +174,7 @@ export async function sendConfirmationEmail(opts: {
     bodyHtml: result.renderedHtml ?? renderedHtml,
     bodyText: result.renderedText ?? null,
     inReplyTo: null,
-    messageId,
+    messageId: deliveredMessageId(messageId, result.result),
     resendId: result.result?.id ?? null,
     status: "sent",
     cc: null,

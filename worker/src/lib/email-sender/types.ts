@@ -34,7 +34,17 @@ export interface SendEmailError {
 }
 
 export interface SendEmailResult {
+  /**
+   * The provider's own id for the send (stored as `sent_emails.resend_id`). Its
+   * meaning is provider-specific: never treat it as an RFC 5322 Message-ID.
+   */
   id: string | null;
+  /**
+   * The Message-ID the recipients actually received, when the provider replaced
+   * the caller's `Message-ID` header with its own (Cloudflare does, always).
+   * Absent when the provider sends the caller's header as given.
+   */
+  deliveredMessageId?: string | null;
   error: SendEmailError | null;
 }
 

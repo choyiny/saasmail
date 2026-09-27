@@ -69,7 +69,15 @@ export class CloudflareSender implements EmailSender {
       }
       const message = new EmailMessage(address, to.address, msg.asRaw());
       const result = await this.binding.send(message);
-      return { id: result?.messageId ?? null, error: null };
+      // Cloudflare Email Service generates the Message-ID itself and ignores the
+      // caller's header (it is platform-controlled), so the id it returns is the
+      // one recipients see.
+      // https://developers.cloudflare.com/email-service/reference/headers/
+      return {
+        id: result?.messageId ?? null,
+        deliveredMessageId: result?.messageId ?? null,
+        error: null,
+      };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       // Surface the cause: this path was previously swallowed, making send

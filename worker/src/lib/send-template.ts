@@ -8,7 +8,7 @@ import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
 
 export type SendTemplateParams = {
@@ -158,7 +158,7 @@ export async function sendTemplate(
     // template render.
     bodyHtml: sendResult.renderedHtml ?? renderedHtml,
     bodyText: sendResult.renderedText ?? null,
-    messageId,
+    messageId: deliveredMessageId(messageId, result),
     resendId: result.id,
     status: outcome,
     sentAt: now,

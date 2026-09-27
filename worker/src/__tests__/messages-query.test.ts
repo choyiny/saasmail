@@ -4,6 +4,7 @@ import { applyMigrations, cleanDb, createTestPerson, getDb } from "./helpers";
 import { attachments } from "../db/attachments.schema";
 import { blocklist } from "../db/blocklist.schema";
 import { emails } from "../db/emails.schema";
+import { senderIdentities } from "../db/sender-identities.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
@@ -108,6 +109,26 @@ describe("queryMessages", () => {
       name: "Alice",
     });
     expect(page.messages[1].to.name).toBe("Alice");
+  });
+
+  it("names a sent message's From with its inbox identity (live QA J3)", async () => {
+    await seedPair();
+    const scope = { isAdmin: false, inboxes: ["support@saasmail.test"] };
+
+    let page = await queryMessages(getDb(), scope, { limit: 10 });
+    expect(page.messages[1].from).toEqual({ email: "support@saasmail.test" });
+
+    await getDb().insert(senderIdentities).values({
+      email: "support@saasmail.test",
+      displayName: "Support Team",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    page = await queryMessages(getDb(), scope, { limit: 10 });
+    expect(page.messages[1].from).toEqual({
+      email: "support@saasmail.test",
+      name: "Support Team",
+    });
   });
 
   it("uses inbox/timestamp indexes for the real inbox-scoped query", async () => {

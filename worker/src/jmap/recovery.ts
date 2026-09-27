@@ -10,6 +10,7 @@ import { resolveAllowedInboxes } from "../lib/inbox-permissions";
 import { discardSentAttachments } from "../lib/sent-attachments";
 import {
   buildSubmissionMessage,
+  loadDeliveredMessageIds,
   submissionAttachmentLeaves,
 } from "../lib/submit-message";
 import { applyOnSuccessStep } from "./on-success";
@@ -106,6 +107,7 @@ async function writeSentRow(
       contentId: leaf.cid,
       disposition: leaf.disposition === "inline" ? "inline" : "attachment",
     })),
+    await loadDeliveredMessageIds(db, content),
   );
   if (submission.fromHeader) message.from = submission.fromHeader;
   await db

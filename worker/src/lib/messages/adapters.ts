@@ -34,6 +34,8 @@ export type SentSelect = {
   sequenceEnrollmentId: string | null;
   sentAt: number;
   personName: string | null;
+  /** The inbox identity's display name, when the select joined it. */
+  fromName?: string | null;
 };
 
 export function parseCc(raw: string | null | undefined): MailAddress[] {
@@ -94,7 +96,9 @@ export function adaptSent(row: SentSelect): UnifiedMessage {
     conversationId: row.conversationId,
     messageId: row.messageId,
     inReplyTo: row.inReplyTo,
-    from: { email: row.fromAddress },
+    from: row.fromName
+      ? { email: row.fromAddress, name: row.fromName }
+      : { email: row.fromAddress },
     to: {
       email: row.toAddress,
       name: row.personName,

@@ -7,6 +7,7 @@ import type { SendEmailAttachment } from "./email-sender";
 import type { CcRecipient } from "./send";
 import {
   buildSubmissionMessage,
+  loadDeliveredMessageIds,
   submissionAttachmentFilename,
   submissionAttachmentLeaves,
 } from "./submit-message";
@@ -86,6 +87,7 @@ export async function loadFrozenJmapSend(
     content,
     { email: submission.identityEmail, displayName: null },
     attachments,
+    await loadDeliveredMessageIds(db, content),
   );
   return {
     from: submission.fromHeader ?? message.from,

@@ -725,6 +725,12 @@ async function threadKeyForMessageId(
     UNION ALL
     SELECT 'sent' AS kind, se.id AS id FROM sent_emails se
      WHERE se.message_id IN ${forms} ${inboxScopeSql(allowed, sql`se.from_address`)}
+    UNION ALL
+    -- A JMAP send is recorded under the id it was delivered with, which a
+    -- provider like Cloudflare assigns; a JMAP client cites the Email's own.
+    SELECT 'sent' AS kind, se.id AS id FROM sent_emails se
+      JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
+     WHERE jmc.message_id IN ${forms} ${inboxScopeSql(allowed, sql`se.from_address`)}
     LIMIT 1
   `);
   const row = rows[0];

@@ -674,7 +674,10 @@ function sentArm(
       se.message_id AS message_id,
       se.in_reply_to AS in_reply_to,
       se.from_address AS from_email,
-      NULL AS from_name,
+      -- The inbox identity's current display name: the sent row doesn't keep
+      -- the name the message went out with.
+      (SELECT si.display_name FROM sender_identities si
+        WHERE si.email = se.from_address) AS from_name,
       se.to_address AS to_email,
       p.name AS to_name,
       se.cc AS cc,
@@ -822,6 +825,7 @@ function toUnified(
       sequenceEnrollmentId: row.sequence_enrollment_id,
       sentAt: row.occurred_at,
       personName: row.to_name,
+      fromName: row.from_name,
     };
     message = adaptSent(selected);
   }

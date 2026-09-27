@@ -346,6 +346,12 @@ export function toJmapEmail(
       args,
     );
   }
+  if (message.ref.kind === "sent" && message.from?.name) {
+    // The web names a sent message's From after its inbox identity, but `from`
+    // and `size` are immutable here, and JMAP has always shown an ordinary Sent
+    // Email's From without a name: a client that fetched it never refetches.
+    message = { ...message, from: { email: message.from.email } };
+  }
   const attachments = message.attachments ?? [];
   const textBody = message.bodyText
     ? [bodyPart(id, "text", message.bodyText, "text/plain")]

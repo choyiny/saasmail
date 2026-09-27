@@ -127,6 +127,15 @@ Rules, each reported per submission as a SetError (nothing is sent when one fail
 
 The message carries the draft's From name, To and Cc display names, subject, `Message-ID`, `In-Reply-To`, `References`, `Reply-To` and every stored part, inline or attached (inline parts keep their `cid`). The text body is the draft's `text/plain` body parts and the HTML body its `text/html` ones, so a text-only draft goes out without an HTML part and an HTML-only draft without a text part. If one create in a call fails unexpectedly, it gets `serverFail` and the call still reports the others.
 
+### Message-IDs: the Email's own and the delivered one
+
+Some providers replace the `Message-ID` a message is sent with. **Cloudflare Email Service always does**: it generates its own and doesn't let the caller set it ([Email headers](https://developers.cloudflare.com/email-service/reference/headers/)). A message sent through JMAP therefore has two ids:
+
+- **The Email's own `messageId`**, the one `Email/get` returns. It is set when the draft is created and never changes: filing the draft into Sent, or a separate `S…` Email, keeps it (RFC 8621 lets a server alter headers when it submits a message).
+- **The delivered Message-ID**, the one recipients received. saasmail records it on the sent message; the web UI's replies use it.
+
+Clients keep citing the Email's own id. When a draft's `inReplyTo` or `references` cites the own id of a message sent through JMAP, the message goes out citing that message's delivered id instead, so the recipient's client threads it; the stored draft and its `blobId` keep what the client wrote. A draft that cites either id joins the sent message's thread. With Postmark, Resend and Bavimail, saasmail records the id it sent, and the two are the same.
+
 A submission is accepted when the provider accepted the message, or when the provider failed temporarily and the outbox owns the retries. Accepted submissions have `undoStatus: "final"` (sent messages can't be recalled), `deliveryStatus: null` and `sendAt`. The submission's `emailId` stays the draft's `D…` id even after that Email is destroyed or filed into Sent. A permanently refused message creates no Sent Email and leaves no stored attachments behind; the draft is left as it was. A draft whose send is still in flight is locked: a second `EmailSubmission/set` for it is `forbiddenToSend` until the send settles, after which the draft can be submitted again, updated or destroyed.
 
 `EmailSubmission/get` and `/query` show accepted submissions only. `/query` filters by `identityIds`, `emailIds`, `threadIds`, `undoStatus`, `before` and `after`, and sorts by `emailId`, `threadId` or `sentAt`. Submissions are kept for 7 days and then pruned. Updating or destroying a submission returns `notFound` for an unknown id and `forbidden` for a known one: there is no unsend.
@@ -183,7 +192,7 @@ Snooze is intentionally invisible to JMAP. A snoozed conversation remains in its
 
 ## Delivery, retries and failures
 
-A message the provider fails temporarily stays with the outbox, which retries it every hour for up to 24 attempts. A retry sends exactly the stored message: the same From display name, recipients and names, `Message-ID`, `References`, bodies and attachments, even if the identity's display name changed in between.
+A message the provider fails temporarily stays with the outbox, which retries it every hour for up to 24 attempts. A retry sends exactly the stored message: the same From display name, recipients and names, `Message-ID`, `References`, bodies and attachments, even if the identity's display name changed in between. Reply-chain ids are mapped to delivered ids again on each attempt, and the attempt that succeeds records its delivered Message-ID.
 
 If a retried message finally fails, its Sent Email stays visible (the submission was already accepted) and the web UI marks it failed, as it does for web sends.
 
@@ -211,6 +220,8 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 - Editable identities (`Identity/set` is read-only).
 - Raw-message `blobId` for received mail and for sent mail that wasn't created through JMAP (it stays `null`).
 - The web composer's drafts don't appear in JMAP, and JMAP drafts don't appear in the web UI.
+- `inReplyTo` and `references` of received mail are `null`, so a client can't see which Message-ID a reply to your message cited.
+- A send finished by the crash-recovery pass, and a campaign message sent on an outbox retry, record the Message-ID saasmail submitted rather than the delivered one: the provider's answer was lost with the crash, or arrives after campaign bookkeeping.
 - Mailbox thread counts group JMAP-sent mail by its saasmail conversation, not by its JMAP `threadId`.
 - EventSource push, search snippets, mailbox mutation, `Email/import` and `Email/copy`.
 - `Thread/changes`, `Identity/changes` and query-change calculation.

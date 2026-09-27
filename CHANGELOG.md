@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Replies thread on Cloudflare.** Cloudflare Email Service replaces the Message-ID of every message it sends. The sent message now records the Message-ID recipients received, so a reply from the web UI cites an id they have, and a JMAP follow-up that cites a JMAP-sent Email's own `messageId` goes out citing its delivered id. The JMAP Email keeps its own `messageId`. Messages sent before this release keep the id saasmail submitted. See [docs/jmap.md](docs/jmap.md#message-ids-the-emails-own-and-the-delivered-one).
+
+- **Inline images in JMAP-sent mail show in the web UI.** The Sent view pointed `<img src="cid:…">` at nothing; it now serves the stored inline attachment, as it does for received mail.
+
+- **The web shows a sent message's From name.** The reading pane showed only the inbox address; it now shows the inbox identity's current display name. The JMAP view of mail not sent through JMAP is unchanged.
+
 - **Display names with commas are quoted.** Outbound Cc names such as `Doe, Jane` are now sent as `"Doe, Jane" <…>` instead of being split into two addresses by the provider. The Cloudflare provider now uses the bare address as the envelope recipient when To carries a display name.
 
 - **Sent attachments survive a crash mid-send:** compose and reply now store attachments before the provider call (database record first, then R2), so an outbox retry after a Worker crash always resends them. Suppressed or failed-to-start sends clean up both the records and the R2 objects, and the hourly cron removes attachments left by a send that never reached the outbox.

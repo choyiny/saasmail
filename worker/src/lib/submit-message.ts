@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import {
   contentLeaves as leavesOfPart,
@@ -116,6 +117,53 @@ function bracketed(id: string): string {
   return id.startsWith("<") ? id : `<${id}>`;
 }
 
+function bare(id: string): string {
+  return id.replace(/^<|>$/g, "");
+}
+
+/** D1 caps bound parameters per statement at 100. */
+const ID_CHUNK = 50;
+
+/**
+ * The Message-ID each JMAP-sent message in this content's reply chain was
+ * actually delivered with, keyed by the Email's own (immutable) `messageId`;
+ * only entries where the two differ. A provider like Cloudflare replaces the
+ * Message-ID we send, so a follow-up that cites the Email's own id would point
+ * at an id no recipient has. Keys and values are bare (no angle brackets).
+ */
+export async function loadDeliveredMessageIds(
+  db: Db,
+  content: JmapContentRow,
+): Promise<Map<string, string>> {
+  const cited = [
+    ...new Set(
+      [
+        ...(parseContentJson<string[] | null>(content.inReplyToJson, null) ??
+          []),
+        ...(parseContentJson<string[] | null>(content.referencesJson, null) ??
+          []),
+      ].map(bare),
+    ),
+  ];
+  const delivered = new Map<string, string>();
+  for (let start = 0; start < cited.length; start += ID_CHUNK) {
+    const rows = await db.all<{ own: string; delivered: string }>(sql`
+      SELECT jmc.message_id AS own, se.message_id AS delivered
+      FROM sent_emails se
+      JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
+      WHERE jmc.message_id IN ${cited.slice(start, start + ID_CHUNK)}
+        AND se.message_id IS NOT NULL
+      ORDER BY se.sent_at DESC
+    `);
+    for (const row of rows) {
+      const own = bare(row.own);
+      const wire = bare(row.delivered);
+      if (wire !== own && !delivered.has(own)) delivered.set(own, wire);
+    }
+  }
+  return delivered;
+}
+
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = [
   "Jan",
@@ -187,7 +235,14 @@ export function buildSubmissionMessage(
   content: JmapContentRow,
   identity: { email: string; displayName: string | null },
   attachments: SendEmailAttachment[],
+  /**
+   * From `loadDeliveredMessageIds`: the reply chain goes out citing the ids
+   * recipients actually have. The stored content keeps the Email's own ids;
+   * RFC 8621 lets the server alter headers when it submits a message.
+   */
+  deliveredIds: ReadonlyMap<string, string> = new Map(),
 ): SubmissionMessage {
+  const onWire = (id: string) => bracketed(deliveredIds.get(bare(id)) ?? id);
   const fromAddress = identity.email.trim().toLowerCase();
   const to = parseContentJson<ContentAddress[]>(content.toJson, [])[0];
   if (!to) throw new Error("content has no To address");
@@ -209,10 +264,10 @@ export function buildSubmissionMessage(
     Date: formatRfc5322Date(content.sentAt),
   };
   if (inReplyTo && inReplyTo.length > 0) {
-    headers["In-Reply-To"] = inReplyTo.map(bracketed).join(" ");
+    headers["In-Reply-To"] = inReplyTo.map(onWire).join(" ");
   }
   if (references && references.length > 0) {
-    headers.References = references.map(bracketed).join(" ");
+    headers.References = references.map(onWire).join(" ");
   }
   // One bare address, as the web composer sends it: every provider takes
   // Reply-To as a single mailbox. Submission refuses more than one.

@@ -10,7 +10,7 @@ import { createEmailSender, type EmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
 import {
@@ -251,7 +251,7 @@ export async function sendEmail(
     subject,
     bodyHtml: sendResult.renderedHtml ?? bodyHtml,
     bodyText: sendResult.renderedText ?? bodyText ?? null,
-    messageId,
+    messageId: deliveredMessageId(messageId, sendResult.result),
     resendId: sendResult.result?.id ?? null,
     status: outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
@@ -497,7 +497,7 @@ export async function replyToEmail(
     bodyHtml: finalBodyHtml,
     bodyText: bodyText ?? null,
     inReplyTo: origInReplyToMessageId,
-    messageId,
+    messageId: deliveredMessageId(messageId, sendResult.result),
     resendId: sendResult.result?.id ?? null,
     status: outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,

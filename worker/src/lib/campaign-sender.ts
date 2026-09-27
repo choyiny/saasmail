@@ -20,7 +20,7 @@ import {
 } from "./campaign-tracking";
 import { htmlToText } from "./html-to-text";
 import { interpolate } from "./interpolate";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
 import { finalizeOutboxRow, sendViaOutbox } from "./outbox";
 import { signPayload } from "./signed-token";
 
@@ -499,7 +499,7 @@ export async function sendCampaignRecipient(
     recipient,
     sentEmailId,
     outboxId: result.outboxId,
-    messageId,
+    messageId: deliveredMessageId(messageId, result.send.result),
     subject,
     html: result.send.renderedHtml ?? html,
     text: result.send.renderedText ?? text ?? null,

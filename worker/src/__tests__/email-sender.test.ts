@@ -110,6 +110,9 @@ describe("CloudflareSender", () => {
     });
 
     expect(result.id).toBe("msg-123");
+    // Cloudflare replaces the caller's Message-ID with its own and returns it:
+    // that one is what recipients see.
+    expect(result.deliveredMessageId).toBe("msg-123");
     expect(result.error).toBeNull();
     expect(fakeBinding.send).toHaveBeenCalledTimes(1);
     const sent = fakeBinding.send.mock.calls[0][0] as {
@@ -238,6 +241,8 @@ describe("BavimailSender", () => {
 
     expect(result.error).toBeNull();
     expect(result.id).toBe("bm-msg-123");
+    // Bavimail's id is a provider id, not the RFC Message-ID.
+    expect(result.deliveredMessageId ?? null).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.bavimail.com/emails");
@@ -521,6 +526,8 @@ describe("PostmarkSender", () => {
 
     expect(result.error).toBeNull();
     expect(result.id).toBe("pm-msg-123");
+    // Postmark's MessageID is a tracking id, not the RFC Message-ID.
+    expect(result.deliveredMessageId ?? null).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.postmarkapp.com/email");
