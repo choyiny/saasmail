@@ -1,5 +1,7 @@
-/** One To plus MAX_CC_ENTRIES (50) is the transactional 1:1 send (spec J4). */
-export const MAX_SUBMISSION_RECIPIENTS = 51;
+import { MAX_RECIPIENTS, MAX_SEND_ATTACHMENTS } from "../lib/send-limits";
+
+/** One To plus Cc, within the provider's per-message recipient cap. */
+export const MAX_SUBMISSION_RECIPIENTS = MAX_RECIPIENTS;
 
 /** An RFC 8621 §7.5 SetError, with every extra field this server uses. */
 export type SubmissionSetError = {
@@ -170,4 +172,14 @@ export function resolveEnvelope(
     };
   }
   return { envelope: derived, error: null };
+}
+
+/** Every stored part goes out as an attachment, inline or not. */
+export function checkAttachmentCount(count: number): SubmissionSetError | null {
+  if (count <= MAX_SEND_ATTACHMENTS) return null;
+  return {
+    type: "invalidEmail",
+    properties: ["attachments"],
+    description: `A message can carry at most ${MAX_SEND_ATTACHMENTS} attachments, inline images included; this one has ${count}`,
+  };
 }

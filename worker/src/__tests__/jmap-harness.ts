@@ -55,7 +55,7 @@ export function recordingSender(
 ) {
   const calls: SendEmailParams[] = [];
   const sender: EmailSender = {
-    provider: "none",
+    provider: "cloudflare",
     async send(params: SendEmailParams) {
       calls.push(params);
       return results[Math.min(calls.length - 1, results.length - 1)];

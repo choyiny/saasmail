@@ -428,6 +428,13 @@
       "when": 1790456932053,
       "tag": "0060_jmap_alias_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1790546458185,
+      "tag": "0061_outbox_delivered_message_id",
+      "breakpoints": true
     }
   ]
 }

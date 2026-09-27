@@ -49,14 +49,16 @@ Two limits come from the outbound provider. The upload and per-Email attachment 
 
 | Provider                 | Upload and attachment limit (bytes) | Whole-message limit (bytes) |
 | ------------------------ | ----------------------------------- | --------------------------- |
-| Cloudflare Email Service | 18,724,571                          | 5,242,880 (5 MiB)           |
+| Cloudflare Email Service | 3,744,914                           | 5,242,880 (5 MiB)           |
 | Postmark                 | 7,489,828                           | 10,000,000                  |
 | Resend                   | 26,214,400                          | 40,000,000                  |
 | Bavimail                 | 26,214,400                          | 26,214,400                  |
 | Demo mode                | 26,214,400                          | 26,214,400                  |
 | None configured          | 0                                   | 0                           |
 
-Cloudflare accepts at most 5 MiB per message to arbitrary recipients (25 MiB only to verified destination addresses). The upload limit still reflects the older 25 MiB assumption, so on Cloudflare an upload can succeed and the message then be refused at submission with `tooLarge`.
+Cloudflare accepts at most 5 MiB per message to arbitrary recipients (25 MiB only to verified destination addresses), attachments included. Its attachment limit is that 5 MiB divided by 1.4, to leave room for base64 and the rest of the message: a conservative estimate, while the whole-message check at submission measures the real message.
+
+Every provider also gets Cloudflare's per-message counts, the strictest of the four: at most 50 recipients (one To plus up to 49 Cc) and 32 attachments, inline images included.
 
 ## Supported methods
 
@@ -114,13 +116,15 @@ Rules, each reported per submission as a SetError (nothing is sent when one fail
 | Any Bcc                                                                         | `invalidEmail`, `properties: ["bcc"]`                   |
 | No To                                                                           | `noRecipients`                                          |
 | An invalid recipient address                                                    | `invalidRecipients` with the list                       |
-| More than 51 recipients (one To plus up to 50 Cc)                               | `tooManyRecipients`, `maxRecipients: 51`                |
+| More than 50 recipients (one To plus up to 49 Cc)                               | `tooManyRecipients`, `maxRecipients: 50`                |
 | `envelope.mailFrom` isn't the identity's address                                | `forbiddenMailFrom`                                     |
 | `envelope.rcptTo` isn't exactly the To and Cc addresses                         | `invalidEmail`                                          |
 | SMTP parameters in the envelope                                                 | `invalidProperties` on `envelope`                       |
 | More than one Reply-To (it goes out as one bare address)                        | `invalidEmail`, `properties: ["replyTo"]`               |
 | A text part that is neither the text nor the HTML body (upload it as a blob)    | `invalidEmail`, `properties: ["bodyStructure"]`         |
 | A stored attachment can't be read                                               | `invalidEmail` on `attachments`                         |
+| More than 32 attachments, inline parts included                                 | `invalidEmail` on `attachments`                         |
+| No outbound provider is configured                                              | `forbiddenToSend`                                       |
 | The stored message exceeds the whole-message limit                              | `tooLarge` with `maxSize`                               |
 | The draft is already being sent                                                 | `forbiddenToSend`: "This message is already being sent" |
 | The provider refused the message permanently                                    | `forbiddenToSend` with the provider's reason            |
@@ -221,7 +225,7 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 - Raw-message `blobId` for received mail and for sent mail that wasn't created through JMAP (it stays `null`).
 - The web composer's drafts don't appear in JMAP, and JMAP drafts don't appear in the web UI.
 - `inReplyTo` and `references` of received mail are `null`, so a client can't see which Message-ID a reply to your message cited.
-- A send finished by the crash-recovery pass, and a campaign message sent on an outbox retry, record the Message-ID saasmail submitted rather than the delivered one: the provider's answer was lost with the crash, or arrives after campaign bookkeeping.
+- A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
 - Mailbox thread counts group JMAP-sent mail by its saasmail conversation, not by its JMAP `threadId`.
 - EventSource push, search snippets, mailbox mutation, `Email/import` and `Email/copy`.
 - `Thread/changes`, `Identity/changes` and query-change calculation.

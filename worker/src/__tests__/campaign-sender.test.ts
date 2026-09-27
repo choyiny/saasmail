@@ -610,6 +610,42 @@ describe("reconcileCampaignBookkeeping", () => {
     expect(await getDb().select().from(outboxEmails)).toHaveLength(0);
   });
 
+  it("records the Message-ID the held row says was delivered", async () => {
+    await seed({ members: 1 });
+    await snapshotCampaign(getDb(), CAMPAIGN, now());
+    await runCampaignFanOutPage(getDb(), cfEnv(), CAMPAIGN, JOB);
+    const recipientId = (await getDb().select().from(campaignRecipients))[0].id;
+    await getDb()
+      .update(campaignRecipients)
+      .set({ status: "processing" })
+      .where(eq(campaignRecipients.id, recipientId));
+    const ts = now();
+    await getDb()
+      .insert(outboxEmails)
+      .values({
+        id: "ob-d",
+        sentEmailId: "se-d",
+        sequenceEmailId: null,
+        campaignRecipientId: recipientId,
+        fromAddress: "news@saasmail.test",
+        toAddress: "u0@example.com",
+        subject: "This week",
+        bodyHtml: "<p>Hi</p>",
+        headers: JSON.stringify({ "Message-ID": "<m1@saasmail.test>" }),
+        transactional: 0,
+        status: "bookkeeping_pending",
+        attempts: 2,
+        deliveredMessageId: "cf-camp@cf.test",
+        nextRetryAt: ts,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+
+    await reconcileCampaignBookkeeping(getDb(), cfEnv());
+    const se = await getDb().select().from(sentEmails);
+    expect(se[0].messageId).toBe("<cf-camp@cf.test>");
+  });
+
   it("is idempotent when the recipient is already sent", async () => {
     await seed({ members: 1 });
     await snapshotCampaign(getDb(), CAMPAIGN, now());

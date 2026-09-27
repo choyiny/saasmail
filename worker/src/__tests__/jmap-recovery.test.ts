@@ -110,6 +110,38 @@ describe("JMAP submission recovery", () => {
     );
   });
 
+  it("row 1 records the Message-ID the held row says was delivered", async () => {
+    const { authorId } = await seedAccount();
+    await seedClaimed(authorId, { outbox: "bookkeeping_pending", sent: null });
+    await getDb()
+      .update(outboxEmails)
+      .set({ deliveredMessageId: "cf-rec@cf.test" })
+      .where(eq(outboxEmails.sentEmailId, "s1"));
+    await recoverClaimedSubmissions(getDb(), env, NOW);
+    const sent = await one(
+      getDb().select().from(sentEmails).where(eq(sentEmails.id, "s1")),
+    );
+    expect(sent?.messageId).toBe("<cf-rec@cf.test>");
+  });
+
+  it("row 1 upgrades a retrying Sent row with the delivered Message-ID", async () => {
+    const { authorId } = await seedAccount();
+    await seedClaimed(authorId, {
+      outbox: "bookkeeping_pending",
+      sent: "retrying",
+    });
+    await getDb()
+      .update(outboxEmails)
+      .set({ deliveredMessageId: "<cf-up@cf.test>" })
+      .where(eq(outboxEmails.sentEmailId, "s1"));
+    await recoverClaimedSubmissions(getDb(), env, NOW);
+    const sent = await one(
+      getDb().select().from(sentEmails).where(eq(sentEmails.id, "s1")),
+    );
+    expect(sent?.status).toBe("sent");
+    expect(sent?.messageId).toBe("<cf-up@cf.test>");
+  });
+
   it("row 2: pending outbox -> retrying Sent row, accepted, claim kept", async () => {
     const { authorId } = await seedAccount();
     await seedClaimed(authorId, { outbox: "pending", sent: null });

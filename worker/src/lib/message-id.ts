@@ -27,6 +27,11 @@ export function deliveredMessageId(
   result: SendEmailResult | null | undefined,
 ): string {
   const delivered = result?.deliveredMessageId?.trim();
-  if (!delivered) return submitted;
-  return delivered.startsWith("<") ? delivered : `<${delivered}>`;
+  return delivered ? bracketedMessageId(delivered) : submitted;
+}
+
+/** A Message-ID in the bracketed form `sent_emails.message_id` stores. */
+export function bracketedMessageId(id: string): string {
+  const trimmed = id.trim();
+  return trimmed.startsWith("<") ? trimmed : `<${trimmed}>`;
 }

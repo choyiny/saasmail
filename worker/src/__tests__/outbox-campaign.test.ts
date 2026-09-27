@@ -304,6 +304,59 @@ describe("bookkeeping ownership", () => {
     expect(row.bookkeepingOwner).toBe("jmap");
   });
 
+  it("keeps the provider's delivered Message-ID on a held row, inline and on retry", async () => {
+    const delivered: SendEmailResult = {
+      id: "<cf-1@cf.test>",
+      deliveredMessageId: "<cf-1@cf.test>",
+      error: null,
+    };
+    const inline = await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender: fakeSender(delivered),
+      sentEmailId: "se-jmap-d1",
+      bookkeepingOwner: "jmap",
+      fromAddress: "me@saasmail.test",
+      from: "Me <me@saasmail.test>",
+      to: "to@example.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      transactional: true,
+    });
+    const retried = await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender: fakeSender(TRANSIENT),
+      sentEmailId: "se-jmap-d2",
+      bookkeepingOwner: "jmap",
+      fromAddress: "me@saasmail.test",
+      from: "Me <me@saasmail.test>",
+      to: "to@example.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      transactional: true,
+    });
+    await getDb()
+      .update(outboxEmails)
+      .set({ nextRetryAt: 0 })
+      .where(eq(outboxEmails.id, retried.outboxId));
+    await attemptOutboxRow(
+      getDb(),
+      env,
+      fakeSender(delivered),
+      retried.outboxId,
+    );
+
+    for (const id of [inline.outboxId, retried.outboxId]) {
+      const [row] = await getDb()
+        .select()
+        .from(outboxEmails)
+        .where(eq(outboxEmails.id, id));
+      expect(row.status).toBe("bookkeeping_pending");
+      expect(row.deliveredMessageId).toBe("<cf-1@cf.test>");
+    }
+  });
+
   it("holds a jmap-owned row when a retry finally succeeds", async () => {
     const first = fakeSender(TRANSIENT);
     const result = await sendViaOutbox({

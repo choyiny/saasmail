@@ -3,8 +3,7 @@ import { z } from "@hono/zod-openapi";
 import type { ZodType } from "zod";
 import type { Context } from "hono";
 import { sanitizeFilename } from "./sanitize-filename";
-
-export const MAX_ATTACHMENTS = 50;
+import { MAX_SEND_ATTACHMENTS } from "./send-limits";
 
 export interface ParsedSendBody<T> {
   payload: T;
@@ -36,7 +35,7 @@ export type SendParseError =
  *     against `schema`.
  *   - `files`: zero or more file fields.
  *
- * Enforces MAX_ATTACHMENTS and a caller-supplied byte cap.
+ * Enforces MAX_SEND_ATTACHMENTS and a caller-supplied byte cap.
  */
 export async function parseSendBody<T>(
   c: Context,
@@ -88,12 +87,12 @@ export async function parseSendBody<T>(
   const rawFiles = form
     .getAll("files")
     .filter((f): f is File => f instanceof File);
-  if (rawFiles.length > MAX_ATTACHMENTS) {
+  if (rawFiles.length > MAX_SEND_ATTACHMENTS) {
     return {
       ok: false,
       err: {
         kind: "too-many-files",
-        limit: MAX_ATTACHMENTS,
+        limit: MAX_SEND_ATTACHMENTS,
         provided: rawFiles.length,
       },
     };

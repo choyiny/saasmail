@@ -15,7 +15,7 @@ import {
 } from "./send";
 import { formatFromAddress } from "./format-from-address";
 import { loadFrozenJmapSend } from "./jmap-frozen-send";
-import { deliveredMessageId } from "./message-id";
+import { bracketedMessageId } from "./message-id";
 import { isDemoMode } from "./is-dev";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
@@ -220,7 +220,12 @@ export async function sendViaOutbox(
       // duplicate. Hold the row until the owner confirms.
       await db
         .update(outboxEmails)
-        .set({ status: "bookkeeping_pending", attempts: 1, updatedAt: after })
+        .set({
+          status: "bookkeeping_pending",
+          attempts: 1,
+          deliveredMessageId: result.deliveredMessageId ?? null,
+          updatedAt: after,
+        })
         .where(eq(outboxEmails.id, outboxId));
     } else {
       await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
@@ -413,7 +418,7 @@ export async function attemptOutboxRow(
         // row keeps the one recipients actually got. Without a provider id the
         // row's submitted id stands.
         ...(result.deliveredMessageId?.trim()
-          ? { messageId: deliveredMessageId("", result) }
+          ? { messageId: bracketedMessageId(result.deliveredMessageId) }
           : {}),
       })
       .where(eq(sentEmails.id, row.sentEmailId));
@@ -431,7 +436,11 @@ export async function attemptOutboxRow(
       // deleting it here.
       await db
         .update(outboxEmails)
-        .set({ status: "bookkeeping_pending", updatedAt: after })
+        .set({
+          status: "bookkeeping_pending",
+          deliveredMessageId: result.deliveredMessageId ?? null,
+          updatedAt: after,
+        })
         .where(eq(outboxEmails.id, row.id));
     } else {
       await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));

@@ -59,6 +59,13 @@ export const outboxEmails = sqliteTable(
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
+    /**
+     * The Message-ID the provider delivered an accepted message with, when it
+     * replaced ours (Cloudflare does). Kept on a `bookkeeping_pending` row so
+     * the owner's bookkeeping, possibly finished later by recovery or the
+     * campaign sweep, records the id recipients actually got.
+     */
+    deliveredMessageId: text("delivered_message_id"),
     /** Unix seconds; the processor picks up pending rows with next_retry_at <= now. */
     nextRetryAt: integer("next_retry_at"),
     createdAt: integer("created_at").notNull(),

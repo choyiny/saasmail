@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkAttachmentCount,
   checkContentRecipients,
   resolveEnvelope,
   submissionRecipients,
@@ -49,17 +50,25 @@ describe("checkContentRecipients (spec §3.2 steps 3–4)", () => {
     });
   });
 
-  it("caps the recipient count at 51", () => {
-    const cc = Array.from({ length: 51 }, (_, i) => addr(`cc${i}@x.com`));
+  it("caps the recipient count at 50, To and Cc together (Cloudflare's limit)", () => {
+    const cc = Array.from({ length: 50 }, (_, i) => addr(`cc${i}@x.com`));
     expect(
       checkContentRecipients(content([addr("a@x.com")], cc)),
     ).toMatchObject({
       type: "tooManyRecipients",
-      maxRecipients: 51,
+      maxRecipients: 50,
     });
     expect(
-      checkContentRecipients(content([addr("a@x.com")], cc.slice(0, 50))),
+      checkContentRecipients(content([addr("a@x.com")], cc.slice(0, 49))),
     ).toBeNull();
+  });
+
+  it("caps attachments at 32, inline parts included", () => {
+    expect(checkAttachmentCount(32)).toBeNull();
+    expect(checkAttachmentCount(33)).toMatchObject({
+      type: "invalidEmail",
+      properties: ["attachments"],
+    });
   });
 });
 

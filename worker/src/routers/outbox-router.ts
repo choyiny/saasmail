@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, desc, eq, lt, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "../lib/email-sender";
@@ -92,7 +92,9 @@ outboxRouter.openapi(listRoute, async (c) => {
       limit = Math.min(parsed, MAX_LIMIT);
   }
 
-  const clauses = [];
+  // A `bookkeeping_pending` row was already accepted by the provider and only
+  // waits for its owner's bookkeeping: it is not a send anyone can act on.
+  const clauses = [inArray(outboxEmails.status, ["pending", "failed"])];
   const scope = inboxFilter(allowed, outboxEmails.fromAddress);
   if (scope) clauses.push(scope);
   if (cursor) {
@@ -120,7 +122,7 @@ outboxRouter.openapi(listRoute, async (c) => {
   const rows = await db
     .select()
     .from(outboxEmails)
-    .where(clauses.length > 0 ? and(...clauses) : undefined)
+    .where(and(...clauses))
     .orderBy(desc(outboxEmails.createdAt), desc(outboxEmails.id))
     .limit(limit + 1);
 
@@ -150,6 +152,9 @@ outboxRouter.openapi(listRoute, async (c) => {
   );
 });
 
+const ALREADY_ACCEPTED =
+  "The provider already accepted this message; it can't be retried or cancelled";
+
 // --- POST /api/outbox/{id}/retry ---
 const retryRoute = createRoute({
   method: "post",
@@ -175,6 +180,10 @@ const retryRoute = createRoute({
       description: "Not found",
       content: { "application/json": { schema: ErrorSchema } },
     },
+    409: {
+      description: "The provider already accepted this message",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -191,6 +200,10 @@ outboxRouter.openapi(retryRoute, async (c) => {
   if (rows.length === 0) return c.json({ error: "Not found" }, 404);
   const row = rows[0];
   assertInboxAllowed(allowed, row.fromAddress);
+  if (row.status === "bookkeeping_pending") {
+    // Retrying would send an accepted message a second time.
+    return c.json({ error: ALREADY_ACCEPTED }, 409);
+  }
 
   const now = Math.floor(Date.now() / 1000);
   // Make the row claimable now; a failed row gets a fresh attempt budget.
@@ -209,9 +222,13 @@ outboxRouter.openapi(retryRoute, async (c) => {
     .where(
       and(
         eq(outboxEmails.id, id),
+        // The status guard also covers a row that became held since the read.
         row.status === "failed"
-          ? undefined
-          : lte(outboxEmails.nextRetryAt, now),
+          ? eq(outboxEmails.status, "failed")
+          : and(
+              eq(outboxEmails.status, "pending"),
+              lte(outboxEmails.nextRetryAt, now),
+            ),
       ),
     )
     .returning({ id: outboxEmails.id });
@@ -259,6 +276,10 @@ outboxRouter.openapi(cancelRoute, async (c) => {
   if (rows.length === 0) return c.json({ error: "Not found" }, 404);
   const row = rows[0];
   assertInboxAllowed(allowed, row.fromAddress);
+  if (row.status === "bookkeeping_pending") {
+    // Cancelling would mark a delivered message failed.
+    return c.json({ error: ALREADY_ACCEPTED }, 409);
+  }
 
   const now = Math.floor(Date.now() / 1000);
   // Guard against cancelling while a send is in flight: the processor holds a
@@ -269,8 +290,12 @@ outboxRouter.openapi(cancelRoute, async (c) => {
     .delete(outboxEmails)
     .where(
       row.status === "failed"
-        ? eq(outboxEmails.id, id)
-        : and(eq(outboxEmails.id, id), lte(outboxEmails.nextRetryAt, now)),
+        ? and(eq(outboxEmails.id, id), eq(outboxEmails.status, "failed"))
+        : and(
+            eq(outboxEmails.id, id),
+            eq(outboxEmails.status, "pending"),
+            lte(outboxEmails.nextRetryAt, now),
+          ),
     )
     .returning({ id: outboxEmails.id });
   if (deleted.length === 0) {

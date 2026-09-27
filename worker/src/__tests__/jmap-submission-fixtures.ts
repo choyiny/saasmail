@@ -42,7 +42,7 @@ export function recordingSender(...results: SendEmailResult[]) {
   const calls: SendEmailParams[] = [];
   const queue = [...results];
   const sender: EmailSender = {
-    provider: "none" as const,
+    provider: "cloudflare" as const,
     async send(params: SendEmailParams) {
       calls.push(params);
       return queue.shift() ?? OK;

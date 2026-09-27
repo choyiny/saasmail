@@ -52,6 +52,7 @@ import {
 import { buildJmapSentRow } from "./sent-row";
 import { currentJmapState, parseJmapState } from "./state";
 import {
+  checkAttachmentCount,
   checkContentRecipients,
   resolveEnvelope,
   submissionRecipients,
@@ -461,7 +462,7 @@ async function createSubmission(
     });
   }
 
-  // Steps 3–4: exactly one To, Cc, no Bcc, sendable, at most 51.
+  // Steps 3–4: exactly one To, Cc, no Bcc, sendable, at most 50 in all.
   const recipientError = checkContentRecipients(content);
   if (recipientError) return rejected(recipientError);
 
@@ -473,8 +474,16 @@ async function createSubmission(
   );
   if (envelope.error) return rejected(envelope.error);
 
-  // Step 6: everything in the Email can be sent, its attachments still
-  // resolve, and the message fits the provider.
+  // Step 6: there is a provider, everything in the Email can be sent, its
+  // attachments still resolve, and the message fits the provider.
+  if (sender.provider === "none") {
+    // Before the size check: NoopSender's limit is 0, which would read as a
+    // message that is too large.
+    return rejected({
+      type: "forbiddenToSend",
+      description: "No email provider is configured on this server",
+    });
+  }
   const replyTo = parseContentJson<ContentAddress[] | null>(
     content.replyToJson,
     null,
@@ -495,6 +504,8 @@ async function createSubmission(
     });
   }
   const leaves = submissionAttachmentLeaves(content);
+  const countError = checkAttachmentCount(leaves.length);
+  if (countError) return rejected(countError);
   const heads = await Promise.all(
     leaves.map((leaf) => ctx.env.R2.head(leaf.r2Key!)),
   );

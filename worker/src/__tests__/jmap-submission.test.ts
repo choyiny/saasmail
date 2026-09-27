@@ -16,7 +16,7 @@ import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { suppressions } from "../db/suppressions.schema";
-import { PostmarkSender } from "../lib/email-sender";
+import { NoopSender, PostmarkSender } from "../lib/email-sender";
 import { attemptOutboxRow } from "../lib/outbox";
 import { submissionAttachmentLeaves } from "../lib/submit-message";
 import { parseDraftEmailId, parseRawBlobId } from "../jmap/public-ids";
@@ -460,6 +460,20 @@ describe("EmailSubmission/set create", () => {
     });
     expect(calls).toHaveLength(0);
     await expectNothingStaged(draft.id, "vanished.pdf");
+  });
+
+  it("with no provider configured, refuses with forbiddenToSend rather than tooLarge", async () => {
+    const draft = await createDraft(userId, recordingSender().sender);
+    const responses = await runJmap(
+      userId,
+      [submitCall(userId, draft.id)],
+      new NoopSender(),
+    );
+    expect(submissionResult(responses).notCreated.s1).toEqual({
+      type: "forbiddenToSend",
+      description: "No email provider is configured on this server",
+    });
+    await expectNothingStaged(draft.id);
   });
 
   it("rejects a message over the provider cap with tooLarge.maxSize (Postmark: 10 MB)", async () => {

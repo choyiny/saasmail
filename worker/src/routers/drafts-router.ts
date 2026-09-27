@@ -1,4 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
+import { MAX_CC_ENTRIES } from "../lib/send-limits";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { drafts } from "../db/drafts.schema";
 import { upsertDraft } from "../lib/drafts";
@@ -161,7 +162,7 @@ const SaveDraftBody = z.object({
   // A draft `to` may be a partial/incomplete address while the user types,
   // so it is deliberately NOT validated as an email here.
   to: z.string().max(320).optional(),
-  cc: z.array(CcEntrySchema).max(50).optional(),
+  cc: z.array(CcEntrySchema).max(MAX_CC_ENTRIES).optional(),
   subject: z.string().max(2000).optional(),
   bodyHtml: z.string().optional(),
   bodyText: z.string().optional(),

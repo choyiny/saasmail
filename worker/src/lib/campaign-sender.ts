@@ -20,7 +20,11 @@ import {
 } from "./campaign-tracking";
 import { htmlToText } from "./html-to-text";
 import { interpolate } from "./interpolate";
-import { deliveredMessageId, generateMessageId } from "./message-id";
+import {
+  bracketedMessageId,
+  deliveredMessageId,
+  generateMessageId,
+} from "./message-id";
 import { finalizeOutboxRow, sendViaOutbox } from "./outbox";
 import { signPayload } from "./signed-token";
 
@@ -648,11 +652,15 @@ export async function reconcileCampaignBookkeeping(
         recipient,
         sentEmailId: row.sentEmailId,
         outboxId: row.id,
-        messageId: row.headers
-          ? ((JSON.parse(row.headers) as Record<string, string>)[
-              "Message-ID"
-            ] ?? null)
-          : null,
+        // The id the accepted message was delivered with, when the provider
+        // replaced ours; rows held before that was recorded fall back to ours.
+        messageId: row.deliveredMessageId
+          ? bracketedMessageId(row.deliveredMessageId)
+          : row.headers
+            ? ((JSON.parse(row.headers) as Record<string, string>)[
+                "Message-ID"
+              ] ?? null)
+            : null,
         subject: row.subject,
         html: row.bodyHtml,
         text: row.bodyText,

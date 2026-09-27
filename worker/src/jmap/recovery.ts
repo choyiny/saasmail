@@ -7,6 +7,7 @@ import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { createDb } from "../db/client";
 import { resolveAllowedInboxes } from "../lib/inbox-permissions";
+import { bracketedMessageId } from "../lib/message-id";
 import { discardSentAttachments } from "../lib/sent-attachments";
 import {
   buildSubmissionMessage,
@@ -83,6 +84,8 @@ async function writeSentRow(
   submission: typeof jmapSubmissions.$inferSelect,
   status: "sent" | "retrying",
   now: number,
+  /** From the held outbox row: the id the accepted message went out with. */
+  deliveredId: string | null = null,
 ) {
   const [content] = await db
     .select()
@@ -118,6 +121,11 @@ async function writeSentRow(
         content,
         message,
         status,
+        providerResult: {
+          id: null,
+          deliveredMessageId: deliveredId,
+          error: null,
+        },
         now,
       }),
     )
@@ -177,7 +185,10 @@ export async function recoverClaimedSubmissions(
   for (const submission of claimed) {
     try {
       const [outbox] = await db
-        .select({ status: outboxEmails.status })
+        .select({
+          status: outboxEmails.status,
+          deliveredMessageId: outboxEmails.deliveredMessageId,
+        })
         .from(outboxEmails)
         .where(eq(outboxEmails.sentEmailId, submission.sentEmailId))
         .limit(1);
@@ -189,11 +200,23 @@ export async function recoverClaimedSubmissions(
 
       if (outbox?.status === "bookkeeping_pending") {
         // The provider accepted. Write or upgrade the Sent row, accept, release.
-        if (!sent) await writeSentRow(db, submission, "sent", now);
-        else if (sent.status !== "sent") {
+        if (!sent) {
+          await writeSentRow(
+            db,
+            submission,
+            "sent",
+            now,
+            outbox.deliveredMessageId,
+          );
+        } else if (sent.status !== "sent") {
           await db
             .update(sentEmails)
-            .set({ status: "sent" })
+            .set({
+              status: "sent",
+              ...(outbox.deliveredMessageId
+                ? { messageId: bracketedMessageId(outbox.deliveredMessageId) }
+                : {}),
+            })
             .where(eq(sentEmails.id, submission.sentEmailId));
         }
         await accept(db, submission.id);

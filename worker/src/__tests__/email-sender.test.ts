@@ -185,13 +185,14 @@ describe("maxAttachmentBytes", () => {
     expect(sender.maxAttachmentBytes()).toBe(25 * 1024 * 1024);
   });
 
-  it("returns ~18MB for Cloudflare", () => {
+  it("returns ~3.7MB for Cloudflare", () => {
     const sender = createEmailSender({
       EMAIL: { send: async () => ({ messageId: "x" }) },
     } as any);
-    // 25MB / 1.4 = ~18.7MB raw budget so post-base64 fits 25MB.
+    // Cloudflare caps the whole message at 5 MiB to arbitrary recipients;
+    // 5 MiB / 1.4 leaves room for base64 and the rest of the message.
     expect(sender.maxAttachmentBytes()).toBe(
-      Math.floor((25 * 1024 * 1024) / 1.4),
+      Math.floor((5 * 1024 * 1024) / 1.4),
     );
   });
 

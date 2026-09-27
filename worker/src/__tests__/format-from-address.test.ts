@@ -21,6 +21,14 @@ describe("encodeDisplayName", () => {
     expect(encodeDisplayName("Sales: EMEA")).toBe('"Sales: EMEA"');
   });
 
+  it("replaces CR and LF, so a name can't end its header", () => {
+    expect(encodeDisplayName("Evil\r\nBcc: victim@example.com")).toBe(
+      '"Evil Bcc: victim@example.com"',
+    );
+    expect(encodeDisplayName("Line\nbreak")).toBe("Line break");
+    expect(encodeDisplayName("Carriage\rreturn")).toBe("Carriage return");
+  });
+
   it("escapes embedded quotes and backslashes", () => {
     expect(encodeDisplayName('Bob "The Builder"')).toBe(
       '"Bob \\"The Builder\\""',

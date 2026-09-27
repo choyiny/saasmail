@@ -95,7 +95,10 @@ export class CloudflareSender implements EmailSender {
   }
 
   maxAttachmentBytes(): number {
-    return Math.floor((25 * 1024 * 1024) / 1.4);
+    // The 5 MiB cap is on the whole message; base64 grows attachments by about
+    // 4/3 and headers and bodies need room, hence the 1.4 margin. Conservative,
+    // not exact: the JMAP path measures the real message (maxMessageBytes).
+    return Math.floor(this.maxMessageBytes() / 1.4);
   }
 
   maxMessageBytes(): number {

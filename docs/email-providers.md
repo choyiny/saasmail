@@ -25,6 +25,12 @@ At runtime: **Bavimail** (when both env vars are set) > **Postmark** (when `POST
 Setting more than one provider's variables is not an error — the highest one in
 that order wins, and the others are ignored.
 
+## Per-message limits
+
+Every send path applies Cloudflare's limits, the strictest of the four, whichever provider is configured: at most **50 recipients** (one To plus up to 49 Cc) and **32 attachments**, inline images included. The attachment size allowance is each provider's own; on Cloudflare the whole message must fit 5 MiB to arbitrary recipients.
+
+**Known issue (Cloudflare):** Cc recipients don't receive the message. The Cloudflare sender hands Cloudflare a raw message whose only envelope recipient is the To address, so Cc appears in the headers but is never delivered. Resend, Bavimail and Postmark deliver Cc normally.
+
 ---
 
 **See also:** [Setup](setup.md) · [Configuration](configuration.md) · [Per-inbox forwarding](inboxes.md#per-inbox-forwarding) (why forwarding goes through your provider rather than Email Routing)
