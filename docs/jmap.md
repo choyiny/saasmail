@@ -129,7 +129,7 @@ Rules, each reported per submission as a SetError (nothing is sent when one fail
 | The draft is already being sent                                                 | `forbiddenToSend`: "This message is already being sent" |
 | The provider refused the message permanently                                    | `forbiddenToSend` with the provider's reason            |
 
-The message carries the draft's From name, To and Cc display names, subject, `Message-ID`, `In-Reply-To`, `References`, `Reply-To` and every stored part, inline or attached (inline parts keep their `cid`). The text body is the draft's `text/plain` body parts and the HTML body its `text/html` ones, so a text-only draft goes out without an HTML part and an HTML-only draft without a text part. If one create in a call fails unexpectedly, it gets `serverFail` and the call still reports the others.
+The message carries the draft's From name, To and Cc display names, subject, `Message-ID`, `In-Reply-To`, `References`, `Reply-To` and every stored part, inline or attached (inline parts keep their `cid`). Cloudflare assembles the MIME message from those parts itself, so the delivered message's structure can differ from the draft's `blobId`, and it sets its own `Message-ID` and `Date` (see below). It also appends a line break to text attachments and drops the filename of inline images ([Email providers](email-providers.md#per-message-limits)). The text body is the draft's `text/plain` body parts and the HTML body its `text/html` ones, so a text-only draft goes out without an HTML part and an HTML-only draft without a text part. If one create in a call fails unexpectedly, it gets `serverFail` and the call still reports the others.
 
 ### Message-IDs: the Email's own and the delivered one
 

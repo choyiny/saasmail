@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Cc is delivered on Cloudflare.** The Cloudflare sender handed Cloudflare a raw message whose only envelope recipient was the To, so Cc recipients (web replies, composed mail, JMAP submissions) never received a copy even though saasmail listed them as delivered. It now uses the `send_email` binding's structured form, where every To and Cc is a real recipient with its display name, Reply-To and inline images are native fields, and threading and unsubscribe headers are passed through. Failures are classified by Cloudflare's error code, so a misconfigured sender or a refused recipient is no longer retried for a day. Two Cloudflare quirks of this form remain and are documented: a text attachment arrives with a line break appended, and an inline image loses its filename.
+
 - **An accepted message can't be sent twice from the Outbox tab.** A send the provider has accepted but whose bookkeeping hasn't finished (`bookkeeping_pending`) no longer appears in the Outbox list, and Retry and Cancel refuse it with 409. Before, once its retry time had passed, Retry could send it again and Cancel could mark a delivered message failed.
 
 - **Display names can't inject headers.** A line break in a Cc display name is refused with 400, and every From, To and Cc name has CR and LF replaced with spaces before it is written into a header.

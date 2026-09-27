@@ -1114,17 +1114,22 @@ async function stepSent(ctx, env, sent) {
     "",
     JSON.stringify(delivered.from),
   );
-  const names = (delivered.attachments ?? []).map((part) => part.name).sort();
-  const cid = (delivered.attachments ?? [])
-    .find((part) => part.name === "logo.png")
-    ?.cid?.replace(/^<|>$/g, "");
+  // The inline image is found by its Content-ID, not its name: Cloudflare
+  // drops the filename of inline parts (the cid, type and bytes survive).
+  const parts = delivered.attachments ?? [];
+  const inline = parts.find(
+    (part) => part.cid?.replace(/^<|>$/g, "") === INLINE_CID,
+  );
+  const notes = parts.find((part) => part.name === "notes.txt");
   report.check(
     `${step}: the delivered attachments, with the inline cid`,
-    names.includes("logo.png") &&
-      names.includes("notes.txt") &&
-      cid === INLINE_CID,
-    names.join(", "),
-    JSON.stringify(delivered.attachments),
+    inline?.type === "image/png" &&
+      inline.size === PNG_BYTES.byteLength &&
+      // Still text/plain: Cloudflare appends a line break to text parts, and
+      // saasmail must not "fix" that by disguising them as octet-streams.
+      notes?.type === "text/plain",
+    `${inline?.name ?? "?"} (cid ${INLINE_CID}), notes.txt`,
+    JSON.stringify(parts),
   );
   return delivered;
 }

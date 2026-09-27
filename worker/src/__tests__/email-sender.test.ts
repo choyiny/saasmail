@@ -89,91 +89,140 @@ describe("createEmailSender", () => {
 });
 
 describe("CloudflareSender", () => {
-  it("sends a raw MIME message with custom headers embedded", async () => {
-    const fakeBinding = {
-      send: vi.fn().mockResolvedValue({ messageId: "msg-123" }),
+  type Send = (message: unknown) => Promise<{ messageId: string }>;
+  function cloudflare(
+    send = vi.fn<Send>().mockResolvedValue({ messageId: "msg-123" }),
+  ) {
+    const binding = { send };
+    return {
+      binding,
+      sender: createEmailSender({
+        EMAIL: binding,
+      } as unknown as CloudflareBindings),
+      sent: () => binding.send.mock.calls[0][0] as Record<string, unknown>,
     };
-    const sender = createEmailSender({
-      EMAIL: fakeBinding,
-    } as unknown as CloudflareBindings);
+  }
 
+  it("sends a structured message: To and every Cc are real recipients, with names", async () => {
+    // The raw EmailMessage form had one envelope recipient, the To: Cc lived
+    // only in the headers and was never delivered (live QA 2026-09-27).
+    const { sender, sent, binding } = cloudflare();
     const result = await sender.send({
       from: '"Alice" <a@b.com>',
-      to: "c@d.com",
+      to: "Bob Example <c@d.com>",
+      cc: ['"Doe, Jane" <j@x.com>', "k@x.com"],
       subject: "hello",
       html: "<p>hi</p>",
       text: "hi",
-      headers: {
-        "Message-ID": "<new@msg>",
-        "In-Reply-To": "<orig@msg>",
-      },
     });
 
-    expect(result.id).toBe("msg-123");
-    // Cloudflare replaces the caller's Message-ID with its own and returns it:
-    // that one is what recipients see.
-    expect(result.deliveredMessageId).toBe("msg-123");
-    expect(result.error).toBeNull();
-    expect(fakeBinding.send).toHaveBeenCalledTimes(1);
-    const sent = fakeBinding.send.mock.calls[0][0] as {
-      from: string;
-      to: string;
-    };
-    // EmailMessage uses the bare address as the envelope sender.
-    expect(sent.from).toBe("a@b.com");
-    expect(sent.to).toBe("c@d.com");
-    const serialized = JSON.stringify(sent);
-    expect(serialized).toContain("Message-ID: <new@msg>");
-    expect(serialized).toContain("In-Reply-To: <orig@msg>");
-    expect(serialized).toContain("text/plain");
-    expect(serialized).toContain("text/html");
+    expect(result).toEqual({
+      id: "msg-123",
+      // Cloudflare generates the Message-ID itself and returns it.
+      deliveredMessageId: "msg-123",
+      error: null,
+    });
+    expect(binding.send).toHaveBeenCalledTimes(1);
+    expect(sent()).toEqual({
+      from: { email: "a@b.com", name: "Alice" },
+      to: [{ email: "c@d.com", name: "Bob Example" }],
+      cc: [{ email: "j@x.com", name: "Doe, Jane" }, "k@x.com"],
+      subject: "hello",
+      html: "<p>hi</p>",
+      text: "hi",
+    });
   });
 
-  it("serializes a Reply-To header without throwing", async () => {
-    // Regression: Reply-To is a single-mailbox header in mimetext, so a bare
-    // string threw MIMETEXT_INVALID_HEADER_VALUE and was swallowed as a failed
-    // send. It must be wrapped in a Mailbox and round-trip into the raw MIME.
-    const fakeBinding = {
-      send: vi.fn().mockResolvedValue({ messageId: "msg-rt" }),
-    };
-    const sender = createEmailSender({
-      EMAIL: fakeBinding,
-    } as unknown as CloudflareBindings);
-
-    const result = await sender.send({
+  it("passes threading and list headers, drops the ones Cloudflare controls, and sends Reply-To as its field", async () => {
+    const { sender, sent } = cloudflare();
+    await sender.send({
       from: "noreply@readerful.com",
       to: "team@readerful.com",
       subject: "contact form",
       html: "<p>hi</p>",
       headers: {
         "Message-ID": "<new@msg>",
-        "Reply-To": "submitter@example.com",
+        Date: "Sat, 26 Sep 2026 10:00:00 +0200",
+        "In-Reply-To": "<orig@msg>",
+        References: "<root@msg> <orig@msg>",
+        "List-Unsubscribe": "<https://x.test/u>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Auto-Submitted": "auto-replied",
+        "X-SaaSMail-Forwarded-For": "team@readerful.com",
+        "Reply-To": "Sub Mitter <submitter@example.com>",
       },
     });
 
-    expect(result.error).toBeNull();
-    expect(result.id).toBe("msg-rt");
-    const sent = fakeBinding.send.mock.calls[0][0];
-    expect(JSON.stringify(sent)).toContain("Reply-To: <submitter@example.com>");
+    expect(sent().from).toBe("noreply@readerful.com");
+    expect(sent().to).toEqual(["team@readerful.com"]);
+    expect(sent().replyTo).toEqual({
+      email: "submitter@example.com",
+      name: "Sub Mitter",
+    });
+    // Message-ID and Date are platform-controlled: sending them fails the
+    // whole message with E_HEADER_NOT_ALLOWED.
+    expect(sent().headers).toEqual({
+      "In-Reply-To": "<orig@msg>",
+      References: "<root@msg> <orig@msg>",
+      "List-Unsubscribe": "<https://x.test/u>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      "Auto-Submitted": "auto-replied",
+      "X-SaaSMail-Forwarded-For": "team@readerful.com",
+    });
   });
 
-  it("catches thrown errors and returns normalized result", async () => {
-    const fakeBinding = {
-      send: vi.fn().mockRejectedValue(new Error("sender not allowed")),
-    };
-    const sender = createEmailSender({
-      EMAIL: fakeBinding,
-    } as unknown as CloudflareBindings);
-
-    const result = await sender.send({
+  it("sends a text-only message without an html field", async () => {
+    const { sender, sent } = cloudflare();
+    await sender.send({
       from: "a@b.com",
       to: "c@d.com",
       subject: "x",
-      html: "<p>x</p>",
+      html: "",
+      text: "plain",
     });
+    expect(sent().html).toBeUndefined();
+    expect(sent().text).toBe("plain");
+  });
 
-    expect(result.id).toBeNull();
-    expect(result.error?.message).toBe("sender not allowed");
+  it("classifies failures by their error code", async () => {
+    const rejectWith = (code: string, message: string) =>
+      vi
+        .fn<Send>()
+        .mockRejectedValue(Object.assign(new Error(message), { code }));
+    const send = (fn: ReturnType<typeof vi.fn<Send>>) =>
+      cloudflare(fn).sender.send({
+        from: "a@b.com",
+        to: "c@d.com",
+        subject: "x",
+        html: "<p>x</p>",
+      });
+
+    const limited = await send(
+      rejectWith("E_RATE_LIMIT_EXCEEDED", "slow down"),
+    );
+    expect(limited.id).toBeNull();
+    expect(limited.error).toEqual({
+      message: "E_RATE_LIMIT_EXCEEDED: slow down",
+      transient: true,
+    });
+    for (const code of [
+      "E_SENDER_NOT_VERIFIED",
+      "E_RECIPIENT_NOT_ALLOWED",
+      "E_RECIPIENT_SUPPRESSED",
+      "E_TOO_MANY_RECIPIENTS",
+      "E_TOO_MANY_ATTACHMENTS",
+      "E_HEADER_NOT_ALLOWED",
+    ]) {
+      const result = await send(rejectWith(code, "no"));
+      expect(result.error?.transient, code).toBe(false);
+    }
+    const plain = await send(
+      vi.fn<Send>().mockRejectedValue(new Error("sender not allowed")),
+    );
+    expect(plain.error).toEqual({
+      message: "sender not allowed",
+      transient: false,
+    });
   });
 });
 
@@ -720,20 +769,20 @@ describe("maxMessageBytes", () => {
 describe("inline attachments and exact headers", () => {
   const png = new Uint8Array([1, 2, 3]);
 
-  it("Cloudflare: inline part with Content-ID, bare envelope To, caller Date", async () => {
+  it("Cloudflare: inline parts with their contentId, other parts as attachments", async () => {
     const fakeBinding = {
       send: vi.fn().mockResolvedValue({ messageId: "cf-1" }),
     };
     const sender = createEmailSender({
       EMAIL: fakeBinding,
     } as unknown as CloudflareBindings);
+    const text = new TextEncoder().encode("a");
 
     const result = await sender.send({
       from: "Mine <mine@x.com>",
       to: '"Doe, John" <john@example.com>',
       subject: "s",
       html: '<p><img src="cid:logo@x"></p>',
-      headers: { Date: "Sat, 26 Sep 2026 10:00:00 +0200" },
       attachments: [
         {
           filename: "logo.png",
@@ -742,26 +791,42 @@ describe("inline attachments and exact headers", () => {
           contentId: "logo@x",
           disposition: "inline",
         },
+        { filename: "a.txt", contentType: "text/plain", content: text },
         {
-          filename: "a.txt",
-          contentType: "text/plain",
-          content: new TextEncoder().encode("a"),
+          // Inline needs a Content-ID to be referenced; without one it's an
+          // ordinary attachment.
+          filename: "b.png",
+          contentType: "image/png",
+          content: png,
+          disposition: "inline",
         },
       ],
     });
 
     expect(result.error).toBeNull();
-    const sent = fakeBinding.send.mock.calls[0][0] as { to: string };
-    expect(sent.to).toBe("john@example.com");
-    const serialized = JSON.stringify(sent);
-    expect(serialized).toContain("Content-ID: <logo@x>");
-    expect(serialized).toContain(
-      'Content-Disposition: inline; filename=\\"logo.png\\"',
-    );
-    expect(serialized).toContain(
-      'Content-Disposition: attachment; filename=\\"a.txt\\"',
-    );
-    expect(serialized).toContain("Date: Sat, 26 Sep 2026 10:00:00 +0200");
+    const sent = fakeBinding.send.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent.to).toEqual([{ email: "john@example.com", name: "Doe, John" }]);
+    expect(sent.attachments).toEqual([
+      {
+        disposition: "inline",
+        contentId: "logo@x",
+        filename: "logo.png",
+        type: "image/png",
+        content: png,
+      },
+      {
+        disposition: "attachment",
+        filename: "a.txt",
+        type: "text/plain",
+        content: text,
+      },
+      {
+        disposition: "attachment",
+        filename: "b.png",
+        type: "image/png",
+        content: png,
+      },
+    ]);
   });
 
   it("Postmark: ContentID for inline parts, Date left to Postmark", async () => {

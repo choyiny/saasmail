@@ -29,7 +29,12 @@ that order wins, and the others are ignored.
 
 Every send path applies Cloudflare's limits, the strictest of the four, whichever provider is configured: at most **50 recipients** (one To plus up to 49 Cc) and **32 attachments**, inline images included. The attachment size allowance is each provider's own; on Cloudflare the whole message must fit 5 MiB to arbitrary recipients.
 
-**Known issue (Cloudflare):** Cc recipients don't receive the message. The Cloudflare sender hands Cloudflare a raw message whose only envelope recipient is the To address, so Cc appears in the headers but is never delivered. Resend, Bavimail and Postmark deliver Cc normally.
+On Cloudflare, saasmail uses the `send_email` binding's structured form: every To and Cc is a real recipient, with its display name, and Cloudflare assembles the message and assigns its `Message-ID` and `Date` itself.
+
+Two Cloudflare quirks of that form, seen live:
+
+- **A text attachment arrives with a line break appended.** A `text/*` file (`.txt`, `.csv`, `.md`, …) that saasmail sends as `abc` reaches the recipient as `abc` plus a newline. Binary attachments and images arrive byte-for-byte. saasmail keeps the true content type rather than disguising text files as `application/octet-stream`.
+- **An inline image loses its filename.** It still renders in the message (its Content-ID, type and bytes are intact), but a recipient who saves it sees no name.
 
 ---
 
