@@ -1,5 +1,6 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { sql, type SQL } from "drizzle-orm";
+import { inArray, sql, type SQL } from "drizzle-orm";
+import { sentEmails } from "../db/sent-emails.schema";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 import {
   buildMessageQuerySql,
@@ -111,6 +112,45 @@ export function jmapThreadKey(message: UnifiedMessage): string {
 
 export function jmapThreadId(message: UnifiedMessage): string {
   return publicThreadId(jmapThreadKey(message));
+}
+
+/**
+ * The public id JMAP shows for a message. A Sent row that a submission's
+ * on-success step aliased keeps the id of the draft it was sent from (spec
+ * §3.3); every other message uses its own reference.
+ */
+export function jmapMessageId(message: UnifiedMessage): string {
+  return message.jmap?.emailId
+    ? publicDraftEmailId(message.jmap.emailId)
+    : publicEmailId(message.ref);
+}
+
+const ALIAS_LOOKUP_CHUNK = 40;
+
+/** Internal draft id -> the Sent row it was aliased onto, if any. */
+export async function loadAliasedSentRefs(
+  db: DrizzleD1Database<any>,
+  draftIds: string[],
+): Promise<Map<string, MessageRef>> {
+  const refs = new Map<string, MessageRef>();
+  const unique = [...new Set(draftIds)];
+  for (let start = 0; start < unique.length; start += ALIAS_LOOKUP_CHUNK) {
+    const rows = await db
+      .select({ id: sentEmails.id, jmapEmailId: sentEmails.jmapEmailId })
+      .from(sentEmails)
+      .where(
+        inArray(
+          sentEmails.jmapEmailId,
+          unique.slice(start, start + ALIAS_LOOKUP_CHUNK),
+        ),
+      );
+    for (const row of rows) {
+      if (row.jmapEmailId) {
+        refs.set(row.jmapEmailId, { kind: "sent", id: row.id });
+      }
+    }
+  }
+  return refs;
 }
 
 function systemMailboxForMessage(message: UnifiedMessage): string | null {
@@ -290,18 +330,18 @@ export function toJmapEmail(
   args: Record<string, unknown>,
   content?: JmapContentRow,
 ): Record<string, unknown> | null {
-  const id = publicEmailId(message.ref);
+  const id = jmapMessageId(message);
   if (content) {
     // JMAP-originated Sent mail: immutable properties come from the content
-    // (spec §3.3); receivedAt is the send time; mailboxes and keywords are the
-    // Sent row's own state.
+    // (spec §3.3); receivedAt is the send time, or the draft's own receivedAt
+    // once the row was aliased; mailboxes and keywords are the Sent row's state.
     return contentEmailObject(
       content,
       {
         id,
         mailboxIds: jmapMailboxIds(message),
         keywords: jmapKeywords(message),
-        receivedAt: message.occurredAt,
+        receivedAt: message.jmap?.receivedAt ?? message.occurredAt,
       },
       args,
     );
@@ -392,9 +432,7 @@ export async function loadJmapEmailObjectsByIds(
     );
   }
 
-  return new Map(
-    messages.map((message) => [publicEmailId(message.ref), message]),
-  );
+  return new Map(messages.map((message) => [jmapMessageId(message), message]));
 }
 
 export async function emailGet(
@@ -454,6 +492,7 @@ export async function emailGet(
     );
     const messageCount = await countMessages(db, allowed, {
       ignoreSnooze: true,
+      withJmap: true,
     });
     if (messageCount + drafts.length > MAX_OBJECTS_IN_GET) {
       return {
@@ -470,7 +509,7 @@ export async function emailGet(
     requestedIds = [];
     const contents = await contentFor(messages);
     for (const message of messages) {
-      const id = publicEmailId(message.ref);
+      const id = jmapMessageId(message);
       requestedIds.push(id);
       builders.set(id, project(contents)(message));
     }
@@ -481,16 +520,6 @@ export async function emailGet(
     }
   } else {
     requestedIds = ids as string[];
-    const messages = await loadJmapEmailObjectsByIds(
-      db,
-      allowed,
-      userId,
-      requestedIds,
-    );
-    const contents = await contentFor([...messages.values()]);
-    for (const [id, message] of messages) {
-      builders.set(id, project(contents)(message));
-    }
     const draftIds: string[] = [];
     for (const id of requestedIds) {
       const ref = parseAnyEmailId(id);
@@ -503,6 +532,26 @@ export async function emailGet(
       builders.set(publicDraftEmailId(item.draft.id), () =>
         draftEmailObject(item, args),
       );
+    }
+
+    // A D id with no draft row may be a draft that was sent and filed into Sent
+    // (the alias). Resolve it to that Sent row; results are keyed by
+    // jmapMessageId, so it comes back under the same D id.
+    const missingDraftIds = draftIds.filter((id) => !drafts.has(id));
+    const aliased = missingDraftIds.length
+      ? await loadAliasedSentRefs(db, missingDraftIds)
+      : new Map<string, MessageRef>();
+
+    const messages = await loadJmapEmailObjectsByIds(db, allowed, userId, [
+      ...requestedIds.filter((id) => {
+        const ref = parseAnyEmailId(id);
+        return !ref || ref.kind !== "draft";
+      }),
+      ...[...aliased.values()].map(publicEmailId),
+    ]);
+    const contents = await contentFor([...messages.values()]);
+    for (const [id, message] of messages) {
+      builders.set(id, project(contents)(message));
     }
   }
 
@@ -609,30 +658,40 @@ async function mergedEmailPage(
       limit: window,
     });
     if (built) {
-      arms.push(sql`SELECT kind, id, occurred_at FROM (${built.statement})`);
+      arms.push(
+        sql`SELECT kind, id, occurred_at, jmap_email_id FROM (${built.statement})`,
+      );
     }
   }
   if (draftFilter) {
-    arms.push(draftArmSql(allowed, userId, draftFilter, window + 1));
+    arms.push(
+      sql`SELECT kind, id, occurred_at, NULL AS jmap_email_id FROM (${draftArmSql(allowed, userId, draftFilter, window + 1)})`,
+    );
   }
   if (arms.length === 0) return [];
   // Each arm already holds its top `window` rows, so the merged top window is
   // exact.
-  const rows = await db.all<{ kind: string; id: string; occurred_at: number }>(
-    sql`
-    SELECT kind, id, occurred_at FROM (${sql.join(arms, sql` UNION ALL `)})
+  const rows = await db.all<{
+    kind: string;
+    id: string;
+    occurred_at: number;
+    jmap_email_id: string | null;
+  }>(sql`
+    SELECT kind, id, occurred_at, jmap_email_id FROM (${sql.join(arms, sql` UNION ALL `)})
      ORDER BY occurred_at DESC, id DESC, kind ASC
      LIMIT ${limit} OFFSET ${position}
-  `,
-  );
-  return rows.map((row) =>
-    row.kind === "draft"
+  `);
+  return rows.map((row) => {
+    // A Sent row a submission aliased onto its draft is that Email, not a
+    // second `S…` (spec §3.3).
+    if (row.jmap_email_id) return publicDraftEmailId(row.jmap_email_id);
+    return row.kind === "draft"
       ? publicDraftEmailId(row.id)
       : publicEmailId({
           kind: row.kind === "sent" ? "sent" : "received",
           id: row.id,
-        }),
-  );
+        });
+  });
 }
 
 export async function emailQuery(
@@ -726,6 +785,7 @@ export async function emailQuery(
   let messageQuery: MessageQuery = {
     order: "desc",
     ignoreSnooze: true,
+    withJmap: true,
     viewer: { userId },
     ...(typeof filter.text === "string"
       ? { search: filter.text, searchMode: "fulltext" as const }

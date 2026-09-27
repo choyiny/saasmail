@@ -13,7 +13,7 @@ import {
   type JmapContentRow,
 } from "./content";
 import { loadDraftsByIds } from "./drafts";
-import { loadJmapEmailObjectsByIds } from "./emails";
+import { loadAliasedSentRefs, loadJmapEmailObjectsByIds } from "./emails";
 import { readableSentContent, sentMessageContent } from "./sent-content";
 import {
   parseAnyEmailId,
@@ -109,8 +109,16 @@ async function resolveBodyPartBlob(
     const item = (await loadDraftsByIds(db, allowed, userId, [ref.id])).get(
       ref.id,
     );
-    if (!item) return null;
-    return contentPartBlob(item.content, target.part, blobId);
+    if (item) return contentPartBlob(item.content, target.part, blobId);
+    // A draft whose id is gone may be the one a submission aliased onto its
+    // Sent row (spec §3.3): the Email keeps its id, so its parts answer through
+    // the same content path an `S…` uses.
+    const aliased = (await loadAliasedSentRefs(db, [ref.id])).get(ref.id);
+    if (aliased && /^\d+$/.test(target.part)) {
+      const content = await sentMessageContent(db, allowed, aliased.id);
+      if (content) return contentPartBlob(content, target.part, blobId);
+    }
+    return null;
   }
 
   // JMAP-sent mail projects from its content row, so its parts answer the same

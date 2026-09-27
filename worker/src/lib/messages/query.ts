@@ -13,6 +13,7 @@ import {
 } from "./adapters";
 import { decodeCursor, encodeCursor } from "./cursor";
 import type { MessageCursorV1 } from "./cursor";
+import { jmapHiddenSentSql } from "./jmap-visibility";
 import type {
   AttachmentRow,
   MessageKind,
@@ -73,7 +74,11 @@ export interface MessageQuery {
   ignoreSnooze?: boolean;
   excludeCampaignSends?: boolean;
   assignedTo?: string;
-  /** JMAP only: select sent mail's content id and its content's thread key. */
+  /**
+   * JMAP only: select sent mail's content id, its content's thread key and its
+   * alias columns, and skip Sent rows whose on-success step is pending. There is
+   * no second flag: every JMAP read needs the content columns anyway.
+   */
   withJmap?: boolean;
   /** Unix seconds used for snooze evaluation. Defaults to the current time. */
   now?: number;
@@ -118,6 +123,8 @@ type RawMessageRow = {
   assigned_user_id: string | null;
   jmap_content_id: string | null;
   jmap_thread_key: string | null;
+  jmap_email_id: string | null;
+  jmap_received_at: number | null;
 };
 
 function normalizeInboxes(inboxes: string[] | undefined): string[] | undefined {
@@ -445,8 +452,8 @@ function campaignScope(query: MessageQuery): SQL {
  */
 function jmapSentColumns(query: MessageQuery): SQL {
   return query.withJmap
-    ? sql`se.jmap_content_id AS jmap_content_id, jmc.thread_key AS jmap_thread_key`
-    : sql`NULL AS jmap_content_id, NULL AS jmap_thread_key`;
+    ? sql`se.jmap_content_id AS jmap_content_id, jmc.thread_key AS jmap_thread_key, se.jmap_email_id AS jmap_email_id, se.jmap_received_at AS jmap_received_at`
+    : sql`NULL AS jmap_content_id, NULL AS jmap_thread_key, NULL AS jmap_email_id, NULL AS jmap_received_at`;
 }
 
 function jmapSentJoin(query: MessageQuery): SQL {
@@ -581,6 +588,8 @@ function receivedArm(
       NULL AS delivery_status,
       NULL AS jmap_content_id,
       NULL AS jmap_thread_key,
+      NULL AS jmap_email_id,
+      NULL AS jmap_received_at,
       ${personalStateSelect(query)},
       mms.archived_at AS archived_at,
       mms.spam_at AS spam_at,
@@ -729,6 +738,7 @@ function sentArm(
         sql`se.person_id`,
       )}
       ${campaignScope(query)}
+      ${query.withJmap ? sql`AND NOT ${jmapHiddenSentSql(sql`se.id`)}` : sql``}
       ${sourceCursorScope(
         sql`se.sent_at`,
         sql`se.id`,
@@ -820,6 +830,8 @@ function toUnified(
     message.jmap = {
       contentId: row.jmap_content_id,
       threadKey: row.jmap_thread_key,
+      emailId: row.jmap_email_id ?? null,
+      receivedAt: row.jmap_received_at ?? null,
     };
   }
 

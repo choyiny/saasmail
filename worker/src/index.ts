@@ -40,6 +40,7 @@ import { reapOrphanSentAttachments } from "./lib/sent-attachments";
 import { runNewsletterMaintenance } from "./lib/newsletter-cron";
 import { pruneJmapChanges } from "./jmap/changes";
 import { collectUnreferencedContent } from "./jmap/content";
+import { runJmapSubmissionMaintenance } from "./jmap/recovery";
 import { reapExpiredUploads } from "./jmap/upload";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
@@ -417,6 +418,13 @@ export default {
             Math.floor(Date.now() / 1000),
           ).catch((err) =>
             console.error("[cron] JMAP upload reaping failed:", err),
+          ),
+        )
+        // JMAP submission recovery, before the content GC it depends on: an
+        // interrupted send's content must be settled before it can be collected.
+        .then(() =>
+          runJmapSubmissionMaintenance(env).catch((err) =>
+            console.error("[cron] JMAP submission maintenance failed:", err),
           ),
         )
         .then(() =>

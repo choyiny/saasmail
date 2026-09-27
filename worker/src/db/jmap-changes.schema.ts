@@ -8,6 +8,12 @@ export const jmapChanges = sqliteTable(
     objectId: text("object_id").notNull(),
     inbox: text("inbox"),
     userId: text("user_id"),
+    /**
+     * Set on a shared (user_id NULL) row that one user must not see: the
+     * alias's inbox-scoped 'c' is for the other members; its author gets a
+     * user-scoped 'u' instead (spec §5).
+     */
+    excludeUserId: text("exclude_user_id"),
     op: text("op").notNull(),
     createdAt: integer("created_at").notNull(),
   },

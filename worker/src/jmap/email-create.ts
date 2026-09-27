@@ -729,11 +729,13 @@ async function threadKeyForMessageId(
   `);
   const row = rows[0];
   if (!row) return null;
-  const publicId = publicEmailId({ kind: row.kind, id: row.id });
+  // Loaded by ref, then read positionally: a Sent row that was aliased onto a
+  // draft comes back keyed by the draft's `D…` id, not the `S…` id we asked
+  // with, and its thread key is what this needs.
   const loaded = await loadJmapEmailObjectsByIds(db, allowed, userId, [
-    publicId,
+    publicEmailId({ kind: row.kind, id: row.id }),
   ]);
-  const message = loaded.get(publicId);
+  const message = [...loaded.values()][0];
   return message ? jmapThreadKey(message) : null;
 }
 

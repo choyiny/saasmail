@@ -354,10 +354,11 @@ export const CONTENT_GC_GRACE_SECONDS = 3600;
 const CONTENT_GC_LIMIT = 200;
 
 /**
- * Content is referenced while something shows it: a draft, a JMAP-sent Sent
- * row, or a `claimed` submission's in-flight intention. Keep every reference
- * in this one predicate — a missing one makes the hourly GC delete content a
- * Sent Email still shows.
+ * Content is referenced while something shows it: a draft, a JMAP-sent Sent row
+ * (aliased or not), or a submission that is in flight (`claimed`) or whose
+ * on-success step has not run yet (`pending` — its patch still names the
+ * Email). Keep every reference in this one predicate — a missing one makes the
+ * hourly GC delete content a Sent Email still shows.
  */
 function contentReferencedSql(contentId: SQL): SQL {
   return sql`(
@@ -367,7 +368,8 @@ function contentReferencedSql(contentId: SQL): SQL {
     )
     OR EXISTS (
       SELECT 1 FROM jmap_submissions js
-       WHERE js.content_id = ${contentId} AND js.attempt_state = 'claimed'
+       WHERE js.content_id = ${contentId}
+         AND (js.attempt_state = 'claimed' OR js.on_success_state = 'pending')
     )
   )`;
 }

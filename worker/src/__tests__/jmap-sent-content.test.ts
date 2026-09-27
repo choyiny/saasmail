@@ -280,9 +280,13 @@ describe("JMAP-sent Emails project from their content", () => {
       },
     );
     expect(jmap.messages[0].ref.id).toBe(sent.id);
+    // PR 6 widened the field with the alias (emailId/receivedAt); a row that
+    // was not aliased carries both as null.
     expect(jmap.messages[0].jmap).toEqual({
       contentId: sent.jmapContentId,
       threadKey: expect.any(String),
+      emailId: null,
+      receivedAt: null,
     });
   });
 });

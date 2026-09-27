@@ -32,6 +32,8 @@ export const jmapSubmissions = sqliteTable(
       enum: ["none", "update", "destroy", "both"],
     }).notNull(),
     onSuccessPatchJson: text("on_success_patch_json"),
+    /** The exact From header of the first attempt; retries reuse it (spec §10.1). */
+    fromHeader: text("from_header"),
     sendAt: integer("send_at").notNull(),
     undoStatus: text("undo_status").notNull().default("final"),
     createdAt: integer("created_at").notNull(),

@@ -285,6 +285,11 @@ export async function executeJmapCalls(
         if (result.name.endsWith("/set")) {
           recordCreated(result.result, ctx.createdIds);
         }
+        // RFC 8621 §7.5: the implicit Email/set answers after the
+        // EmailSubmission/set response, under the same method call id.
+        for (const followUp of result.followUps ?? []) {
+          methodResponses.push([followUp.name, followUp.result, callId]);
+        }
       }
     } catch {
       methodResponses.push(["error", { type: "serverFail" }, callId]);

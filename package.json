@@ -18,6 +18,7 @@
     "db:studio:prod": "NODE_ENV=production drizzle-kit studio",
     "cf-typegen": "node scripts/cf-typegen.mjs",
     "vapid:generate": "tsx scripts/generate-vapid.ts",
+    "jmap:e2e": "node scripts/jmap-send-e2e.mjs",
     "test": "vitest run --config vitest.config.test.ts",
     "test:watch": "vitest --config vitest.config.test.ts",
     "test:web": "vitest run --config vitest.config.web.ts",

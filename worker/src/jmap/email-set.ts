@@ -8,7 +8,7 @@ import {
   setMailboxState,
   setUserState,
 } from "../lib/messages/state";
-import type { UnifiedMessage } from "../lib/messages/types";
+import type { MessageRef, UnifiedMessage } from "../lib/messages/types";
 import { MAX_OBJECTS_IN_SET } from "./constants";
 import type { CreatedIds } from "./creation-refs";
 import { resolveCreationRef } from "./creation-refs";
@@ -29,6 +29,7 @@ import {
 import {
   jmapKeywords,
   jmapMailboxIds,
+  loadAliasedSentRefs,
   loadJmapEmailObjectsByIds,
   type JmapMethodError,
 } from "./emails";
@@ -38,8 +39,30 @@ import {
   type MailboxDescriptor,
 } from "./mailboxes";
 import type { JmapMethodContext } from "./methods";
-import { parseAnyEmailId, publicDraftEmailId } from "./public-ids";
+import { aliasDraftToSent, type PendingSubmission } from "./on-success";
+import {
+  parseAnyEmailId,
+  publicDraftEmailId,
+  publicEmailId,
+} from "./public-ids";
 import { currentJmapState, parseJmapState } from "./state";
+
+type SystemDescriptor = Extract<MailboxDescriptor, { kind: "system" }>;
+
+export type EmailSetOptions = {
+  /**
+   * Drafts (by internal id) whose submission was accepted and whose on-success
+   * step is running right now. Only these may move from Drafts to Sent, and
+   * that move is the alias (spec §3.3). Set only by the implicit Email/set.
+   */
+  fileToSentWindow?: Map<string, PendingSubmission>;
+};
+
+/** The file-to-Sent allowance for one draft, if its submission's step is running. */
+type FileToSent = {
+  env: CloudflareBindings;
+  submission: PendingSubmission;
+};
 
 type PatchResult =
   | {
@@ -176,13 +199,14 @@ function patchTargets(
   return { keywords: targetKeywords, mailboxIds: targetMailboxIds };
 }
 
-function validateMailboxTarget(
-  message: UnifiedMessage,
+function validateMailboxTargetFor(
+  kind: "received" | "sent",
+  inbox: string,
   targetIds: Set<string>,
   descriptorsById: Map<string, MailboxDescriptor>,
 ):
   | {
-      system: Extract<MailboxDescriptor, { kind: "system" }>;
+      system: SystemDescriptor;
       folders: Set<string>;
     }
   | SetError {
@@ -190,26 +214,25 @@ function validateMailboxTarget(
     return { type: "invalidProperties", properties: ["mailboxIds"] };
   }
 
-  const inbox = message.inbox.toLowerCase();
+  const normalizedInbox = inbox.toLowerCase();
   const descriptors: MailboxDescriptor[] = [];
   for (const id of targetIds) {
     const descriptor = descriptorsById.get(id);
-    if (!descriptor || descriptor.inbox.toLowerCase() !== inbox) {
+    if (!descriptor || descriptor.inbox.toLowerCase() !== normalizedInbox) {
       return { type: "invalidProperties", properties: ["mailboxIds"] };
     }
     descriptors.push(descriptor);
   }
 
   const systems = descriptors.filter(
-    (item): item is Extract<MailboxDescriptor, { kind: "system" }> =>
-      item.kind === "system",
+    (item): item is SystemDescriptor => item.kind === "system",
   );
   if (systems.length !== 1 || systems[0].role === "drafts") {
     return { type: "invalidProperties", properties: ["mailboxIds"] };
   }
 
   const allowedRoles =
-    message.ref.kind === "received"
+    kind === "received"
       ? new Set(["inbox", "archive", "junk", "trash"])
       : new Set(["sent", "trash"]);
   if (!allowedRoles.has(systems[0].role)) {
@@ -227,6 +250,54 @@ function validateMailboxTarget(
         .map((item) => item.mailboxId),
     ),
   };
+}
+
+function validateMailboxTarget(
+  message: UnifiedMessage,
+  targetIds: Set<string>,
+  descriptorsById: Map<string, MailboxDescriptor>,
+):
+  | {
+      system: SystemDescriptor;
+      folders: Set<string>;
+    }
+  | SetError {
+  return validateMailboxTargetFor(
+    message.ref.kind,
+    message.inbox,
+    targetIds,
+    descriptorsById,
+  );
+}
+
+/**
+ * The Sent rules of spec §3.3 for a draft's target state inside the
+ * file-to-Sent window: one Sent-or-Trash mailbox of its own inbox, any custom
+ * folders of that inbox, and only `$seen`/`$flagged`. `$seen` is implied rather
+ * than required (plan Decision 6): a Sent Email is always seen in saasmail, and
+ * RFC 8621's example patch only removes `$draft`. The caller applies the
+ * returned keyword set.
+ */
+export function validateSentTarget(
+  inbox: string,
+  targetMailboxIds: Set<string>,
+  targetKeywords: Set<string>,
+  descriptorsById: Map<string, MailboxDescriptor>,
+): { system: SystemDescriptor; folders: Set<string> } | SetError {
+  targetKeywords.add("$seen");
+  if (
+    [...targetKeywords].some(
+      (keyword) => keyword !== "$seen" && keyword !== "$flagged",
+    )
+  ) {
+    return { type: "invalidProperties", properties: ["keywords"] };
+  }
+  return validateMailboxTargetFor(
+    "sent",
+    inbox,
+    targetMailboxIds,
+    descriptorsById,
+  );
 }
 
 function mailboxStateForRole(
@@ -340,6 +411,10 @@ async function updateMessage(
 /**
  * Spec §3.3, draft row: a draft lives in exactly one system mailbox of its own
  * inbox (role `drafts` or `trash`) and always keeps `$draft`.
+ *
+ * The one exception is the file-to-Sent window: a draft whose submission was
+ * just accepted may be filed into Sent (or Trash) instead, which is the alias
+ * and replaces the draft row with the Sent row under the draft's own id.
  */
 async function updateDraft(
   db: DrizzleD1Database<any>,
@@ -347,6 +422,7 @@ async function updateDraft(
   patch: unknown,
   descriptorsById: Map<string, MailboxDescriptor>,
   now: number,
+  fileToSent: FileToSent | null,
 ): Promise<SetError | null> {
   const { draft } = item;
   const targets = patchTargets(
@@ -358,6 +434,30 @@ async function updateDraft(
     DRAFT_KEYWORDS,
   );
   if ("type" in targets) return targets;
+
+  // A patch that drops `$draft` no longer describes a draft: it asks for the
+  // Draft -> Sent move, which only an accepted submission's step may perform.
+  if (fileToSent && !targets.keywords.has("$draft")) {
+    const sentTarget = validateSentTarget(
+      draft.inbox,
+      targets.mailboxIds,
+      targets.keywords,
+      descriptorsById,
+    );
+    if ("type" in sentTarget) return sentTarget;
+    await aliasDraftToSent(fileToSent.env, {
+      submission: fileToSent.submission,
+      draftId: draft.id,
+      draftReceivedAt: draft.receivedAt,
+      userId: draft.userId,
+      system: sentTarget.system.role as "sent" | "trash",
+      folders: [...sentTarget.folders],
+      flagged: targets.keywords.has("$flagged"),
+      now,
+    });
+    return null;
+  }
+
   if (!targets.keywords.has("$draft")) {
     return { type: "invalidProperties", properties: ["keywords"] };
   }
@@ -395,6 +495,7 @@ export async function emailSet(
   accountId: string,
   args: Record<string, unknown>,
   ctx: JmapMethodContext,
+  options: EmailSetOptions = {},
 ): Promise<Record<string, unknown> | JmapMethodError> {
   const parsed = validateSetArguments(args);
   if ("type" in parsed) return parsed;
@@ -475,13 +576,17 @@ export async function emailSet(
     if (ref && ref.kind === "draft") draftIds.push(ref.id);
     else messageIds.push(id);
   }
-  const loadedMessages = await loadJmapEmailObjectsByIds(
-    db,
-    allowed,
-    userId,
-    messageIds,
-  );
   const loadedDrafts = await loadDraftsByIds(db, allowed, userId, draftIds);
+  // A D id with no draft row may be a draft filed into Sent (the alias): it is
+  // that Sent row now, loaded under the same D id (as Email/get does).
+  const missingDraftIds = draftIds.filter((id) => !loadedDrafts.has(id));
+  const aliased = missingDraftIds.length
+    ? await loadAliasedSentRefs(db, missingDraftIds)
+    : new Map<string, MessageRef>();
+  const loadedMessages = await loadJmapEmailObjectsByIds(db, allowed, userId, [
+    ...messageIds,
+    ...[...aliased.values()].map(publicEmailId),
+  ]);
   const draftFor = (id: string): DraftWithContent | undefined => {
     const ref = parseAnyEmailId(id);
     if (!ref || ref.kind !== "draft") return undefined;
@@ -497,6 +602,10 @@ export async function emailSet(
 
   const updated: Record<string, null> = {};
   const notUpdated: Record<string, SetError> = {};
+  const windowFor = (draftId: string): FileToSent | null => {
+    const submission = options.fileToSentWindow?.get(draftId);
+    return submission ? { env: ctx.env, submission } : null;
+  };
   for (const [id, patch] of updateEntries) {
     const item = draftFor(id);
     const message = item ? undefined : loadedMessages.get(id);
@@ -505,7 +614,14 @@ export async function emailSet(
       continue;
     }
     const error = item
-      ? await updateDraft(db, item, patch, descriptorsById, now)
+      ? await updateDraft(
+          db,
+          item,
+          patch,
+          descriptorsById,
+          now,
+          windowFor(item.draft.id),
+        )
       : await updateMessage(
           db,
           allowed,
@@ -529,9 +645,10 @@ export async function emailSet(
       continue;
     }
     const ref = parseAnyEmailId(id);
-    // Master plan Decision 7: received and sent destroy stays forbidden.
+    // Master plan Decision 7: received and sent destroy stays forbidden, an
+    // aliased D id included.
     notDestroyed[id] =
-      ref && ref.kind === "draft"
+      ref && ref.kind === "draft" && !loadedMessages.has(id)
         ? { type: "notFound" }
         : { type: "forbidden" };
   }

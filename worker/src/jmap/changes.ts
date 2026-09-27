@@ -96,6 +96,7 @@ function scopedChangesSql(
     FROM jmap_changes jc
     WHERE jc.user_id IS NULL
       AND jc.seq > ${sinceSeq}
+      AND (jc.exclude_user_id IS NULL OR jc.exclude_user_id <> ${userId})
       ${sharedInboxScope}
       ${sharedObjectScope}
     UNION ALL

@@ -54,11 +54,17 @@ export interface UnifiedMessage {
   attachments?: AttachmentRow[];
   state?: UnifiedMessageState;
   /**
-   * Mail sent through JMAP EmailSubmission: its content row and that content's
-   * thread key. Only set when the query asked for `withJmap`, so the web API's
-   * `...message` spread never carries it.
+   * Mail sent through JMAP EmailSubmission: its content row, that content's
+   * thread key, and, once a submission's on-success step filed the draft into
+   * Sent, the draft id it now shows as (`emailId`) and the draft's receivedAt.
+   * Only set when the query asked for `withJmap`.
    */
-  jmap?: { contentId: string; threadKey: string };
+  jmap?: {
+    contentId: string;
+    threadKey: string;
+    emailId: string | null;
+    receivedAt: number | null;
+  };
 }
 
 export function serializeMessageRef(ref: MessageRef): string {

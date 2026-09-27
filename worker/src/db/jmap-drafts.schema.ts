@@ -25,6 +25,11 @@ export const jmapDrafts = sqliteTable(
     submitState: text("submit_state", { enum: ["submitting", "queued"] }),
     /** Internal id of the submission holding the lock. */
     submitAttemptId: text("submit_attempt_id"),
+    /**
+     * Set to 1 immediately before the alias deletes this row, so the delete
+     * trigger writes no 'd': the same Email id lives on as a Sent Email.
+     */
+    aliasDelete: integer("alias_delete").notNull().default(0),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

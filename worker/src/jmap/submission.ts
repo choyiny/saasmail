@@ -15,14 +15,12 @@ import {
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 import type { OutboxSendResult } from "../lib/outbox";
 import {
-  findOrCreatePersonId,
-  outboundConversationId,
-} from "../lib/sent-bookkeeping";
-import {
   buildSubmissionMessage,
   parseContentJson,
   sendSubmission,
+  submissionAttachmentFilename,
   submissionAttachmentLeaves,
+  submissionFromHeader,
   submissionUnsendableLeaves,
   type SubmissionMessage,
 } from "../lib/submit-message";
@@ -34,6 +32,14 @@ import type { JmapMethodError } from "./emails";
 import { listUsableIdentities, type IdentityRow } from "./mailboxes";
 import type { JmapMethodContext } from "./methods";
 import {
+  applyOnSuccessStep,
+  isMethodError,
+  onSuccessForCreation,
+  parseOnSuccessArgs,
+  wantsImplicitEmailSet,
+  type ParsedOnSuccess,
+} from "./on-success";
+import {
   parseAnyEmailId,
   parseSubmissionId,
   publicAccountId,
@@ -42,6 +48,7 @@ import {
   publicSubmissionId,
   publicThreadId,
 } from "./public-ids";
+import { buildJmapSentRow } from "./sent-row";
 import { currentJmapState, parseJmapState } from "./state";
 import {
   checkContentRecipients,
@@ -66,6 +73,8 @@ type StagedAttachment = {
 type CreateOutcome = {
   created: Record<string, unknown> | null;
   error: SubmissionSetError | null;
+  /** Internal id of an accepted submission, so the call can run its step. */
+  acceptedId?: string;
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -146,6 +155,11 @@ async function claimAndRecordIntention(
     threadId: string;
     envelope: Envelope;
     staged: StagedAttachment[];
+    /** Spec §3.4 step 1: what this create's on-success step will do. */
+    onSuccessMode: string;
+    onSuccessPatchJson: string | null;
+    /** The exact From header of the first attempt; retries reuse it. */
+    fromHeader: string;
     now: number;
   },
 ): Promise<boolean> {
@@ -159,8 +173,8 @@ async function claimAndRecordIntention(
       .bind(input.submissionId, input.now, input.draftId, input.userId),
     d1
       .prepare(
-        `INSERT INTO jmap_submissions (id, user_id, attempt_state, on_success_state, draft_id, content_id, identity_id, identity_email, email_id, thread_id, sent_email_id, envelope_json, on_success_mode, on_success_patch_json, send_at, undo_status, created_at)
-         SELECT ?, ?, 'claimed', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, 'none', NULL, ?, 'final', ?
+        `INSERT INTO jmap_submissions (id, user_id, attempt_state, on_success_state, draft_id, content_id, identity_id, identity_email, email_id, thread_id, sent_email_id, envelope_json, on_success_mode, on_success_patch_json, from_header, send_at, undo_status, created_at)
+         SELECT ?, ?, 'claimed', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'final', ?
          WHERE ${ours}`,
       )
       .bind(
@@ -174,6 +188,9 @@ async function claimAndRecordIntention(
         input.threadId,
         input.sentEmailId,
         JSON.stringify(input.envelope),
+        input.onSuccessMode,
+        input.onSuccessPatchJson,
+        input.fromHeader,
         input.now,
         input.now,
         input.draftId,
@@ -307,7 +324,13 @@ async function releaseFinishedQueuedLock(
     );
 }
 
-/** Spec §3.4 step 3 for `sent` / `retrying`: the Sent row, acceptance, the lock. */
+/**
+ * Spec §3.4 step 3 for `sent` / `retrying`: the Sent row (written HIDDEN — its
+ * submission's `on_success_state` stays 'pending'), acceptance, the lock, and the
+ * release of the owned outbox row once nothing else owes bookkeeping. A `sent`
+ * draft keeps its `submitting` lock: only the on-success step may unlock it,
+ * because until then the Email is neither a draft nor a visible Sent Email.
+ */
 async function recordAcceptedSubmission(
   db: Db,
   input: {
@@ -321,48 +344,27 @@ async function recordAcceptedSubmission(
 ): Promise<void> {
   const { message, result } = input;
   const now = Math.floor(Date.now() / 1000);
-  const personId = await findOrCreatePersonId(db, message.to, now);
-  const conversationId = await outboundConversationId(
-    db,
-    message.fromAddress,
-    message.to,
-    message.cc.map((cc) => cc.email),
-  );
-  const inReplyTo = parseContentJson<string[] | null>(
-    input.content.inReplyToJson,
-    null,
-  );
+  // The one Sent-row writer for JMAP sends; recovery writes the same row.
+  const sentRow = await buildJmapSentRow(db, {
+    sentEmailId: input.sentEmailId,
+    content: input.content,
+    message,
+    status: result.outcome,
+    resendId: result.send.result?.id ?? null,
+    now,
+  });
+  const personId = sentRow.personId!;
   const statements = [
-    db.insert(sentEmails).values({
-      id: input.sentEmailId,
-      personId,
-      fromAddress: message.fromAddress,
-      toAddress: message.to,
-      subject: message.subject,
-      bodyHtml: message.html || null,
-      bodyText: message.text ?? null,
-      inReplyTo:
-        inReplyTo && inReplyTo.length > 0
-          ? `<${inReplyTo[0].replace(/^<|>$/g, "")}>`
-          : null,
-      messageId: message.headers["Message-ID"],
-      resendId: result.send.result?.id ?? null,
-      status: result.outcome,
-      cc: message.cc.length > 0 ? JSON.stringify(message.cc) : null,
-      conversationId,
-      jmapContentId: input.content.id,
-      sentAt: now,
-      createdAt: now,
-    }),
+    db.insert(sentEmails).values(sentRow),
     db
       .update(jmapSubmissions)
-      .set({ attemptState: "accepted", onSuccessState: "applied" })
+      .set({ attemptState: "accepted" })
       .where(eq(jmapSubmissions.id, input.submissionId)),
     db
       .update(jmapDrafts)
       .set(
         result.outcome === "sent"
-          ? { submitState: null, submitAttemptId: null }
+          ? { submitState: "submitting" as const }
           : { submitState: "queued" as const },
       )
       .where(
@@ -371,10 +373,29 @@ async function recordAcceptedSubmission(
           eq(jmapDrafts.submitAttemptId, input.submissionId),
         ),
       ),
+    // The provider accepted and this batch is the JMAP bookkeeping that owes the
+    // outbox confirmation, so the held row can go. A `retrying` row still reads
+    // `pending` and is untouched.
+    db
+      .delete(outboxEmails)
+      .where(
+        and(
+          eq(outboxEmails.sentEmailId, input.sentEmailId),
+          eq(outboxEmails.bookkeepingOwner, "jmap"),
+          eq(outboxEmails.status, "bookkeeping_pending"),
+        ),
+      ),
   ];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await db.batch(statements as any);
-  await cancelSequencesForPerson(db, personId);
+  try {
+    await cancelSequencesForPerson(db, personId);
+  } catch (error) {
+    console.error(
+      `[jmap] cancelling sequences after submission ${input.submissionId} failed:`,
+      error,
+    );
+  }
 }
 
 async function createSubmission(
@@ -385,6 +406,8 @@ async function createSubmission(
   ctx: JmapMethodContext,
   sender: EmailSender,
   identities: Map<string, IdentityRow>,
+  onSuccess: ParsedOnSuccess,
+  creationId: string,
 ): Promise<CreateOutcome> {
   if (!isObject(input)) return rejected({ type: "invalidProperties" });
   const unknownProperties = Object.keys(input).filter(
@@ -496,7 +519,7 @@ async function createSubmission(
   const sentEmailId = nanoid();
   const staged: StagedAttachment[] = leaves.map((leaf) => {
     const id = nanoid();
-    const filename = leaf.name ?? `attachment-${leaf.partId}`;
+    const filename = submissionAttachmentFilename(leaf);
     return {
       id,
       leaf,
@@ -505,6 +528,9 @@ async function createSubmission(
     };
   });
   const threadId = publicThreadId(content.threadKey);
+  // Spec §3.4 step 1: the intention records what its on-success step will do and
+  // the exact From the first attempt uses, so a retry can replay it verbatim.
+  const forCreate = onSuccessForCreation(onSuccess, creationId);
   const claimed = await claimAndRecordIntention(ctx.env.DB, {
     submissionId,
     sentEmailId,
@@ -517,6 +543,14 @@ async function createSubmission(
     threadId,
     envelope: envelope.envelope!,
     staged,
+    onSuccessMode: forCreate.mode,
+    onSuccessPatchJson: forCreate.patch
+      ? JSON.stringify(forCreate.patch)
+      : null,
+    fromHeader: submissionFromHeader(content, {
+      email: identityEmail,
+      displayName: identity.displayName ?? null,
+    }),
     now,
   });
   if (!claimed) {
@@ -573,7 +607,10 @@ async function createSubmission(
       sender,
       sentEmailId,
       message,
-      bookkeepingOwner: null,
+      // Spec §3.4: the provider-accepted row is held until the JMAP bookkeeping
+      // (the Sent row and the on-success step) is durable, so a crash in
+      // between leaves evidence of an accepted send instead of resending it.
+      bookkeepingOwner: "jmap",
     });
   } catch (err) {
     // sendViaOutbox deletes its own row only when the provider call throws. A
@@ -599,14 +636,27 @@ async function createSubmission(
   }
 
   if (result.outcome === "sent" || result.outcome === "retrying") {
-    await recordAcceptedSubmission(db, {
-      submissionId,
-      sentEmailId,
-      draftId: draft.id,
-      content,
-      message,
-      result,
-    });
+    // The provider has the message: from here on the create is reported as
+    // created whatever happens, or the client would send it again. If the
+    // bookkeeping fails, the claimed intention and the held outbox row stay
+    // (the draft stays locked) and the hourly recovery records the send.
+    let recorded = true;
+    try {
+      await recordAcceptedSubmission(db, {
+        submissionId,
+        sentEmailId,
+        draftId: draft.id,
+        content,
+        message,
+        result,
+      });
+    } catch (error) {
+      recorded = false;
+      console.error(
+        `[jmap] recording accepted submission ${submissionId} failed; recovery will record it:`,
+        error,
+      );
+    }
     return {
       created: {
         id: publicSubmissionId(submissionId),
@@ -615,6 +665,7 @@ async function createSubmission(
         undoStatus: "final",
       },
       error: null,
+      acceptedId: recorded ? submissionId : undefined,
     };
   }
 
@@ -645,18 +696,22 @@ async function knownSubmissionIds(
         .filter((id): id is string => id !== null),
     ),
   ];
-  if (internal.length === 0) return new Set();
-  const rows = await db
-    .select({ id: jmapSubmissions.id })
-    .from(jmapSubmissions)
-    .where(
-      and(
-        eq(jmapSubmissions.userId, userId),
-        eq(jmapSubmissions.attemptState, "accepted"),
-        inArray(jmapSubmissions.id, internal),
-      ),
-    );
-  return new Set(rows.map((row) => publicSubmissionId(row.id)));
+  const known = new Set<string>();
+  // Chunked: D1 binds at most 100 parameters per statement.
+  for (let start = 0; start < internal.length; start += 90) {
+    const rows = await db
+      .select({ id: jmapSubmissions.id })
+      .from(jmapSubmissions)
+      .where(
+        and(
+          eq(jmapSubmissions.userId, userId),
+          eq(jmapSubmissions.attemptState, "accepted"),
+          inArray(jmapSubmissions.id, internal.slice(start, start + 90)),
+        ),
+      );
+    for (const row of rows) known.add(publicSubmissionId(row.id));
+  }
+  return known;
 }
 
 export async function emailSubmissionSet(
@@ -666,20 +721,18 @@ export async function emailSubmissionSet(
   user: any,
   args: Record<string, unknown>,
   ctx: JmapMethodContext,
-): Promise<Record<string, unknown> | JmapMethodError> {
+): Promise<
+  | {
+      response: Record<string, unknown>;
+      followUps: { name: string; result: Record<string, unknown> }[];
+    }
+  | JmapMethodError
+> {
   const userId: string = user.id;
-  // Master plan Decision 8: the on-success arguments arrive in PR 6.
-  const onSuccess = ["onSuccessUpdateEmail", "onSuccessDestroyEmail"].filter(
-    (key) => !isNullish(args[key]),
-  );
-  if (onSuccess.length > 0) {
-    return {
-      type: "invalidArguments",
-      properties: onSuccess,
-      description:
-        "onSuccessUpdateEmail and onSuccessDestroyEmail are not supported yet; send, then update or destroy the draft with Email/set",
-    };
-  }
+  // RFC 8621 §7.5. Malformed arguments fail the whole call; a well-formed one
+  // is stored on each accepted create's intention (see claimAndRecordIntention).
+  const onSuccess = parseOnSuccessArgs(args);
+  if (isMethodError(onSuccess)) return onSuccess;
 
   const parsed = parseSetArguments(args);
   if (parsed.error) return parsed.error;
@@ -714,8 +767,17 @@ export async function emailSubmissionSet(
     ]),
   );
 
+  // Read before any create sends: nothing that can fail runs between the
+  // first provider call and the response.
+  const known = await knownSubmissionIds(db, userId, [
+    ...Object.keys(update),
+    ...destroy,
+  ]);
+
   const created: Record<string, Record<string, unknown>> = {};
   const notCreated: Record<string, SubmissionSetError> = {};
+  /** Internal ids of submissions accepted in this call; Task 5 runs their steps. */
+  const acceptedIds: string[] = [];
   for (const [creationId, input] of Object.entries(create)) {
     // One create failing must not hide the others: a create already sent in
     // this call is reported, so the client doesn't resend it. A failed create
@@ -731,6 +793,8 @@ export async function emailSubmissionSet(
         ctx,
         sender,
         identities,
+        onSuccess,
+        creationId,
       );
     } catch (error) {
       console.error(
@@ -744,13 +808,12 @@ export async function emailSubmissionSet(
       continue;
     }
     if (outcome.error) notCreated[creationId] = outcome.error;
-    else created[creationId] = outcome.created!;
+    else {
+      created[creationId] = outcome.created!;
+      if (outcome.acceptedId) acceptedIds.push(outcome.acceptedId);
+    }
   }
 
-  const known = await knownSubmissionIds(db, userId, [
-    ...Object.keys(update),
-    ...destroy,
-  ]);
   const readOnly = (id: string): SubmissionSetError =>
     known.has(id)
       ? {
@@ -763,10 +826,10 @@ export async function emailSubmissionSet(
   const notDestroyed: Record<string, SubmissionSetError> = {};
   for (const id of destroy) notDestroyed[id] = readOnly(id);
 
-  return {
+  const response: Record<string, unknown> = {
     accountId: publicAccountId(userId),
     oldState: current.state,
-    newState: (await currentJmapState(db, allowed, userId)).state,
+    newState: current.state,
     created: nonEmptyOrNull(created),
     updated: null,
     destroyed: null,
@@ -774,4 +837,48 @@ export async function emailSubmissionSet(
     notUpdated: nonEmptyOrNull(notUpdated),
     notDestroyed: nonEmptyOrNull(notDestroyed),
   };
+
+  // Spec §3.4 step 4: once per call, after every create has run, the on-success
+  // step files each accepted draft into Sent (the alias), flags or destroys it,
+  // and otherwise reveals the Sent row. Each submission's step is idempotent
+  // through its own `applied` marker.
+  const followUps: { name: string; result: Record<string, unknown> }[] = [];
+  if (acceptedIds.length > 0) {
+    try {
+      const implicit = await applyOnSuccessStep({
+        db,
+        allowed,
+        user,
+        ctx,
+        submissionIds: acceptedIds,
+        emitResponse: wantsImplicitEmailSet(onSuccess),
+      });
+      if (implicit) followUps.push(implicit);
+    } catch (error) {
+      // The messages were sent: answer with the submissions regardless. Their
+      // steps stay pending (drafts locked), and the hourly recovery runs them.
+      console.error(
+        "[jmap] on-success step failed; recovery will apply it:",
+        error,
+      );
+      if (wantsImplicitEmailSet(onSuccess)) {
+        followUps.push({
+          name: "error",
+          result: {
+            type: "serverFail",
+            description: "The on-success step will be completed later",
+          },
+        });
+      }
+    }
+  }
+  // The step wrote change rows, so the new state is read after it. A failed
+  // read keeps the old state rather than failing a call that already sent:
+  // the client then just sees these changes again through /changes.
+  try {
+    response.newState = (await currentJmapState(db, allowed, userId)).state;
+  } catch (error) {
+    console.error("[jmap] reading the state after a submission failed:", error);
+  }
+  return { response, followUps };
 }

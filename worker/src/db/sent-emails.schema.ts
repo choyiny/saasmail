@@ -1,4 +1,10 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const sentEmails = sqliteTable(
   "sent_emails",
@@ -36,6 +42,14 @@ export const sentEmails = sqliteTable(
      * JMAP projects the Email's immutable properties from that content row.
      */
     jmapContentId: text("jmap_content_id"),
+    /**
+     * Internal id of the JMAP draft this Sent row became when a submission's
+     * on-success step filed the draft into Sent (the alias). JMAP shows the
+     * row as `D<jmapEmailId>`, never as `S<id>`. Null for every other row.
+     */
+    jmapEmailId: text("jmap_email_id"),
+    /** The aliased draft's receivedAt (RFC 8621 keeps it immutable). */
+    jmapReceivedAt: integer("jmap_received_at"),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
@@ -45,5 +59,6 @@ export const sentEmails = sqliteTable(
     index("sent_emails_from_sent_idx").on(table.fromAddress, table.sentAt),
     index("sent_emails_sequence_sent_idx").on(table.sequenceId, table.sentAt),
     index("sent_emails_jmap_content_idx").on(table.jmapContentId),
+    uniqueIndex("sent_emails_jmap_email_id_unique").on(table.jmapEmailId),
   ],
 );

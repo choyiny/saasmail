@@ -184,6 +184,9 @@ async function mailboxCounts(
       folder,
       viewer: { userId },
       ignoreSnooze: true,
+      // JMAP-only: keeps a pending submission's Sent row out of the counts
+      // (spec §3.4). The web's own counts never pass this.
+      withJmap: true,
     };
   }
   const unreadMessages = messages ? { ...messages, seen: false } : null;

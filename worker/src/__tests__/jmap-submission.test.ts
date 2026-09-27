@@ -679,6 +679,77 @@ describe("EmailSubmission/set create", () => {
     expect(calls).toHaveLength(1);
   });
 
+  it("reports a create the provider accepted even when its bookkeeping fails", async () => {
+    const { sender, calls } = recordingSender();
+    const draft = await createDraft(userId, sender);
+    await env.DB.prepare(
+      `CREATE TRIGGER sent_insert_fails BEFORE INSERT ON sent_emails
+       BEGIN SELECT RAISE(ABORT, 'd1 down'); END`,
+    ).run();
+    let responses: unknown[][];
+    try {
+      responses = await runJmap(userId, [submitCall(userId, draft.id)], sender);
+    } finally {
+      await env.DB.prepare("DROP TRIGGER sent_insert_fails").run();
+    }
+    expect(calls).toHaveLength(1);
+    expect(responses[0][0]).toBe("EmailSubmission/set");
+    expect(
+      (responses[0][1] as { created: Record<string, { id: string }> }).created
+        .s1.id,
+    ).toMatch(/^E/);
+    // Recovery finishes it: the held outbox row is the evidence, and the
+    // draft stays locked so nothing resends it meanwhile.
+    const [outbox] = await getDb().select().from(outboxEmails);
+    expect(outbox.status).toBe("bookkeeping_pending");
+    expect((await draftRow(draft.id)).submitState).toBe("submitting");
+  });
+
+  it("still answers with the submission when its on-success step fails", async () => {
+    const { sender, calls } = recordingSender();
+    const draft = await createDraft(userId, sender);
+    await env.DB.prepare(
+      `CREATE TRIGGER on_success_fails BEFORE UPDATE OF on_success_state ON jmap_submissions
+       BEGIN SELECT RAISE(ABORT, 'd1 down'); END`,
+    ).run();
+    let responses: unknown[][];
+    try {
+      responses = await runJmap(
+        userId,
+        [
+          [
+            "EmailSubmission/set",
+            {
+              accountId: acct(userId),
+              create: { s1: { identityId: idn(MINE), emailId: draft.id } },
+              onSuccessUpdateEmail: {
+                "#s1": { "keywords/$flagged": true },
+              },
+            },
+            "s",
+          ],
+        ],
+        sender,
+      );
+    } finally {
+      await env.DB.prepare("DROP TRIGGER on_success_fails").run();
+    }
+    expect(calls).toHaveLength(1);
+    expect(responses[0][0]).toBe("EmailSubmission/set");
+    expect(
+      (responses[0][1] as { created: Record<string, { id: string }> }).created
+        .s1.id,
+    ).toMatch(/^E/);
+    expect(responses[1]).toEqual([
+      "error",
+      expect.objectContaining({ type: "serverFail" }),
+      "s",
+    ]);
+    // The step stays pending, so the hourly recovery applies it.
+    const [submission] = await getDb().select().from(jmapSubmissions);
+    expect(submission.onSuccessState).toBe("pending");
+  });
+
   it("a failing create still reports the creates already sent in the same call", async () => {
     const blob = await uploadBlob(
       userId,
@@ -828,10 +899,12 @@ describe("EmailSubmission/set create", () => {
     expect(reply.threadId).toBe(original.threadId);
   });
 
-  it("refuses on-success arguments until PR 6 and treats update/destroy as read-only", async () => {
+  it("runs the on-success step and treats update/destroy as read-only", async () => {
     const { sender } = recordingSender();
     const draft = await createDraft(userId, sender);
-    const [refused] = await runJmap(
+    // PR 6 supports the on-success arguments: a destroy now takes the draft away
+    // in the implicit Email/set that follows this response.
+    const destroyed = await runJmap(
       userId,
       [
         [
@@ -846,13 +919,14 @@ describe("EmailSubmission/set create", () => {
       ],
       sender,
     );
-    expect(refused[0]).toBe("error");
-    expect(refused[1]).toMatchObject({
-      type: "invalidArguments",
-      properties: ["onSuccessDestroyEmail"],
-    });
+    expect(destroyed[0][0]).toBe("EmailSubmission/set");
+    expect(submissionResult(destroyed).created.s1.id).toMatch(/^E/);
+    // RFC 8621 §7.5: the implicit Email/set answers under the same call id.
+    expect(destroyed[1][0]).toBe("Email/set");
+    expect(destroyed[1][1].destroyed).toEqual([draft.id]);
 
-    const sent = await runJmap(userId, [submitCall(userId, draft.id)], sender);
+    const kept = await createDraft(userId, sender);
+    const sent = await runJmap(userId, [submitCall(userId, kept.id)], sender);
     const id = submissionResult(sent).created.s1.id as string;
     const [changed] = await runJmap(
       userId,
@@ -874,5 +948,23 @@ describe("EmailSubmission/set create", () => {
     expect(result.notUpdated.Enope.type).toBe("notFound");
     expect(result.notDestroyed[id].type).toBe("forbidden");
     expect(result.notDestroyed.Enope.type).toBe("notFound");
+
+    // More ids than D1 binds in one statement are still answered one by one.
+    const many = Array.from({ length: 150 }, (_, i) => `Enope${i}`);
+    const [bulk] = await runJmap(
+      userId,
+      [
+        [
+          "EmailSubmission/set",
+          { accountId: acct(userId), destroy: [id, ...many] },
+          "s",
+        ],
+      ],
+      sender,
+    );
+    expect(bulk[0]).toBe("EmailSubmission/set");
+    const bulkResult = bulk[1] as Record<string, any>;
+    expect(bulkResult.notDestroyed[id].type).toBe("forbidden");
+    expect(bulkResult.notDestroyed.Enope149.type).toBe("notFound");
   });
 });

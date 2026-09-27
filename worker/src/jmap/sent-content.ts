@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { jmapMessageContent } from "../db/jmap-message-content.schema";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -7,6 +7,7 @@ import {
   isInboxAllowed,
   type AllowedInboxes,
 } from "../lib/inbox-permissions";
+import { jmapHiddenSentSql } from "../lib/messages/jmap-visibility";
 import type { MessageRef } from "../lib/messages/types";
 import type { JmapContentRow } from "./content";
 
@@ -52,6 +53,7 @@ export async function loadContentKeyedSentRefs(
       FROM sent_emails se
       JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
       WHERE jmc.thread_key IN ${unique.slice(start, start + CHUNK)}
+        AND NOT ${jmapHiddenSentSql(sql`se.id`)}
       ${scope}
     `);
     refs.push(...rows.map((row) => ({ kind: "sent" as const, id: row.id })));
@@ -70,7 +72,9 @@ export async function listContentThreadKeys(
     SELECT DISTINCT jmc.thread_key AS thread_key
     FROM sent_emails se
     JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
-    WHERE 1 = 1 ${scope}
+    WHERE 1 = 1
+      AND NOT ${jmapHiddenSentSql(sql`se.id`)}
+      ${scope}
     ORDER BY thread_key
     LIMIT ${limit}
   `);
@@ -86,7 +90,12 @@ export async function readableSentContent(
   const rows = await db
     .select({ inbox: sentEmails.fromAddress })
     .from(sentEmails)
-    .where(eq(sentEmails.jmapContentId, contentId));
+    .where(
+      and(
+        eq(sentEmails.jmapContentId, contentId),
+        sql`NOT ${jmapHiddenSentSql(sql`${sentEmails.id}`)}`,
+      ),
+    );
   if (!rows.some((row) => isInboxAllowed(allowed, row.inbox))) return null;
   const [content] = await db
     .select()
@@ -108,7 +117,12 @@ export async function sentMessageContent(
       contentId: sentEmails.jmapContentId,
     })
     .from(sentEmails)
-    .where(eq(sentEmails.id, sentEmailId))
+    .where(
+      and(
+        eq(sentEmails.id, sentEmailId),
+        sql`NOT ${jmapHiddenSentSql(sql`${sentEmails.id}`)}`,
+      ),
+    )
     .limit(1);
   if (!row || !row.contentId || !isInboxAllowed(allowed, row.inbox))
     return null;

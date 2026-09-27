@@ -14,6 +14,7 @@ import {
   type SendOutput,
 } from "./send";
 import { formatFromAddress } from "./format-from-address";
+import { loadFrozenJmapSend } from "./jmap-frozen-send";
 import { isDemoMode } from "./is-dev";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
@@ -333,26 +334,48 @@ export async function attemptOutboxRow(
   if (claimed.length === 0) return null;
   const row = claimed[0];
 
-  const from = await formatFromAddress(db, row.fromAddress);
-  const storedAttachments = await loadOutboxAttachments(
-    db,
-    env,
-    row.sentEmailId,
-  );
+  // A JMAP row replays its frozen content (spec §10.1): the content row keeps
+  // the To name, Cc, References and inline attachments, and the intention keeps
+  // the exact From of the first attempt. Every other row — and a JMAP row whose
+  // intention, content or R2 objects are gone — uses the stored outbox fields.
+  const frozen =
+    bookkeepingOwnerOf(row) === "jmap"
+      ? await loadFrozenJmapSend(db, env, row.sentEmailId)
+      : null;
+  if (bookkeepingOwnerOf(row) === "jmap" && !frozen) {
+    console.error(
+      `[outbox] no frozen content for JMAP row ${row.id}; retrying from stored fields`,
+    );
+  }
+  const from = frozen
+    ? frozen.from
+    : await formatFromAddress(db, row.fromAddress);
+  const storedAttachments = frozen
+    ? frozen.attachments
+    : await loadOutboxAttachments(db, env, row.sentEmailId);
 
   const send = await sendWithSuppressionCheck({
     db,
     env,
     sender,
     from,
-    to: row.toAddress,
-    cc: row.cc ? (JSON.parse(row.cc) as CcRecipient[]) : undefined,
-    subject: row.subject,
-    html: row.bodyHtml ?? undefined,
-    text: row.bodyText ?? undefined,
-    headers: row.headers
-      ? (JSON.parse(row.headers) as Record<string, string>)
-      : undefined,
+    to: frozen ? frozen.to : row.toAddress,
+    ...(frozen && frozen.toName ? { toName: frozen.toName } : {}),
+    cc: frozen
+      ? frozen.cc.length > 0
+        ? frozen.cc
+        : undefined
+      : row.cc
+        ? (JSON.parse(row.cc) as CcRecipient[])
+        : undefined,
+    subject: frozen ? frozen.subject : row.subject,
+    html: frozen ? frozen.html : (row.bodyHtml ?? undefined),
+    text: frozen ? frozen.text : (row.bodyText ?? undefined),
+    headers: frozen
+      ? frozen.headers
+      : row.headers
+        ? (JSON.parse(row.headers) as Record<string, string>)
+        : undefined,
     attachments: storedAttachments.length > 0 ? storedAttachments : undefined,
     transactional: row.transactional === 1,
   });

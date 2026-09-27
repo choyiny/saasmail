@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Updated: 2026-09-24
+Updated: 2026-09-26
 
 This file tracks the stages built on top of saasmail's customer timeline, inbox
 permissions, newsletters, sequences, MCP/WebMCP and delivery infrastructure.
@@ -10,7 +10,7 @@ native agent, MCP, WebMCP and JMAP are further clients of the same services.
 
 ## Status
 
-Stages 1–7 are complete. Stage 8 is deferred.
+Stages 1–7 are complete, including JMAP sending. Stage 8 is deferred.
 
 | Stage | Scope                                                            | PR  | Merge commit |
 | ----- | ---------------------------------------------------------------- | --- | ------------ |
@@ -37,6 +37,16 @@ Stages 1–7 are complete. Stage 8 is deferred.
 | QA 2  | Agent fixes: reasoning models, signed approvals, teammate lookup | #28 | `da49cf0`    |
 | QA 3  | Automation guards and JMAP conformance                           | #29 | `5ee9ab2`    |
 | QA 4  | Real type checks, SQL logging off by default, upgrade docs       | #30 | —            |
+| 7c-1  | JMAP ids are RFC 8620-valid; account reset                       | #39 | `ad9c35b`    |
+| 7c-2  | Crash-safe sent attachments and outbox bookkeeping ownership     | #40 | `22fc601`    |
+| 7c-3  | JMAP upload, blob download and creation references               | —   | —            |
+| 7c-4  | JMAP drafts and stored message content                           | —   | —            |
+| 7c-5  | JMAP EmailSubmission                                             | —   | —            |
+| 7c-6  | JMAP on-success filing, crash recovery and frozen retries        | —   | —            |
+| 7c-7  | JMAP end-to-end script, docs and live QA                         | —   | —            |
+
+A row with `—` is on a branch that hasn't merged yet; fill in the PR number and
+squash commit when it lands.
 
 The stage order isn't numeric because Stage 3 (the mailbox view) needed Stage
 1's state model, while the agent (Stage 2) could land later.
@@ -81,14 +91,17 @@ The stage order isn't numeric because Stage 3 (the mailbox view) needed Stage
     `Thread/get`, `Identity/get`, and `Email/set` for keywords and mailbox
     membership.
   - A trigger-based change log.
+  - Sending (7c): RFC 8620-valid ids, blob upload and download, drafts with a
+    stored RFC 5322 form, and `EmailSubmission` with the RFC 8621 on-success
+    update, as transactional one-To messages through the shared outbox.
   - See [docs/jmap.md](docs/jmap.md).
 
 ## Deferred
 
 - **Stage 8, portability (a non-Cloudflare runtime):** only on real demand.
-- **JMAP `EmailSubmission`:** not built; it needs an explicit product decision.
-  JMAP push, search snippets, vacation response and blob upload are also
-  deferred.
+- **JMAP follow-ups:** multiple To and Bcc, delayed send and unsend, drafts in
+  custom folders, raw-message blobs for mail not created through JMAP, push,
+  search snippets and vacation response.
 - **Snooze-expiry notifications:** there is no wake-up cron by design.
 - **A persistent audit table for agent CRM actions:** approved executions are
   logged to the Workers console only.
@@ -96,7 +109,8 @@ The stage order isn't numeric because Stage 3 (the mailbox view) needed Stage
 ## Principles
 
 1. A message is `emails ∪ sent_emails`: no third source, and delivery machinery
-   is not mail.
+   is not mail. Drafts, from the web composer or from JMAP, are unsent client
+   state, not mail.
 2. D1 is the system of record. Durable Objects are for coordination and agent
    session state only.
 3. One permission-checked service layer serves HTTP, MCP, WebMCP, the native
