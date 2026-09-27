@@ -13,7 +13,7 @@ saasmail exposes a bounded subset of [JMAP Core (RFC 8620)](https://www.rfc-edit
 
 Authenticate with the same credentials as the HTTP API: either a signed-in session cookie or `Authorization: Bearer sk_...`. Session-cookie callers have the same passkey-registration gate as `/api/*`; API keys retain their normal issuance-time passkey guarantee. Every object is scoped through the caller's allowed inboxes. Objects outside that scope are reported as not found rather than disclosed.
 
-There is one JMAP account per saasmail user. Its account id is a derived, opaque value (not the user id) and it is advertised as personal and writable. JMAP writes are deliberately limited to Email state: creating drafts, destroying messages, mailbox administration, and EmailSubmission remain unsupported.
+There is one JMAP account per saasmail user. Its account id is a derived, opaque value (not the user id) and it is advertised as personal and writable. JMAP writes are deliberately limited to Email state and drafts: destroying received or sent messages, mailbox administration, and EmailSubmission remain unsupported.
 
 ## Ids and account (breaking in this release)
 
@@ -25,15 +25,15 @@ State strings moved with the ids: they are now `j2-<seq>-<issuedAt>-<fp>`. A cli
 
 The web UI, the HTTP API and MCP are unaffected: the internal `received:<id>` / `sent:<id>` message references they use are unchanged, and only the JMAP boundary encodes and decodes.
 
-Body-part blob ids (`P<email id>_text` / `P<email id>_html`) are not downloadable yet — the same pre-existing gap as before. See "Limits and known gaps" below.
+Body-part blob ids come in two shapes: `P<email id>_text` / `P<email id>_html` for received and sent mail, and `P<draft id>_<part id>` for a draft's own parts. Both are downloadable; see "Uploads and blobs" and "Drafts".
 
 ## Uploads and blobs
 
 Uploads accept any content, including an empty body, up to the Session's `maxSizeUpload`. That value is the configured provider's attachment limit, and the same value is advertised as `maxSizeAttachmentsPerEmail`. A larger body gets `413` with a problem body whose `maxSize` is the limit. The server counts the octets it reads, so a missing or wrong `Content-Length` doesn't help. A request for another account gets `403`. A browser session (cookie) upload must carry an `Origin` from the deployment's trusted origins, or it gets `403`. API-key uploads don't need one.
 
-An uploaded blob (`U…`) is readable only by the user who uploaded it and is deleted after 24 hours. Use it in a draft before then; a draft keeps its own copy. Attachment blobs (`A…`) follow the inbox permissions of their message. Body-part (`P…`) and raw-message blobs are not downloadable yet.
+An uploaded blob (`U…`) is readable only by the user who uploaded it and is deleted after 24 hours. Use it in a draft before then; a draft copies the bytes it keeps, so it still resolves after the upload is reaped. Attachment blobs (`A…`) follow the inbox permissions of their message. Raw-message blobs (`X…`) and body-part blobs (`P…`) are the draft's own content, and are readable by the draft's author while the draft exists.
 
-Creation references work across calls in one request: a later call may use `#creationId` in `ids`, `destroy` and `update` keys to name a record created earlier. `createdIds` is accepted on the request and echoed on the response, per RFC 8620 §3.3. No method creates records yet; drafts arrive next.
+Creation references work across calls in one request: a later call may use `#creationId` in `ids`, `destroy` and `update` keys to name a record created earlier, and one `Email/set` may reference a draft it creates in the same call. `createdIds` is accepted on the request and echoed on the response, per RFC 8620 §3.3.
 
 ## Supported methods
 
@@ -46,13 +46,46 @@ The server advertises `urn:ietf:params:jmap:core` and `urn:ietf:params:jmap:mail
 - `Identity/get`
 - `Mailbox/changes`
 
-`Email/set` is update-only. It can change `$seen`/`$flagged`, move received mail among Inbox/Archive/Junk/Trash, move sent mail between Sent/Trash, and add/remove custom-folder membership. Create and destroy requests are returned per-id as `forbidden`. `Thread/changes`, `Identity/changes`, and every `*/queryChanges` continue to return `cannotCalculateChanges`.
+`Email/set` creates drafts, and updates and destroys them, alongside today's updates to received and sent mail. It can change `$seen`/`$flagged`, move received mail among Inbox/Archive/Junk/Trash, move sent mail between Sent/Trash, add/remove custom-folder membership, and move a draft between that identity's Drafts and Trash. Destroying received or sent mail is still `forbidden`; only drafts are destroyable. `Thread/changes`, `Identity/changes`, and every `*/queryChanges` continue to return `cannotCalculateChanges`.
 
-Mailbox objects are a view over the existing mailbox-state model. Each allowed inbox gets virtual Inbox, Drafts, Sent, Archive, Junk, and Trash mailboxes whose ids are derived values, not the inbox address. Drafts is currently advertised as an empty mailbox. Custom folders from the `mailboxes` table get ids derived from the folder row. `mayReadItems`, `mayAddItems`, `mayRemoveItems`, `maySetSeen`, and `maySetKeywords` are true for normal system and custom mailboxes. Drafts remains read-only. Mailbox create/rename/delete and submission rights remain false.
+Mailbox objects are a view over the existing mailbox-state model. Each allowed inbox gets virtual Inbox, Drafts, Sent, Archive, Junk, and Trash mailboxes whose ids are derived values, not the inbox address. Custom folders from the `mailboxes` table get ids derived from the folder row. `mayReadItems`, `mayAddItems`, `mayRemoveItems`, `maySetSeen`, and `maySetKeywords` are true for system and custom mailboxes, Drafts included; its counts are the caller's own drafts. Mailbox create/rename/delete and submission rights remain false.
 
-Email ids are derived from the underlying saasmail message reference and are not the internal `received:<id>` / `sent:<id>` strings the HTTP API uses. `Email/get` exposes addresses, subject, dates, preview, seen/flagged keywords, mailbox membership, text/HTML body structure and optional body values, plus attachment blob ids. `Email/query` supports `inMailbox`, `text`, `from`, `after`, `before`, `hasKeyword`, and `notKeyword` for `$seen`/`$flagged`. The only supported sort is `receivedAt` descending. Thread ids are derived from the conversation keys the unified message service uses.
+Email ids are derived from the underlying saasmail message reference and are not the internal `received:<id>` / `sent:<id>` strings the HTTP API uses; a draft's id is a separate `D…` family. `Email/get` exposes addresses, subject, dates, preview, seen/flagged keywords, mailbox membership, text/HTML body structure and optional body values, plus attachment blob ids. `Email/query` supports `inMailbox`, `text`, `from`, `after`, `before`, `hasKeyword`, and `notKeyword` for `$seen`/`$flagged`/`$draft`; for a draft, `text` matches its subject or body as a substring. Drafts and received/sent mail are merged into one `receivedAt`-descending result, so `position`, `limit` and `total` count both. The only supported sort is `receivedAt` descending. Thread ids are derived from the conversation keys the unified message service uses.
 
 Attachment blob downloads reuse the same permission-checked attachment lookup as `GET /api/attachments/{id}`.
+
+## Drafts
+
+A JMAP client composes by creating a draft with `Email/set`, then reading, editing, trashing or destroying it like any other Email. A draft's id is a `D…` value, and its content is stored separately from its mutable state so the same immutable content can later back a sent Email.
+
+**Creating.** A draft needs exactly one `from` that is one of your usable identities, `mailboxIds` naming exactly that identity's Drafts mailbox, and the `$draft` keyword. `$seen` and `$flagged` may be set at creation. The server fills in `messageId` (`<random>@<identity domain>`), `sentAt` and `receivedAt` when you omit them, and keeps any values you do supply.
+
+Both body forms are accepted (RFC 8621 §4.6): the flattened `textBody` / `htmlBody` / `attachments` plus `bodyValues`, or a `bodyStructure` in one of these shapes:
+
+- `text/plain` or `text/html`
+- `multipart/alternative(text, html)`
+- `multipart/related(html, inline blobs…)`
+- `multipart/mixed(<one of the above>, attachments…)`
+
+`headers` is never accepted, on the Email or on any part, and neither is any `header:*` property.
+
+**Attachments.** Every attachment `blobId` is resolved when the draft is created; a missing or unreadable one is reported as `blobNotFound` with _every_ missing id listed, and nothing is stored. The bytes are then copied into the draft's own storage, so the draft keeps its attachments after the upload expires, and an attachment copied from an existing message survives that message's deletion. The total attachment size is capped at `maxSizeAttachmentsPerEmail`; over it, the draft is refused with `tooLarge`.
+
+**The create response** gives the new draft's `id` (`D…`), `blobId` (`X…`, its raw RFC 5322 message), `threadId` and `size`. The `X…` blob downloads the whole message; each part has a `P…` blob (`P<draft id>_<part id>`) holding that part's bytes.
+
+**Rules for updates and destroys.**
+
+| Kind           | Mailboxes                                                     | Keywords            | Destroy     |
+| -------------- | ------------------------------------------------------------- | ------------------- | ----------- |
+| Received Email | Inbox / Archive / Junk / Trash, plus custom folders           | `$seen`, `$flagged` | `forbidden` |
+| Sent Email     | Sent / Trash                                                  | must keep `$seen`   | `forbidden` |
+| Draft          | exactly one of that identity's Drafts / Trash; never a folder | must keep `$draft`  | allowed     |
+
+Anything else fails with `invalidProperties` and changes nothing.
+
+**Threads.** A reply that names a message you can see — through `inReplyTo` or `references` — joins that message's thread. Any other draft takes the thread its sent message will naturally land in (the conversation of its external recipients, or the person thread for a single recipient), and failing that starts a thread of its own (`Td…`). Thread ids are immutable per Email, so a draft's `threadId` is fixed at creation.
+
+**Visibility.** Drafts are private to their author. Another member of the same inbox never sees a draft — not in `Email/get`, `Email/query`, `Thread/get`, `Email/changes`, the Drafts or Trash counts, or an `X…`/`P…` download.
 
 ## State and changes
 
@@ -76,9 +109,9 @@ For clients that ask for endpoints manually, use `https://your-domain.example/jm
 
 The Session advertises a 10 MB request limit, 16 method calls per request, 256 objects per `/get`, 256 objects per `/set`, four concurrent requests, and `i;ascii-casemap` collation. Result references (`#property`) are supported, including wildcard JSON-pointer paths used to feed one method response into a later call in the same request.
 
-EventSource push, Email creation/destruction, mailbox mutation, EmailSubmission, search snippets, raw-message blob download, and body-part blob download are not implemented. Thread/changes, Identity/changes, and query-change calculation are also not implemented. Draft rows are not yet projected into JMAP Email objects.
+EventSource push, mailbox mutation, EmailSubmission, and search snippets are not implemented. Destroying received or sent mail is `forbidden`; only drafts can be destroyed. Thread/changes, Identity/changes, and query-change calculation are also not implemented. `blobId` is still `null` for received and sent mail that didn't come from JMAP, so those messages have no raw-message blob.
 
-`Email/get` accepts the full RFC 8621 Email property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors, so standard clients may request their normal property lists. `messageId` and `inReplyTo` are returned when they are already present in the unified message row. Properties the current unified model cannot supply cheaply — including raw-message `blobId`, `references`, `sender`, `bcc`, `replyTo`, `bodyStructure`, `headers`, and dynamic `header:*` selectors — are returned as `null`. These nulls are a deliberate compatibility deviation from the stricter RFC field types until those values are modeled; names outside the RFC property set still return `invalidArguments`.
+`Email/get` accepts the full RFC 8621 Email property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors, so standard clients may request their normal property lists. `messageId` and `inReplyTo` are returned when they are already present in the unified message row. For received and sent mail, properties the current unified model cannot supply cheaply — including raw-message `blobId`, `references`, `sender`, `bcc`, `replyTo`, `bodyStructure`, `headers`, and dynamic `header:*` selectors — are returned as `null`; a draft supplies all of them from its own stored content. These nulls are a deliberate compatibility deviation from the stricter RFC field types until those values are modeled; names outside the RFC property set still return `invalidArguments`.
 
 The API does not add a scheduler or maintain separate mailbox state; reads go through the same `queryMessages()` and state tables used by the saasmail UI and HTTP API.
 

@@ -1,14 +1,16 @@
-import { asc } from "drizzle-orm";
+import { asc, sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { mailboxes } from "../db/mailboxes.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
 import {
+  buildMessageQuerySql,
   countMessages,
-  countMessageThreads,
   type MessageFolder,
+  type MessageQuery,
 } from "../lib/messages/query";
 import { SYSTEM_MAILBOX_ROLES, type SystemMailboxRole } from "./constants";
+import { countDrafts, draftThreadKeySql, type DraftFilter } from "./drafts";
 import { customMailboxId, systemMailboxId } from "./ids";
 
 export type MailboxDescriptor =
@@ -26,6 +28,13 @@ export type MailboxDescriptor =
     };
 
 export type IdentityRow = typeof senderIdentities.$inferSelect;
+
+/** Strict mode is off, so narrow the descriptor union explicitly. */
+export function isSystemDescriptor(
+  descriptor: MailboxDescriptor,
+): descriptor is Extract<MailboxDescriptor, { kind: "system" }> {
+  return descriptor.kind === "system";
+}
 
 const ROLE_NAMES: Record<SystemMailboxRole, string> = {
   inbox: "Inbox",
@@ -115,6 +124,36 @@ export async function loadMailboxDescriptors(
   return descriptors;
 }
 
+async function countThreadsAcross(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  messageQuery: MessageQuery | null,
+  draftFilter: DraftFilter | null,
+): Promise<number> {
+  const arms: SQL[] = [];
+  if (messageQuery) {
+    const built = buildMessageQuerySql(allowed, {
+      ...messageQuery,
+      limit: null,
+      cursor: undefined,
+      offset: undefined,
+      withState: true,
+    });
+    if (built) {
+      arms.push(
+        sql`SELECT COALESCE(conversation_key, kind || ':' || id) AS thread_key FROM (${built.statement})`,
+      );
+    }
+  }
+  if (draftFilter) arms.push(draftThreadKeySql(allowed, userId, draftFilter));
+  if (arms.length === 0) return 0;
+  const rows = await db.all<{ count: number }>(sql`
+    SELECT COUNT(DISTINCT thread_key) AS count FROM (${sql.join(arms, sql` UNION ALL `)})
+  `);
+  return Number(rows[0]?.count ?? 0);
+}
+
 async function mailboxCounts(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
@@ -126,40 +165,45 @@ async function mailboxCounts(
   totalThreads: number;
   unreadThreads: number;
 }> {
-  if (descriptor.kind === "system" && descriptor.role === "drafts") {
-    return {
-      totalEmails: 0,
-      unreadEmails: 0,
-      totalThreads: 0,
-      unreadThreads: 0,
+  const role = isSystemDescriptor(descriptor) ? descriptor.role : null;
+  const drafts: DraftFilter | null =
+    role === "drafts" || role === "trash"
+      ? { inbox: descriptor.inbox, role }
+      : null;
+  let messages: MessageQuery | null = null;
+  if (role !== "drafts") {
+    const folder: MessageFolder = isSystemDescriptor(descriptor)
+      ? folderForRole(descriptor.role)!
+      : {
+          mailboxId: (
+            descriptor as Extract<MailboxDescriptor, { kind: "custom" }>
+          ).mailboxId,
+        };
+    messages = {
+      inboxes: [descriptor.inbox],
+      folder,
+      viewer: { userId },
+      ignoreSnooze: true,
     };
   }
-
-  const folder: MessageFolder =
-    descriptor.kind === "custom"
-      ? { mailboxId: descriptor.mailboxId }
-      : folderForRole(descriptor.role)!;
-  const base = {
-    inboxes: [descriptor.inbox],
-    folder,
-    viewer: { userId },
-    ignoreSnooze: true,
-  };
+  const unreadMessages = messages ? { ...messages, seen: false } : null;
+  // RFC 8621 §2: unread means neither $seen nor $draft, so no draft is unread.
+  const unreadDrafts: DraftFilter | null = null;
+  const count = async (
+    query: MessageQuery | null,
+    filter: DraftFilter | null,
+  ) =>
+    (query ? await countMessages(db, allowed, query) : 0) +
+    (filter ? await countDrafts(db, allowed, userId, filter) : 0);
 
   const [totalEmails, unreadEmails, totalThreads, unreadThreads] =
     await Promise.all([
-      countMessages(db, allowed, base),
-      countMessages(db, allowed, { ...base, seen: false }),
-      countMessageThreads(db, allowed, base),
-      countMessageThreads(db, allowed, { ...base, seen: false }),
+      count(messages, drafts),
+      count(unreadMessages, unreadDrafts),
+      countThreadsAcross(db, allowed, userId, messages, drafts),
+      countThreadsAcross(db, allowed, userId, unreadMessages, unreadDrafts),
     ]);
-
-  return {
-    totalEmails,
-    unreadEmails,
-    totalThreads,
-    unreadThreads,
-  };
+  return { totalEmails, unreadEmails, totalThreads, unreadThreads };
 }
 
 export async function listJmapMailboxes(
@@ -187,10 +231,10 @@ export async function listJmapMailboxes(
         unreadThreads: counts.unreadThreads,
         myRights: {
           mayReadItems: true,
-          mayAddItems: descriptor.role !== "drafts",
-          mayRemoveItems: descriptor.role !== "drafts",
-          maySetSeen: descriptor.role !== "drafts",
-          maySetKeywords: descriptor.role !== "drafts",
+          mayAddItems: true,
+          mayRemoveItems: true,
+          maySetSeen: true,
+          maySetKeywords: true,
           mayCreateChild: false,
           mayRename: false,
           mayDelete: false,

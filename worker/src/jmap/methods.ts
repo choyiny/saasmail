@@ -22,11 +22,13 @@ import {
   type JmapMethodError,
 } from "./emails";
 import { listJmapMailboxes, listUsableIdentities } from "./mailboxes";
+import { draftThreadMembers, listDraftThreadKeys } from "./drafts";
 import { emailChanges, mailboxChanges } from "./changes";
 import { emailSet } from "./email-set";
 import {
   parseThreadId,
   publicAccountId,
+  publicDraftEmailId,
   publicEmailId,
   publicIdentityId,
   publicThreadId,
@@ -331,10 +333,17 @@ async function threadGet(
       { viewer: { userId }, ignoreSnooze: true },
       MAX_OBJECTS_IN_GET + 1,
     );
-    if (keys.length > MAX_OBJECTS_IN_GET) {
+    const draftKeys = await listDraftThreadKeys(
+      db,
+      allowed,
+      userId,
+      MAX_OBJECTS_IN_GET + 1,
+    );
+    const combined = [...new Set([...keys, ...draftKeys])];
+    if (combined.length > MAX_OBJECTS_IN_GET) {
       return methodError("requestTooLarge");
     }
-    for (const key of keys) {
+    for (const key of combined) {
       const publicId = publicThreadId(key);
       requestedPublic.push(publicId);
       keyByPublic.set(publicId, key);
@@ -348,7 +357,7 @@ async function threadGet(
   }
 
   const queryKeys = [...new Set(keyByPublic.values())];
-  const grouped = new Map<string, string[]>();
+  const grouped = new Map<string, { id: string; at: number }[]>();
   let emailCount = 0;
 
   for (
@@ -378,9 +387,31 @@ async function threadGet(
     for (const message of page.messages) {
       const key = jmapThreadKey(message);
       const current = grouped.get(key) ?? [];
-      current.push(publicEmailId(message.ref));
+      current.push({
+        id: publicEmailId(message.ref),
+        at: message.occurredAt,
+      });
       grouped.set(key, current);
     }
+  }
+
+  const draftMembers = await draftThreadMembers(db, allowed, userId, queryKeys);
+  emailCount += draftMembers.length;
+  if (emailCount > MAX_EMAILS_IN_THREAD_GET) {
+    return methodError(
+      "requestTooLarge",
+      `Thread/get is limited to ${MAX_EMAILS_IN_THREAD_GET} matching emails`,
+    );
+  }
+  for (const member of draftMembers) {
+    const current = grouped.get(member.threadKey) ?? [];
+    current.push({ id: publicDraftEmailId(member.id), at: member.receivedAt });
+    grouped.set(member.threadKey, current);
+  }
+  for (const members of grouped.values()) {
+    members.sort(
+      (left, right) => left.at - right.at || (left.id < right.id ? -1 : 1),
+    );
   }
 
   const list: Record<string, unknown>[] = [];
@@ -393,7 +424,7 @@ async function threadGet(
       continue;
     }
     const thread = filterProperties(
-      { id: publicId, emailIds },
+      { id: publicId, emailIds: emailIds.map((member) => member.id) },
       args.properties,
     );
     if (!thread) {
@@ -505,6 +536,7 @@ export async function executeMethod(
       user.id,
       publicAccountId(user.id),
       args,
+      ctx,
     );
     const error = result as JmapMethodError;
     if (typeof error.type === "string") {

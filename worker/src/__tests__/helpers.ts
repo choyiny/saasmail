@@ -122,6 +122,16 @@ export async function applyMigrations() {
     `CREATE TRIGGER IF NOT EXISTS jmap_mailboxes_insert AFTER INSERT ON mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('mailbox', 'mbx:' || NEW.id, NEW.inbox, NULL, 'c', CAST(strftime('%s','now') AS INTEGER)); END`,
     `CREATE TRIGGER IF NOT EXISTS jmap_mailboxes_update AFTER UPDATE ON mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('mailbox', 'mbx:' || NEW.id, NEW.inbox, NULL, 'u', CAST(strftime('%s','now') AS INTEGER)); END`,
     `CREATE TRIGGER IF NOT EXISTS jmap_mailboxes_delete AFTER DELETE ON mailboxes BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('mailbox', 'mbx:' || OLD.id, OLD.inbox, NULL, 'd', CAST(strftime('%s','now') AS INTEGER)); END`,
+    // JMAP drafts and their immutable content (migrations 0055, 0056).
+    `CREATE TABLE IF NOT EXISTS jmap_message_content (id TEXT PRIMARY KEY, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, inbox TEXT NOT NULL, from_json TEXT NOT NULL, to_json TEXT NOT NULL, cc_json TEXT NOT NULL, bcc_json TEXT NOT NULL, reply_to_json TEXT, subject TEXT NOT NULL, message_id TEXT NOT NULL, in_reply_to_json TEXT, references_json TEXT, sent_at TEXT NOT NULL, parts_json TEXT NOT NULL, text_body_json TEXT NOT NULL, html_body_json TEXT NOT NULL, attachments_json TEXT NOT NULL, body_values_json TEXT NOT NULL, preview TEXT NOT NULL, thread_key TEXT NOT NULL, raw_r2_key TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS jmap_message_content_thread_key_idx ON jmap_message_content(thread_key)`,
+    `CREATE INDEX IF NOT EXISTS jmap_message_content_created_at_idx ON jmap_message_content(created_at)`,
+    `CREATE TABLE IF NOT EXISTS jmap_drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, content_id TEXT NOT NULL REFERENCES jmap_message_content(id), inbox TEXT NOT NULL, received_at INTEGER NOT NULL, mailbox_role TEXT NOT NULL DEFAULT 'drafts', seen INTEGER NOT NULL DEFAULT 0, flagged INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS jmap_drafts_user_received_idx ON jmap_drafts(user_id, received_at)`,
+    `CREATE INDEX IF NOT EXISTS jmap_drafts_content_idx ON jmap_drafts(content_id)`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_drafts_insert AFTER INSERT ON jmap_drafts BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'draft:' || NEW.id, NEW.inbox, NEW.user_id, 'c', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_drafts_update AFTER UPDATE OF mailbox_role, seen, flagged ON jmap_drafts WHEN OLD.mailbox_role IS NOT NEW.mailbox_role OR OLD.seen IS NOT NEW.seen OR OLD.flagged IS NOT NEW.flagged BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'draft:' || NEW.id, NEW.inbox, NEW.user_id, 'u', CAST(strftime('%s','now') AS INTEGER)); END`,
+    `CREATE TRIGGER IF NOT EXISTS jmap_drafts_delete AFTER DELETE ON jmap_drafts BEGIN INSERT INTO jmap_changes (object_type, object_id, inbox, user_id, op, created_at) VALUES ('email', 'draft:' || OLD.id, OLD.inbox, OLD.user_id, 'd', CAST(strftime('%s','now') AS INTEGER)); END`,
     `CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions(endpoint)`,
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER NOT NULL, updated_by TEXT)`,
@@ -442,6 +452,8 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM jmap_drafts;
+    DELETE FROM jmap_message_content;
     DELETE FROM auto_reply_log;
     DELETE FROM rules;
     DELETE FROM customer_people;

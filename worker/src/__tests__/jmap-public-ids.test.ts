@@ -1,18 +1,23 @@
 import { describe, it, expect } from "vitest";
 import {
   JMAP_ID_PATTERN,
+  parseAnyEmailId,
   parseAttachmentBlobId,
   parseBodyPartBlobId,
+  parseDraftEmailId,
   parseEmailId,
+  parseRawBlobId,
   parseThreadId,
   parseUploadBlobId,
   publicAccountId,
   publicAttachmentBlobId,
   publicBodyPartBlobId,
   publicCustomMailboxId,
+  publicDraftEmailId,
   publicEmailId,
   publicIdForChangeObject,
   publicIdentityId,
+  publicRawBlobId,
   publicSystemMailboxId,
   publicThreadId,
   publicUploadBlobId,
@@ -143,5 +148,52 @@ describe("JMAP public ids", () => {
     expect(publicIdForChangeObject("received:a1")).toBe("Ra1");
     expect(publicIdForChangeObject("sent:b2")).toBe("Sb2");
     expect(publicIdForChangeObject("mbx:f1")).toBe("Mf1");
+  });
+
+  it("round-trips draft email ids and raw-message blob ids", () => {
+    expect(publicDraftEmailId("draft_1")).toBe("Ddraft_1");
+    expect(parseDraftEmailId("Ddraft_1")).toBe("draft_1");
+    expect(parseAnyEmailId("Ddraft_1")).toEqual({
+      kind: "draft",
+      id: "draft_1",
+    });
+    expect(parseAnyEmailId("Rabc")).toEqual({ kind: "received", id: "abc" });
+    expect(parseAnyEmailId("Sabc")).toEqual({ kind: "sent", id: "abc" });
+    for (const bad of ["", "D", "d!!", "Zabc", "draft:abc"]) {
+      expect(parseAnyEmailId(bad)).toBeNull();
+    }
+    // The R/S parser stays strict: web-API shaped refs never see drafts.
+    expect(parseEmailId("Ddraft_1")).toBeNull();
+
+    expect(publicRawBlobId("content-1")).toBe("Xcontent-1");
+    expect(parseRawBlobId("Xcontent-1")).toBe("content-1");
+    expect(parseRawBlobId("Aatt_1")).toBeNull();
+    expect(parseRawBlobId("X")).toBeNull();
+  });
+
+  it("maps draft-started threads to Td ids", () => {
+    expect(publicThreadId("draft:abc_1")).toBe("Tdabc_1");
+    expect(parseThreadId("Tdabc_1")).toBe("draft:abc_1");
+  });
+
+  it("accepts numeric body-part ids for every email family", () => {
+    const part = publicBodyPartBlobId("Dd1", "3");
+    expect(part).toBe("PDd1_3");
+    expect(parseBodyPartBlobId(part)).toEqual({ emailId: "Dd1", part: "3" });
+    // The part id is parsed from the end, so ids containing "_<digits>" work.
+    expect(parseBodyPartBlobId("PDd_1_12")).toEqual({
+      emailId: "Dd_1",
+      part: "12",
+    });
+    expect(parseBodyPartBlobId("PRabc_text")).toEqual({
+      emailId: "Rabc",
+      part: "text",
+    });
+    expect(parseBodyPartBlobId("PDd1_x3")).toBeNull();
+    expect(parseBodyPartBlobId("Pnope_3")).toBeNull();
+  });
+
+  it("maps draft change-log ids", () => {
+    expect(publicIdForChangeObject("draft:d9")).toBe("Dd9");
   });
 });

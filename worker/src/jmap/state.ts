@@ -28,6 +28,8 @@ type StateAggregate = {
   mailbox_max: number | null;
   identity_count: number;
   identity_max: number | null;
+  draft_count: number;
+  draft_max: number | null;
 };
 
 export async function jmapState(
@@ -40,6 +42,7 @@ export async function jmapState(
   const mailboxStateScope = inboxScopeSql(allowed, sql`mms.inbox`);
   const mailboxScope = inboxScopeSql(allowed, sql`mb.inbox`);
   const identityScope = inboxScopeSql(allowed, sql`si.email`);
+  const draftScope = inboxScopeSql(allowed, sql`jd.inbox`);
 
   const rows = await db.all<StateAggregate>(sql`
     SELECT
@@ -64,8 +67,21 @@ export async function jmapState(
       (SELECT COUNT(*) FROM sender_identities si WHERE 1 = 1 ${identityScope}) AS identity_count,
       (SELECT MAX(si.updated_at) FROM sender_identities si WHERE 1 = 1 ${identityScope}) AS identity_max
   `);
+  // A separate statement: every scope binds each allowed inbox, and D1 binds at
+  // most 100 parameters per statement.
+  const draftRows = await db.all<
+    Pick<StateAggregate, "draft_count" | "draft_max">
+  >(sql`
+    SELECT COUNT(*) AS draft_count, MAX(jd.updated_at) AS draft_max
+      FROM jmap_drafts jd
+     WHERE jd.user_id = ${userId} ${draftScope}
+  `);
 
-  return opaqueState({ v: JMAP_ID_FORMAT_VERSION, ...(rows[0] ?? {}) });
+  return opaqueState({
+    v: JMAP_ID_FORMAT_VERSION,
+    ...(rows[0] ?? {}),
+    ...(draftRows[0] ?? {}),
+  });
 }
 
 export type ParsedJmapState = {

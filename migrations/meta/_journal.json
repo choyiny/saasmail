@@ -386,6 +386,20 @@
       "when": 1790447666452,
       "tag": "0054_jmap_blobs",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1790450016413,
+      "tag": "0055_jmap_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1790450369394,
+      "tag": "0056_jmap_draft_changes",
+      "breakpoints": true
     }
   ]
 }

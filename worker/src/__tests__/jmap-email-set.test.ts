@@ -317,7 +317,7 @@ describe("JMAP Email/set", () => {
     ]);
     expect(result.methodResponses[0][0]).toBe("Email/set");
     expect(result.methodResponses[0][1].notCreated).toEqual({
-      draft1: { type: "forbidden" },
+      draft1: { type: "invalidProperties", properties: ["mailboxIds"] },
     });
     expect(result.methodResponses[0][1].notDestroyed).toEqual({
       [id]: { type: "forbidden" },
@@ -332,6 +332,22 @@ describe("JMAP Email/set", () => {
     response = await emailSet(apiKey, userId, tooMany);
     expect(response[0]).toBe("error");
     expect(response[1].type).toBe("requestTooLarge");
+
+    // RFC 8620: maxObjectsInSet covers destroy as well.
+    const tooManyDestroys = await jmapJson(apiKey, [
+      [
+        "Email/set",
+        {
+          accountId: acct(userId),
+          destroy: Array.from({ length: 257 }, (_, index) =>
+            rid(`too-many-${index}`),
+          ),
+        },
+        "d",
+      ],
+    ]);
+    expect(tooManyDestroys.methodResponses[0][0]).toBe("error");
+    expect(tooManyDestroys.methodResponses[0][1].type).toBe("requestTooLarge");
   });
 
   it("keeps states stable across time and accepts ifInState by seq and fingerprint", async () => {
@@ -384,7 +400,7 @@ describe("JMAP Email/set", () => {
     expect(changes.methodResponses[0][1].updated).toContain(id);
   });
 
-  it("advertises writable rights except for Drafts", async () => {
+  it("advertises writable rights, including Drafts", async () => {
     const { userId, apiKey } = await seedReceived();
     const result = await jmapJson(apiKey, [
       [
@@ -427,10 +443,11 @@ describe("JMAP Email/set", () => {
     });
     expect(byId.get(sys(MINE, "drafts")).myRights).toMatchObject({
       mayReadItems: true,
-      mayAddItems: false,
-      mayRemoveItems: false,
-      maySetSeen: false,
-      maySetKeywords: false,
+      mayAddItems: true,
+      mayRemoveItems: true,
+      maySetSeen: true,
+      maySetKeywords: true,
+      maySubmit: false,
     });
   });
 });
