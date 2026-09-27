@@ -144,7 +144,7 @@ describe("JMAP", () => {
     expect(session.primaryAccounts[MAIL_CAPABILITY]).toBe(acct(userId));
   });
 
-  it("advertises the v2 account id and rejects the old one", async () => {
+  it("advertises the current account id and rejects the user id", async () => {
     const { userId, apiKey } = await createTestUser({ id: "jmap-reset-user" });
     const session = await (
       await authFetch("/.well-known/jmap", { apiKey })

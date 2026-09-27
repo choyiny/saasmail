@@ -34,6 +34,8 @@ export interface UnifiedMessage {
   conversationId: string | null;
   messageId: string | null;
   inReplyTo: string | null;
+  /** The raw References header of received mail; null for sent mail. */
+  references?: string | null;
   from: MailAddress | null;
   to: MailAddress;
   cc: MailAddress[];

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  citesDeliveredOriginal,
   bodyValueMatches,
   bytesEqual,
   collectJmapIds,
@@ -247,8 +248,29 @@ describe("jmap-send-e2e comparisons", () => {
   });
 });
 
+describe("jmap-send-e2e threading", () => {
+  it("accepts a follow-up that cites the original's delivered Message-ID", () => {
+    const original = { messageId: ["cf-1@x.test"] };
+    expect(
+      citesDeliveredOriginal(
+        { inReplyTo: ["cf-1@x.test"], references: ["r@x.test", "cf-1@x.test"] },
+        original,
+      ),
+    ).toBe(true);
+    expect(
+      citesDeliveredOriginal(
+        { inReplyTo: ["own@x.test"], references: ["r@x.test", "own@x.test"] },
+        original,
+      ),
+    ).toBe(false);
+    expect(
+      citesDeliveredOriginal({ inReplyTo: null, references: null }, original),
+    ).toBe(false);
+  });
+});
+
 describe("jmap-send-e2e runner", () => {
-  it("fails the run, not the process, when the session is not the v2 account", async () => {
+  it("fails the run, not the process, when the session's account id isn't the hashed form", async () => {
     const lines = [];
     const fetchImpl = async () => ({
       status: 200,
@@ -277,7 +299,7 @@ describe("jmap-send-e2e runner", () => {
       { fetchImpl, log: (line) => lines.push(line), sleep: async () => {} },
     );
     expect(result.ok).toBe(false);
-    expect(result.failure).toContain("account id is the v2 form");
+    expect(result.failure).toContain("account id is the hashed form");
     expect(lines.filter((line) => line.startsWith("FAIL"))).toHaveLength(1);
   });
 });

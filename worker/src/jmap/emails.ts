@@ -371,7 +371,7 @@ export function toJmapEmail(
     receivedAt: utcDate(message.occurredAt),
     messageId: messageIds(message.messageId),
     inReplyTo: messageIds(message.inReplyTo),
-    references: null,
+    references: messageIds(message.references ?? null),
     sender: null,
     from: from ? [from] : [],
     to: [emailAddress(message.to)],

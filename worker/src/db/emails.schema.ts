@@ -17,6 +17,13 @@ export const emails = sqliteTable(
     bodyText: text("body_text"),
     rawHeaders: text("raw_headers"),
     messageId: text("message_id").unique(),
+    /**
+     * The raw `In-Reply-To` and `References` header values, as received
+     * (one or more `<id>`s). JMAP exposes them as `inReplyTo`/`references`.
+     * Rows from before migration 0063 were backfilled from `raw_headers`.
+     */
+    inReplyTo: text("in_reply_to"),
+    referencesHeader: text("references_header"),
     spf: text("spf"),
     dkim: text("dkim"),
     dmarc: text("dmarc"),

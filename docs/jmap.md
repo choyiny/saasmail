@@ -27,6 +27,8 @@ State strings moved with the ids: they are now `j2-<seq>-<issuedAt>-<fp>`. A cli
 
 The web UI, the HTTP API and MCP are unaffected: the internal message references they use are unchanged, and only the JMAP boundary encodes and decodes ids.
 
+**A second reset (id format v3)** came with `inReplyTo` and `references` for received mail. Both are immutable Email properties that used to be `null`, and a client never refetches an immutable property, so the account id changed again rather than the values changing under ids clients already hold. The v2 account id now answers `accountNotFound`, and states are `j3-…`: resync from `/.well-known/jmap` as for the first reset. Every other id (mailboxes, Emails, threads, identities, blobs, submissions) is unchanged.
+
 ## Capabilities and limits
 
 The Session advertises `urn:ietf:params:jmap:core`, `urn:ietf:params:jmap:mail` and `urn:ietf:params:jmap:submission`, and the account is primary for mail and submission.
@@ -85,7 +87,7 @@ Each allowed inbox gets virtual Inbox, Drafts, Sent, Archive, Junk and Trash mai
 
 Email ids are derived from the underlying message: `R…` for received mail, `S…` for sent mail and `D…` for drafts. They are not the internal `received:<id>` / `sent:<id>` references the HTTP API uses.
 
-`Email/get` exposes addresses, subject, dates, preview, keywords, mailbox membership, text/HTML body structure, optional body values, and attachment blob ids. For Emails that saasmail created through JMAP (drafts and everything sent from them), every property is modeled from the stored message: `blobId` (the raw RFC 5322 message), exact `size`, `messageId`, `inReplyTo`, `references`, `sender`, `bcc`, `replyTo`, names on every address, and the full `bodyStructure`. For other received and sent mail, properties the unified mail model can't supply cheaply (raw-message `blobId`, `references`, `sender`, `bcc`, `replyTo`, `bodyStructure`, `headers` and `header:*` selectors) are returned as `null`, a deliberate deviation from the stricter RFC field types. `Email/get` accepts the full RFC 8621 property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors; names outside it return `invalidArguments`.
+`Email/get` exposes addresses, subject, dates, preview, keywords, mailbox membership, text/HTML body structure, optional body values, and attachment blob ids. For Emails that saasmail created through JMAP (drafts and everything sent from them), every property is modeled from the stored message: `blobId` (the raw RFC 5322 message), exact `size`, `messageId`, `inReplyTo`, `references`, `sender`, `bcc`, `replyTo`, names on every address, and the full `bodyStructure`. Received mail also has the `inReplyTo` and `references` it arrived with. For other received and sent mail, properties the unified mail model can't supply cheaply (raw-message `blobId`, `references` of sent mail, `sender`, `bcc`, `replyTo`, `bodyStructure`, `headers` and `header:*` selectors) are returned as `null`, a deliberate deviation from the stricter RFC field types. `Email/get` accepts the full RFC 8621 property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors; names outside it return `invalidArguments`.
 
 `Email/query` supports `inMailbox`, `text`, `from`, `after`, `before`, `hasKeyword` and `notKeyword` for `$seen`, `$flagged` and `$draft`. The only supported sort is `receivedAt` descending. Drafts take part in queries, totals and mailbox counts like any other Email.
 
@@ -224,7 +226,6 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 - Editable identities (`Identity/set` is read-only).
 - Raw-message `blobId` for received mail and for sent mail that wasn't created through JMAP (it stays `null`).
 - The web composer's drafts don't appear in JMAP, and JMAP drafts don't appear in the web UI.
-- `inReplyTo` and `references` of received mail are `null`, so a client can't see which Message-ID a reply to your message cited.
 - A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
 - Mailbox thread counts group JMAP-sent mail by its saasmail conversation, not by its JMAP `threadId`.
 - EventSource push, search snippets, mailbox mutation, `Email/import` and `Email/copy`.

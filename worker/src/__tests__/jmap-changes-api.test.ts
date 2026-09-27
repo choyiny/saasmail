@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { JMAP_ID_FORMAT_VERSION } from "../jmap/public-ids";
 import { eq, sql } from "drizzle-orm";
 import {
   applyMigrations,
@@ -229,7 +230,7 @@ describe("JMAP changes and snooze projection", () => {
     const freshState = await stateFor(apiKey, userId);
     const [, seq, , fp] = freshState.split("-");
     const oldIssuedAt = Math.floor(Date.now() / 1000) - 30 * 24 * 60 * 60;
-    const oldState = `j2-${seq}-${oldIssuedAt}-${fp}`;
+    const oldState = `j${JMAP_ID_FORMAT_VERSION}-${seq}-${oldIssuedAt}-${fp}`;
     result = await jmapJson(apiKey, [
       [
         "Email/changes",

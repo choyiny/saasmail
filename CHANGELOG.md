@@ -33,11 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrading to the mailbox/agent/JMAP release
 
-- Apply D1 migrations `0037` through `0060` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
+- Apply D1 migrations `0037` through `0063` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
 - Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
 - Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
 
 ### Changed
+
+- **JMAP: received mail has `inReplyTo` and `references` (breaking for JMAP clients).** Received Emails now expose the In-Reply-To and References they arrived with, so a JMAP client can see which message a reply answers. New columns `emails.in_reply_to` and `emails.references_header` are filled on receipt; migration 0063 backfills existing mail from its stored headers. Because both properties are immutable and were `null`, the JMAP account was reset again (id format v3): the account id changed, the previous one answers `accountNotFound`, and states are `j3-`. Connected JMAP clients must resync, as after the v2 reset. Apply migrations 0062 and 0063 before deploying.
 
 - **JMAP ids are RFC 8620-valid (breaking for JMAP clients).** Every JMAP id now uses only `A-Za-z0-9-_` and is at most 255 octets; mailbox and identity ids no longer embed email addresses. Because this reallocates ids, the JMAP account id changed and state strings moved to `j2-`: connected JMAP clients must resync (drop their cache and refetch). The web UI and HTTP API are unaffected.
 

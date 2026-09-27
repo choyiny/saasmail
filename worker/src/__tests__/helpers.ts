@@ -53,7 +53,7 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, display_name TEXT, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS customer_people (customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE, person_id TEXT NOT NULL UNIQUE REFERENCES people(id) ON DELETE CASCADE, linked_by TEXT REFERENCES users(id) ON DELETE SET NULL, linked_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS customer_people_customer_idx ON customer_people(customer_id)`,
-    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT UNIQUE, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT UNIQUE, in_reply_to TEXT, references_header TEXT, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
     `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, conversation_id TEXT, campaign_id TEXT, sequence_id TEXT, sequence_enrollment_id TEXT, jmap_content_id TEXT, jmap_email_id TEXT, jmap_received_at INTEGER, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
@@ -293,6 +293,8 @@ export async function createTestEmail(
     messageId?: string;
     isRead?: number;
     rawHeaders?: string;
+    inReplyTo?: string | null;
+    referencesHeader?: string | null;
     conversationId?: string | null;
     cc?: string | null;
   } = {},
@@ -308,6 +310,8 @@ export async function createTestEmail(
     bodyText: opts.bodyText ?? "Hello",
     rawHeaders: opts.rawHeaders ?? "{}",
     messageId: opts.messageId ?? "msg-1@example.com",
+    inReplyTo: opts.inReplyTo ?? null,
+    referencesHeader: opts.referencesHeader ?? null,
     isRead: opts.isRead ?? 0,
     conversationId: opts.conversationId ?? null,
     cc: opts.cc ?? null,

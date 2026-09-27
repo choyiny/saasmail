@@ -6,10 +6,13 @@ import type { SystemMailboxRole } from "./constants";
  * Public JMAP ids (RFC 8620 §1.2: 1-255 octets of A-Za-z0-9-_).
  * Internal refs never leave the JMAP layer; everything a client sees is
  * produced here. Version 2 = the id and account reset of the EmailSubmission
- * work (see docs/jmap.md). Uppercase type letters carry a raw payload that is
+ * work; version 3 = the account reset for received mail's inReplyTo and
+ * references, immutable properties that used to be null (see docs/jmap.md).
+ * The version salts the account id and prefixes state strings, so a bump makes
+ * every client resync. Uppercase type letters carry a raw payload that is
  * already safe; lowercase letters carry base64url or a SHA-256 digest.
  */
-export const JMAP_ID_FORMAT_VERSION = 2;
+export const JMAP_ID_FORMAT_VERSION = 3;
 export const JMAP_ID_PATTERN = /^[A-Za-z0-9_-]{1,255}$/;
 
 const SAFE = /^[A-Za-z0-9_-]+$/;
@@ -70,7 +73,7 @@ function decodeReversible(
 }
 
 export function publicAccountId(userId: string): string {
-  return `a${sha256Base64url(`jmap-account-v2:${userId}`)}`;
+  return `a${sha256Base64url(`jmap-account-v${JMAP_ID_FORMAT_VERSION}:${userId}`)}`;
 }
 
 export function publicEmailId(ref: MessageRef): string {

@@ -228,6 +228,10 @@ export async function handleEmail(
     bodyText: parsed.bodyText,
     rawHeaders: JSON.stringify(parsed.headers),
     messageId: parsed.messageId,
+    // postal-mime keys headers in lowercase; JMAP exposes these as
+    // inReplyTo/references.
+    inReplyTo: parsed.headers["in-reply-to"]?.trim() || null,
+    referencesHeader: parsed.headers["references"]?.trim() || null,
     spf: parsed.auth.spf,
     dkim: parsed.auth.dkim,
     dmarc: parsed.auth.dmarc,

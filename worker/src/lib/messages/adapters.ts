@@ -8,6 +8,9 @@ export type ReceivedSelect = {
   bodyHtml: string | null;
   bodyText: string | null;
   messageId: string | null;
+  /** Raw In-Reply-To / References headers, when the select read them. */
+  inReplyTo?: string | null;
+  referencesHeader?: string | null;
   isRead: number;
   cc: string | null;
   conversationId: string | null;
@@ -64,7 +67,8 @@ export function adaptReceived(row: ReceivedSelect): UnifiedMessage {
     personId: row.personId,
     conversationId: row.conversationId,
     messageId: row.messageId,
-    inReplyTo: null,
+    inReplyTo: row.inReplyTo ?? null,
+    references: row.referencesHeader ?? null,
     from: row.personEmail
       ? {
           email: row.personEmail,

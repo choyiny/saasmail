@@ -11,11 +11,11 @@
 //
 // Optional:
 //   JMAP_CC                  one Cc recipient
-//   JMAP_OLD_ACCOUNT_ID      the user id (the pre-reset JMAP account id); checks it is rejected
+//   JMAP_OLD_ACCOUNT_ID      an account id from before a reset (the user id, or a previous
+//                            version's hashed id); checks it is rejected
 //   JMAP_EXPECT_DELIVERY=1   poll JMAP_TO's saasmail inbox (the key's user must be able to read it),
 //                            and send one more message: a follow-up to the first, whose delivered
-//                            In-Reply-To must be the Message-ID the first was delivered with (checked
-//                            by hand: the run prints both ids)
+//                            In-Reply-To must be the Message-ID the first was delivered with
 //   JMAP_DELIVERY_TIMEOUT_S  delivery polling budget in seconds (default 120)
 //
 // Exit codes: 0 every check passed, 1 a check failed, 2 bad configuration.
@@ -280,8 +280,24 @@ const USAGE = [
   "Optional: JMAP_CC, JMAP_OLD_ACCOUNT_ID, JMAP_EXPECT_DELIVERY=1, JMAP_DELIVERY_TIMEOUT_S",
 ].join("\n");
 
-/** A well-formed v2 account id that is not this deployment's. */
+/** A well-formed account id that is not this deployment's. */
 const WRONG_ACCOUNT_ID = `a${"A".repeat(43)}`;
+
+/**
+ * Whether a delivered follow-up cites the Message-ID its original was delivered
+ * with, in In-Reply-To and as the last References entry. A provider like
+ * Cloudflare replaces the Message-ID, so the Sent Email's own `messageId` can
+ * differ from the delivered one; the follow-up must still thread for the
+ * recipient.
+ */
+export function citesDeliveredOriginal(followUp, original) {
+  const id = original?.messageId?.[0];
+  if (!id) return false;
+  return (
+    stableStringify(followUp?.inReplyTo) === stableStringify([id]) &&
+    followUp?.references?.at(-1) === id
+  );
+}
 
 function defaultSleep(ms) {
   return new Promise((done) => setTimeout(done, ms));
@@ -536,7 +552,15 @@ async function awaitDelivery(ctx, env, step, subject) {
         {
           accountId: env.accountId,
           "#ids": { resultOf: "q", name: "Email/query", path: "/ids" },
-          properties: ["id", "subject", "from", "messageId", "attachments"],
+          properties: [
+            "id",
+            "subject",
+            "from",
+            "messageId",
+            "inReplyTo",
+            "references",
+            "attachments",
+          ],
         },
         "g",
       ],
@@ -572,7 +596,7 @@ async function stepSession(ctx) {
 
   const accountId = session.primaryAccounts?.[MAIL_CAPABILITY];
   report.check(
-    `${step}: account id is the v2 form`,
+    `${step}: account id is the hashed form`,
     typeof accountId === "string" && /^a[A-Za-z0-9_-]{43}$/.test(accountId),
     accountId,
     `primary mail account is ${JSON.stringify(accountId)}`,
@@ -630,9 +654,9 @@ async function stepSession(ctx) {
   const identities = methodResponse(responses, "Identity/get", "id");
   const threads = methodResponse(responses, "Thread/get", "t");
   report.check(
-    `${step}: read surface ids are valid and states are j2`,
+    `${step}: read surface ids are valid and states are j3`,
     [mailboxes.state, threads.state].every(
-      (state) => typeof state === "string" && state.startsWith("j2-"),
+      (state) => typeof state === "string" && state.startsWith("j3-"),
     ),
     `${mailboxes.list.length} mailboxes, ${identities.list.length} identities`,
     `states ${mailboxes.state}, ${threads.state}`,
@@ -1189,10 +1213,15 @@ async function stepFollowUp(ctx, env, blobs, sent, deliveredOriginal) {
   );
 
   const delivered = await awaitDelivery(ctx, env, step, subject);
-  // saasmail's JMAP view of received mail has no inReplyTo/references, so the
-  // delivered In-Reply-To is checked by hand: it must be this Message-ID.
-  ctx.log(
-    `NOTE  ${step}: check the delivered follow-up ${delivered.id} cites In-Reply-To ${deliveredOriginal.messageId[0]}`,
+  report.check(
+    `${step}: it cites the Message-ID the first message was delivered with`,
+    citesDeliveredOriginal(delivered, deliveredOriginal),
+    deliveredOriginal.messageId[0],
+    JSON.stringify({
+      inReplyTo: delivered.inReplyTo,
+      references: delivered.references,
+      original: deliveredOriginal.messageId,
+    }),
   );
 }
 
