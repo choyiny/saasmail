@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createEmailSender,
   BavimailSender,
+  DemoSender,
   PostmarkSender,
+  ResendSender,
 } from "../lib/email-sender";
 
 describe("createEmailSender", () => {
@@ -678,5 +680,244 @@ describe("PostmarkSender", () => {
 
     expect(result.id).toBeNull();
     expect(result.error?.message).toBe("network down");
+  });
+});
+
+describe("maxMessageBytes", () => {
+  const envOf = (extra: Record<string, unknown>) =>
+    extra as unknown as CloudflareBindings;
+
+  it("returns each provider's documented whole-message cap", () => {
+    expect(
+      createEmailSender(envOf({ RESEND_API_KEY: "re_test" })).maxMessageBytes(),
+    ).toBe(40_000_000);
+    expect(
+      createEmailSender(envOf({ EMAIL: { send: vi.fn() } })).maxMessageBytes(),
+    ).toBe(5 * 1024 * 1024);
+    expect(
+      createEmailSender(
+        envOf({ POSTMARK_API_KEY: "pm_test" }),
+      ).maxMessageBytes(),
+    ).toBe(10_000_000);
+    expect(
+      createEmailSender(
+        envOf({ BAVIMAIL_API_KEY: "bm_test", BAVIMAIL_ALIAS_ID: "alias" }),
+      ).maxMessageBytes(),
+    ).toBe(25 * 1024 * 1024);
+    expect(new DemoSender().maxMessageBytes()).toBe(25 * 1024 * 1024);
+    expect(createEmailSender(envOf({})).maxMessageBytes()).toBe(0);
+  });
+});
+
+describe("inline attachments and exact headers", () => {
+  const png = new Uint8Array([1, 2, 3]);
+
+  it("Cloudflare: inline part with Content-ID, bare envelope To, caller Date", async () => {
+    const fakeBinding = {
+      send: vi.fn().mockResolvedValue({ messageId: "cf-1" }),
+    };
+    const sender = createEmailSender({
+      EMAIL: fakeBinding,
+    } as unknown as CloudflareBindings);
+
+    const result = await sender.send({
+      from: "Mine <mine@x.com>",
+      to: '"Doe, John" <john@example.com>',
+      subject: "s",
+      html: '<p><img src="cid:logo@x"></p>',
+      headers: { Date: "Sat, 26 Sep 2026 10:00:00 +0200" },
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: png,
+          contentId: "logo@x",
+          disposition: "inline",
+        },
+        {
+          filename: "a.txt",
+          contentType: "text/plain",
+          content: new TextEncoder().encode("a"),
+        },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+    const sent = fakeBinding.send.mock.calls[0][0] as { to: string };
+    expect(sent.to).toBe("john@example.com");
+    const serialized = JSON.stringify(sent);
+    expect(serialized).toContain("Content-ID: <logo@x>");
+    expect(serialized).toContain(
+      'Content-Disposition: inline; filename=\\"logo.png\\"',
+    );
+    expect(serialized).toContain(
+      'Content-Disposition: attachment; filename=\\"a.txt\\"',
+    );
+    expect(serialized).toContain("Date: Sat, 26 Sep 2026 10:00:00 +0200");
+  });
+
+  it("Postmark: ContentID for inline parts, Date left to Postmark", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ErrorCode: 0, MessageID: "pm-1" }), {
+        status: 200,
+      }),
+    );
+    const sender = new PostmarkSender(
+      "pm_test",
+      fetchMock as unknown as typeof fetch,
+    );
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      headers: {
+        Date: "Sat, 26 Sep 2026 10:00:00 +0200",
+        "Message-ID": "<m@b.com>",
+      },
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: new Uint8Array([1]),
+          contentId: "logo@b",
+          disposition: "inline",
+        },
+      ],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.Attachments).toEqual([
+      {
+        Name: "logo.png",
+        Content: "AQ==",
+        ContentType: "image/png",
+        ContentID: "cid:logo@b",
+      },
+    ]);
+    expect(body.Headers).toEqual([{ Name: "Message-ID", Value: "<m@b.com>" }]);
+  });
+
+  it("Resend: contentType and contentId on attachments, Date left to Resend", async () => {
+    const sender = new ResendSender("re_test");
+    const send = vi
+      .fn()
+      .mockResolvedValue({ data: { id: "rs-1" }, error: null });
+    (
+      sender as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      headers: {
+        Date: "Sat, 26 Sep 2026 10:00:00 +0200",
+        "Message-ID": "<m@b.com>",
+      },
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: new Uint8Array([1]),
+          contentId: "logo@b",
+          disposition: "inline",
+        },
+      ],
+    });
+
+    expect(result).toEqual({ id: "rs-1", error: null });
+    const payload = send.mock.calls[0][0];
+    expect(payload.headers).toEqual({ "Message-ID": "<m@b.com>" });
+    expect(payload.attachments).toEqual([
+      {
+        filename: "logo.png",
+        content: "AQ==",
+        contentType: "image/png",
+        contentId: "logo@b",
+      },
+    ]);
+  });
+
+  it("Postmark and Resend send a text-only message without an HTML body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ErrorCode: 0, MessageID: "pm-1" }), {
+        status: 200,
+      }),
+    );
+    const postmark = new PostmarkSender(
+      "pm_test",
+      fetchMock as unknown as typeof fetch,
+    );
+    await postmark.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "",
+      text: "plain",
+    });
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.HtmlBody).toBeUndefined();
+    expect(body.TextBody).toBe("plain");
+
+    const resend = new ResendSender("re_test");
+    const send = vi
+      .fn()
+      .mockResolvedValue({ data: { id: "rs-1" }, error: null });
+    (
+      resend as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+    await resend.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "",
+      text: "plain",
+    });
+    expect("html" in send.mock.calls[0][0]).toBe(false);
+    expect(send.mock.calls[0][0].text).toBe("plain");
+  });
+
+  it("Bavimail: escaped text when html is empty, and is_inline for inline parts", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ attachments: [{ id: "att-1" }] }), {
+          status: 201,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "bm-1" }), { status: 201 }),
+      );
+    const sender = new BavimailSender(
+      "bm_test",
+      "alias-uuid",
+      fetchMock as unknown as typeof fetch,
+    );
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "",
+      text: "1 < 2 & 3 > 2",
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: new Uint8Array([1]),
+          contentId: "logo@b",
+          disposition: "inline",
+        },
+      ],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.body).toBe(
+      '<pre style="white-space:pre-wrap">1 &lt; 2 &amp; 3 &gt; 2</pre>',
+    );
+    expect(body.attachments).toEqual([
+      { attachment_id: "att-1", is_inline: true },
+    ]);
   });
 });

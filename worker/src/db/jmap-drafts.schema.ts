@@ -21,6 +21,10 @@ export const jmapDrafts = sqliteTable(
       .default("drafts"),
     seen: integer("seen").notNull().default(0),
     flagged: integer("flagged").notNull().default(0),
+    /** null | "submitting" (claimed by a submission) | "queued" (outbox retrying). */
+    submitState: text("submit_state", { enum: ["submitting", "queued"] }),
+    /** Internal id of the submission holding the lock. */
+    submitAttemptId: text("submit_attempt_id"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

@@ -4,10 +4,8 @@ import { nanoid } from "nanoid";
 import { emailTemplates } from "../db/email-templates.schema";
 import { emails } from "../db/emails.schema";
 import { people } from "../db/people.schema";
-import { senderIdentities } from "../db/sender-identities.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { cancelSequencesForPerson } from "./cancel-sequence";
-import { computeConversationId, externalsOnly } from "./conversation-id";
 import { createEmailSender, type EmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
@@ -15,6 +13,11 @@ import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { generateMessageId } from "./message-id";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
+import {
+  fetchInternalDomains,
+  findOrCreatePersonId,
+  outboundConversationId,
+} from "./sent-bookkeeping";
 import {
   discardSentAttachments,
   discardSentAttachmentsUnlessQueued,
@@ -124,27 +127,6 @@ export type ReplyEmailFailure =
 export type ReplyEmailResult = ReplyEmailSuccess | ReplyEmailFailure;
 
 /**
- * Fetch the set of "internal" domains (domains owned by our
- * sender_identities) for the current request — used to derive the
- * external-only participant list when computing a conversation_id.
- */
-async function fetchInternalDomains(db: Db): Promise<string[]> {
-  const rows = await db
-    .select({ email: senderIdentities.email })
-    .from(senderIdentities);
-  return Array.from(
-    new Set(
-      rows
-        .map((r: { email: string }) => {
-          const at = r.email.lastIndexOf("@");
-          return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-        })
-        .filter(Boolean),
-    ),
-  ) as string[];
-}
-
-/**
  * Compose and send a new email, persisting attachments and the sent_emails
  * row. Callers own multipart parsing and hand over the already-parsed
  * payload plus attachment bytes.
@@ -252,44 +234,14 @@ export async function sendEmail(
   const recordedTo = sendResult.delivered[0];
 
   // Find or create the person row for the actual recipient.
-  const existingPerson = await db
-    .select({ id: people.id })
-    .from(people)
-    .where(eq(people.email, recordedTo))
-    .limit(1);
+  const personId = await findOrCreatePersonId(db, recordedTo, now);
 
-  let personId: string;
-  if (existingPerson[0]) {
-    personId = existingPerson[0].id;
-  } else {
-    personId = nanoid();
-    await db
-      .insert(people)
-      .values({
-        id: personId,
-        email: recordedTo,
-        name: null,
-        lastEmailAt: now,
-        unreadCount: 0,
-        totalCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing({ target: people.email });
-    const refetched = await db
-      .select({ id: people.id })
-      .from(people)
-      .where(eq(people.email, recordedTo))
-      .limit(1);
-    personId = refetched[0]!.id;
-  }
-
-  const internalDomains = await fetchInternalDomains(db);
-  const externals = externalsOnly(
-    [recordedTo, ...(cc ?? []).map((c) => c.email)],
-    internalDomains,
+  const conversationId = await outboundConversationId(
+    db,
+    fromAddress,
+    recordedTo,
+    (cc ?? []).map((c) => c.email),
   );
-  const conversationId = await computeConversationId(fromAddress, externals);
 
   await db.insert(sentEmails).values({
     id,
@@ -528,14 +480,11 @@ export async function replyToEmail(
   }
 
   // Compute conversation_id for this reply.
-  const internalDomainsReply = await fetchInternalDomains(db);
-  const externalsReply = externalsOnly(
-    [toAddress, ...(cc ?? []).map((c) => c.email)],
-    internalDomainsReply,
-  );
-  const conversationIdReply = await computeConversationId(
+  const conversationIdReply = await outboundConversationId(
+    db,
     fromAddress,
-    externalsReply,
+    toAddress,
+    (cc ?? []).map((c) => c.email),
   );
 
   // Store sent email

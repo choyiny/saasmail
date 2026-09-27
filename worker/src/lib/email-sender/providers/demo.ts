@@ -19,4 +19,8 @@ export class DemoSender implements EmailSender {
   maxAttachmentBytes(): number {
     return 25 * 1024 * 1024;
   }
+
+  maxMessageBytes(): number {
+    return 25 * 1024 * 1024;
+  }
 }

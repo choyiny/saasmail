@@ -73,6 +73,8 @@ export interface MessageQuery {
   ignoreSnooze?: boolean;
   excludeCampaignSends?: boolean;
   assignedTo?: string;
+  /** JMAP only: select sent mail's content id and its content's thread key. */
+  withJmap?: boolean;
   /** Unix seconds used for snooze evaluation. Defaults to the current time. */
   now?: number;
 }
@@ -114,6 +116,8 @@ type RawMessageRow = {
   conversation_key: string | null;
   snoozed_until: number | null;
   assigned_user_id: string | null;
+  jmap_content_id: string | null;
+  jmap_thread_key: string | null;
 };
 
 function normalizeInboxes(inboxes: string[] | undefined): string[] | undefined {
@@ -435,6 +439,22 @@ function campaignScope(query: MessageQuery): SQL {
     : sql``;
 }
 
+/**
+ * JMAP-only columns. The web never asks for them, so no web query pays for the
+ * join and no web response can leak a content id.
+ */
+function jmapSentColumns(query: MessageQuery): SQL {
+  return query.withJmap
+    ? sql`se.jmap_content_id AS jmap_content_id, jmc.thread_key AS jmap_thread_key`
+    : sql`NULL AS jmap_content_id, NULL AS jmap_thread_key`;
+}
+
+function jmapSentJoin(query: MessageQuery): SQL {
+  return query.withJmap
+    ? sql`LEFT JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id`
+    : sql``;
+}
+
 function receivedSearch(
   search: string | undefined,
   mode: MessageSearchMode,
@@ -559,6 +579,8 @@ function receivedArm(
       NULL AS sequence_id,
       NULL AS sequence_enrollment_id,
       NULL AS delivery_status,
+      NULL AS jmap_content_id,
+      NULL AS jmap_thread_key,
       ${personalStateSelect(query)},
       mms.archived_at AS archived_at,
       mms.spam_at AS spam_at,
@@ -656,6 +678,7 @@ function sentArm(
       se.sequence_id AS sequence_id,
       se.sequence_enrollment_id AS sequence_enrollment_id,
       se.status AS delivery_status,
+      ${jmapSentColumns(query)},
       ${personalStateSelect(query)},
       mms.archived_at AS archived_at,
       mms.spam_at AS spam_at,
@@ -663,6 +686,7 @@ function sentArm(
       ${snoozeStateSelect(query, sql`se.conversation_id`, sql`se.person_id`)}
     FROM sent_emails se
     LEFT JOIN people p ON p.id = se.person_id
+    ${jmapSentJoin(query)}
     LEFT JOIN mailbox_message_state mms
       ON mms.message_kind = 'sent' AND mms.message_id = se.id
     ${personalStateJoin(query, "sent", sql`se.id`)}
@@ -790,6 +814,13 @@ function toUnified(
       personName: row.to_name,
     };
     message = adaptSent(selected);
+  }
+
+  if (row.jmap_content_id && row.jmap_thread_key) {
+    message.jmap = {
+      contentId: row.jmap_content_id,
+      threadKey: row.jmap_thread_key,
+    };
   }
 
   if (withState) {

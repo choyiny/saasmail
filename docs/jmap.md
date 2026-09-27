@@ -13,7 +13,9 @@ saasmail exposes a bounded subset of [JMAP Core (RFC 8620)](https://www.rfc-edit
 
 Authenticate with the same credentials as the HTTP API: either a signed-in session cookie or `Authorization: Bearer sk_...`. Session-cookie callers have the same passkey-registration gate as `/api/*`; API keys retain their normal issuance-time passkey guarantee. Every object is scoped through the caller's allowed inboxes. Objects outside that scope are reported as not found rather than disclosed.
 
-There is one JMAP account per saasmail user. Its account id is a derived, opaque value (not the user id) and it is advertised as personal and writable. JMAP writes are deliberately limited to Email state and drafts: destroying received or sent messages, mailbox administration, and EmailSubmission remain unsupported.
+Method names are case-sensitive in the JMAP `methodCalls` array, and a method that is not implemented for the account answers `unknownMethod` rather than acting partially.
+
+There is one JMAP account per saasmail user. Its account id is a derived, opaque value (not the user id) and it is advertised as personal and writable. JMAP writes are deliberately limited to Email state, drafts and sending: destroying received or sent messages and mailbox administration remain unsupported.
 
 ## Ids and account (breaking in this release)
 
@@ -37,14 +39,17 @@ Creation references work across calls in one request: a later call may use `#cre
 
 ## Supported methods
 
-The server advertises `urn:ietf:params:jmap:core` and `urn:ietf:params:jmap:mail` and supports:
+The server advertises `urn:ietf:params:jmap:core`, `urn:ietf:params:jmap:mail` and `urn:ietf:params:jmap:submission` and supports:
 
 - `Core/echo`
 - `Mailbox/get`, `Mailbox/query`
 - `Email/get`, `Email/query`, `Email/set`, `Email/changes`
 - `Thread/get`
-- `Identity/get`
+- `Identity/get`, `Identity/set`
 - `Mailbox/changes`
+- `EmailSubmission/set`, `EmailSubmission/get`, `EmailSubmission/query`, `EmailSubmission/changes`
+
+The submission methods and `Identity/set` answer `unknownMethod` unless `urn:ietf:params:jmap:submission` is listed in `using`. `Identity/get` keeps working with `urn:ietf:params:jmap:mail` alone.
 
 `Email/set` creates drafts, and updates and destroys them, alongside today's updates to received and sent mail. It can change `$seen`/`$flagged`, move received mail among Inbox/Archive/Junk/Trash, move sent mail between Sent/Trash, add/remove custom-folder membership, and move a draft between that identity's Drafts and Trash. Destroying received or sent mail is still `forbidden`; only drafts are destroyable. `Thread/changes`, `Identity/changes`, and every `*/queryChanges` continue to return `cannotCalculateChanges`.
 
@@ -87,11 +92,32 @@ Anything else fails with `invalidProperties` and changes nothing.
 
 **Visibility.** Drafts are private to their author. Another member of the same inbox never sees a draft — not in `Email/get`, `Email/query`, `Thread/get`, `Email/changes`, the Drafts or Trash counts, or an `X…`/`P…` download.
 
+## Sending (EmailSubmission)
+
+Clients that list `urn:ietf:params:jmap:submission` in `using` can send a saved draft with `EmailSubmission/set` (create), and read submissions with `EmailSubmission/get`, `/query` and `/changes`. `EmailSubmission/queryChanges` returns `cannotCalculateChanges`. `Identity/set` exists but is read-only: creates are `forbidden`, and updates and destroys are `notFound` for unknown ids and `forbidden` for known ones.
+
+- **Transactional 1:1 sends, like the web composer.** Exactly one To plus up to 50 Cc (51 recipients); no Bcc; no suppression filtering; no unsubscribe footer or `List-Unsubscribe` header.
+- **Exact content.** The message carries the draft's From name, To and Cc display names, subject (no "Re:" rewriting), `Message-ID`, `In-Reply-To`, `References`, `Reply-To` and every attached or inline part (inline parts keep their `cid`). The text body is the draft's `text/plain` body parts and the HTML body its `text/html` ones, so a text-only draft goes out without an HTML part and an HTML-only draft without a text part. The Cloudflare provider also keeps the draft's `Date`. Postmark, Resend and Bavimail stamp their own `Date`, and Bavimail can't carry a `Content-ID`.
+- **What can't be sent.** `Reply-To` goes out as one bare address (every provider takes a single one), so a draft with two or more is refused with `invalidEmail` (`replyTo`). A text part that is neither body (for example a `text/plain` attachment given as a `partId`) is refused with `invalidEmail` (`bodyStructure`); upload it as a blob instead. If one create in a call fails unexpectedly, it gets `serverFail` and the others are still reported.
+- **Envelope.** If given, `mailFrom` must be the identity's address and `rcptTo` must equal To ∪ Cc. SMTP parameters aren't supported.
+- **Size.** `tooLarge.maxSize` is the provider's whole-message cap: Cloudflare 5 MiB (to unverified recipients), Postmark 10 MB, Resend 40 MB.
+- **Errors.** Every RFC 8621 §7.5 SetError applies. A provider's permanent rejection returns `forbiddenToSend` with its message, and no Sent Email is created. A temporary failure is accepted: the outbox retries it, and the draft can't be submitted again until the outbox gives up.
+- **The Sent copy** appears in the Sent mailbox as its own Email, with the draft's immutable properties (`blobId`, `size`, `threadId`, addresses, bodies…) and `receivedAt` equal to the send time.
+
+A submission is claimed atomically, so two concurrent `EmailSubmission/set` calls for the same draft make exactly one provider call: one gets `created`, the other `forbiddenToSend`. The claim is released again after a terminal failure or when the outbox finally gives up, so the draft can be submitted once more.
+
+Not yet supported:
+
+- `onSuccessUpdateEmail`/`onSuccessDestroyEmail` return `invalidArguments`. After sending, clients move or destroy the draft with their own `Email/set`.
+- A retry of a temporarily failed send uses the inbox's current display name and drops the To display name.
+- If the server stops between claiming a draft and recording the send, that draft reports "already being sent" until recovery ships.
+- Mailbox thread counts group JMAP-sent mail by conversation, not by its JMAP `threadId`.
+
 ## State and changes
 
 Mailbox/get, Email/get, Thread/get, and Email/set use change-log state strings of the form `j2-<seq>-<issuedAt>-<fp>`. `issuedAt` is the start of the current UTC day, so repeated reads of unchanged data keep the same state throughout the day; Email/set's `ifInState` compares the parsed sequence and permission fingerprint, not the issuance timestamp. Change rows are scoped by the caller's allowed inboxes and, for personal seen/flagged state, by user. States older than the supported window are rejected with `cannotCalculateChanges`; change-log rows are retained for 30 days and pruned in bounded batches by the existing scheduled maintenance chain.
 
-Email/changes coalesces repeated activity for an Email into created/updated/destroyed ids and supports paging through an intermediate state. Mailbox/changes also reports mailbox count changes caused by Email activity. Because mailbox counts are small, saasmail does not page Mailbox/changes: if the result would exceed `maxChanges`, it returns `cannotCalculateChanges` instead.
+Email/changes coalesces repeated activity for an Email into created/updated/destroyed ids and supports paging through an intermediate state. Mailbox/changes also reports mailbox count changes caused by Email activity. Because mailbox counts are small, saasmail does not page Mailbox/changes: if the result would exceed `maxChanges`, it returns `cannotCalculateChanges` instead. EmailSubmission/changes reports the same three sets for `E…` submission ids; it shares the Email/Mailbox change-log state, and claiming or releasing a draft's submission lock writes no Email change row.
 
 Snooze is intentionally invisible to JMAP. A snoozed conversation remains in its normal JMAP system mailbox (normally Inbox), is returned by matching Email/query calls, and contributes to mailbox counts. Snooze-only changes therefore do not advance JMAP Email or Mailbox state.
 
@@ -109,7 +135,7 @@ For clients that ask for endpoints manually, use `https://your-domain.example/jm
 
 The Session advertises a 10 MB request limit, 16 method calls per request, 256 objects per `/get`, 256 objects per `/set`, four concurrent requests, and `i;ascii-casemap` collation. Result references (`#property`) are supported, including wildcard JSON-pointer paths used to feed one method response into a later call in the same request.
 
-EventSource push, mailbox mutation, EmailSubmission, and search snippets are not implemented. Destroying received or sent mail is `forbidden`; only drafts can be destroyed. Thread/changes, Identity/changes, and query-change calculation are also not implemented. `blobId` is still `null` for received and sent mail that didn't come from JMAP, so those messages have no raw-message blob.
+EventSource push, mailbox mutation, and search snippets are not implemented. Destroying received or sent mail is `forbidden`; only drafts can be destroyed. Thread/changes, Identity/changes, and query-change calculation are also not implemented. `blobId` is still `null` for received and sent mail that didn't come from JMAP, so those messages have no raw-message blob; mail sent through EmailSubmission keeps the draft's `blobId`, because its content row outlives the draft.
 
 `Email/get` accepts the full RFC 8621 Email property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors, so standard clients may request their normal property lists. `messageId` and `inReplyTo` are returned when they are already present in the unified message row. For received and sent mail, properties the current unified model cannot supply cheaply — including raw-message `blobId`, `references`, `sender`, `bcc`, `replyTo`, `bodyStructure`, `headers`, and dynamic `header:*` selectors — are returned as `null`; a draft supplies all of them from its own stored content. These nulls are a deliberate compatibility deviation from the stricter RFC field types until those values are modeled; names outside the RFC property set still return `invalidArguments`.
 

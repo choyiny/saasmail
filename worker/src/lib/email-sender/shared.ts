@@ -25,3 +25,26 @@ export function toBase64(bytes: ArrayBuffer | Uint8Array): string {
   }
   return btoa(binary);
 }
+
+/** A copy of `headers` without `name` (case-insensitive); undefined when empty. */
+export function withoutHeader(
+  headers: Record<string, string> | undefined,
+  name: string,
+): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  const lower = name.toLowerCase();
+  const entries = Object.entries(headers).filter(
+    ([key]) => key.toLowerCase() !== lower,
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+/** Plain text as a minimal HTML body, for providers whose API has no text-only mode. */
+export function textAsHtml(text: string | undefined): string {
+  if (!text) return "";
+  const escaped = text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  return `<pre style="white-space:pre-wrap">${escaped}</pre>`;
+}

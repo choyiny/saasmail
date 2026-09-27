@@ -124,6 +124,17 @@ export function parseRawBlobId(id: string): string | null {
   return decodeReversible(id, "X", "x");
 }
 
+/** EmailSubmissions (PR 5). The payload is the jmap_submissions row id. */
+export function publicSubmissionId(id: string): string {
+  const encoded = reversible("E", "e", id);
+  if (!encoded) throw new Error("submission id too long for a JMAP id");
+  return encoded;
+}
+
+export function parseSubmissionId(id: string): string | null {
+  return decodeReversible(id, "E", "e");
+}
+
 export function publicSystemMailboxId(
   inbox: string,
   role: SystemMailboxRole,
@@ -232,6 +243,9 @@ export function publicIdForChangeObject(objectId: string): string {
   }
   if (objectId.startsWith("draft:")) {
     return publicDraftEmailId(objectId.slice(6));
+  }
+  if (objectId.startsWith("submission:")) {
+    return publicSubmissionId(objectId.slice("submission:".length));
   }
   return objectId;
 }

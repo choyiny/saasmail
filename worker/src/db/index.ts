@@ -45,3 +45,4 @@ export * from "./jmap-changes.schema";
 export * from "./jmap-blobs.schema";
 export * from "./jmap-message-content.schema";
 export * from "./jmap-drafts.schema";
+export * from "./jmap-submissions.schema";

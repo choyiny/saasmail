@@ -18,7 +18,12 @@ export class CloudflareSender implements EmailSender {
       const { name, address } = parseFrom(params.from);
       const msg = createMimeMessage();
       msg.setSender(name ? { name, addr: address } : { addr: address });
-      msg.setRecipient(params.to);
+      // The envelope recipient must be a bare address even when `to` carries a
+      // display name ("Name <addr>"); mimetext encodes the name in the header.
+      const to = parseFrom(params.to);
+      msg.setRecipient(
+        to.name ? { name: to.name, addr: to.address } : { addr: to.address },
+      );
       if (params.cc && params.cc.length > 0) {
         for (const c of params.cc) {
           const parsed = parseFrom(c);
@@ -42,6 +47,9 @@ export class CloudflareSender implements EmailSender {
             filename: a.filename,
             contentType: a.contentType,
             data: toBase64(a.content),
+            inline: a.disposition === "inline",
+            // mimetext wraps the value in angle brackets itself.
+            ...(a.contentId ? { headers: { "Content-ID": a.contentId } } : {}),
           });
         }
       }
@@ -59,7 +67,7 @@ export class CloudflareSender implements EmailSender {
           }
         }
       }
-      const message = new EmailMessage(address, params.to, msg.asRaw());
+      const message = new EmailMessage(address, to.address, msg.asRaw());
       const result = await this.binding.send(message);
       return { id: result?.messageId ?? null, error: null };
     } catch (e) {
@@ -80,5 +88,12 @@ export class CloudflareSender implements EmailSender {
 
   maxAttachmentBytes(): number {
     return Math.floor((25 * 1024 * 1024) / 1.4);
+  }
+
+  maxMessageBytes(): number {
+    // Cloudflare Email Service caps a message at 5 MiB (attachments included)
+    // to arbitrary recipients; 25 MiB applies to verified destinations only.
+    // https://developers.cloudflare.com/email-service/platform/limits/
+    return 5 * 1024 * 1024;
   }
 }

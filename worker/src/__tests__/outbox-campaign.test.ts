@@ -32,6 +32,7 @@ function fakeSender(result: SendEmailResult): EmailSender & {
       return result;
     },
     maxAttachmentBytes: () => 25 * 1024 * 1024,
+    maxMessageBytes: () => 25 * 1024 * 1024,
   };
 }
 

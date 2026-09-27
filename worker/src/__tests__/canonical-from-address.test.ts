@@ -80,6 +80,7 @@ describe("canonical sequence sending inboxes", () => {
     const sender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "mixed-provider-id",
         error: null,

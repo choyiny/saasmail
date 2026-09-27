@@ -7,6 +7,7 @@ import {
   parseDraftEmailId,
   parseEmailId,
   parseRawBlobId,
+  parseSubmissionId,
   parseThreadId,
   parseUploadBlobId,
   publicAccountId,
@@ -18,6 +19,7 @@ import {
   publicIdForChangeObject,
   publicIdentityId,
   publicRawBlobId,
+  publicSubmissionId,
   publicSystemMailboxId,
   publicThreadId,
   publicUploadBlobId,
@@ -195,5 +197,13 @@ describe("JMAP public ids", () => {
 
   it("maps draft change-log ids", () => {
     expect(publicIdForChangeObject("draft:d9")).toBe("Dd9");
+  });
+
+  it("round-trips submission ids and maps submission change rows", () => {
+    expect(publicSubmissionId("sub_1-A")).toBe("Esub_1-A");
+    expect(parseSubmissionId("Esub_1-A")).toBe("sub_1-A");
+    expect(parseSubmissionId("E")).toBeNull();
+    expect(parseSubmissionId("Dabc")).toBeNull();
+    expect(publicIdForChangeObject("submission:s9")).toBe("Es9");
   });
 });

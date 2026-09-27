@@ -32,8 +32,11 @@ export class PostmarkSender implements EmailSender {
         From: params.from,
         To: params.to,
         Subject: params.subject,
-        HtmlBody: params.html,
       };
+      // A text-only message (a JMAP draft) has no HTML body to send.
+      if (params.html) {
+        payload.HtmlBody = params.html;
+      }
       if (params.text) {
         payload.TextBody = params.text;
       }
@@ -48,7 +51,11 @@ export class PostmarkSender implements EmailSender {
         if (replyTo) {
           payload.ReplyTo = replyTo[1];
         }
-        const rest = entries.filter(([k]) => k.toLowerCase() !== "reply-to");
+        const rest = entries.filter(([k]) => {
+          const key = k.toLowerCase();
+          // Postmark stamps Date itself; overriding it isn't documented.
+          return key !== "reply-to" && key !== "date";
+        });
         if (rest.length > 0) {
           payload.Headers = rest.map(([Name, Value]) => ({ Name, Value }));
         }
@@ -58,6 +65,7 @@ export class PostmarkSender implements EmailSender {
           Name: a.filename,
           Content: toBase64(a.content),
           ContentType: a.contentType,
+          ...(a.contentId ? { ContentID: `cid:${a.contentId}` } : {}),
         }));
       }
 
@@ -109,5 +117,11 @@ export class PostmarkSender implements EmailSender {
   maxAttachmentBytes(): number {
     // Postmark caps total message size at 10 MB; base64 inflates ~1.4x.
     return Math.floor((10 * 1024 * 1024) / 1.4);
+  }
+
+  maxMessageBytes(): number {
+    // "10MB total message size including attachments", counted after Base64
+    // encoding (postmarkapp.com/support/article/1056).
+    return 10_000_000;
   }
 }

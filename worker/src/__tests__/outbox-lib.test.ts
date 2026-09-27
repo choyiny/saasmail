@@ -61,6 +61,7 @@ function fakeSender(results: SendEmailResult[]): EmailSender & {
       return results[Math.min(calls.length - 1, results.length - 1)];
     },
     maxAttachmentBytes: () => 25 * 1024 * 1024,
+    maxMessageBytes: () => 25 * 1024 * 1024,
   };
 }
 
@@ -144,6 +145,7 @@ describe("sendViaOutbox", () => {
         throw new Error("unexpected transport crash");
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
     await expect(sendViaOutbox(baseParams(throwingSender))).rejects.toThrow(
       "unexpected transport crash",
@@ -162,9 +164,22 @@ describe("sendViaOutbox", () => {
         return { id: "prov-1", error: null };
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
     await sendViaOutbox(baseParams(observingSender));
     expect(observedNextRetryAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+  });
+
+  it("sends To with its display name but stores the bare address", async () => {
+    const sender = fakeSender([TRANSIENT]);
+    await sendViaOutbox({
+      ...baseParams(sender),
+      to: "john@example.com",
+      toName: "Doe, John",
+    });
+    expect(sender.calls[0].to).toBe('"Doe, John" <john@example.com>');
+    const [row] = await getDb().select().from(outboxEmails);
+    expect(row.toAddress).toBe("john@example.com");
   });
 
   it("deletes the row when every recipient is suppressed", async () => {

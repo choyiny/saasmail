@@ -194,6 +194,7 @@ describe("sequence processor - processSequenceEmail suppression", () => {
       const fakeSender: EmailSender = {
         provider: "none",
         maxAttachmentBytes: () => 25_000_000,
+        maxMessageBytes: () => 25_000_000,
         send: vi.fn(async (_params: SendEmailParams) => ({
           id: "should-not-be-called",
           error: null,
@@ -273,6 +274,7 @@ describe("sequence processor - processSequenceEmail suppression", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "fake-resend-id",
         error: null,
@@ -355,6 +357,7 @@ describe("sequence processor - processSequenceEmail outbox", () => {
         };
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
 
     // Must resolve without throwing — the queue consumer ACKs on return.
@@ -432,6 +435,7 @@ describe("sequence processor - processSequenceEmail outbox", () => {
         };
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
 
     await processSequenceEmail(
@@ -532,6 +536,7 @@ describe("sequence processor - crash-redelivery idempotency", () => {
         throw new Error("should not be called");
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
 
     // Must not throw — the redelivery guard intercepts and repairs.
@@ -627,6 +632,7 @@ describe("sequence processor - template rendering", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "fake-id",
         error: null,
@@ -660,6 +666,7 @@ describe("sequence processor - template rendering", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "should-not-be-called",
         error: null,
@@ -710,6 +717,7 @@ describe("sequence processor - template rendering", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "fake-id",
         error: null,

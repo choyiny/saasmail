@@ -3,6 +3,13 @@ export interface SendEmailAttachment {
   contentType: string;
   /** Raw bytes. */
   content: ArrayBuffer | Uint8Array;
+  /**
+   * Content-ID without angle brackets, for parts the HTML references as
+   * `cid:…`. Null/absent for ordinary attachments.
+   */
+  contentId?: string | null;
+  /** "inline" for parts shown in the body (multipart/related). Default "attachment". */
+  disposition?: "attachment" | "inline";
 }
 
 export interface SendEmailParams {
@@ -35,4 +42,10 @@ export interface EmailSender {
   provider: "resend" | "cloudflare" | "none" | "demo" | "bavimail" | "postmark";
   send(params: SendEmailParams): Promise<SendEmailResult>;
   maxAttachmentBytes(): number;
+  /**
+   * The provider's documented cap on a whole message, in octets, measured the
+   * way the provider measures it (after transfer encoding). JMAP reports it as
+   * `tooLarge.maxSize`; it is never derived from `maxAttachmentBytes()`.
+   */
+  maxMessageBytes(): number;
 }

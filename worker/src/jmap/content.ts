@@ -354,12 +354,22 @@ export const CONTENT_GC_GRACE_SECONDS = 3600;
 const CONTENT_GC_LIMIT = 200;
 
 /**
- * Content is referenced while something shows it. PR 5 adds
- * sent_emails.jmap_content_id and claimed jmap_submissions.content_id here —
- * keep every reference in this one predicate.
+ * Content is referenced while something shows it: a draft, a JMAP-sent Sent
+ * row, or a `claimed` submission's in-flight intention. Keep every reference
+ * in this one predicate — a missing one makes the hourly GC delete content a
+ * Sent Email still shows.
  */
 function contentReferencedSql(contentId: SQL): SQL {
-  return sql`EXISTS (SELECT 1 FROM jmap_drafts d WHERE d.content_id = ${contentId})`;
+  return sql`(
+    EXISTS (SELECT 1 FROM jmap_drafts d WHERE d.content_id = ${contentId})
+    OR EXISTS (
+      SELECT 1 FROM sent_emails se WHERE se.jmap_content_id = ${contentId}
+    )
+    OR EXISTS (
+      SELECT 1 FROM jmap_submissions js
+       WHERE js.content_id = ${contentId} AND js.attempt_state = 'claimed'
+    )
+  )`;
 }
 
 function contentObjectKeys(rawR2Key: string, partsJson: string): string[] {

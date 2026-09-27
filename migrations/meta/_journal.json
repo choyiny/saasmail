@@ -400,6 +400,20 @@
       "when": 1790450369394,
       "tag": "0056_jmap_draft_changes",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1790454017768,
+      "tag": "0057_jmap_submissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1790454026814,
+      "tag": "0058_jmap_submission_triggers",
+      "breakpoints": true
     }
   ]
 }

@@ -21,6 +21,7 @@ function fakeSender(): EmailSender & { calls: SendEmailParams[] } {
       return { id: "prov-1", error: null };
     },
     maxAttachmentBytes: () => 25 * 1024 * 1024,
+    maxMessageBytes: () => 25 * 1024 * 1024,
   };
 }
 

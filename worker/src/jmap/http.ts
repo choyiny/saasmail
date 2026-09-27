@@ -8,6 +8,7 @@ import {
   MAIL_CAPABILITY,
   MAX_CALLS_IN_REQUEST,
   MAX_SIZE_REQUEST,
+  SUBMISSION_CAPABILITY,
   SUPPORTED_CAPABILITIES,
 } from "./constants";
 import { executeMethod, makeSession, type JmapMethodContext } from "./methods";
@@ -248,6 +249,16 @@ export async function executeJmapCalls(
   const methodResponses: MethodResponse[] = [];
   for (const [name, rawArgs, callId] of methodCalls) {
     if (name !== "Core/echo" && !using.includes(MAIL_CAPABILITY)) {
+      methodResponses.push(["error", { type: "unknownMethod" }, callId]);
+      continue;
+    }
+
+    // RFC 8621 §2: a method whose capability isn't in `using` is unknown.
+    // `Identity/get` stays on `mail`, so only the submission methods move.
+    if (
+      (name.startsWith("EmailSubmission/") || name === "Identity/set") &&
+      !using.includes(SUBMISSION_CAPABILITY)
+    ) {
       methodResponses.push(["error", { type: "unknownMethod" }, callId]);
       continue;
     }

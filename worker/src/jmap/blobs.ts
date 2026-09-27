@@ -10,9 +10,11 @@ import {
   toCrlf,
   utf8Bytes,
   type ContentPart,
+  type JmapContentRow,
 } from "./content";
 import { loadDraftsByIds } from "./drafts";
 import { loadJmapEmailObjectsByIds } from "./emails";
+import { readableSentContent, sentMessageContent } from "./sent-content";
 import {
   parseAnyEmailId,
   parseAttachmentBlobId,
@@ -41,7 +43,11 @@ async function resolveRawMessageBlob(
   blobId: string,
   contentId: string,
 ): Promise<ResolvedBlob | null> {
-  const content = await findReadableContent(db, allowed, userId, contentId);
+  const content =
+    (await findReadableContent(db, allowed, userId, contentId)) ??
+    // PR 5: a JMAP-sent Email shows the same raw message, so a visible Sent
+    // row makes the content readable even with no draft left.
+    (await readableSentContent(db, allowed, contentId));
   if (!content) return null;
   return {
     blobId,
@@ -49,6 +55,43 @@ async function resolveRawMessageBlob(
     size: content.size,
     name: null,
     source: { r2Key: content.rawR2Key },
+  };
+}
+
+/**
+ * One leaf of a content row as a downloadable blob. The single implementation
+ * behind both a draft's `P<D…>_<n>` and a JMAP-sent Email's `P<S…>_<n>`, so
+ * the two serve identical bytes and types.
+ */
+export function contentPartBlob(
+  content: JmapContentRow,
+  partId: string,
+  blobId: string,
+): ResolvedBlob | null {
+  const leaf = contentLeaves(JSON.parse(content.partsJson) as ContentPart).find(
+    (candidate) => candidate.partId === partId,
+  );
+  if (!leaf) return null;
+  if (leaf.r2Key !== null) {
+    return {
+      blobId,
+      type: leaf.type,
+      size: leaf.size,
+      name: leaf.name,
+      source: { r2Key: leaf.r2Key },
+    };
+  }
+  const value = (JSON.parse(content.bodyValuesJson) as Record<string, string>)[
+    leaf.partId
+  ];
+  if (value === undefined) return null;
+  const bytes = utf8Bytes(toCrlf(value));
+  return {
+    blobId,
+    type: leaf.type,
+    size: bytes.byteLength,
+    name: leaf.name,
+    source: { bytes },
   };
 }
 
@@ -67,31 +110,14 @@ async function resolveBodyPartBlob(
       ref.id,
     );
     if (!item) return null;
-    const leaf = contentLeaves(
-      JSON.parse(item.content.partsJson) as ContentPart,
-    ).find((candidate) => candidate.partId === target.part);
-    if (!leaf) return null;
-    if (leaf.r2Key !== null) {
-      return {
-        blobId,
-        type: leaf.type,
-        size: leaf.size,
-        name: leaf.name,
-        source: { r2Key: leaf.r2Key },
-      };
-    }
-    const value = (
-      JSON.parse(item.content.bodyValuesJson) as Record<string, string>
-    )[leaf.partId];
-    if (value === undefined) return null;
-    const bytes = utf8Bytes(toCrlf(value));
-    return {
-      blobId,
-      type: leaf.type,
-      size: bytes.byteLength,
-      name: leaf.name,
-      source: { bytes },
-    };
+    return contentPartBlob(item.content, target.part, blobId);
+  }
+
+  // JMAP-sent mail projects from its content row, so its parts answer the same
+  // way a draft's do.
+  if (ref.kind === "sent" && /^\d+$/.test(target.part)) {
+    const content = await sentMessageContent(db, allowed, ref.id);
+    if (content) return contentPartBlob(content, target.part, blobId);
   }
 
   // Received and sent mail expose two synthetic parts: "text" and "html".

@@ -75,11 +75,14 @@ function allowedChunks(allowed: AllowedInboxes): AllowedInboxes[] {
   return chunks;
 }
 
+/** Every object type a client can name in a change set. */
+type ChangeObjectType = "email" | "mailbox" | "submission";
+
 function scopedChangesSql(
   allowed: AllowedInboxes,
   userId: string,
   sinceSeq: number,
-  objectType?: "email" | "mailbox",
+  objectType?: ChangeObjectType,
 ) {
   const sharedInboxScope = inboxScopeSql(allowed, sql`jc.inbox`);
   const personalInboxScope = inboxScopeSql(allowed, sql`jc.inbox`);
@@ -166,7 +169,7 @@ function groupedChangesSql(
   allowed: AllowedInboxes,
   userId: string,
   sinceSeq: number,
-  objectType: "email" | "mailbox",
+  objectType: ChangeObjectType,
   limit?: number,
 ) {
   const scoped = scopedChangesSql(allowed, userId, sinceSeq, objectType);
@@ -198,7 +201,7 @@ async function loadGroupedChanges(
   allowed: AllowedInboxes,
   userId: string,
   sinceSeq: number,
-  objectType: "email" | "mailbox",
+  objectType: ChangeObjectType,
   limit?: number,
 ): Promise<ChangeRow[]> {
   const rows: ChangeRow[] = [];
@@ -271,6 +274,51 @@ export async function emailChanges(
     accountId,
     oldState: args.sinceState as string,
     newState,
+    hasMoreChanges,
+    created: sets.created.map(publicIdForChangeObject),
+    updated: sets.updated.map(publicIdForChangeObject),
+    destroyed: sets.destroyed.map(publicIdForChangeObject),
+    updatedProperties: null,
+  };
+}
+
+export async function submissionChanges(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  accountId: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown> | JmapMethodError> {
+  const requestedMax = maxChanges(args.maxChanges);
+  if (typeof requestedMax !== "number") return requestedMax;
+  const now = Math.floor(Date.now() / 1000);
+  const validation = await validateSinceState(
+    db,
+    allowed,
+    userId,
+    args.sinceState,
+    now,
+  );
+  if ("type" in validation) return validation;
+
+  const rows = await loadGroupedChanges(
+    db,
+    allowed,
+    userId,
+    validation.since.seq,
+    "submission",
+    requestedMax + 1,
+  );
+  const hasMoreChanges = rows.length > requestedMax;
+  const page = hasMoreChanges ? rows.slice(0, requestedMax) : rows;
+  const sets = classify(page);
+  const lastSeq = page.at(-1)?.last_seq ?? validation.since.seq;
+  return {
+    accountId,
+    oldState: args.sinceState as string,
+    newState: hasMoreChanges
+      ? formatJmapState(lastSeq, validation.since.issuedAt, validation.since.fp)
+      : validation.current.state,
     hasMoreChanges,
     created: sets.created.map(publicIdForChangeObject),
     updated: sets.updated.map(publicIdForChangeObject),

@@ -1,5 +1,6 @@
 import { isSuppressed, type Database } from "./suppressions";
 import { signToken } from "./unsubscribe-token";
+import { encodeDisplayName } from "./format-from-address";
 import type {
   EmailSender,
   SendEmailParams,
@@ -22,6 +23,11 @@ export interface SendInput {
   sender: EmailSender;
   from: SendEmailParams["from"];
   to: string;
+  /**
+   * Display name for `to`. Honoured by transactional sends only: marketing
+   * sends address every recipient separately and keep bare addresses.
+   */
+  toName?: string | null;
   cc?: CcRecipient[];
   subject: string;
   html?: string;
@@ -111,9 +117,9 @@ function appendTextFooter(text: string, url: string): string {
   return text + `\n\n---\nUnsubscribe: ${url}`;
 }
 
-/** Format a CcRecipient as a header-friendly `"Name <addr>"` string. */
+/** Format an address as a header-safe `Name <addr>` (quoting names with specials). */
 function formatCcForTransport(c: CcRecipient): string {
-  return c.name ? `${c.name} <${c.email}>` : c.email;
+  return c.name ? `${encodeDisplayName(c.name)} <${c.email}>` : c.email;
 }
 
 export async function sendWithSuppressionCheck(
@@ -125,6 +131,7 @@ export async function sendWithSuppressionCheck(
     sender,
     from,
     to,
+    toName,
     cc,
     subject,
     html,
@@ -178,7 +185,9 @@ export async function sendWithSuppressionCheck(
 
     lastResult = await sender.send({
       from,
-      to: primaryTo,
+      to: toName
+        ? formatCcForTransport({ email: primaryTo, name: toName })
+        : primaryTo,
       ...(ccArg ? { cc: ccArg } : {}),
       subject,
       html: html ?? "",

@@ -1,9 +1,10 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { createEmailSender } from "../lib/email-sender";
+import { createEmailSender, type EmailSender } from "../lib/email-sender";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 import {
   queryMessages,
   queryMessageThreadKeys,
+  MESSAGE_REFS_PER_QUERY,
   THREAD_KEYS_PER_QUERY,
 } from "../lib/messages/query";
 import {
@@ -13,6 +14,7 @@ import {
   MAX_OBJECTS_IN_GET,
   MAX_OBJECTS_IN_SET,
   MAX_SIZE_REQUEST,
+  SUBMISSION_CAPABILITY,
 } from "./constants";
 import type { CreatedIds } from "./creation-refs";
 import {
@@ -23,8 +25,14 @@ import {
 } from "./emails";
 import { listJmapMailboxes, listUsableIdentities } from "./mailboxes";
 import { draftThreadMembers, listDraftThreadKeys } from "./drafts";
-import { emailChanges, mailboxChanges } from "./changes";
+import { emailChanges, mailboxChanges, submissionChanges } from "./changes";
 import { emailSet } from "./email-set";
+import { emailSubmissionSet } from "./submission";
+import { emailSubmissionGet, emailSubmissionQuery } from "./submission-read";
+import {
+  listContentThreadKeys,
+  loadContentKeyedSentRefs,
+} from "./sent-content";
 import {
   parseThreadId,
   publicAccountId,
@@ -46,6 +54,8 @@ export type JmapMethodContext = {
   env: CloudflareBindings;
   /** Creation id -> server id for this request (RFC 8620 §3.3). */
   createdIds: CreatedIds;
+  /** Test seam: the provider EmailSubmission sends through. Defaults to createEmailSender(env). */
+  sender?: EmailSender;
 };
 
 function methodError(
@@ -167,6 +177,7 @@ export async function makeSession(
         collationAlgorithms: ["i;ascii-casemap"],
       },
       [MAIL_CAPABILITY]: {},
+      [SUBMISSION_CAPABILITY]: {},
     },
     accounts: {
       [accountId]: {
@@ -182,6 +193,11 @@ export async function makeSession(
             emailQuerySortOptions: ["receivedAt"],
             mayCreateTopLevelMailbox: false,
           },
+          [SUBMISSION_CAPABILITY]: {
+            // No delayed send: a submission goes out during the request.
+            maxDelayedSend: 0,
+            submissionExtensions: {},
+          },
         },
       },
     },
@@ -189,6 +205,7 @@ export async function makeSession(
     // accountCapabilities. Core is session-level and is not listed there.
     primaryAccounts: {
       [MAIL_CAPABILITY]: accountId,
+      [SUBMISSION_CAPABILITY]: accountId,
     },
     username: user.email ?? user.id,
     apiUrl: "/jmap/api",
@@ -327,7 +344,7 @@ async function threadGet(
   const keyByPublic = new Map<string, string>();
   const requestedPublic: string[] = [];
   if (ids === undefined || ids === null) {
-    const keys = await queryMessageThreadKeys(
+    const naturalKeys = await queryMessageThreadKeys(
       db,
       allowed,
       { viewer: { userId }, ignoreSnooze: true },
@@ -339,7 +356,15 @@ async function threadGet(
       userId,
       MAX_OBJECTS_IN_GET + 1,
     );
-    const combined = [...new Set([...keys, ...draftKeys])];
+    // JMAP-sent mail can thread under a key neither of those finds.
+    const contentKeys = await listContentThreadKeys(
+      db,
+      allowed,
+      MAX_OBJECTS_IN_GET + 1,
+    );
+    const combined = [
+      ...new Set([...naturalKeys, ...draftKeys, ...contentKeys]),
+    ];
     if (combined.length > MAX_OBJECTS_IN_GET) {
       return methodError("requestTooLarge");
     }
@@ -358,6 +383,8 @@ async function threadGet(
 
   const queryKeys = [...new Set(keyByPublic.values())];
   const grouped = new Map<string, { id: string; at: number }[]>();
+  // Public ids already filed under a key, so nothing is listed twice.
+  const seen = new Set<string>();
   let emailCount = 0;
 
   for (
@@ -373,6 +400,7 @@ async function threadGet(
       order: "asc",
       viewer: { userId },
       withState: true,
+      withJmap: true,
       ignoreSnooze: true,
     });
 
@@ -385,12 +413,11 @@ async function threadGet(
     }
 
     for (const message of page.messages) {
+      const id = publicEmailId(message.ref);
+      seen.add(id);
       const key = jmapThreadKey(message);
       const current = grouped.get(key) ?? [];
-      current.push({
-        id: publicEmailId(message.ref),
-        at: message.occurredAt,
-      });
+      current.push({ id, at: message.occurredAt });
       grouped.set(key, current);
     }
   }
@@ -404,10 +431,51 @@ async function threadGet(
     );
   }
   for (const member of draftMembers) {
+    const id = publicDraftEmailId(member.id);
+    seen.add(id);
     const current = grouped.get(member.threadKey) ?? [];
-    current.push({ id: publicDraftEmailId(member.id), at: member.receivedAt });
+    current.push({ id, at: member.receivedAt });
     grouped.set(member.threadKey, current);
   }
+
+  // JMAP-sent mail keeps its content's thread key (RFC 8621: threadId is
+  // immutable), which can differ from its natural conversation key, so look it
+  // up by content key too.
+  const extraRefs = (
+    await loadContentKeyedSentRefs(db, allowed, queryKeys)
+  ).filter((ref) => !seen.has(publicEmailId(ref)));
+  for (
+    let start = 0;
+    start < extraRefs.length;
+    start += MESSAGE_REFS_PER_QUERY
+  ) {
+    const page = await queryMessages(db, allowed, {
+      messageRefs: extraRefs.slice(start, start + MESSAGE_REFS_PER_QUERY),
+      limit: MESSAGE_REFS_PER_QUERY,
+      order: "asc",
+      viewer: { userId },
+      withState: true,
+      withJmap: true,
+      ignoreSnooze: true,
+    });
+    emailCount += page.messages.length;
+    if (emailCount > MAX_EMAILS_IN_THREAD_GET) {
+      return methodError(
+        "requestTooLarge",
+        `Thread/get is limited to ${MAX_EMAILS_IN_THREAD_GET} matching emails`,
+      );
+    }
+    for (const message of page.messages) {
+      const id = publicEmailId(message.ref);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const key = jmapThreadKey(message);
+      const current = grouped.get(key) ?? [];
+      current.push({ id, at: message.occurredAt });
+      grouped.set(key, current);
+    }
+  }
+
   for (const members of grouped.values()) {
     members.sort(
       (left, right) => left.at - right.at || (left.id < right.id ? -1 : 1),
@@ -515,6 +583,97 @@ async function identityGet(
   };
 }
 
+/**
+ * Identities are managed in saasmail settings, so `Identity/set` exists only so
+ * a JMAP client gets a precise answer instead of `unknownMethod`.
+ */
+async function identitySet(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  args: Record<string, unknown>,
+): Promise<MethodResult> {
+  const isObject = (value: unknown) =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  if (
+    args.create !== undefined &&
+    args.create !== null &&
+    !isObject(args.create)
+  ) {
+    return methodError("invalidArguments", undefined, ["create"]);
+  }
+  if (
+    args.update !== undefined &&
+    args.update !== null &&
+    !isObject(args.update)
+  ) {
+    return methodError("invalidArguments", undefined, ["update"]);
+  }
+  if (
+    args.destroy !== undefined &&
+    args.destroy !== null &&
+    (!Array.isArray(args.destroy) ||
+      !args.destroy.every((id) => typeof id === "string"))
+  ) {
+    return methodError("invalidArguments", undefined, ["destroy"]);
+  }
+  const state = await jmapState(db, allowed, userId);
+  if (
+    args.ifInState !== undefined &&
+    args.ifInState !== null &&
+    args.ifInState !== state
+  ) {
+    return methodError("stateMismatch");
+  }
+  const known = new Set(
+    (await listUsableIdentities(db, allowed)).map((row) =>
+      publicIdentityId(row.email),
+    ),
+  );
+  const readOnly = (id: string) =>
+    known.has(id)
+      ? {
+          type: "forbidden",
+          description: "Identities are managed in saasmail settings",
+        }
+      : { type: "notFound" };
+  const notCreated: Record<string, unknown> = {};
+  for (const id of Object.keys(
+    (args.create ?? {}) as Record<string, unknown>,
+  )) {
+    notCreated[id] = {
+      type: "forbidden",
+      description: "Identities are managed in saasmail settings",
+    };
+  }
+  const notUpdated: Record<string, unknown> = {};
+  for (const id of Object.keys(
+    (args.update ?? {}) as Record<string, unknown>,
+  )) {
+    notUpdated[id] = readOnly(id);
+  }
+  const notDestroyed: Record<string, unknown> = {};
+  for (const id of (args.destroy ?? []) as string[])
+    notDestroyed[id] = readOnly(id);
+  const orNull = (value: Record<string, unknown>) =>
+    Object.keys(value).length > 0 ? value : null;
+  return {
+    ok: true,
+    name: "Identity/set",
+    result: {
+      accountId: publicAccountId(userId),
+      oldState: state,
+      newState: state,
+      created: null,
+      updated: null,
+      destroyed: null,
+      notCreated: orNull(notCreated),
+      notUpdated: orNull(notUpdated),
+      notDestroyed: orNull(notDestroyed),
+    },
+  };
+}
+
 export async function executeMethod(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
@@ -538,6 +697,17 @@ export async function executeMethod(
       args,
       ctx,
     );
+    const error = result as JmapMethodError;
+    if (typeof error.type === "string") {
+      return methodError(error.type, error.description, error.properties);
+    }
+    return { ok: true, name, result };
+  }
+
+  if (name === "EmailSubmission/set") {
+    const account = accountError(args.accountId, user.id);
+    if (account) return account;
+    const result = await emailSubmissionSet(db, allowed, user, args, ctx);
     const error = result as JmapMethodError;
     if (typeof error.type === "string") {
       return methodError(error.type, error.description, error.properties);
@@ -569,6 +739,58 @@ export async function executeMethod(
       return methodError(error.type, error.description, error.properties);
     }
     return { ok: true, name, result };
+  }
+
+  if (name === "EmailSubmission/get" || name === "EmailSubmission/query") {
+    const account = accountError(args.accountId, user.id);
+    if (account) return account;
+    const result =
+      name === "EmailSubmission/get"
+        ? await emailSubmissionGet(
+            db,
+            allowed,
+            user.id,
+            publicAccountId(user.id),
+            args,
+          )
+        : await emailSubmissionQuery(
+            db,
+            allowed,
+            user.id,
+            publicAccountId(user.id),
+            args,
+          );
+    const error = result as JmapMethodError;
+    if (typeof error.type === "string") {
+      return methodError(error.type, error.description, error.properties);
+    }
+    return { ok: true, name, result };
+  }
+  if (name === "EmailSubmission/changes") {
+    const account = accountError(args.accountId, user.id);
+    if (account) return account;
+    const result = await submissionChanges(
+      db,
+      allowed,
+      user.id,
+      publicAccountId(user.id),
+      args,
+    );
+    const error = result as JmapMethodError;
+    if (typeof error.type === "string") {
+      return methodError(error.type, error.description, error.properties);
+    }
+    return { ok: true, name, result };
+  }
+  if (name === "EmailSubmission/queryChanges") {
+    const account = accountError(args.accountId, user.id);
+    if (account) return account;
+    return methodError("cannotCalculateChanges");
+  }
+  if (name === "Identity/set") {
+    const account = accountError(args.accountId, user.id);
+    if (account) return account;
+    return identitySet(db, allowed, user.id, args);
   }
 
   if (/\/(changes|queryChanges)$/.test(name)) {

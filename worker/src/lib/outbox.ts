@@ -75,6 +75,8 @@ export interface OutboxSendParams {
   /** Formatted "Name <addr>" for the wire. */
   from: string;
   to: string;
+  /** Display name for `to` (transactional sends); the row stores the bare address. */
+  toName?: string | null;
   cc?: CcRecipient[];
   subject: string;
   html?: string;
@@ -122,6 +124,7 @@ export async function sendViaOutbox(
     fromAddress: rawFromAddress,
     from,
     to,
+    toName,
     cc,
     subject,
     html,
@@ -181,6 +184,7 @@ export async function sendViaOutbox(
       sender,
       from,
       to,
+      toName,
       cc,
       subject,
       html,

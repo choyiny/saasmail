@@ -53,6 +53,12 @@ export interface UnifiedMessage {
   attachmentCount?: number;
   attachments?: AttachmentRow[];
   state?: UnifiedMessageState;
+  /**
+   * Mail sent through JMAP EmailSubmission: its content row and that content's
+   * thread key. Only set when the query asked for `withJmap`, so the web API's
+   * `...message` spread never carries it.
+   */
+  jmap?: { contentId: string; threadKey: string };
 }
 
 export function serializeMessageRef(ref: MessageRef): string {

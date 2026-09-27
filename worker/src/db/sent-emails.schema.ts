@@ -31,6 +31,11 @@ export const sentEmails = sqliteTable(
     campaignId: text("campaign_id"),
     sequenceId: text("sequence_id"),
     sequenceEnrollmentId: text("sequence_enrollment_id"),
+    /**
+     * `jmap_message_content.id` for mail sent through JMAP EmailSubmission.
+     * JMAP projects the Email's immutable properties from that content row.
+     */
+    jmapContentId: text("jmap_content_id"),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
@@ -39,5 +44,6 @@ export const sentEmails = sqliteTable(
     index("sent_emails_conversation_idx").on(table.conversationId),
     index("sent_emails_from_sent_idx").on(table.fromAddress, table.sentAt),
     index("sent_emails_sequence_sent_idx").on(table.sequenceId, table.sentAt),
+    index("sent_emails_jmap_content_idx").on(table.jmapContentId),
   ],
 );

@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Display names with commas are quoted.** Outbound Cc names such as `Doe, Jane` are now sent as `"Doe, Jane" <…>` instead of being split into two addresses by the provider. The Cloudflare provider now uses the bare address as the envelope recipient when To carries a display name.
+
 - **Sent attachments survive a crash mid-send:** compose and reply now store attachments before the provider call (database record first, then R2), so an outbox retry after a Worker crash always resends them. Suppressed or failed-to-start sends clean up both the records and the R2 objects, and the hourly cron removes attachments left by a send that never reached the outbox.
 
 ### Upgrading to the mailbox/agent/JMAP release
 
-- Apply D1 migrations `0037` through `0056` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. JMAP blob upload additionally needs the `jmap_blobs` table from `0054`, and JMAP drafts the `jmap_message_content` and `jmap_drafts` tables from `0055` (with `0056`'s change triggers).
+- Apply D1 migrations `0037` through `0058` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. JMAP blob upload additionally needs the `jmap_blobs` table from `0054`, and JMAP drafts the `jmap_message_content` and `jmap_drafts` tables from `0055` (with `0056`'s change triggers). JMAP sending needs the `jmap_submissions` table, the `sent_emails.jmap_content_id` column and the `jmap_drafts` submission-lock columns from `0057` (with `0058`'s change triggers).
 - Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
 - Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
 
@@ -33,11 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **JMAP sending (EmailSubmission).** JMAP clients can send a saved draft with `EmailSubmission/set` and read submissions with `EmailSubmission/get`, `/query` and `/changes`. Sends are transactional 1:1 messages, like the web composer: one To plus up to 50 Cc, no Bcc. The message keeps the draft's names, subject, `Message-ID`, `In-Reply-To`, `References` and inline attachments, and the Sent copy shows the same immutable properties. `Identity/set` is read-only. `onSuccessUpdateEmail`/`onSuccessDestroyEmail` aren't supported yet. Requires the `urn:ietf:params:jmap:submission` capability.
+
 - **JMAP drafts.** JMAP clients can create drafts from any inbox they can send from (with attachments uploaded through `/jmap/upload`), and read, query, thread, flag, trash and destroy them. Each draft has a downloadable raw RFC 5322 message (`X…` blob) and body-part blobs (`P…`), which received and sent mail now also have for their text and HTML bodies. Drafts are private to their author. Apply the new D1 migrations before deploying.
 
 - **JMAP blob upload.** `POST /jmap/upload/{accountId}/` stores a file for later use in drafts (RFC 8620 §6.1), capped at the configured provider's attachment limit (now advertised in the JMAP Session), readable only by its uploader, and deleted after 24 hours. Downloads now honour the `name` and `type` URL variables, and `createdIds` / `#creationId` references work across method calls. Apply migration `0054_jmap_blobs` (the upgrade line's migration range moves up by one).
 
-- **JMAP change tracking and safe Email state writes.** JMAP now keeps a 30-day permission-scoped change log, supports Email/changes and Mailbox/changes, and accepts update-only Email/set calls for seen/flagged state and mailbox membership. Snooze remains app-only and invisible to JMAP; Email creation/destruction and EmailSubmission remain unsupported.
+- **JMAP change tracking and safe Email state writes.** JMAP now keeps a 30-day permission-scoped change log, supports Email/changes and Mailbox/changes, and accepts update-only Email/set calls for seen/flagged state and mailbox membership. Snooze remains app-only and invisible to JMAP; Email creation/destruction remain unsupported.
 
 - **Read-only JMAP mail access.** Authenticated clients can discover a JMAP Session and read permission-scoped mailboxes, messages, threads, identities, and attachment blobs through a bounded RFC 8620/8621 subset. The adapter reuses the unified message/state services, supports result references and the documented Email/query filters, and deliberately exposes no write or change-calculation methods.
 

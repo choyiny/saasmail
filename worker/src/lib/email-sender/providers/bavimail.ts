@@ -4,7 +4,7 @@ import type {
   SendEmailParams,
   SendEmailResult,
 } from "../types";
-import { parseFrom } from "../shared";
+import { parseFrom, textAsHtml } from "../shared";
 import { transientFromStatus } from "../classify";
 
 async function extractBavimailError(res: Response): Promise<string> {
@@ -50,7 +50,9 @@ export class BavimailSender implements EmailSender {
         alias_id: this.aliasId,
         to_email: toAddress,
         subject: params.subject,
-        body: params.html,
+        // Its API has only an HTML `body`, so a text-only message still needs
+        // something to send.
+        body: params.html || textAsHtml(params.text),
       };
       if (ccAddresses.length > 0) {
         payload.cc_emails = ccAddresses;
@@ -64,9 +66,10 @@ export class BavimailSender implements EmailSender {
         payload.reply_to = replyTo;
       }
       if (attachmentIds.length > 0) {
-        payload.attachments = attachmentIds.map((id) => ({
+        payload.attachments = attachmentIds.map((id, index) => ({
           attachment_id: id,
-          is_inline: false,
+          // Bavimail has no Content-ID field; inline parts are flagged only.
+          is_inline: params.attachments?.[index]?.disposition === "inline",
         }));
       }
 
@@ -149,6 +152,12 @@ export class BavimailSender implements EmailSender {
   }
 
   maxAttachmentBytes(): number {
+    return 25 * 1024 * 1024;
+  }
+
+  maxMessageBytes(): number {
+    // Bavimail documents no whole-message cap; use the attachment ceiling
+    // this sender already assumes.
     return 25 * 1024 * 1024;
   }
 }

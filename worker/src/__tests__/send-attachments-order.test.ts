@@ -51,6 +51,7 @@ function probingSender(result: SendEmailResult) {
       return result;
     },
     maxAttachmentBytes: () => 25 * 1024 * 1024,
+    maxMessageBytes: () => 25 * 1024 * 1024,
   };
   return { sender, seen, calls };
 }
@@ -154,6 +155,7 @@ describe("sent attachments are staged before the provider call", () => {
         throw new Error("provider exploded");
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
     await expect(
       sendEmail({

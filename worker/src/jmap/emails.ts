@@ -16,7 +16,12 @@ import {
   type UnifiedMessage,
 } from "../lib/messages/types";
 import { customMailboxId, systemMailboxId } from "./ids";
-import { selectEmailProperties } from "./content";
+import {
+  contentEmailObject,
+  selectEmailProperties,
+  type JmapContentRow,
+} from "./content";
+import { loadContentRows } from "./sent-content";
 import {
   countDrafts,
   draftArmSql,
@@ -91,9 +96,17 @@ function attachmentPart(row: AttachmentRow): Record<string, unknown> {
   };
 }
 
-/** Internal thread key: what queryMessages' `threadKeys` filters on. */
+/**
+ * Internal thread key: what queryMessages' `threadKeys` filters on. JMAP-sent
+ * mail keeps its content's key (RFC 8621: threadId is immutable), which can
+ * differ from the conversation key its Sent row would get naturally.
+ */
 export function jmapThreadKey(message: UnifiedMessage): string {
-  return message.state?.conversationKey ?? serializeMessageRef(message.ref);
+  return (
+    message.jmap?.threadKey ??
+    message.state?.conversationKey ??
+    serializeMessageRef(message.ref)
+  );
 }
 
 export function jmapThreadId(message: UnifiedMessage): string {
@@ -275,8 +288,24 @@ function messageIds(value: string | null): string[] | null {
 export function toJmapEmail(
   message: UnifiedMessage,
   args: Record<string, unknown>,
+  content?: JmapContentRow,
 ): Record<string, unknown> | null {
   const id = publicEmailId(message.ref);
+  if (content) {
+    // JMAP-originated Sent mail: immutable properties come from the content
+    // (spec §3.3); receivedAt is the send time; mailboxes and keywords are the
+    // Sent row's own state.
+    return contentEmailObject(
+      content,
+      {
+        id,
+        mailboxIds: jmapMailboxIds(message),
+        keywords: jmapKeywords(message),
+        receivedAt: message.occurredAt,
+      },
+      args,
+    );
+  }
   const attachments = message.attachments ?? [];
   const textBody = message.bodyText
     ? [bodyPart(id, "text", message.bodyText, "text/plain")]
@@ -334,6 +363,7 @@ async function queryEmailObjects(
     viewer: { userId },
     withState: true,
     withAttachments: true,
+    withJmap: true,
   });
   return page.messages;
 }
@@ -397,6 +427,24 @@ export async function emailGet(
   let requestedIds: string[];
   const builders = new Map<string, () => Record<string, unknown> | null>();
 
+  // JMAP-sent mail projects from its content row; ordinary mail has none.
+  const contentFor = async (messages: UnifiedMessage[]) =>
+    loadContentRows(
+      db,
+      messages.flatMap((message) =>
+        message.jmap ? [message.jmap.contentId] : [],
+      ),
+    );
+  const project =
+    (contents: Map<string, JmapContentRow>) =>
+    (message: UnifiedMessage) =>
+    (): Record<string, unknown> | null =>
+      toJmapEmail(
+        message,
+        args,
+        message.jmap ? contents.get(message.jmap.contentId) : undefined,
+      );
+
   if (ids === undefined || ids === null) {
     const drafts = await listDrafts(
       db,
@@ -420,10 +468,11 @@ export async function emailGet(
             limit: MAX_OBJECTS_IN_GET,
           });
     requestedIds = [];
+    const contents = await contentFor(messages);
     for (const message of messages) {
       const id = publicEmailId(message.ref);
       requestedIds.push(id);
-      builders.set(id, () => toJmapEmail(message, args));
+      builders.set(id, project(contents)(message));
     }
     for (const item of drafts) {
       const id = publicDraftEmailId(item.draft.id);
@@ -438,8 +487,9 @@ export async function emailGet(
       userId,
       requestedIds,
     );
+    const contents = await contentFor([...messages.values()]);
     for (const [id, message] of messages) {
-      builders.set(id, () => toJmapEmail(message, args));
+      builders.set(id, project(contents)(message));
     }
     const draftIds: string[] = [];
     for (const id of requestedIds) {

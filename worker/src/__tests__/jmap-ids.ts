@@ -10,6 +10,7 @@ import {
   publicEmailId,
   publicIdentityId,
   publicRawBlobId,
+  publicSubmissionId,
   publicSystemMailboxId,
   publicThreadId,
   publicUploadBlobId,
@@ -28,6 +29,7 @@ export const att = (attachmentId: string) =>
 export const upl = (uploadId: string) => publicUploadBlobId(uploadId);
 export const drf = (id: string) => publicDraftEmailId(id);
 export const raw = (contentId: string) => publicRawBlobId(contentId);
+export const sub = (id: string) => publicSubmissionId(id);
 
 const ID_KEYS = new Set([
   "id",
@@ -35,7 +37,11 @@ const ID_KEYS = new Set([
   "threadId",
   "blobId",
   "parentId",
+  "emailId",
   "emailIds",
+  "identityId",
+  "identityIds",
+  "threadIds",
   "ids",
   "notFound",
   "created",
