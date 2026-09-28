@@ -109,6 +109,11 @@ export interface OutboxSendResult {
   outboxId: string;
 }
 
+/** One key per outbox row: its first attempt and every retry share it. */
+export function outboxIdempotencyKey(outboxId: string): string {
+  return `saasmail-outbox-${outboxId}`;
+}
+
 /**
  * Write-ahead send: insert an outbox row, attempt the provider call inline,
  * then resolve the row — deleted on success/suppression, kept `pending` for
@@ -207,6 +212,7 @@ export async function sendViaOutbox(
       attachments,
       transactional,
       unsubscribeContext,
+      idempotencyKey: outboxIdempotencyKey(outboxId),
     });
   } catch (err) {
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
@@ -406,6 +412,7 @@ export async function attemptOutboxRow(
         : undefined,
     attachments: storedAttachments.length > 0 ? storedAttachments : undefined,
     transactional: row.transactional === 1,
+    idempotencyKey: outboxIdempotencyKey(row.id),
   });
 
   const after = Math.floor(Date.now() / 1000);

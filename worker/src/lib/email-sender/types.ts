@@ -32,6 +32,12 @@ export interface SendEmailParams {
   text?: string;
   headers?: Record<string, string>;
   attachments?: SendEmailAttachment[];
+  /**
+   * The same on the first attempt and every retry of one message, so a
+   * provider that supports it (Resend, for 24 hours) sends it at most once even
+   * if an earlier attempt succeeded without saasmail learning so. Others ignore it.
+   */
+  idempotencyKey?: string;
 }
 
 export interface SendEmailError {

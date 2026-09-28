@@ -205,7 +205,7 @@ If a retried message finally fails, its Sent Email stays visible (the submission
 
 An hourly recovery pass finishes submissions that a Worker crash interrupted: it completes the ones the provider accepted, releases the ones that never reached the provider, and applies any pending on-success update exactly once.
 
-One window stays open: if the provider accepted a message and the Worker died before recording it, the outbox still sees the attempt as pending and sends it again, so the recipient may get a duplicate. The providers saasmail supports offer no idempotency key to close this.
+One window stays open: if the provider accepted a message and the Worker died before recording it, the outbox still sees the attempt as pending and sends it again. On **Resend** that retry carries the same idempotency key (one per outbox row), so Resend returns its original answer instead of sending twice, for 24 hours. Cloudflare, Postmark and Bavimail offer no such key, so there the recipient may get a duplicate.
 
 ## Pointing a client at saasmail
 

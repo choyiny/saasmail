@@ -40,6 +40,11 @@ export interface SendInput {
   attachments?: SendEmailParams["attachments"];
   transactional?: boolean;
   /**
+   * Stable across attempts of this send (the outbox row). A marketing send
+   * keys each recipient's copy as `<key>:<n>`.
+   */
+  idempotencyKey?: string;
+  /**
    * An unsubscribe URL the caller has already minted.
    *
    * Campaign sends need a v2 (per-list) token, but this helper otherwise mints
@@ -146,6 +151,7 @@ export async function sendWithSuppressionCheck(
     attachments,
     transactional,
     unsubscribeContext,
+    idempotencyKey,
   } = input;
   if (
     transactional !== true &&
@@ -212,6 +218,7 @@ export async function sendWithSuppressionCheck(
       ...(text !== undefined ? { text } : {}),
       ...(headers ? { headers } : {}),
       ...(attachments ? { attachments } : {}),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
 
     renderedHtml = html;
@@ -236,7 +243,7 @@ export async function sendWithSuppressionCheck(
       : null;
 
     const results = await Promise.all(
-      allDelivered.map(async (recipient) => {
+      allDelivered.map(async (recipient, index) => {
         const url =
           providedUnsubUrl ??
           buildUnsubscribeUrl(
@@ -280,6 +287,10 @@ export async function sendWithSuppressionCheck(
           ...(recipientText !== undefined ? { text: recipientText } : {}),
           headers: recipientHeaders,
           ...(attachments ? { attachments } : {}),
+          // The recipient order is stable across retries (the stored Cc list).
+          ...(idempotencyKey
+            ? { idempotencyKey: `${idempotencyKey}:${index}` }
+            : {}),
         });
 
         return { result, recipientHtml, recipientText };

@@ -1083,3 +1083,58 @@ describe("several To and Bcc", () => {
     expect(result.error?.transient).toBe(false);
   });
 });
+
+describe("Resend idempotency keys", () => {
+  function resend(response: unknown = { data: { id: "rs" }, error: null }) {
+    const sender = new ResendSender("re_test");
+    const send = vi.fn().mockResolvedValue(response);
+    (
+      sender as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+    return { sender, send };
+  }
+  const params = {
+    from: "a@b.com",
+    to: "c@d.com",
+    subject: "s",
+    html: "<p>h</p>",
+  };
+
+  it("passes the send's idempotency key to Resend", async () => {
+    const { sender, send } = resend();
+    await sender.send({ ...params, idempotencyKey: "saasmail-outbox-ob1" });
+    expect(send.mock.calls[0][1]).toEqual({
+      idempotencyKey: "saasmail-outbox-ob1",
+    });
+  });
+
+  it("sends no options without a key", async () => {
+    const { sender, send } = resend();
+    await sender.send(params);
+    expect(send.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("retries a concurrent request with the same key, and never resends one Resend saw with another payload", async () => {
+    const concurrent = await resend({
+      data: null,
+      error: {
+        name: "concurrent_idempotent_requests",
+        message:
+          "Another request with the same idempotency key is in progress. It is safe to retry this request later.",
+        statusCode: 409,
+      },
+    }).sender.send({ ...params, idempotencyKey: "k" });
+    expect(concurrent.error?.transient).toBe(true);
+
+    const reused = await resend({
+      data: null,
+      error: {
+        name: "invalid_idempotent_request",
+        message:
+          "This idempotency key has already been used on a request that had a different payload.",
+        statusCode: 409,
+      },
+    }).sender.send({ ...params, idempotencyKey: "k" });
+    expect(reused.error?.transient).toBe(false);
+  });
+});

@@ -25,6 +25,10 @@ At runtime: **Bavimail** (when both env vars are set) > **Postmark** (when `POST
 Setting more than one provider's variables is not an error — the highest one in
 that order wins, and the others are ignored.
 
+## Retries and duplicates
+
+Every outbound message goes through the outbox, which retries temporary failures hourly. On **Resend**, each message carries an idempotency key that stays the same across its retries, so a retry after an attempt that was accepted without saasmail learning so (a Worker crash) doesn't send the message twice; Resend keeps keys for 24 hours. Cloudflare, Postmark and Bavimail have no idempotency key, so that rare crash window can still produce a duplicate there.
+
 ## Several To and Bcc
 
 JMAP submissions can have several To addresses and Bcc recipients. Cloudflare, Resend and Postmark deliver them; Bcc recipients are in the envelope only, never in the message's headers. Bavimail's API takes one To address and a Cc list, so on Bavimail a JMAP submission with a second To or any Bcc is refused rather than sent to fewer people.

@@ -439,3 +439,47 @@ describe("bookkeeping ownership", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("idempotency keys", () => {
+  it("the first attempt and every retry of an outbox row send the same key", async () => {
+    const first = fakeSender(TRANSIENT);
+    const result = await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender: first,
+      sentEmailId: "se-idem-1",
+      fromAddress: "me@saasmail.test",
+      from: "Me <me@saasmail.test>",
+      to: "to@example.com",
+      subject: "Hi",
+      html: "<p>Hi</p>",
+      transactional: true,
+    });
+    await getDb()
+      .update(outboxEmails)
+      .set({ nextRetryAt: 0 })
+      .where(eq(outboxEmails.id, result.outboxId));
+    const retry = fakeSender(OK);
+    await attemptOutboxRow(getDb(), env, retry, result.outboxId);
+
+    const key = first.calls[0].idempotencyKey;
+    expect(key).toBe(`saasmail-outbox-${result.outboxId}`);
+    expect(retry.calls[0].idempotencyKey).toBe(key);
+  });
+
+  it("a marketing send keys each recipient's copy separately", async () => {
+    const sender = fakeSender(OK);
+    const result = await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender,
+      sentEmailId: "se-idem-2",
+      ...baseParams,
+      cc: [{ email: "cc@example.com", name: null }],
+    });
+    expect(sender.calls.map((call) => call.idempotencyKey)).toEqual([
+      `saasmail-outbox-${result.outboxId}:0`,
+      `saasmail-outbox-${result.outboxId}:1`,
+    ]);
+  });
+});
