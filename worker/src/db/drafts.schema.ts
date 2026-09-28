@@ -43,8 +43,8 @@ export const drafts = sqliteTable(
     /** 1 while the working copy has edits not yet published to JMAP. */
     dirty: integer("dirty").notNull().default(1),
     /**
-     * `gone` once its JMAP draft was sent or deleted elsewhere: the working copy
-     * then stops publishing and the composer says so. Null otherwise.
+     * Deprecated (no longer read or written): "gone" is now read live from the
+     * linked JMAP draft. Rows from before may still hold `gone`.
      */
     jmapState: text("jmap_state", { enum: ["gone"] }),
     createdAt: integer("created_at").notNull(),

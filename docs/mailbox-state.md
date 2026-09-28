@@ -189,7 +189,11 @@ mailbox draft store. `GET /api/drafts/list` returns only the authenticated
 user's drafts newest-first with summary fields, supports `limit` (default 50,
 maximum 100) plus `offset`, and accepts an optional `inbox` filter. Inbox
 filters are trimmed and lowercased and include drafts whose `from_address` is
-null so an unassigned draft is still reachable.
+null so an unassigned draft is still reachable. With `includeMailClient=1` (the
+web's Drafts folder) the first page also lists the user's drafts made in a JMAP
+mail client, as `jmap:<id>` items: read-only, shown with
+`GET /api/drafts/jmap-preview` and deletable with `DELETE /api/drafts`; those
+aren't paged.
 
 The Mailbox **Drafts** folder uses three context namespaces:
 

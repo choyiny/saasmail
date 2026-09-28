@@ -111,8 +111,11 @@ A draft written in the saasmail web composer also appears in JMAP, as an ordinar
 
 - A draft is published once it has a From that is one of your identities and a complete To address; until then it stays web-only.
 - A web reply draft carries `inReplyTo` and `references` of the message it answers, so it joins that thread.
-- Deleting the draft in the web deletes it in JMAP. If a client destroys or sends the published draft, the web draft stops publishing.
-- Attachments added in the web composer aren't part of the published draft yet, and JMAP drafts don't appear in the web UI yet.
+- Saving the same values again (opening and closing a draft without editing it) makes no revision.
+- Deleting the draft in the web deletes it in JMAP. While a client has the published draft destroyed, being sent or in Trash, the web draft doesn't publish (and never pulls a trashed draft back into Drafts); moved back to Drafts, it publishes again.
+- Attachments added in the web composer aren't part of the published draft.
+
+Drafts made in a JMAP client are listed in the web UI's Drafts folder, marked "Mail client". The web shows them read-only (From, To, Cc, Bcc, subject, body and attachment names) and can delete them; editing and sending them stays in the mail client. A draft in Trash isn't listed.
 
 ## Sending
 
@@ -252,7 +255,7 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 - Delayed send beyond 24 hours, changing a scheduled send's time, and scheduling from the web composer. Recalling a message that was sent.
 - A canceled delayed send whose Sent copy is a separate `S…` Email (the submission didn't file the draft into Sent) can't be destroyed over JMAP; move it to Trash.
 - Raw-message `blobId` for sent mail that wasn't created through JMAP, and for mail received before the raw message was kept (it stays `null`).
-- JMAP drafts don't appear in the web UI, and a web draft's attachments aren't published to JMAP ([Drafts written in the web UI](#drafts-written-in-the-web-ui)).
+- Drafts made in a JMAP client are read-only in the web UI (edit and send them in the client), and a web draft's attachments aren't published to JMAP ([Drafts written in the web UI](#drafts-written-in-the-web-ui)).
 - A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
 - Mailbox thread counts group JMAP-sent mail by its saasmail conversation, not by its JMAP `threadId`.
 - EventSource push, search snippets, mailbox mutation, `Email/import` and `Email/copy`.

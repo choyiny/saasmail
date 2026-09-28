@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   deleteMailbox: vi.fn(),
   fetchDraft: vi.fn(),
   fetchDraftList: vi.fn(),
+  fetchJmapDraftPreview: vi.fn(),
   cancelScheduledByMessage: vi.fn(),
   fetchSuggestedReply: vi.fn(),
   fetchInboxAssignees: vi.fn(),
@@ -241,6 +242,7 @@ describe("MailPage", () => {
     await waitFor(() =>
       expect(api.fetchDraftList).toHaveBeenCalledWith({
         inbox: "support@e2e.test",
+        includeMailClient: true,
       }),
     );
     expect(await screen.findByText("To: alice@example.test")).toBeTruthy();
@@ -256,6 +258,55 @@ describe("MailPage", () => {
       from: "support@e2e.test",
     });
     expect(onCompose.mock.calls.at(-1)?.[1]).toMatch(/^draft:[A-Za-z0-9_-]+$/);
+  });
+
+  it("shows a mail-client draft read-only, never in the composer", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "jmap:abc",
+          contextKey: "jmap:abc",
+          fromAddress: "support@e2e.test",
+          toAddress: "alice@example.test",
+          subject: "From my phone",
+          replyToEmailId: null,
+          updatedAt: 1_800_000_000,
+        },
+      ],
+    });
+    api.fetchJmapDraftPreview.mockResolvedValue({
+      contextKey: "jmap:abc",
+      from: { email: "support@e2e.test", name: "Support" },
+      to: [{ email: "alice@example.test", name: null }],
+      cc: [],
+      bcc: [{ email: "boss@example.test", name: null }],
+      subject: "From my phone",
+      html: '<p>Hello</p><script>window.__pwned = true</script><img src=x onerror="window.__pwned = true">',
+      text: "Hello",
+      attachments: [{ name: "scan.pdf", type: "application/pdf", size: 9 }],
+      updatedAt: 1_800_000_000,
+    });
+    api.deleteDraft.mockResolvedValue(undefined);
+
+    renderMail("/mail/support%40e2e.test/drafts");
+    expect(await screen.findByTestId("mail-draft-from-client")).toBeTruthy();
+    fireEvent.click(screen.getByText("From my phone"));
+    const dialog = await screen.findByTestId("jmap-draft-preview");
+    expect(onCompose).not.toHaveBeenCalled();
+    expect(api.fetchJmapDraftPreview).toHaveBeenCalledWith("jmap:abc");
+    await waitFor(() => expect(within(dialog).getByText("Hello")).toBeTruthy());
+    expect(within(dialog).getByText("boss@example.test")).toBeTruthy();
+    expect(within(dialog).getByText("scan.pdf")).toBeTruthy();
+    const body = within(dialog).getByTestId("jmap-draft-preview-body");
+    expect(body.innerHTML).not.toContain("<script");
+    expect(body.innerHTML).not.toContain("onerror");
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(within(dialog).getByTestId("jmap-draft-preview-delete"));
+    await waitFor(() =>
+      expect(api.deleteDraft).toHaveBeenCalledWith("jmap:abc"),
+    );
+    confirm.mockRestore();
   });
 
   it("opens reply drafts on the received message and restores the reply composer", async () => {

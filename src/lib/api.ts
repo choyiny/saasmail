@@ -930,9 +930,12 @@ export async function fetchDraftList(params?: {
   inbox?: string;
   limit?: number;
   offset?: number;
+  /** Also list drafts made in a mail client (read-only), on the first page. */
+  includeMailClient?: boolean;
 }): Promise<{ drafts: DraftListItem[] }> {
   const qs = new URLSearchParams();
   if (params?.inbox) qs.set("inbox", params.inbox);
+  if (params?.includeMailClient) qs.set("includeMailClient", "1");
   if (params?.limit !== undefined) qs.set("limit", String(params.limit));
   if (params?.offset !== undefined) qs.set("offset", String(params.offset));
   const query = qs.toString();
@@ -959,6 +962,29 @@ export async function deleteDraft(contextKey: string): Promise<void> {
   await apiFetch(`/api/drafts?contextKey=${encodeURIComponent(contextKey)}`, {
     method: "DELETE",
   });
+}
+
+/** A draft written in a mail client, as the web shows it (read-only). */
+export interface JmapDraftPreview {
+  contextKey: string;
+  from: { email: string; name: string | null } | null;
+  to: { email: string; name: string | null }[];
+  cc: { email: string; name: string | null }[];
+  bcc: { email: string; name: string | null }[];
+  subject: string;
+  html: string | null;
+  text: string | null;
+  attachments: { name: string | null; type: string; size: number }[];
+  updatedAt: number;
+}
+
+export async function fetchJmapDraftPreview(
+  contextKey: string,
+): Promise<JmapDraftPreview> {
+  const res = await apiFetch<{ draft: JmapDraftPreview }>(
+    `/api/drafts/jmap-preview?contextKey=${encodeURIComponent(contextKey)}`,
+  );
+  return res.draft;
 }
 
 export type PublishDraftStatus =

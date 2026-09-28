@@ -77,6 +77,15 @@ export default function MailDraftList({
                 <p className="mt-1 truncate text-sm text-text-primary">
                   {draft.subject || "(no subject)"}
                 </p>
+                {draft.contextKey.startsWith("jmap:") && (
+                  <span
+                    data-testid="mail-draft-from-client"
+                    title="Written in a mail client: edit or send it there"
+                    className="mt-1 inline-block rounded bg-bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-text-secondary"
+                  >
+                    Mail client
+                  </span>
+                )}
               </button>
               <button
                 type="button"
