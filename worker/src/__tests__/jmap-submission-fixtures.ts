@@ -92,6 +92,7 @@ export async function seedAccount() {
     authorId: author.userId,
     authorApiKey: author.apiKey,
     memberId: member.userId,
+    memberApiKey: member.apiKey,
   };
 }
 

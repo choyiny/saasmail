@@ -193,13 +193,19 @@ describe("JMAP delayed send (RFC 4865 FUTURERELEASE)", () => {
   let authorId: string;
   let authorApiKey: string;
   let memberId: string;
+  let memberKey: string;
 
   beforeAll(async () => {
     await applyMigrations();
   });
   beforeEach(async () => {
     await cleanDb();
-    ({ authorId, authorApiKey, memberId } = await seedAccount());
+    ({
+      authorId,
+      authorApiKey,
+      memberId,
+      memberApiKey: memberKey,
+    } = await seedAccount());
   });
 
   it("schedules without sending and files the same Email into Sent at once", async () => {
@@ -500,6 +506,48 @@ describe("JMAP delayed send (RFC 4865 FUTURERELEASE)", () => {
     expect((await submissionRow(res[0][1].created.s1.id)).restoreToDrafts).toBe(
       0,
     );
+  });
+
+  it("the mail UI's cancel before trashing: cancels only, and only the author's send", async () => {
+    const draftId = await createDraft(authorId);
+    const res = await schedule(authorId, draftId);
+    const row = await submissionRow(res[0][1].created.s1.id);
+    const path = `/api/outbox/scheduled/by-message/${row.sentEmailId}/cancel`;
+
+    // The member can see the inbox but didn't schedule this send.
+    const foreign = await authFetch(path, {
+      apiKey: memberKey,
+      method: "POST",
+    });
+    expect(foreign.status).toBe(404);
+    expect((await rowById(row.id)).undoStatus).toBe("pending");
+
+    const canceled = await authFetch(path, {
+      apiKey: authorApiKey,
+      method: "POST",
+    });
+    expect(canceled.status).toBe(200);
+    expect((await rowById(row.id)).undoStatus).toBe("canceled");
+    // Cancel only: the Email stays in Sent (the UI trashes it next).
+    expect((await emailGet(authorId, draftId)).list[0].mailboxIds).toEqual({
+      [SENT()]: true,
+    });
+    expect((await rowById(row.id)).restoreToDrafts).toBe(0);
+  });
+
+  it("the mail UI's cancel is a 409 once the send started", async () => {
+    const draftId = await createDraft(authorId);
+    const res = await schedule(authorId, draftId);
+    const row = await submissionRow(res[0][1].created.s1.id);
+    await releaseScheduledSubmission(env, row.id, {
+      sender: recordingSender().sender,
+      now: row.sendAt,
+    });
+    const response = await authFetch(
+      `/api/outbox/scheduled/by-message/${row.sentEmailId}/cancel`,
+      { apiKey: authorApiKey, method: "POST" },
+    );
+    expect(response.status).toBe(409);
   });
 
   it("web Cancel after the send started is a 409", async () => {

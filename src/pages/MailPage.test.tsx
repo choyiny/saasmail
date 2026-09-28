@@ -16,6 +16,7 @@ const api = vi.hoisted(() => ({
   deleteMailbox: vi.fn(),
   fetchDraft: vi.fn(),
   fetchDraftList: vi.fn(),
+  cancelScheduledByMessage: vi.fn(),
   fetchSuggestedReply: vi.fn(),
   fetchInboxAssignees: vi.fn(),
   fetchMailboxes: vi.fn(),
@@ -397,6 +398,100 @@ describe("MailPage", () => {
         archived: true,
       }),
     );
+  });
+
+  describe("trashing a scheduled message", () => {
+    function scheduled() {
+      return {
+        ...message("s1", "Later", { direction: "outbound" }),
+        delivery: { status: "scheduled" },
+      };
+    }
+
+    it("asks, cancels first, then trashes", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [scheduled()],
+        nextCursor: null,
+      });
+      api.cancelScheduledByMessage.mockResolvedValue("canceled");
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As1");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() =>
+        expect(api.setMessageState).toHaveBeenCalledWith({
+          refs: ["sent:s1"],
+          trashed: true,
+        }),
+      );
+      expect(confirm).toHaveBeenCalledWith(
+        expect.stringContaining("Cancel the scheduled send"),
+      );
+      expect(api.cancelScheduledByMessage).toHaveBeenCalledWith("s1");
+      expect(
+        api.cancelScheduledByMessage.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        api.setMessageState.mock.invocationCallOrder.at(-1) as number,
+      );
+      confirm.mockRestore();
+    });
+
+    it("does nothing when the user declines", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [scheduled()],
+        nextCursor: null,
+      });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As1");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() => expect(confirm).toHaveBeenCalled());
+      expect(api.cancelScheduledByMessage).not.toHaveBeenCalled();
+      expect(api.setMessageState).not.toHaveBeenCalledWith(
+        expect.objectContaining({ trashed: true }),
+      );
+      confirm.mockRestore();
+    });
+
+    it("doesn't trash or claim a cancel once the send has started", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [scheduled()],
+        nextCursor: null,
+      });
+      api.cancelScheduledByMessage.mockResolvedValue("cannotUnsend");
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As1");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() =>
+        expect(api.cancelScheduledByMessage).toHaveBeenCalledWith("s1"),
+      );
+      // Give a trash call the chance to happen; it must not.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(api.setMessageState).not.toHaveBeenCalledWith(
+        expect.objectContaining({ trashed: true }),
+      );
+      confirm.mockRestore();
+    });
+
+    it("trashes an ordinary sent message without asking", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [message("s2", "Sent", { direction: "outbound" })],
+        nextCursor: null,
+      });
+      const confirm = vi.spyOn(window, "confirm");
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As2");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() =>
+        expect(api.setMessageState).toHaveBeenCalledWith({
+          refs: ["sent:s2"],
+          trashed: true,
+        }),
+      );
+      expect(confirm).not.toHaveBeenCalled();
+      confirm.mockRestore();
+    });
   });
 
   it("hides archive and spam bulk actions when any selected message is sent", async () => {

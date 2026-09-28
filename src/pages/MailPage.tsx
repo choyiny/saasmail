@@ -26,7 +26,9 @@ import {
   fetchInboxAssignees,
   fetchMailboxes,
   fetchStats,
+  cancelScheduledByMessage,
   type DraftListItem,
+  type MailMessage,
   type InboxAssignee,
   type Mailbox,
   type Stats,
@@ -354,6 +356,60 @@ export default function MailPage() {
     if (await action()) setSelectedRefs(new Set());
   }
 
+  /**
+   * Trashing never cancels a scheduled send by itself (RFC 8621 keeps the two
+   * apart). Before trashing, offer to cancel any still-scheduled message:
+   * cancel first, then trash only what was canceled. Returns the messages to
+   * trash, or null when the user backed out.
+   */
+  async function prepareTrash(
+    messages: MailMessage[],
+  ): Promise<MailMessage[] | null> {
+    const scheduled = messages.filter(
+      (message) =>
+        message.ref.startsWith("sent:") &&
+        message.delivery?.status === "scheduled",
+    );
+    if (scheduled.length === 0) return messages;
+    const question =
+      scheduled.length === 1 && messages.length === 1
+        ? "This message is scheduled to be sent. Cancel the scheduled send and move it to Trash?"
+        : `${scheduled.length} of these messages are scheduled to be sent. Cancel their scheduled sends and move them to Trash?`;
+    if (!window.confirm(question)) return null;
+    const kept = new Set<string>();
+    for (const message of scheduled) {
+      let outcome: Awaited<ReturnType<typeof cancelScheduledByMessage>>;
+      try {
+        outcome = await cancelScheduledByMessage(
+          message.ref.slice("sent:".length),
+        );
+      } catch {
+        outcome = "cannotUnsend";
+      }
+      if (outcome === "canceled") continue;
+      kept.add(message.ref);
+      const subject = message.subject || "(no subject)";
+      showToast({
+        kind: "error",
+        message:
+          outcome === "notYours"
+            ? `Only its sender can cancel “${subject}”, so it wasn’t moved to Trash.`
+            : `“${subject}” has already started sending, so it wasn’t canceled or moved to Trash.`,
+      });
+    }
+    return messages.filter((message) => !kept.has(message.ref));
+  }
+
+  async function trashWithPrompt(message: MailMessage) {
+    // Restoring from Trash needs no prompt.
+    if (message.state.trashedAt !== null) {
+      await mail.toggleTrash(message);
+      return;
+    }
+    const toTrash = await prepareTrash([message]);
+    if (toTrash && toTrash.length > 0) await mail.toggleTrash(message);
+  }
+
   useEffect(() => {
     if (
       searchParams.get("reply") !== "1" ||
@@ -459,7 +515,7 @@ export default function MailPage() {
       if (event.key === "#") {
         if (!targetMessage) return;
         event.preventDefault();
-        void mail.toggleTrash(targetMessage);
+        void trashWithPrompt(targetMessage);
         return;
       }
       if (event.key === "r") {
@@ -627,9 +683,13 @@ export default function MailPage() {
                     void runBulk(() => mail.bulkSetSpam(selectedMessages, spam))
                   }
                   onTrash={() =>
-                    void runBulk(() =>
-                      mail.bulkSetTrashed(selectedMessages, trash),
-                    )
+                    void runBulk(async () => {
+                      const targets = trash
+                        ? await prepareTrash(selectedMessages)
+                        : selectedMessages;
+                      if (!targets || targets.length === 0) return false;
+                      return mail.bulkSetTrashed(targets, trash);
+                    })
                   }
                   onSnooze={(until) =>
                     void runBulk(() => mail.bulkSnooze(selectedMessages, until))
@@ -679,7 +739,7 @@ export default function MailPage() {
               onToggleStar={(message) => void mail.toggleStar(message)}
               onToggleArchive={(message) => void mail.toggleArchive(message)}
               onToggleSpam={(message) => void mail.toggleSpam(message)}
-              onToggleTrash={(message) => void mail.toggleTrash(message)}
+              onToggleTrash={(message) => void trashWithPrompt(message)}
               onSnooze={(message, until) =>
                 void mail.snoozeMessage(message, until)
               }

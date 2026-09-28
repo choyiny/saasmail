@@ -220,6 +220,68 @@ outboxRouter.openapi(cancelScheduledRoute, async (c) => {
   return c.json({ canceled: true as const, movedToDrafts, willMove }, 200);
 });
 
+// --- POST /api/outbox/scheduled/by-message/{sentEmailId}/cancel ---
+// The mail UI's "Cancel scheduled send and move to Trash?": cancel only (the
+// UI then trashes the message itself). Trashing never cancels on its own.
+const cancelByMessageRoute = createRoute({
+  method: "post",
+  path: "/scheduled/by-message/{sentEmailId}/cancel",
+  tags: ["Outbox"],
+  description:
+    "Cancel the delayed send of a scheduled Sent message (by its message id), without moving it back to Drafts. 409 once the send has started (cannotUnsend); 404 when the message isn't your scheduled send.",
+  request: { params: z.object({ sentEmailId: z.string() }) },
+  responses: {
+    200: {
+      description: "Canceled",
+      content: {
+        "application/json": {
+          schema: z.object({ canceled: z.literal(true) }),
+        },
+      },
+    },
+    404: { description: "Not your scheduled send" },
+    409: { description: "The message is already being sent or was sent" },
+  },
+});
+
+outboxRouter.openapi(cancelByMessageRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const user = c.get("user");
+  const { sentEmailId } = c.req.valid("param");
+  const [row] = await db
+    .select({
+      id: jmapSubmissions.id,
+      identityEmail: jmapSubmissions.identityEmail,
+    })
+    .from(jmapSubmissions)
+    .where(
+      and(
+        eq(jmapSubmissions.sentEmailId, sentEmailId),
+        eq(jmapSubmissions.userId, user.id),
+      ),
+    )
+    .limit(1);
+  if (!row || !isInboxAllowed(allowed, row.identityEmail)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const outcome = await cancelScheduledSubmission(c.env, {
+    submissionId: row.id,
+    userId: user.id,
+    restoreToDrafts: false,
+  });
+  if (outcome === "canceled" || outcome === "alreadyCanceled") {
+    return c.json({ canceled: true as const }, 200);
+  }
+  if (outcome === "cannotUnsend") {
+    return c.json(
+      { error: "The message is already being sent or was sent" },
+      409,
+    );
+  }
+  return c.json({ error: "Not found" }, 404);
+});
+
 // --- GET /api/outbox ---
 const listRoute = createRoute({
   method: "get",

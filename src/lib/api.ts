@@ -1624,6 +1624,24 @@ export async function fetchScheduledSends(): Promise<{
  * Cancel a delayed send, then move its message back to Drafts. Rejects (409)
  * once the send has started.
  */
+/**
+ * Cancel a scheduled Sent message's delayed send without moving it back to
+ * Drafts (the mail UI trashes it itself). `cannotUnsend` once the send has
+ * started; `notYours` when it isn't the caller's scheduled send.
+ */
+export async function cancelScheduledByMessage(
+  sentEmailId: string,
+): Promise<"canceled" | "cannotUnsend" | "notYours"> {
+  const res = await fetch(
+    `/api/outbox/scheduled/by-message/${encodeURIComponent(sentEmailId)}/cancel`,
+    { method: "POST", credentials: "include" },
+  );
+  if (res.ok) return "canceled";
+  if (res.status === 409) return "cannotUnsend";
+  if (res.status === 404) return "notYours";
+  throw new Error(`API error: ${res.status}`);
+}
+
 export async function cancelScheduledSend(
   id: string,
 ): Promise<{ canceled: true; movedToDrafts: boolean; willMove: boolean }> {
