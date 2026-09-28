@@ -7,6 +7,7 @@ import { people } from "../db/people.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { computeConversationId, externalsOnly } from "../lib/conversation-id";
 import { inboxScopeSql, type AllowedInboxes } from "../lib/inbox-permissions";
+import { parseJmapDate } from "./dates";
 import { readBlobBytes, resolveReadableBlob, type ResolvedBlob } from "./blobs";
 import {
   contentLeaves,
@@ -184,9 +185,6 @@ const EMAIL_PATTERN = /^[^\s@<>()[\]\\,;:"]+@[^\s@<>()[\]\\,;:"]+$/;
 const MESSAGE_ID_PATTERN = /^[^\s<>]+@[^\s<>]+$/;
 const CID_PATTERN = /^[^\s<>]+$/;
 const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
-const RFC3339 =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i;
-const UTC_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/i;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -629,8 +627,7 @@ export function parseEmailCreate(
   if (!absent(input.sentAt)) {
     if (
       typeof input.sentAt !== "string" ||
-      !RFC3339.test(input.sentAt) ||
-      !Number.isFinite(Date.parse(input.sentAt))
+      parseJmapDate(input.sentAt) === null
     ) {
       return reject("sentAt");
     }
@@ -639,11 +636,8 @@ export function parseEmailCreate(
 
   let receivedAt: number | null = null;
   if (!absent(input.receivedAt)) {
-    const ms =
-      typeof input.receivedAt === "string" && UTC_DATE.test(input.receivedAt)
-        ? Date.parse(input.receivedAt)
-        : Number.NaN;
-    if (!Number.isFinite(ms)) return reject("receivedAt");
+    const ms = parseJmapDate(input.receivedAt, { utc: true });
+    if (ms === null) return reject("receivedAt");
     receivedAt = Math.floor(ms / 1000);
   }
 

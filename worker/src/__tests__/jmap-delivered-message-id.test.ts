@@ -267,3 +267,34 @@ describe("the From name of an ordinary Sent Email (J3)", () => {
     expect(after[0].from).toEqual([{ email: MINE, name: null }]);
   });
 });
+
+describe("Message-ID lookups are indexed", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  async function plan(statement: string) {
+    const { results } = await env.DB.prepare(
+      `EXPLAIN QUERY PLAN ${statement}`,
+    ).all<{ detail: string }>();
+    return results.map((row) => row.detail).join("\n");
+  }
+
+  it("finds a sent message by its delivered Message-ID without a scan", async () => {
+    const details = await plan(
+      "SELECT id FROM sent_emails WHERE message_id IN ('<a@x>', 'a@x')",
+    );
+    expect(details).toContain("sent_emails_message_id_idx");
+    expect(details).not.toMatch(/\bSCAN sent_emails\b/i);
+  });
+
+  it("finds JMAP content by its own Message-ID without a scan (thread lookup, delivered-id mapping)", async () => {
+    const details = await plan(
+      `SELECT se.id, se.message_id FROM sent_emails se
+         JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
+        WHERE jmc.message_id IN ('a@x', '<a@x>')`,
+    );
+    expect(details).toContain("jmap_message_content_message_id_idx");
+    expect(details).not.toMatch(/\bSCAN jmc\b|\bSCAN jmap_message_content\b/i);
+  });
+});

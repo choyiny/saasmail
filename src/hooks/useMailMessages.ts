@@ -9,7 +9,7 @@ import {
   type MailMessageState,
 } from "@/lib/api";
 import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
-import { onMailRefresh } from "@/lib/mail-events";
+import { dispatchMailRefresh, onMailRefresh } from "@/lib/mail-events";
 import { showToast } from "@/lib/toast";
 
 const PAGE_SIZE = 50;
@@ -74,6 +74,23 @@ export function useMailMessages({
   const [bulkBusy, setBulkBusy] = useState(false);
   const seenAttemptedRef = useRef(new Set<string>());
   const listScrollRef = useRef<HTMLDivElement | null>(null);
+  // Only the newest list request may write the list: switching folders fires
+  // a new load, and the old one must not land on top of it.
+  const loadSeqRef = useRef(0);
+  // The view an action started in. An action that finishes after the user
+  // moved on must not edit the new view's list as if it were the old one, and
+  // the new view has to reload: it may have been fetched before the server
+  // applied the change (restore, then open Inbox straight away).
+  const viewKey = [
+    inbox ?? "",
+    mailboxId ?? "",
+    systemFolder ?? "",
+    query,
+  ].join("|");
+  const viewKeyRef = useRef(viewKey);
+  useEffect(() => {
+    viewKeyRef.current = viewKey;
+  }, [viewKey]);
 
   const loadMessages = useCallback(
     async (cursor: string | null, append: boolean) => {
@@ -91,6 +108,8 @@ export function useMailMessages({
 
       if (append) setLoadingMore(true);
       else setLoading(true);
+      const seq = append ? loadSeqRef.current : ++loadSeqRef.current;
+      const isCurrent = () => seq === loadSeqRef.current;
 
       try {
         const request = mailboxId
@@ -132,12 +151,14 @@ export function useMailMessages({
                 });
 
         const result = await request;
+        if (!isCurrent()) return;
         setMessages((current) =>
           append ? [...current, ...result.messages] : result.messages,
         );
         setNextCursor(result.nextCursor);
         if (!append) setShowNewMessages(false);
       } catch (error) {
+        if (!isCurrent()) return;
         if (!append) {
           setMessages([]);
           setNextCursor(null);
@@ -148,8 +169,10 @@ export function useMailMessages({
           description: error instanceof Error ? error.message : undefined,
         });
       } finally {
-        if (append) setLoadingMore(false);
-        else setLoading(false);
+        if (isCurrent()) {
+          if (append) setLoadingMore(false);
+          else setLoading(false);
+        }
       }
     },
     [allowedInboxes, inbox, mailboxId, query, showCampaignSends, systemFolder],
@@ -205,9 +228,12 @@ export function useMailMessages({
   ) {
     optimisticUpdate(message.ref, update);
     setActionBusyRef(message.ref);
+    const startedIn = viewKeyRef.current;
     try {
       await request();
-      if (options?.removeAfterSuccess) {
+      if (viewKeyRef.current !== startedIn) {
+        dispatchMailRefresh();
+      } else if (options?.removeAfterSuccess) {
         setMessages((current) =>
           current.filter((item) => item.ref !== message.ref),
         );
@@ -242,10 +268,13 @@ export function useMailMessages({
       ),
     );
     setBulkBusy(true);
+    const startedIn = viewKeyRef.current;
     try {
       const refs = selectedMessages.map((message) => message.ref);
       await request(refs);
-      if (options?.removeAfterSuccess) {
+      if (viewKeyRef.current !== startedIn) {
+        dispatchMailRefresh();
+      } else if (options?.removeAfterSuccess) {
         setMessages((current) =>
           current.filter((message) => !selectedRefs.has(message.ref)),
         );

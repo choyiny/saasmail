@@ -449,6 +449,13 @@
       "when": 1790549880646,
       "tag": "0063_backfill_emails_threading_headers",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1790579318479,
+      "tag": "0064_message_id_indexes",
+      "breakpoints": true
     }
   ]
 }

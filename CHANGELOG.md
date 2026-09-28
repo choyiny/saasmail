@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The mailbox list no longer drops a message you just moved.** Restoring, unarchiving or otherwise changing a message and then opening another folder before the change reached the server could show that folder without the message until a reload; the list now reloads when a change lands after you moved on. An older folder's list can also no longer overwrite the newer one when you switch folders quickly. This also fixes the intermittently failing "custom folders" end-to-end test.
+
+- **JMAP dates are validated strictly.** An impossible `sentAt` such as `2026-02-30` used to be stored as March 2; it is now refused, and `before`/`after` filters accept only UTCDates.
+
+- **Faster Message-ID lookups.** Migration 0064 indexes `sent_emails.message_id` and `jmap_message_content.message_id`, which JMAP thread lookup and reply-chain mapping query on every draft and submission.
+
 - **Cc is delivered on Cloudflare.** The Cloudflare sender handed Cloudflare a raw message whose only envelope recipient was the To, so Cc recipients (web replies, composed mail, JMAP submissions) never received a copy even though saasmail listed them as delivered. It now uses the `send_email` binding's structured form, where every To and Cc is a real recipient with its display name, Reply-To and inline images are native fields, and threading and unsubscribe headers are passed through. Failures are classified by Cloudflare's error code, so a misconfigured sender or a refused recipient is no longer retried for a day. Two Cloudflare quirks of this form remain and are documented: a text attachment arrives with a line break appended, and an inline image loses its filename.
 
 - **An accepted message can't be sent twice from the Outbox tab.** A send the provider has accepted but whose bookkeeping hasn't finished (`bookkeeping_pending`) no longer appears in the Outbox list, and Retry and Cancel refuse it with 409. Before, once its retry time had passed, Retry could send it again and Cancel could mark a delivered message failed.
@@ -33,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrading to the mailbox/agent/JMAP release
 
-- Apply D1 migrations `0037` through `0063` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
+- Apply D1 migrations `0037` through `0064` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
 - Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
 - Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
 

@@ -45,5 +45,7 @@ export const jmapMessageContent = sqliteTable(
   (table) => [
     index("jmap_message_content_thread_key_idx").on(table.threadKey),
     index("jmap_message_content_created_at_idx").on(table.createdAt),
+    // Thread lookup and delivered-id mapping find content by its own Message-ID.
+    index("jmap_message_content_message_id_idx").on(table.messageId),
   ],
 );

@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
+import { parseJmapDate } from "./dates";
 import { MAX_OBJECTS_IN_GET } from "./constants";
 import type { JmapMethodError } from "./emails";
 import { parseSubmissionId, publicSubmissionId } from "./public-ids";
@@ -172,9 +173,8 @@ export async function emailSubmissionQuery(
   }
   const bound = (value: unknown): number | null | undefined => {
     if (value === undefined) return undefined;
-    if (typeof value !== "string") return null;
-    const millis = Date.parse(value);
-    return Number.isFinite(millis) ? Math.floor(millis / 1000) : null;
+    const millis = parseJmapDate(value, { utc: true });
+    return millis === null ? null : Math.floor(millis / 1000);
   };
   const before = bound(filter.before);
   const after = bound(filter.after);

@@ -16,6 +16,7 @@ import {
   type MessageRef,
   type UnifiedMessage,
 } from "../lib/messages/types";
+import { parseJmapDate } from "./dates";
 import { customMailboxId, systemMailboxId } from "./ids";
 import {
   contentEmailObject,
@@ -579,17 +580,15 @@ export async function emailGet(
 
 function parseAfter(value: unknown): number | null | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string") return null;
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return null;
+  const parsed = parseJmapDate(value, { utc: true });
+  if (parsed === null) return null;
   return Math.floor(parsed / 1000) + 1;
 }
 
 function parseBefore(value: unknown): number | null | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string") return null;
-  const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) return null;
+  const parsed = parseJmapDate(value, { utc: true });
+  if (parsed === null) return null;
   return Math.ceil(parsed / 1000) - 1;
 }
 

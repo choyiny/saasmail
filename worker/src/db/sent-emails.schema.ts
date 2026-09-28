@@ -59,6 +59,9 @@ export const sentEmails = sqliteTable(
     index("sent_emails_from_sent_idx").on(table.fromAddress, table.sentAt),
     index("sent_emails_sequence_sent_idx").on(table.sequenceId, table.sentAt),
     index("sent_emails_jmap_content_idx").on(table.jmapContentId),
+    // JMAP thread lookup and reply-chain mapping find a sent message by the
+    // Message-ID it was delivered with.
+    index("sent_emails_message_id_idx").on(table.messageId),
     uniqueIndex("sent_emails_jmap_email_id_unique").on(table.jmapEmailId),
   ],
 );
