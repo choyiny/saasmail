@@ -20,6 +20,7 @@ import {
 } from "./helpers";
 import { recordingSender, runJmap } from "./jmap-harness";
 import { acct, rid } from "./jmap-ids";
+import { JMAP_ID_FORMAT_VERSION } from "../jmap/public-ids";
 
 const INBOX = "support@example.com";
 
@@ -202,7 +203,7 @@ describe("received In-Reply-To and References", () => {
   });
 });
 
-describe("the JMAP account reset for it (id format v3)", () => {
+describe("the JMAP account resets (id format v3 and later)", () => {
   beforeAll(async () => {
     await applyMigrations();
   });
@@ -210,13 +211,22 @@ describe("the JMAP account reset for it (id format v3)", () => {
     await cleanDb();
   });
 
-  it("advertises a new account id, refuses the v2 one, and issues j3 states", async () => {
-    const { userId, apiKey } = await createTestUser({ id: "reset-v3-user" });
-    const bytes = sha256(new TextEncoder().encode(`jmap-account-v2:${userId}`));
+  function accountIdOfVersion(version: number, userId: string): string {
+    const bytes = sha256(
+      new TextEncoder().encode(`jmap-account-v${version}:${userId}`),
+    );
     let binary = "";
     for (const byte of bytes) binary += String.fromCharCode(byte);
-    const v2 = `a${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
-    expect(acct(userId)).not.toBe(v2);
+    return `a${btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`;
+  }
+
+  it("advertises the current account id, refuses every earlier one, and issues current states", async () => {
+    const { userId, apiKey } = await createTestUser({ id: "reset-v3-user" });
+    const earlier = [2, 3].map((version) =>
+      accountIdOfVersion(version, userId),
+    );
+    expect(JMAP_ID_FORMAT_VERSION).toBe(4);
+    expect(acct(userId)).toBe(accountIdOfVersion(4, userId));
 
     const session = await (
       await authFetch("/.well-known/jmap", { apiKey })
@@ -224,15 +234,30 @@ describe("the JMAP account reset for it (id format v3)", () => {
     expect(Object.keys(session.accounts)).toEqual([acct(userId)]);
 
     const { sender } = recordingSender();
-    const [old, current] = await runJmap(
+    const responses = await runJmap(
       userId,
       [
-        ["Mailbox/get", { accountId: v2 }, "old"],
+        ...earlier.map(
+          (accountId, index) =>
+            ["Mailbox/get", { accountId }, `old${index}`] as [
+              string,
+              Record<string, unknown>,
+              string,
+            ],
+        ),
         ["Mailbox/get", { accountId: acct(userId), ids: [] }, "new"],
       ],
       sender,
     );
-    expect(old).toEqual(["error", { type: "accountNotFound" }, "old"]);
-    expect((current[1] as Record<string, any>).state).toMatch(/^j3-/);
+    expect(responses.slice(0, earlier.length)).toEqual(
+      earlier.map((_, index) => [
+        "error",
+        { type: "accountNotFound" },
+        `old${index}`,
+      ]),
+    );
+    expect((responses[earlier.length][1] as Record<string, any>).state).toMatch(
+      /^j4-/,
+    );
   });
 });

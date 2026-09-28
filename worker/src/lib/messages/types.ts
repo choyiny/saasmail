@@ -40,8 +40,16 @@ export interface UnifiedMessage {
   rawSize?: number;
   from: MailAddress | null;
   to: MailAddress;
-  /** Further To recipients of a sent message (JMAP), after `to`. */
+  /**
+   * Further To recipients, after `to`: a sent message's extra To (JMAP), or
+   * received mail's To addresses other than its inbox.
+   */
   additionalTo?: MailAddress[];
+  /**
+   * Received mail's To header exactly as it lists them (JMAP `to`); absent
+   * when the stored headers have no To.
+   */
+  toList?: MailAddress[];
   cc: MailAddress[];
   /** Blind recipients of a sent message (JMAP). Only the sender sees these. */
   bcc?: MailAddress[];

@@ -1,4 +1,4 @@
-import PostalMime from "postal-mime";
+import PostalMime, { addressParser } from "postal-mime";
 
 export interface AuthResults {
   spf: string | null;
@@ -141,6 +141,37 @@ function parseSpamScore(headers: Record<string, string>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Valid addresses only, lowercased, names trimmed, at most 50. */
+function cleanAddresses(
+  list: Array<{ address?: string; name?: string }>,
+): ParsedEmailAddress[] {
+  return list
+    .filter((c): c is { address: string; name?: string } => {
+      if (!c.address || typeof c.address !== "string") return false;
+      // Cheap RFC 5322-ish gate. Defers strict validation to downstream
+      // schemas; we only need to reject the obviously-not-email cases.
+      return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
+    })
+    .slice(0, 50)
+    .map((c) => ({
+      email: c.address.trim().toLowerCase(),
+      name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
+    }));
+}
+
+/**
+ * The addresses of a stored address header (the value kept in
+ * `emails.raw_headers`), with groups flattened as RFC 8621 does and the same
+ * clean-up as the Cc list.
+ */
+export function parseAddressHeader(value: string): ParsedEmailAddress[] {
+  return cleanAddresses(
+    addressParser(value).flatMap((entry) =>
+      "group" in entry && entry.group ? entry.group : [entry],
+    ),
+  );
+}
+
 export async function parseEmail(
   message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
@@ -167,20 +198,9 @@ export async function parseEmail(
   //   don't fork conversation_id buckets,
   // - cap the array so a single inbound message can't slam storage
   //   with thousands of header-entries.
-  const cc: ParsedEmailAddress[] = (
-    (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? []
-  )
-    .filter((c): c is { address: string; name?: string } => {
-      if (!c.address || typeof c.address !== "string") return false;
-      // Cheap RFC 5322-ish gate. Defers strict validation to downstream
-      // schemas; we only need to reject the obviously-not-email cases.
-      return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
-    })
-    .slice(0, 50)
-    .map((c) => ({
-      email: c.address.trim().toLowerCase(),
-      name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
-    }));
+  const cc = cleanAddresses(
+    (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? [],
+  );
 
   return {
     raw: new Uint8Array(rawEmail),

@@ -1,3 +1,4 @@
+import { parseAddressHeader } from "../email-parser";
 import type { MailAddress, UnifiedMessage } from "./types";
 
 export type ReceivedSelect = {
@@ -15,6 +16,8 @@ export type ReceivedSelect = {
   rawSize?: number | null;
   isRead: number;
   cc: string | null;
+  /** The raw To header from `raw_headers`, when the select read it. */
+  toHeader?: string | null;
   conversationId: string | null;
   receivedAt: number;
   personEmail: string | null;
@@ -65,6 +68,12 @@ export function parseCc(raw: string | null | undefined): MailAddress[] {
 }
 
 export function adaptReceived(row: ReceivedSelect): UnifiedMessage {
+  const toList =
+    typeof row.toHeader === "string"
+      ? parseAddressHeader(row.toHeader)
+      : undefined;
+  const inbox = row.recipient.toLowerCase();
+  const others = (toList ?? []).filter((address) => address.email !== inbox);
   return {
     ref: { kind: "received", id: row.id },
     direction: "inbound",
@@ -82,6 +91,8 @@ export function adaptReceived(row: ReceivedSelect): UnifiedMessage {
         }
       : null,
     to: { email: row.recipient },
+    ...(others.length > 0 ? { additionalTo: others } : {}),
+    ...(toList ? { toList } : {}),
     cc: parseCc(row.cc),
     subject: row.subject,
     bodyText: row.bodyText,

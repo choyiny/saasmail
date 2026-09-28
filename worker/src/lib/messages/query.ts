@@ -106,6 +106,7 @@ type RawMessageRow = {
   to_name: string | null;
   cc: string | null;
   additional_to: string | null;
+  to_header: string | null;
   bcc: string | null;
   subject: string | null;
   body_text: string | null;
@@ -584,6 +585,8 @@ function receivedArm(
       NULL AS to_name,
       e.cc AS cc,
       NULL AS additional_to,
+      CASE WHEN json_valid(e.raw_headers)
+        THEN json_extract(e.raw_headers, '$.to') END AS to_header,
       NULL AS bcc,
       e.subject AS subject,
       e.body_text AS body_text,
@@ -692,6 +695,7 @@ function sentArm(
       p.name AS to_name,
       se.cc AS cc,
       se.additional_to AS additional_to,
+      NULL AS to_header,
       se.bcc AS bcc,
       se.subject AS subject,
       se.body_text AS body_text,
@@ -815,6 +819,7 @@ function toUnified(
       rawSize: row.raw_size,
       isRead: row.is_read ?? 0,
       cc: row.cc,
+      toHeader: row.to_header,
       conversationId: row.conversation_id,
       receivedAt: row.occurred_at,
       personEmail: row.from_email,

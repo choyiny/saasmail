@@ -13,6 +13,7 @@ import {
 import {
   serializeMessageRef,
   type AttachmentRow,
+  type MailAddress,
   type MessageRef,
   type UnifiedMessage,
 } from "../lib/messages/types";
@@ -213,13 +214,23 @@ function bodyValues(
   return values;
 }
 
+/**
+ * JMAP `to`: received mail's To header as stored (the inbox alone for mail
+ * stored without one); a sent message's To and any further To.
+ */
+function toAddresses(message: UnifiedMessage): MailAddress[] {
+  if (message.toList) return message.toList;
+  if (message.ref.kind === "received") return [message.to];
+  return [message.to, ...(message.additionalTo ?? [])];
+}
+
 function approximateSize(message: UnifiedMessage): number {
   const addressBytes = [
     message.from?.email,
     message.from?.name,
-    message.to.email,
-    message.to.name,
-    ...message.cc.flatMap((address) => [address.email, address.name]),
+    ...[...toAddresses(message), ...message.cc, ...(message.bcc ?? [])].flatMap(
+      (address) => [address.email, address.name],
+    ),
   ].reduce<number>((sum, value) => sum + byteLength(value), 0);
   const attachmentBytes = (message.attachments ?? []).reduce(
     (sum, attachment) => sum + attachment.size,
@@ -381,9 +392,12 @@ export function toJmapEmail(
     references: messageIds(message.references ?? null),
     sender: null,
     from: from ? [from] : [],
-    to: [emailAddress(message.to)],
+    to: toAddresses(message).map((address) => emailAddress(address)),
     cc: message.cc.map((address) => emailAddress(address)),
-    bcc: null,
+    bcc:
+      message.bcc && message.bcc.length > 0
+        ? message.bcc.map((address) => emailAddress(address))
+        : null,
     replyTo: null,
     subject: message.subject ?? "",
     sentAt:

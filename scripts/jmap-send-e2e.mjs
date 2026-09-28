@@ -685,9 +685,9 @@ async function stepSession(ctx) {
   const identities = methodResponse(responses, "Identity/get", "id");
   const threads = methodResponse(responses, "Thread/get", "t");
   report.check(
-    `${step}: read surface ids are valid and states are j3`,
+    `${step}: read surface ids are valid and states are j4`,
     [mailboxes.state, threads.state].every(
-      (state) => typeof state === "string" && state.startsWith("j3-"),
+      (state) => typeof state === "string" && state.startsWith("j4-"),
     ),
     `${mailboxes.list.length} mailboxes, ${identities.list.length} identities`,
     `states ${mailboxes.state}, ${threads.state}`,

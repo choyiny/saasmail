@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **JMAP lists every To address (account reset, id format v4).** Received mail's `to` used to be the inbox it arrived in; it is now the To header as it arrived, with names (mail stored without one still lists the inbox), and the web reading pane shows the other To addresses too. A sent message's `to` now lists its further To addresses and `bcc` its Bcc. `to` and `bcc` are immutable, so the JMAP account id changed again: the v3 account id answers `accountNotFound`, states are `j4-…`, and clients resync from `/.well-known/jmap`. Found by `yarn jmap:e2e` step 7.
+
 - **JMAP state strings each have one source.** `Email/query` and `Mailbox/query` `queryState` now come from the change log, like `/changes` (the old count-and-latest-timestamp fingerprint could miss two changes in the same second). The Session `state` no longer changes whenever mail arrives, only when the Session does, and the Identity state is a hash of the identities you see, so every visible change moves it.
 
 - **The JMAP on-success step never loses a sent message.** If a Sent message was deleted in the web UI in the moment before its JMAP bookkeeping ran, the step used to delete the draft and finish anyway, leaving no Email at all; it now re-creates the Sent message from the stored submission first, and never deletes the draft or finishes without it.

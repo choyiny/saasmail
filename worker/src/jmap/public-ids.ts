@@ -7,12 +7,14 @@ import type { SystemMailboxRole } from "./constants";
  * Internal refs never leave the JMAP layer; everything a client sees is
  * produced here. Version 2 = the id and account reset of the EmailSubmission
  * work; version 3 = the account reset for received mail's inReplyTo and
- * references, immutable properties that used to be null (see docs/jmap.md).
+ * references, immutable properties that used to be null; version 4 = the
+ * account reset for every To of received mail and a sent message's further To
+ * and Bcc, where `to` had listed only the first address (see docs/jmap.md).
  * The version salts the account id and prefixes state strings, so a bump makes
  * every client resync. Uppercase type letters carry a raw payload that is
  * already safe; lowercase letters carry base64url or a SHA-256 digest.
  */
-export const JMAP_ID_FORMAT_VERSION = 3;
+export const JMAP_ID_FORMAT_VERSION = 4;
 export const JMAP_ID_PATTERN = /^[A-Za-z0-9_-]{1,255}$/;
 
 const SAFE = /^[A-Za-z0-9_-]+$/;
