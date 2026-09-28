@@ -585,15 +585,18 @@ describe("JMAP drafts", () => {
       });
       const created = await createDraft(apiKey, userId);
       const cases: [Record<string, unknown>, string][] = [
+        // A draft may be in a custom folder now (jmap-drafts-folders.test.ts),
+        // but never in two system mailboxes, and never in a folder alone.
         [
           {
             mailboxIds: {
               [sys(MINE, "drafts")]: true,
-              [mbx("draft-folder")]: true,
+              [sys(MINE, "trash")]: true,
             },
           },
           "mailboxIds",
         ],
+        [{ mailboxIds: { [mbx("draft-folder")]: true } }, "mailboxIds"],
         [{ mailboxIds: { [sys(MINE, "inbox")]: true } }, "mailboxIds"],
         [{ mailboxIds: { [sys(MINE, "sent")]: true } }, "mailboxIds"],
         [{ mailboxIds: {} }, "mailboxIds"],

@@ -14,7 +14,7 @@ import {
   type JmapContentRow,
 } from "./content";
 import { systemMailboxId } from "./ids";
-import { publicDraftEmailId } from "./public-ids";
+import { publicCustomMailboxId, publicDraftEmailId } from "./public-ids";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -86,9 +86,29 @@ export function draftKeywords(draft: JmapDraftRow): Record<string, true> {
   return keywords;
 }
 
+/** The custom folders (internal `mailboxes.id`) a draft is filed in. */
+export function draftFolderIds(
+  draft: Pick<JmapDraftRow, "folderIds">,
+): string[] {
+  try {
+    const parsed = JSON.parse(draft.folderIds ?? "[]") as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((id): id is string => typeof id === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function draftMailboxIds(draft: JmapDraftRow): Record<string, true> {
   const role = draft.mailboxRole === "trash" ? "trash" : "drafts";
-  return { [systemMailboxId(draft.inbox, role)]: true };
+  const ids: Record<string, true> = {
+    [systemMailboxId(draft.inbox, role)]: true,
+  };
+  for (const folder of draftFolderIds(draft)) {
+    ids[publicCustomMailboxId(folder)] = true;
+  }
+  return ids;
 }
 
 export function draftEmailObject(
@@ -110,21 +130,36 @@ export function draftEmailObject(
 export async function updateDraftState(
   db: Db,
   draft: JmapDraftRow,
-  next: { mailboxRole: "drafts" | "trash"; seen: boolean; flagged: boolean },
+  next: {
+    mailboxRole: "drafts" | "trash";
+    seen: boolean;
+    flagged: boolean;
+    folderIds?: string[];
+  },
   now: number,
 ): Promise<void> {
   const seen = next.seen ? 1 : 0;
   const flagged = next.flagged ? 1 : 0;
+  const folderIds = JSON.stringify(
+    [...new Set(next.folderIds ?? draftFolderIds(draft))].sort(),
+  );
   if (
     next.mailboxRole === draft.mailboxRole &&
     seen === draft.seen &&
-    flagged === draft.flagged
+    flagged === draft.flagged &&
+    folderIds === JSON.stringify([...draftFolderIds(draft)].sort())
   ) {
     return;
   }
   await db
     .update(jmapDrafts)
-    .set({ mailboxRole: next.mailboxRole, seen, flagged, updatedAt: now })
+    .set({
+      mailboxRole: next.mailboxRole,
+      seen,
+      flagged,
+      folderIds,
+      updatedAt: now,
+    })
     .where(
       and(eq(jmapDrafts.id, draft.id), eq(jmapDrafts.userId, draft.userId)),
     );
@@ -155,6 +190,8 @@ export async function destroyDraft(
 export type DraftFilter = {
   inbox?: string;
   role?: "drafts" | "trash";
+  /** A custom folder (internal `mailboxes.id`) the draft is filed in. */
+  mailboxId?: string;
   text?: string;
   from?: string;
   after?: number;
@@ -176,6 +213,11 @@ export function draftWhereSql(
     ${inboxScopeSql(allowed, sql`d.inbox`)}
     ${filter.inbox === undefined ? sql`` : sql`AND d.inbox = ${filter.inbox.toLowerCase()}`}
     ${filter.role === undefined ? sql`` : sql`AND d.mailbox_role = ${filter.role}`}
+    ${
+      filter.mailboxId === undefined
+        ? sql``
+        : sql`AND EXISTS (SELECT 1 FROM json_each(d.folder_ids) jf WHERE jf.value = ${filter.mailboxId})`
+    }
     ${
       textPattern === null
         ? sql``

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **JMAP: drafts in custom folders.** A draft can be filed in custom folders of its inbox besides Drafts or Trash, from creation on (`Email/set` create with Drafts plus folders) or later; it shows in `Email/query` and in the folders' counts for its author. A draft can still never be in Inbox, Archive, Junk or Sent except through its own submission. Deleting a folder takes it off every draft. Migrations 0069 (`jmap_drafts.folder_ids`) and 0070 (change triggers).
+
 - **JMAP: received mail keeps its raw message.** Inbound mail is now stored exactly as it arrived (in R2, deleted with the message), and a JMAP client can download it: the received Email's `blobId` is that raw message and its `size` is exact. Mail received earlier keeps `blobId: null`. Migration 0068 adds `emails.raw_r2_key` and `raw_size`.
 
 - **Resend: no duplicate after a crash mid-send.** Every outbound message sent through Resend carries an idempotency key that is the same on its first attempt and every outbox retry (per recipient for marketing sends), so a retry of a message Resend already accepted returns Resend's original answer instead of sending it again (Resend keeps keys for 24 hours). The same key with a changed payload is treated as a permanent failure, never as a resend. Other providers ignore the key.
@@ -53,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrading to the mailbox/agent/JMAP release
 
-- Apply D1 migrations `0037` through `0068` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
+- Apply D1 migrations `0037` through `0070` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
 - Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
 - Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
 

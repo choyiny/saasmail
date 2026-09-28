@@ -55,7 +55,7 @@ describe("parseEmailCreate", () => {
   it("normalises a minimal draft", () => {
     const result = parse() as ParsedEmailCreate;
     expect(result).not.toBeInstanceOf(Rejection);
-    expect(result.mailboxId).toBe("mbox");
+    expect(result.mailboxIds).toEqual(["mbox"]);
     expect(result.seen).toBe(false);
     expect(result.flagged).toBe(false);
     expect(result.from).toEqual({ name: "Ada", email: "ada@saasmail.test" });
@@ -166,7 +166,8 @@ describe("parseEmailCreate", () => {
 
   it.each([
     ["missing mailboxIds", { mailboxIds: undefined }, ["mailboxIds"]],
-    ["two mailboxes", { mailboxIds: { a: true, b: true } }, ["mailboxIds"]],
+    // Several mailboxes parse; which ones a draft may use is checked at create.
+    ["no mailboxes", { mailboxIds: {} }, ["mailboxIds"]],
     ["no $draft", { keywords: { $seen: true } }, ["keywords"]],
     [
       "unsupported keyword",

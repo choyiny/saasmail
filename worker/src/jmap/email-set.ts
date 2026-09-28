@@ -20,6 +20,7 @@ import {
   updateDraftState,
   type DraftWithContent,
 } from "./drafts";
+import { validateDraftTarget } from "./draft-target";
 import {
   DRAFT_KEYWORDS,
   createDraftEmail,
@@ -461,27 +462,20 @@ async function updateDraft(
   if (!targets.keywords.has("$draft")) {
     return { type: "invalidProperties", properties: ["keywords"] };
   }
-  const [targetId] = [...targets.mailboxIds];
-  const descriptor =
-    targets.mailboxIds.size === 1 ? descriptorsById.get(targetId) : undefined;
-  if (
-    !descriptor ||
-    !isSystemDescriptor(descriptor) ||
-    descriptor.inbox !== draft.inbox
-  ) {
-    return { type: "invalidProperties", properties: ["mailboxIds"] };
-  }
-  const role = descriptor.role;
-  if (role !== "drafts" && role !== "trash") {
-    return { type: "invalidProperties", properties: ["mailboxIds"] };
-  }
+  const target = validateDraftTarget(
+    draft.inbox,
+    targets.mailboxIds,
+    descriptorsById,
+  );
+  if ("type" in target) return target;
   await updateDraftState(
     db,
     draft,
     {
-      mailboxRole: role,
+      mailboxRole: target.role,
       seen: targets.keywords.has("$seen"),
       flagged: targets.keywords.has("$flagged"),
+      folderIds: target.folders,
     },
     now,
   );

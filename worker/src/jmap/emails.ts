@@ -832,7 +832,11 @@ export async function emailQuery(
       else
         messageQuery = { ...messageQuery, inboxes: [descriptor.inbox], folder };
       const role = descriptorDraftRole(descriptor);
-      if (!role) draftsImpossible = true;
+      if (descriptor.kind === "custom") {
+        // The author's drafts filed in this folder.
+        draftFilter.inbox = descriptor.inbox;
+        draftFilter.mailboxId = descriptor.mailboxId;
+      } else if (!role) draftsImpossible = true;
       else {
         draftFilter.inbox = descriptor.inbox;
         draftFilter.role = role;

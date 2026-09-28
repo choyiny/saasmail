@@ -21,6 +21,12 @@ export const jmapDrafts = sqliteTable(
       .default("drafts"),
     seen: integer("seen").notNull().default(0),
     flagged: integer("flagged").notNull().default(0),
+    /**
+     * JSON array of the custom `mailboxes.id` the draft is filed in, beside its
+     * system mailbox (`mailbox_role`). Personal like the draft; a deleted folder
+     * is removed by a trigger on `mailboxes`.
+     */
+    folderIds: text("folder_ids").notNull().default("[]"),
     /** null | "submitting" (claimed by a submission) | "queued" (outbox retrying). */
     submitState: text("submit_state", { enum: ["submitting", "queued"] }),
     /** Internal id of the submission holding the lock. */

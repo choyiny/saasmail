@@ -169,7 +169,9 @@ async function mailboxCounts(
   const drafts: DraftFilter | null =
     role === "drafts" || role === "trash"
       ? { inbox: descriptor.inbox, role }
-      : null;
+      : descriptor.kind === "custom"
+        ? { inbox: descriptor.inbox, mailboxId: descriptor.mailboxId }
+        : null;
   let messages: MessageQuery | null = null;
   if (role !== "drafts") {
     const folder: MessageFolder = isSystemDescriptor(descriptor)

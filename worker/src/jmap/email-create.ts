@@ -20,8 +20,8 @@ import {
   type ContentPart,
 } from "./content";
 import { jmapThreadKey, loadJmapEmailObjectsByIds } from "./emails";
-import { systemMailboxId } from "./ids";
-import { listUsableIdentities } from "./mailboxes";
+import { validateDraftTarget } from "./draft-target";
+import { listUsableIdentities, loadMailboxDescriptors } from "./mailboxes";
 import {
   publicDraftEmailId,
   publicEmailId,
@@ -117,7 +117,7 @@ export function inputLeaves(
 
 export type ParsedEmailCreate = {
   /** The one mailbox id given (checked against the identity's Drafts later). */
-  mailboxId: string;
+  mailboxIds: string[];
   seen: boolean;
   flagged: boolean;
   from: ContentAddress;
@@ -575,7 +575,7 @@ export function parseEmailCreate(
   const mailboxIds = input.mailboxIds;
   if (
     !isObject(mailboxIds) ||
-    Object.keys(mailboxIds).length !== 1 ||
+    Object.keys(mailboxIds).length === 0 ||
     Object.values(mailboxIds).some((value) => value !== true)
   ) {
     return reject("mailboxIds");
@@ -672,7 +672,7 @@ export function parseEmailCreate(
   }
 
   return {
-    mailboxId: Object.keys(mailboxIds)[0],
+    mailboxIds: Object.keys(mailboxIds),
     seen: keywordSet.has("$seen"),
     flagged: keywordSet.has("$flagged"),
     from: from[0],
@@ -825,7 +825,14 @@ export async function createDraftEmail(
   );
   if (!identity) return reject("from");
   const inbox = identity.email.toLowerCase();
-  if (parsed.mailboxId !== systemMailboxId(inbox, "drafts")) {
+  // Drafts, plus any custom folders of the same inbox; never created in Trash.
+  const descriptors = await loadMailboxDescriptors(ctx.db, ctx.allowed);
+  const target = validateDraftTarget(
+    inbox,
+    new Set(parsed.mailboxIds),
+    new Map(descriptors.map((descriptor) => [descriptor.id, descriptor])),
+  );
+  if ("type" in target || target.role !== "drafts") {
     return reject("mailboxIds");
   }
 
@@ -1022,6 +1029,7 @@ export async function createDraftEmail(
     mailboxRole: "drafts",
     seen: parsed.seen ? 1 : 0,
     flagged: parsed.flagged ? 1 : 0,
+    folderIds: JSON.stringify([...new Set(target.folders)].sort()),
     createdAt: ctx.now,
     updatedAt: ctx.now,
   });

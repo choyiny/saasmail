@@ -162,13 +162,13 @@ An `S…` Email created from a draft has every immutable property of that draft,
 
 One set of rules applies to every `Email/set` update, whether the client sends it or it is the implicit update after a submission. An update whose result breaks a rule fails with `invalidProperties` and changes nothing.
 
-| Email                                    | Exactly one system mailbox of its inbox | Custom folders of that inbox            | Keywords                                 |
-| ---------------------------------------- | --------------------------------------- | --------------------------------------- | ---------------------------------------- |
-| Received                                 | Inbox, Archive, Junk or Trash           | any                                     | `$seen`, `$flagged`                      |
-| Sent (including a draft filed into Sent) | Sent or Trash                           | any                                     | `$seen` (required), `$flagged`           |
-| Draft                                    | Drafts or Trash                         | none: drafts can't be in custom folders | `$draft` (required), `$seen`, `$flagged` |
+| Email                                    | Exactly one system mailbox of its inbox | Custom folders of that inbox | Keywords                                 |
+| ---------------------------------------- | --------------------------------------- | ---------------------------- | ---------------------------------------- |
+| Received                                 | Inbox, Archive, Junk or Trash           | any                          | `$seen`, `$flagged`                      |
+| Sent (including a draft filed into Sent) | Sent or Trash                           | any                          | `$seen` (required), `$flagged`           |
+| Draft                                    | Drafts or Trash (Drafts when created)   | any                          | `$draft` (required), `$seen`, `$flagged` |
 
-A draft can move into Sent only inside the implicit update of its own accepted submission (the patch must also remove `$draft`). Outside that window, filing a draft into Sent or Inbox, or removing `$draft`, is `invalidProperties`.
+A draft can move into Sent only inside the implicit update of its own accepted submission (the patch must also remove `$draft`). Outside that window, filing a draft into Sent or Inbox, or removing `$draft`, is `invalidProperties`. A draft's custom folders are personal, like the draft: other members don't see it in them. When a draft is filed into Sent, ordinary patch rules decide its folders: a patch that doesn't remove a folder keeps it on the Sent Email, and a full `mailboxIds` keeps only what it lists. Deleting a custom folder takes it off every draft filed in it.
 
 `Email/set` `destroy` removes drafts. Destroying a received or sent Email returns `forbidden`: saasmail doesn't delete mail over JMAP.
 
@@ -228,7 +228,6 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 ## Known gaps
 
 - Delayed send, and cancelling or recalling a submission.
-- Drafts in custom folders.
 - Raw-message `blobId` for sent mail that wasn't created through JMAP, and for mail received before the raw message was kept (it stays `null`).
 - The web composer's drafts don't appear in JMAP, and JMAP drafts don't appear in the web UI.
 - A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
