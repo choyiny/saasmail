@@ -111,6 +111,31 @@ describe("queryMessages", () => {
     expect(page.messages[1].to.name).toBe("Alice");
   });
 
+  it("finds no unread mail in Sent, and still finds the inbox's", async () => {
+    await seedPair();
+    const allowed = { isAdmin: false, inboxes: ["support@saasmail.test"] };
+    const viewer = { userId: "viewer-1" };
+    const refs = async (query: Parameters<typeof queryMessages>[2]) =>
+      (
+        await queryMessages(getDb(), allowed, { limit: 10, viewer, ...query })
+      ).messages.map((message) => message.ref);
+
+    expect(await refs({ folder: "sent" })).toEqual([
+      { kind: "sent", id: "sent-1" },
+    ]);
+    expect(await refs({ folder: "sent", unseen: true })).toEqual([]);
+    expect(await refs({ folder: "sent", seen: false })).toEqual([]);
+    expect(await refs({ folder: "sent", seen: true })).toEqual([
+      { kind: "sent", id: "sent-1" },
+    ]);
+    expect(await refs({ folder: "inbox", unseen: true })).toEqual([
+      { kind: "received", id: "recv-1" },
+    ]);
+    expect(await refs({ unseen: true })).toEqual([
+      { kind: "received", id: "recv-1" },
+    ]);
+  });
+
   it("names a sent message's From with its inbox identity (live QA J3)", async () => {
     await seedPair();
     const scope = { isAdmin: false, inboxes: ["support@saasmail.test"] };

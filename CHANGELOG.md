@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Sent never counts unread mail.** An unread filter on Sent (JMAP `unreadEmails`/`unreadThreads`, `Email/query` with `notKeyword: "$seen"`, and the web's `unseen`/`seen=false` query) returned the inbox's unread received mail instead of nothing, so a mail client showed Sent with the Inbox's unread count.
+
 - **JMAP Session URLs are absolute.** `apiUrl`, `uploadUrl` and `downloadUrl` were paths (`/jmap/api`); some clients use them as given and couldn't make a single call (aerc, through go-jmap: `unsupported protocol scheme`). They are now absolute URLs on the host the client reached, and the Session `state` includes that host.
 
 - **JMAP lists every To address (account reset, id format v4).** Received mail's `to` used to be the inbox it arrived in; it is now the To header as it arrived, with names (mail stored without one still lists the inbox), and the web reading pane shows the other To addresses too. A sent message's `to` now lists its further To addresses and `bcc` its Bcc. `to` and `bcc` are immutable, so the JMAP account id changed again: the v3 account id answers `accountNotFound`, states are `j4-…`, and clients resync from `/.well-known/jmap`. Found by `yarn jmap:e2e` step 7.

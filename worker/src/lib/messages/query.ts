@@ -418,13 +418,18 @@ function stateScope(
       : query.starred
         ? sql`AND mus.starred_at IS NOT NULL`
         : sql`AND mus.starred_at IS NULL`;
+  // Sent mail is always seen, so an unseen filter finds none of it.
   const unseen =
-    query.unseen === true && kind === "received" && readColumn
-      ? sql`AND (
+    query.unseen !== true
+      ? sql``
+      : kind === "sent"
+        ? sql`AND 0`
+        : readColumn
+          ? sql`AND (
           (mus.message_id IS NULL AND ${readColumn} = 0)
           OR (mus.message_id IS NOT NULL AND mus.seen_at IS NULL)
         )`
-      : sql``;
+          : sql``;
   let seen = sql``;
   if (query.seen !== undefined) {
     if (kind === "sent") {
@@ -1089,14 +1094,17 @@ export function buildMessageQuerySql(
 
   const arms: SQL[] = [];
   const folder = query.folder;
-  const forceReceived =
-    folder === "inbox" ||
-    folder === "archive" ||
-    folder === "junk" ||
-    folder === "snoozed" ||
-    query.unseen === true ||
-    query.seen === false;
+  // Sent holds only sent mail, whatever else the query asks: an unread filter
+  // there must find nothing, not the inbox's unread received mail.
   const forceSent = folder === "sent";
+  const forceReceived =
+    !forceSent &&
+    (folder === "inbox" ||
+      folder === "archive" ||
+      folder === "junk" ||
+      folder === "snoozed" ||
+      query.unseen === true ||
+      query.seen === false);
   const forceBoth =
     folder === "trash" || (folder !== undefined && typeof folder === "object");
   const includeReceived = forceReceived

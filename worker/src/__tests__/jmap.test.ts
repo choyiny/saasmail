@@ -366,6 +366,57 @@ describe("JMAP", () => {
     ]);
   });
 
+  it("counts no unread mail in Sent, however much the Inbox has", async () => {
+    const { userId, apiKey } = await createTestUser({ id: "jmap-user" });
+    await addIdentity(MINE, "Support");
+    await createTestPerson({ id: "person-1", email: "alice@example.com" });
+    for (const id of ["unread-1", "unread-2"]) {
+      await createTestEmail({
+        id,
+        personId: "person-1",
+        recipient: MINE,
+        messageId: `<${id}@example.com>`,
+        isRead: 0,
+      });
+    }
+    await createTestSentEmail({ id: "sent-1", fromAddress: MINE });
+
+    const result = await jmapJson(apiKey, [
+      [
+        "Mailbox/get",
+        {
+          accountId: acct(userId),
+          ids: [sys(MINE, "inbox"), sys(MINE, "sent")],
+          properties: [
+            "id",
+            "totalEmails",
+            "unreadEmails",
+            "totalThreads",
+            "unreadThreads",
+          ],
+        },
+        "m",
+      ],
+      [
+        "Email/query",
+        {
+          accountId: acct(userId),
+          filter: { inMailbox: sys(MINE, "sent"), notKeyword: "$seen" },
+        },
+        "q",
+      ],
+    ]);
+    const [inbox, sent] = result.methodResponses[0][1].list;
+    expect(inbox).toMatchObject({ totalEmails: 2, unreadEmails: 2 });
+    expect(sent).toMatchObject({
+      totalEmails: 1,
+      unreadEmails: 0,
+      totalThreads: 1,
+      unreadThreads: 0,
+    });
+    expect(result.methodResponses[1][1].ids).toEqual([]);
+  });
+
   it("rejects unknown properties in every supported get method", async () => {
     const { userId, apiKey } = await createTestUser({
       id: "jmap-properties-user",
