@@ -3,6 +3,7 @@ import { MAX_CC_ENTRIES } from "../lib/send-limits";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { drafts } from "../db/drafts.schema";
 import { upsertDraft } from "../lib/drafts";
+import { destroyLinkedJmapDraft, publishWebDraft } from "../jmap/web-drafts";
 import { json200Response } from "../lib/helpers";
 import { bearerSecurity } from "../lib/openapi-auth";
 import type { Variables } from "../variables";
@@ -211,8 +212,62 @@ draftsRouter.openapi(deleteDraftRoute, async (c) => {
   const db = c.get("db");
   const user = c.get("user");
   const { contextKey } = c.req.valid("query");
-  await db
+  const deleted = await db
     .delete(drafts)
-    .where(and(eq(drafts.userId, user.id), eq(drafts.contextKey, contextKey)));
+    .where(and(eq(drafts.userId, user.id), eq(drafts.contextKey, contextKey)))
+    .returning({ jmapDraftId: drafts.jmapDraftId, userId: drafts.userId });
+  // A shared draft is one draft: deleting it here deletes it in JMAP too.
+  for (const row of deleted) {
+    await destroyLinkedJmapDraft(db, c.env, row);
+  }
   return c.json({ success: true }, 200);
+});
+
+// POST /api/drafts/publish — publish a compose surface's draft to JMAP.
+const PublishResponse = z.object({
+  status: z.enum(["published", "unchanged", "skipped", "gone", "notFound"]),
+  reason: z.string().optional(),
+});
+
+const publishDraftRoute = createRoute({
+  method: "post",
+  path: "/publish",
+  tags: ["Drafts"],
+  security: bearerSecurity,
+  description:
+    "Publish the draft of a compose surface so JMAP clients see it (a new JMAP draft revision when it changed). The composer calls it when it closes and after a minute idle. `gone` means the draft was sent or deleted from a JMAP client.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ contextKey: z.string().min(1).max(200) }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "What the publish did",
+      content: { "application/json": { schema: PublishResponse } },
+    },
+    401: { description: "Not signed in" },
+  },
+});
+
+draftsRouter.openapi(publishDraftRoute, async (c) => {
+  const { contextKey } = c.req.valid("json");
+  const outcome = await publishWebDraft(
+    c.get("db"),
+    c.env,
+    c.get("allowedInboxes")!,
+    c.get("user").id,
+    contextKey,
+  );
+  return c.json(
+    {
+      status: outcome.status,
+      ...(outcome.status === "skipped" ? { reason: outcome.reason } : {}),
+    },
+    200,
+  );
 });

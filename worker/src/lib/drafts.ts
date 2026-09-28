@@ -68,6 +68,8 @@ export async function upsertDraft(
         bodyHtml: input.bodyHtml ?? null,
         bodyText: input.bodyText ?? null,
         replyToEmailId: input.replyToEmailId ?? null,
+        // Shared drafts: the next publish makes a new JMAP revision.
+        dirty: 1,
         updatedAt: now,
       },
     });

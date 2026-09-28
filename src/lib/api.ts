@@ -961,6 +961,26 @@ export async function deleteDraft(contextKey: string): Promise<void> {
   });
 }
 
+export type PublishDraftStatus =
+  | "published"
+  | "unchanged"
+  | "skipped"
+  | "gone"
+  | "notFound";
+
+/**
+ * Shared drafts: publish a compose surface's draft so JMAP clients see it.
+ * `gone` means it was sent or deleted from a JMAP client.
+ */
+export async function publishDraft(
+  contextKey: string,
+): Promise<{ status: PublishDraftStatus; reason?: string }> {
+  return apiFetch("/api/drafts/publish", {
+    method: "POST",
+    body: JSON.stringify({ contextKey }),
+  });
+}
+
 // --- User Management Types ---
 
 export interface Invite {

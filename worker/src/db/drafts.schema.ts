@@ -35,6 +35,18 @@ export const drafts = sqliteTable(
     bodyText: text("body_text"),
     /** The email being replied to, or null for a new-message draft. */
     replyToEmailId: text("reply_to_email_id"),
+    /**
+     * Shared drafts: the internal id of the JMAP draft (`jmap_drafts.id`) this
+     * working copy was last published as, or opened from. Null until published.
+     */
+    jmapDraftId: text("jmap_draft_id"),
+    /** 1 while the working copy has edits not yet published to JMAP. */
+    dirty: integer("dirty").notNull().default(1),
+    /**
+     * `gone` once its JMAP draft was sent or deleted elsewhere: the working copy
+     * then stops publishing and the composer says so. Null otherwise.
+     */
+    jmapState: text("jmap_state", { enum: ["gone"] }),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

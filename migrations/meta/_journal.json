@@ -512,6 +512,13 @@
       "when": 1790593091444,
       "tag": "0072_jmap_delayed_send_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1790597619742,
+      "tag": "0073_shared_drafts",
+      "breakpoints": true
     }
   ]
 }
