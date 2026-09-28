@@ -47,7 +47,7 @@ import {
   publicReceivedRawBlobId,
   publicThreadId,
 } from "./public-ids";
-import { currentJmapState, jmapState } from "./state";
+import { currentJmapState } from "./state";
 import { MAX_OBJECTS_IN_GET } from "./constants";
 
 export type JmapMethodError = {
@@ -840,7 +840,7 @@ export async function emailQuery(
     }
   }
 
-  const queryState = await jmapState(db, allowed, userId);
+  const queryState = (await currentJmapState(db, allowed, userId)).state;
   let total: number | undefined;
   if (position < 0 || args.calculateTotal === true) {
     total =

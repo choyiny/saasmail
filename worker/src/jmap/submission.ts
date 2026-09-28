@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { attachments } from "../db/attachments.schema";
@@ -26,6 +26,7 @@ import {
   submissionUnsendableLeaves,
   type SubmissionMessage,
 } from "../lib/submit-message";
+import { queuedLockReleasableSql } from "./queued-lock";
 import { MAX_OBJECTS_IN_SET } from "./constants";
 import type { ContentAddress, ContentLeaf, JmapContentRow } from "./content";
 import { resolveCreationRef } from "./creation-refs";
@@ -303,19 +304,7 @@ async function releaseFinishedQueuedLock(
   draft: JmapDraftRow,
 ): Promise<void> {
   if (draft.submitState !== "queued" || !draft.submitAttemptId) return;
-  const [holder] = await db
-    .select({ sentEmailId: jmapSubmissions.sentEmailId })
-    .from(jmapSubmissions)
-    .where(eq(jmapSubmissions.id, draft.submitAttemptId))
-    .limit(1);
-  if (holder) {
-    const [outbox] = await db
-      .select({ status: outboxEmails.status })
-      .from(outboxEmails)
-      .where(eq(outboxEmails.sentEmailId, holder.sentEmailId))
-      .limit(1);
-    if (outbox && outbox.status !== "failed") return;
-  }
+  // The same rule as the recovery sweep (queued-lock.ts).
   await db
     .update(jmapDrafts)
     .set({ submitState: null, submitAttemptId: null })
@@ -324,6 +313,7 @@ async function releaseFinishedQueuedLock(
         eq(jmapDrafts.id, draft.id),
         eq(jmapDrafts.submitState, "queued"),
         eq(jmapDrafts.submitAttemptId, draft.submitAttemptId),
+        queuedLockReleasableSql(sql`${jmapDrafts.submitAttemptId}`),
       ),
     );
 }

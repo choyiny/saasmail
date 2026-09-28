@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { ensureSubmissionSentRow } from "./sent-row";
 import { emailSet } from "./email-set";
 import type { JmapMethodError } from "./emails";
 import type { JmapMethodContext } from "./methods";
@@ -82,6 +83,12 @@ export type PendingSubmission = typeof jmapSubmissions.$inferSelect;
  * batch (a concurrent request, or the recovery cron) changes nothing.
  */
 const PENDING_GUARD = `EXISTS (SELECT 1 FROM jmap_submissions WHERE id = ? AND on_success_state = 'pending')`;
+
+/**
+ * Cleanup spec §2: a draft is never deleted, and a submission never marked
+ * `applied`, unless its Sent row exists. Binds the Sent row id.
+ */
+const SENT_EXISTS = `EXISTS (SELECT 1 FROM sent_emails WHERE id = ?)`;
 
 /**
  * The alias (spec §3.3, §5): a draft that just went out becomes the Sent Email
@@ -192,14 +199,16 @@ export async function aliasDraftToSent(
   statements.push(
     db
       .prepare(
-        `UPDATE jmap_drafts SET alias_delete = 1 WHERE id = ? AND ${PENDING_GUARD}`,
+        `UPDATE jmap_drafts SET alias_delete = 1
+          WHERE id = ? AND ${PENDING_GUARD} AND ${SENT_EXISTS}`,
       )
-      .bind(draftId, submission.id),
+      .bind(draftId, submission.id, submission.sentEmailId),
     db
       .prepare(
-        `DELETE FROM jmap_drafts WHERE id = ? AND alias_delete = 1 AND ${PENDING_GUARD}`,
+        `DELETE FROM jmap_drafts WHERE id = ? AND alias_delete = 1
+            AND ${PENDING_GUARD} AND ${SENT_EXISTS}`,
       )
-      .bind(draftId, submission.id),
+      .bind(draftId, submission.id, submission.sentEmailId),
     // The author already knew this Email (as a draft): it was updated.
     db
       .prepare(
@@ -219,9 +228,9 @@ export async function aliasDraftToSent(
     db
       .prepare(
         `UPDATE jmap_submissions SET on_success_state = 'applied'
-          WHERE id = ? AND on_success_state = 'pending'`,
+          WHERE id = ? AND on_success_state = 'pending' AND ${SENT_EXISTS}`,
       )
-      .bind(submission.id),
+      .bind(submission.id, submission.sentEmailId),
   );
   const results = await db.batch(statements);
   return (results.at(-1)?.meta.changes ?? 0) > 0;
@@ -251,15 +260,21 @@ export async function revealSubmission(
       .prepare(
         `UPDATE jmap_drafts SET submit_state = NULL, submit_attempt_id = NULL, updated_at = ?
           WHERE id = ? AND submit_attempt_id = ? AND submit_state = 'submitting'
-            AND ${PENDING_GUARD}`,
+            AND ${PENDING_GUARD} AND ${SENT_EXISTS}`,
       )
-      .bind(now, submission.draftId, submission.id, submission.id),
+      .bind(
+        now,
+        submission.draftId,
+        submission.id,
+        submission.id,
+        submission.sentEmailId,
+      ),
     db
       .prepare(
         `UPDATE jmap_submissions SET on_success_state = 'applied'
-          WHERE id = ? AND on_success_state = 'pending'`,
+          WHERE id = ? AND on_success_state = 'pending' AND ${SENT_EXISTS}`,
       )
-      .bind(submission.id),
+      .bind(submission.id, submission.sentEmailId),
   ]);
   return (results.at(-1)?.meta.changes ?? 0) > 0;
 }
@@ -307,6 +322,13 @@ export async function applyOnSuccessStep(input: {
           ),
         )),
     );
+  }
+
+  // Cleanup spec §2: repair a missing Sent row before anything can delete the
+  // draft or mark the submission applied.
+  const repairedAt = Math.floor(Date.now() / 1000);
+  for (const submission of pending) {
+    await ensureSubmissionSentRow(db, submission, repairedAt);
   }
 
   const update: Record<string, Record<string, unknown>> = {};

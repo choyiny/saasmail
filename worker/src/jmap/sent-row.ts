@@ -3,6 +3,9 @@
 // row and conversation id the web composer computes, plus the content link and
 // the Message-ID the message was delivered with.
 import { and, eq } from "drizzle-orm";
+import { jmapMessageContent } from "../db/jmap-message-content.schema";
+import type { jmapSubmissions } from "../db/jmap-submissions.schema";
+import { outboxEmails } from "../db/outbox-emails.schema";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -12,7 +15,12 @@ import {
   findOrCreatePersonId,
   outboundConversationId,
 } from "../lib/sent-bookkeeping";
-import type { SubmissionMessage } from "../lib/submit-message";
+import {
+  buildSubmissionMessage,
+  loadDeliveredMessageIds,
+  submissionAttachmentLeaves,
+  type SubmissionMessage,
+} from "../lib/submit-message";
 import type { JmapContentRow } from "./content";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -107,4 +115,96 @@ async function withInlineAttachmentUrls(
     );
   }
   return rewritten;
+}
+
+/** Write the Sent row a provider-accepted send is missing, from its content. */
+export async function writeSentRow(
+  db: Db,
+  submission: typeof jmapSubmissions.$inferSelect,
+  status: "sent" | "retrying",
+  now: number,
+  /** From the held outbox row: the id the accepted message went out with. */
+  deliveredId: string | null = null,
+) {
+  const [content] = await db
+    .select()
+    .from(jmapMessageContent)
+    .where(eq(jmapMessageContent.id, submission.contentId))
+    .limit(1);
+  if (!content) {
+    throw new Error(
+      `content ${submission.contentId} missing for ${submission.id}`,
+    );
+  }
+  const leaves = submissionAttachmentLeaves(content);
+  const message = buildSubmissionMessage(
+    content,
+    { email: submission.identityEmail, displayName: null },
+    // The staged attachment bytes live under the Sent row's own keys and were
+    // already sent (or are owed by the outbox), so only the shape is needed here.
+    leaves.map((leaf) => ({
+      filename: leaf.name ?? `attachment-${leaf.partId}`,
+      contentType: leaf.type,
+      content: new ArrayBuffer(0),
+      contentId: leaf.cid,
+      disposition: leaf.disposition === "inline" ? "inline" : "attachment",
+    })),
+    await loadDeliveredMessageIds(db, content),
+  );
+  if (submission.fromHeader) message.from = submission.fromHeader;
+  await db
+    .insert(sentEmails)
+    .values(
+      await buildJmapSentRow(db, {
+        sentEmailId: submission.sentEmailId,
+        content,
+        message,
+        status,
+        providerResult: {
+          id: null,
+          deliveredMessageId: deliveredId,
+          error: null,
+        },
+        now,
+      }),
+    )
+    .onConflictDoNothing({ target: sentEmails.id });
+}
+
+/**
+ * Cleanup spec §2: the on-success step never runs without the submission's Sent
+ * row. A row deleted while still hidden (its person was deleted in the web UI)
+ * is re-created from the durable submission and content, as recovery writes it.
+ * Attachments shown in the web view are not restored; the JMAP Email projects
+ * from the content row and is complete.
+ */
+export async function ensureSubmissionSentRow(
+  db: Db,
+  submission: typeof jmapSubmissions.$inferSelect,
+  now: number,
+): Promise<void> {
+  const [existing] = await db
+    .select({ id: sentEmails.id })
+    .from(sentEmails)
+    .where(eq(sentEmails.id, submission.sentEmailId))
+    .limit(1);
+  if (existing) return;
+  const [outbox] = await db
+    .select({
+      status: outboxEmails.status,
+      deliveredMessageId: outboxEmails.deliveredMessageId,
+    })
+    .from(outboxEmails)
+    .where(eq(outboxEmails.sentEmailId, submission.sentEmailId))
+    .limit(1);
+  console.warn(
+    `[jmap] Sent row ${submission.sentEmailId} of submission ${submission.id} was missing; re-creating it`,
+  );
+  await writeSentRow(
+    db,
+    submission,
+    outbox?.status === "pending" ? "retrying" : "sent",
+    now,
+    outbox?.deliveredMessageId ?? null,
+  );
 }

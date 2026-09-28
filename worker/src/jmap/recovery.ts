@@ -1,7 +1,6 @@
 import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { users } from "../db/auth.schema";
-import { jmapMessageContent } from "../db/jmap-message-content.schema";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -9,13 +8,9 @@ import { createDb } from "../db/client";
 import { resolveAllowedInboxes } from "../lib/inbox-permissions";
 import { bracketedMessageId } from "../lib/message-id";
 import { discardSentAttachments } from "../lib/sent-attachments";
-import {
-  buildSubmissionMessage,
-  loadDeliveredMessageIds,
-  submissionAttachmentLeaves,
-} from "../lib/submit-message";
+import { queuedLockReleasableSql } from "./queued-lock";
 import { applyOnSuccessStep } from "./on-success";
-import { buildJmapSentRow } from "./sent-row";
+import { writeSentRow } from "./sent-row";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -76,60 +71,6 @@ async function accept(db: Db, submissionId: string) {
         eq(jmapSubmissions.attemptState, "claimed"),
       ),
     );
-}
-
-/** Write the Sent row a provider-accepted send is missing, from its content. */
-async function writeSentRow(
-  db: Db,
-  submission: typeof jmapSubmissions.$inferSelect,
-  status: "sent" | "retrying",
-  now: number,
-  /** From the held outbox row: the id the accepted message went out with. */
-  deliveredId: string | null = null,
-) {
-  const [content] = await db
-    .select()
-    .from(jmapMessageContent)
-    .where(eq(jmapMessageContent.id, submission.contentId))
-    .limit(1);
-  if (!content) {
-    throw new Error(
-      `content ${submission.contentId} missing for ${submission.id}`,
-    );
-  }
-  const leaves = submissionAttachmentLeaves(content);
-  const message = buildSubmissionMessage(
-    content,
-    { email: submission.identityEmail, displayName: null },
-    // The staged attachment bytes live under the Sent row's own keys and were
-    // already sent (or are owed by the outbox), so only the shape is needed here.
-    leaves.map((leaf) => ({
-      filename: leaf.name ?? `attachment-${leaf.partId}`,
-      contentType: leaf.type,
-      content: new ArrayBuffer(0),
-      contentId: leaf.cid,
-      disposition: leaf.disposition === "inline" ? "inline" : "attachment",
-    })),
-    await loadDeliveredMessageIds(db, content),
-  );
-  if (submission.fromHeader) message.from = submission.fromHeader;
-  await db
-    .insert(sentEmails)
-    .values(
-      await buildJmapSentRow(db, {
-        sentEmailId: submission.sentEmailId,
-        content,
-        message,
-        status,
-        providerResult: {
-          id: null,
-          deliveredMessageId: deliveredId,
-          error: null,
-        },
-        now,
-      }),
-    )
-    .onConflictDoNothing({ target: sentEmails.id });
 }
 
 /**
@@ -326,12 +267,7 @@ export async function unlockQueuedDrafts(db: Db, now: number): Promise<number> {
     UPDATE jmap_drafts
        SET submit_state = NULL, submit_attempt_id = NULL, updated_at = ${now}
      WHERE submit_state = 'queued'
-       AND NOT EXISTS (
-         SELECT 1 FROM jmap_submissions js
-           JOIN outbox_emails o ON o.sent_email_id = js.sent_email_id
-          WHERE js.id = jmap_drafts.submit_attempt_id
-            AND o.status = 'pending'
-       )
+       AND ${queuedLockReleasableSql(sql`jmap_drafts.submit_attempt_id`)}
   `);
   return result.meta.changes ?? 0;
 }

@@ -577,6 +577,32 @@ describe("EmailSubmission/set create", () => {
     expect(third.calls).toHaveLength(1);
   });
 
+  it("a queued draft whose send was cancelled in the Outbox can be sent again", async () => {
+    const first = recordingSender([TRANSIENT]);
+    const draft = await createDraft(userId, first.sender);
+    await runJmap(userId, [submitCall(userId, draft.id)], first.sender);
+    const [sent] = await sentRowsFor(parseRawBlobId(draft.blobId)!);
+    expect((await draftRow(draft.id)).submitState).toBe("queued");
+
+    // What DELETE /api/outbox/{id} does: drop the row, fail the message.
+    await getDb()
+      .delete(outboxEmails)
+      .where(eq(outboxEmails.sentEmailId, sent.id));
+    await getDb()
+      .update(sentEmails)
+      .set({ status: "failed" })
+      .where(eq(sentEmails.id, sent.id));
+
+    const again = recordingSender();
+    const responses = await runJmap(
+      userId,
+      [submitCall(userId, draft.id)],
+      again.sender,
+    );
+    expect(submissionResult(responses).created.s1).toBeDefined();
+    expect(again.calls).toHaveLength(1);
+  });
+
   it("two concurrent submissions of one draft make exactly one provider call", async () => {
     const { sender: base } = recordingSender();
     const draft = await createDraft(userId, base);

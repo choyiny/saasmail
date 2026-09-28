@@ -43,7 +43,7 @@ import {
   publicIdentityId,
   publicThreadId,
 } from "./public-ids";
-import { currentJmapState, jmapState } from "./state";
+import { currentJmapState, identityState, sessionState } from "./state";
 
 const MAX_EMAILS_IN_THREAD_GET = 1024;
 
@@ -223,7 +223,7 @@ export async function makeSession(
     downloadUrl: "/jmap/download/{accountId}/{blobId}/{name}?type={type}",
     uploadUrl: "/jmap/upload/{accountId}/",
     eventSourceUrl: "",
-    state: await jmapState(db, allowed, user.id),
+    state: await sessionState(db, allowed, user),
   };
 }
 
@@ -318,7 +318,7 @@ async function mailboxQuery(
     name: "Mailbox/query",
     result: {
       accountId: publicAccountId(userId),
-      queryState: await jmapState(db, allowed, userId),
+      queryState: (await currentJmapState(db, allowed, userId)).state,
       canCalculateChanges: false,
       position,
       ids: ids.slice(position, position + window.limit),
@@ -524,6 +524,24 @@ async function threadGet(
   };
 }
 
+/** The Identity objects the user sees; `Identity/get` and the Identity state. */
+async function identityObjects(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+) {
+  const rows = await listUsableIdentities(db, allowed);
+  return rows.map((row) => ({
+    id: publicIdentityId(row.email),
+    name: row.displayName ?? row.email,
+    email: row.email,
+    replyTo: null,
+    bcc: null,
+    textSignature: "",
+    htmlSignature: row.signatureHtml ?? "",
+    mayDelete: false,
+  }));
+}
+
 async function identityGet(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
@@ -547,17 +565,7 @@ async function identityGet(
     return methodError("requestTooLarge");
   }
 
-  const rows = await listUsableIdentities(db, allowed);
-  const all = rows.map((row) => ({
-    id: publicIdentityId(row.email),
-    name: row.displayName ?? row.email,
-    email: row.email,
-    replyTo: null,
-    bcc: null,
-    textSignature: "",
-    htmlSignature: row.signatureHtml ?? "",
-    mayDelete: false,
-  }));
+  const all = await identityObjects(db, allowed);
   const byId = new Map(all.map((identity) => [identity.id, identity]));
   const requested =
     ids === undefined || ids === null
@@ -587,7 +595,7 @@ async function identityGet(
     name: "Identity/get",
     result: {
       accountId: publicAccountId(userId),
-      state: await jmapState(db, allowed, userId),
+      state: await identityState(all),
       list,
       notFound,
     },
@@ -628,7 +636,7 @@ async function identitySet(
   ) {
     return methodError("invalidArguments", undefined, ["destroy"]);
   }
-  const state = await jmapState(db, allowed, userId);
+  const state = await identityState(await identityObjects(db, allowed));
   if (
     args.ifInState !== undefined &&
     args.ifInState !== null &&

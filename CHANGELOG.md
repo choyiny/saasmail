@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **JMAP state strings each have one source.** `Email/query` and `Mailbox/query` `queryState` now come from the change log, like `/changes` (the old count-and-latest-timestamp fingerprint could miss two changes in the same second). The Session `state` no longer changes whenever mail arrives, only when the Session does, and the Identity state is a hash of the identities you see, so every visible change moves it.
+
+- **The JMAP on-success step never loses a sent message.** If a Sent message was deleted in the web UI in the moment before its JMAP bookkeeping ran, the step used to delete the draft and finish anyway, leaving no Email at all; it now re-creates the Sent message from the stored submission first, and never deletes the draft or finishes without it.
+
+- **A queued JMAP draft stays locked while its send is still owed.** The hourly sweep released a draft whose message the provider had accepted but whose bookkeeping wasn't done yet; one shared rule now keeps the lock while delivery is pending or accepted work is owed, and releases it on a terminal failure, an Outbox cancel, or completed bookkeeping.
+
 - **A message addressed to two of your inboxes appears in both.** Inbound mail was deduplicated by Message-ID across all inboxes, so the second inbox's copy was dropped; it is now deduplicated per inbox (migration 0067 replaces the unique index on `emails.message_id` with one on `(message_id, recipient)`). A redelivery to the same inbox is still dropped. Found while sending a JMAP message To one inbox and Bcc another.
 
 - **The mailbox list no longer drops a message you just moved.** Restoring, unarchiving or otherwise changing a message and then opening another folder before the change reached the server could show that folder without the message until a reload; the list now reloads when a change lands after you moved on. An older folder's list can also no longer overwrite the newer one when you switch folders quickly. This also fixes the intermittently failing "custom folders" end-to-end test.

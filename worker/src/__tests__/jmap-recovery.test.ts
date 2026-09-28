@@ -17,8 +17,10 @@ import {
 } from "../jmap/recovery";
 import { aliasDraftToSent } from "../jmap/on-success";
 import { collectUnreferencedContent } from "../jmap/content";
+import { sys } from "./jmap-ids";
 import worker from "../index";
 import {
+  INBOX,
   changeRows,
   insertJmapSentRow,
   insertStagedAttachment,
@@ -318,6 +320,189 @@ describe("JMAP submission recovery", () => {
     expect((await one(getDb().select().from(jmapDrafts)))?.submitState).toBe(
       null,
     );
+  });
+
+  describe("the on-success step never loses the Email (cleanup spec §2)", () => {
+    async function seed(authorId: string, mode: "update" | "none") {
+      await insertTestContent({ id: "c1", userId: authorId });
+      await insertTestDraft({
+        id: "d1",
+        userId: authorId,
+        contentId: "c1",
+        submitState: "submitting",
+        submitAttemptId: "e1",
+      });
+      await insertTestSubmission({
+        id: "e1",
+        userId: authorId,
+        draftId: "d1",
+        contentId: "c1",
+        sentEmailId: "s1",
+        attemptState: "accepted",
+        onSuccessMode: mode,
+        // RFC 8621 §7.5's filing patch: out of Drafts, into Sent.
+        onSuccessPatch:
+          mode === "update"
+            ? {
+                "keywords/$draft": null,
+                [`mailboxIds/${sys(INBOX, "drafts")}`]: null,
+                [`mailboxIds/${sys(INBOX, "sent")}`]: true,
+              }
+            : null,
+        createdAt: OLD,
+      });
+      // No Sent row: it was deleted while still hidden (e.g. its person was
+      // deleted in the web UI).
+    }
+
+    it("the alias batch refuses to delete the draft or mark applied without a Sent row", async () => {
+      const { authorId } = await seedAccount();
+      await seed(authorId, "update");
+      const [submission] = await getDb().select().from(jmapSubmissions);
+      expect(
+        await aliasDraftToSent(env, {
+          submission,
+          draftId: "d1",
+          draftReceivedAt: OLD,
+          userId: authorId,
+          system: "sent",
+          folders: [],
+          flagged: false,
+          now: NOW,
+        }),
+      ).toBe(false);
+      expect(await getDb().select().from(jmapDrafts)).toHaveLength(1);
+      expect(
+        (await one(getDb().select().from(jmapSubmissions)))?.onSuccessState,
+      ).toBe("pending");
+    });
+
+    it("recovery re-creates the Sent row, then aliases the draft onto it", async () => {
+      const { authorId } = await seedAccount();
+      await seed(authorId, "update");
+      expect(await applyPendingOnSuccess(getDb(), env, NOW)).toBe(1);
+
+      const sent = await one(
+        getDb().select().from(sentEmails).where(eq(sentEmails.id, "s1")),
+      );
+      expect(sent?.jmapContentId).toBe("c1");
+      expect(sent?.jmapEmailId).toBe("d1");
+      expect(await getDb().select().from(jmapDrafts)).toHaveLength(0);
+    });
+
+    it("recovery re-creates the Sent row before revealing it and unlocking the draft", async () => {
+      const { authorId } = await seedAccount();
+      await seed(authorId, "none");
+      expect(await applyPendingOnSuccess(getDb(), env, NOW)).toBe(1);
+      expect(
+        await one(
+          getDb().select().from(sentEmails).where(eq(sentEmails.id, "s1")),
+        ),
+      ).toBeDefined();
+      expect((await changeRows("sent:s1")).map((r) => r.op)).toEqual(["c"]);
+      expect((await one(getDb().select().from(jmapDrafts)))?.submitState).toBe(
+        null,
+      );
+    });
+  });
+
+  describe("one queued-lock rule (cleanup spec §3)", () => {
+    const cases: Array<{
+      name: string;
+      outbox: "pending" | "bookkeeping_pending" | "failed" | null;
+      sent: "sent" | "retrying" | "failed" | null;
+      onSuccess: "pending" | "applied";
+      submission?: false;
+      released: boolean;
+    }> = [
+      {
+        name: "delivery still retrying",
+        outbox: "pending",
+        sent: "retrying",
+        onSuccess: "pending",
+        released: false,
+      },
+      {
+        name: "accepted, bookkeeping owed",
+        outbox: "bookkeeping_pending",
+        sent: "sent",
+        onSuccess: "pending",
+        released: false,
+      },
+      {
+        name: "accepted, on-success owed, no outbox row",
+        outbox: null,
+        sent: "sent",
+        onSuccess: "pending",
+        released: false,
+      },
+      {
+        name: "outbox gave up",
+        outbox: "failed",
+        sent: "failed",
+        onSuccess: "pending",
+        released: true,
+      },
+      {
+        name: "cancelled in the Outbox tab",
+        outbox: null,
+        sent: "failed",
+        onSuccess: "pending",
+        released: true,
+      },
+      {
+        name: "on-success applied",
+        outbox: null,
+        sent: "sent",
+        onSuccess: "applied",
+        released: true,
+      },
+      {
+        name: "holder submission gone",
+        outbox: null,
+        sent: null,
+        onSuccess: "pending",
+        submission: false,
+        released: true,
+      },
+    ];
+    for (const c of cases) {
+      it(`${c.released ? "releases" : "keeps"} the lock: ${c.name}`, async () => {
+        const { authorId } = await seedAccount();
+        await insertTestContent({ id: "c1", userId: authorId });
+        await insertTestDraft({
+          id: "d1",
+          userId: authorId,
+          contentId: "c1",
+          submitState: "queued",
+          submitAttemptId: "e1",
+        });
+        if (c.submission !== false) {
+          await insertTestSubmission({
+            id: "e1",
+            userId: authorId,
+            draftId: "d1",
+            contentId: "c1",
+            sentEmailId: "s1",
+            attemptState: "accepted",
+            onSuccessState: c.onSuccess,
+          });
+        }
+        if (c.outbox) {
+          await insertTestOutboxRow({ sentEmailId: "s1", status: c.outbox });
+        }
+        if (c.sent) {
+          await insertJmapSentRow({
+            id: "s1",
+            contentId: "c1",
+            status: c.sent,
+          });
+        }
+        await unlockQueuedDrafts(getDb(), NOW);
+        const draft = await one(getDb().select().from(jmapDrafts));
+        expect(draft?.submitState).toBe(c.released ? null : "queued");
+      });
+    }
   });
 
   it("prunes applied submissions after 7 days and writes a tombstone", async () => {

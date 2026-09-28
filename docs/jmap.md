@@ -189,7 +189,9 @@ The response sets `Content-Type` from the `type` parameter, uses `name` as the f
 
 ## State and changes
 
-Mailbox/get, Email/get, Thread/get, Email/set and the EmailSubmission methods use change-log state strings of the form `j2-<seq>-<issuedAt>-<fp>`. `issuedAt` is the start of the current UTC day, so repeated reads of unchanged data keep the same state throughout the day; `ifInState` compares the parsed sequence and permission fingerprint, not the issuance timestamp. Change rows are scoped by the caller's allowed inboxes and, for personal state (seen/flagged, drafts, submissions), by user. States older than the supported window are rejected with `cannotCalculateChanges`; change-log rows are retained for 30 days and pruned in bounded batches by the scheduled maintenance chain.
+Mailbox/get, Email/get, Thread/get, Email/set, the EmailSubmission methods, and the `queryState` of `Email/query` and `Mailbox/query` use change-log state strings of the form `j3-<seq>-<issuedAt>-<fp>`. `issuedAt` is the start of the current UTC day, so repeated reads of unchanged data keep the same state throughout the day; `ifInState` compares the parsed sequence and permission fingerprint, not the issuance timestamp. Change rows are scoped by the caller's allowed inboxes and, for personal state (seen/flagged, drafts, submissions), by user. States older than the supported window are rejected with `cannotCalculateChanges`; change-log rows are retained for 30 days and pruned in bounded batches by the scheduled maintenance chain.
+
+Two states are not mail state and follow their own objects. The Session's `state` changes only when the Session does (the account, the username, or the inboxes it covers), not when mail arrives. The Identity `state` (`Identity/get`, and `Identity/set`'s `ifInState`) is a hash of the identities you see, so it moves with any visible change to them.
 
 Email/changes coalesces repeated activity for an Email into created/updated/destroyed ids and supports paging through an intermediate state. Mailbox/changes also reports mailbox count changes caused by Email activity. Because mailbox counts are small, saasmail does not page Mailbox/changes: if the result would exceed `maxChanges`, it returns `cannotCalculateChanges` instead.
 
@@ -219,11 +221,14 @@ For clients that ask for endpoints manually, use `https://your-domain.example/jm
 
 To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mjs`). It sends real email; the variables it needs are listed at the top of the script.
 
+## Identities are read-only
+
+`Identity/set` answers `forbidden` for every create, update and destroy, on purpose. A saasmail identity is a shared inbox, not a personal sending profile: it carries organization-wide settings (display name, signature, forwarding, spam threshold, agent instructions) that everyone using the inbox shares. Letting any member change them from a mail client would change them for everyone, so they are managed in saasmail's settings. Per-user identity preferences would be a separate, future layer.
+
 ## Known gaps
 
 - Delayed send, and cancelling or recalling a submission.
 - Drafts in custom folders.
-- Editable identities (`Identity/set` is read-only).
 - Raw-message `blobId` for sent mail that wasn't created through JMAP, and for mail received before the raw message was kept (it stays `null`).
 - The web composer's drafts don't appear in JMAP, and JMAP drafts don't appear in the web UI.
 - A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
