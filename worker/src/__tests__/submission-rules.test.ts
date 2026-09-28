@@ -118,6 +118,7 @@ describe("resolveEnvelope (spec §3.2 step 5)", () => {
         ],
       },
       error: null,
+      releaseAt: null,
     });
   });
 
@@ -164,6 +165,78 @@ describe("resolveEnvelope (spec §3.2 step 5)", () => {
     ).toMatchObject({ type: "invalidProperties", properties: ["envelope"] });
     expect(
       resolveEnvelope({ rcptTo: "nope" }, "me@x.com", recipients).error,
+    ).toMatchObject({ type: "invalidProperties", properties: ["envelope"] });
+  });
+});
+
+describe("resolveEnvelope: RFC 4865 FUTURERELEASE on mailFrom", () => {
+  const recipients = ["a@x.com"];
+  const NOW = 1_800_000_000;
+  const hold = (parameters: unknown) =>
+    resolveEnvelope(
+      {
+        mailFrom: { email: "me@x.com", parameters },
+        rcptTo: [{ email: "a@x.com" }],
+      },
+      "me@x.com",
+      recipients,
+      NOW,
+    );
+
+  it("holds for HOLDFOR seconds, case-insensitively, up to 86400", () => {
+    expect(hold({ HOLDFOR: "600" })).toMatchObject({
+      error: null,
+      releaseAt: NOW + 600,
+      envelope: { mailFrom: { parameters: { HOLDFOR: "600" } } },
+    });
+    expect(hold({ holdfor: "86400" }).releaseAt).toBe(NOW + 86400);
+    expect(hold({ HOLDFOR: "0" })).toMatchObject({
+      error: null,
+      releaseAt: null,
+    });
+  });
+
+  it("holds until a HOLDUNTIL date-time; one in the past sends now", () => {
+    expect(hold({ HOLDUNTIL: "2027-01-15T08:00:10Z" }).releaseAt).toBe(
+      Date.parse("2027-01-15T08:00:10Z") / 1000,
+    );
+    expect(
+      hold({ HOLDUNTIL: new Date((NOW + 3600) * 1000).toISOString() })
+        .releaseAt,
+    ).toBe(NOW + 3600);
+    expect(hold({ HOLDUNTIL: "2020-01-01T00:00:00Z" })).toMatchObject({
+      error: null,
+      releaseAt: null,
+    });
+  });
+
+  it("refuses holds past maxDelayedSend, malformed values and other parameters", () => {
+    for (const parameters of [
+      { HOLDFOR: "86401" },
+      { HOLDFOR: "-5" },
+      { HOLDFOR: "1e3" },
+      { HOLDFOR: null },
+      { HOLDUNTIL: new Date((NOW + 86401) * 1000).toISOString() },
+      { HOLDUNTIL: "tomorrow" },
+      { HOLDFOR: "60", HOLDUNTIL: "2027-01-15T08:00:00Z" },
+      { BODY: "8BITMIME" },
+      "HOLDFOR=60",
+    ]) {
+      expect(hold(parameters).error).toMatchObject({
+        type: "invalidProperties",
+        properties: ["envelope"],
+      });
+    }
+    expect(
+      resolveEnvelope(
+        {
+          mailFrom: { email: "me@x.com" },
+          rcptTo: [{ email: "a@x.com", parameters: { NOTIFY: "NEVER" } }],
+        },
+        "me@x.com",
+        recipients,
+        NOW,
+      ).error,
     ).toMatchObject({ type: "invalidProperties", properties: ["envelope"] });
   });
 });

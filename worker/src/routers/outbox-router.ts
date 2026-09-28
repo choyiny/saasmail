@@ -1,10 +1,21 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, desc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
+import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { createEmailSender } from "../lib/email-sender";
 import { attemptOutboxRow, resolveSequenceStep } from "../lib/outbox";
-import { assertInboxAllowed, inboxFilter } from "../lib/inbox-permissions";
+import {
+  assertInboxAllowed,
+  inboxFilter,
+  isInboxAllowed,
+} from "../lib/inbox-permissions";
+import {
+  cancelScheduledSubmission,
+  restoreCanceledToDrafts,
+  restoreStillPossible,
+  webRestoreTarget,
+} from "../jmap/release";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 
@@ -62,6 +73,151 @@ outboxRouter.openapi(countRoute, async (c) => {
         : eq(outboxEmails.status, "pending"),
     );
   return c.json({ pending: rows[0]?.n ?? 0 }, 200);
+});
+
+// --- GET /api/outbox/scheduled ---
+// Delayed sends a JMAP client scheduled (RFC 4865 FUTURERELEASE). Only their
+// author can cancel them, so only the author's are listed.
+const ScheduledItemSchema = z.object({
+  id: z.string(),
+  sentEmailId: z.string(),
+  fromAddress: z.string(),
+  toAddress: z.string(),
+  subject: z.string(),
+  sendAt: z.number(),
+});
+
+const scheduledRoute = createRoute({
+  method: "get",
+  path: "/scheduled",
+  tags: ["Outbox"],
+  description:
+    "Your delayed sends that haven't gone out yet, soonest first. Cancel one before its send time with POST /api/outbox/scheduled/{id}/cancel.",
+  responses: {
+    200: {
+      description: "Scheduled sends",
+      content: {
+        "application/json": {
+          schema: z.object({ items: z.array(ScheduledItemSchema) }),
+        },
+      },
+    },
+    401: { description: "Not signed in" },
+  },
+});
+
+outboxRouter.openapi(scheduledRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const user = c.get("user");
+  const scope = inboxFilter(allowed, jmapSubmissions.identityEmail);
+  const rows = await db
+    .select({
+      id: jmapSubmissions.id,
+      sentEmailId: jmapSubmissions.sentEmailId,
+      fromAddress: jmapSubmissions.identityEmail,
+      toAddress: sentEmails.toAddress,
+      subject: sentEmails.subject,
+      sendAt: jmapSubmissions.sendAt,
+    })
+    .from(jmapSubmissions)
+    .innerJoin(sentEmails, eq(sentEmails.id, jmapSubmissions.sentEmailId))
+    .where(
+      and(
+        eq(jmapSubmissions.userId, user.id),
+        eq(jmapSubmissions.attemptState, "scheduled"),
+        eq(jmapSubmissions.undoStatus, "pending"),
+        ...(scope ? [scope] : []),
+      ),
+    )
+    .orderBy(asc(jmapSubmissions.sendAt))
+    .limit(MAX_LIMIT);
+  return c.json({ items: rows }, 200);
+});
+
+// --- POST /api/outbox/scheduled/{id}/cancel ---
+const cancelScheduledRoute = createRoute({
+  method: "post",
+  path: "/scheduled/{id}/cancel",
+  tags: ["Outbox"],
+  description:
+    "Cancel a delayed send before it goes out, then move its message back to Drafts. If the move fails, the send stays canceled and the hourly maintenance finishes the move.",
+  request: { params: z.object({ id: z.string() }) },
+  responses: {
+    200: {
+      description: "Canceled",
+      content: {
+        "application/json": {
+          schema: z.object({
+            canceled: z.literal(true),
+            movedToDrafts: z.boolean(),
+            /** Not moved yet, but the hourly maintenance will move it. */
+            willMove: z.boolean(),
+          }),
+        },
+      },
+    },
+    404: { description: "Not found" },
+    409: { description: "The message is already being sent or was sent" },
+  },
+});
+
+outboxRouter.openapi(cancelScheduledRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const user = c.get("user");
+  const { id } = c.req.valid("param");
+  const [row] = await db
+    .select({ identityEmail: jmapSubmissions.identityEmail })
+    .from(jmapSubmissions)
+    .where(and(eq(jmapSubmissions.id, id), eq(jmapSubmissions.userId, user.id)))
+    .limit(1);
+  if (!row || !isInboxAllowed(allowed, row.identityEmail)) {
+    return c.json({ error: "Not found" }, 404);
+  }
+  // Step 1 decides: cancel wins only while the send is still scheduled.
+  const outcome = await cancelScheduledSubmission(c.env, {
+    submissionId: id,
+    userId: user.id,
+    restoreToDrafts: true,
+  });
+  if (outcome === "notFound") return c.json({ error: "Not found" }, 404);
+  if (outcome === "cannotUnsend") {
+    return c.json(
+      { error: "The message is already being sent or was sent" },
+      409,
+    );
+  }
+  // Step 2 is best effort: the send is canceled either way.
+  let movedToDrafts = false;
+  let willMove = false;
+  try {
+    const target = await webRestoreTarget(db, id);
+    movedToDrafts = target
+      ? await restoreCanceledToDrafts(c.env, {
+          submissionId: id,
+          userId: user.id,
+          target,
+          now: Math.floor(Date.now() / 1000),
+        })
+      : false;
+  } catch (error) {
+    console.error(
+      `[outbox] moving canceled ${id} back to Drafts failed:`,
+      error,
+    );
+  }
+  if (!movedToDrafts) {
+    willMove = await restoreStillPossible(c.env, id);
+    if (!willMove) {
+      // The send never filed its draft into Sent: nothing to move back.
+      await db
+        .update(jmapSubmissions)
+        .set({ restoreToDrafts: 0 })
+        .where(eq(jmapSubmissions.id, id));
+    }
+  }
+  return c.json({ canceled: true as const, movedToDrafts, willMove }, 200);
 });
 
 // --- GET /api/outbox ---

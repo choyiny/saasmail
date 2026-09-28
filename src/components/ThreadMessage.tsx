@@ -2,6 +2,7 @@ import { Send, Inbox as InboxIcon, AlertTriangle, Clock } from "lucide-react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import type { Email } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import DeliveryBadge from "@/components/mail/DeliveryBadge";
 
 interface ThreadMessageProps {
   email: Email;
@@ -26,6 +27,9 @@ export default function ThreadMessage({
   const isSent = email.type === "sent";
   const failedToSend = isSent && email.status === "failed";
   const retrying = isSent && email.status === "retrying";
+  // A delayed send that hasn't gone out: no "Sent" chip, a scheduled badge.
+  const notSentYet =
+    isSent && (email.status === "scheduled" || email.status === "canceled");
   const sender = isSent
     ? `you (${email.fromAddress ?? "—"})`
     : (email.fromAddress ?? "Unknown");
@@ -71,6 +75,11 @@ export default function ThreadMessage({
               <Clock size={9} />
               Retrying
             </>
+          ) : notSentYet ? (
+            <>
+              <Clock size={9} />
+              Not sent
+            </>
           ) : isSent ? (
             <>
               <Send size={9} />
@@ -83,6 +92,9 @@ export default function ThreadMessage({
             </>
           )}
         </span>
+        {notSentYet && (
+          <DeliveryBadge status={email.status} sendAt={email.timestamp} />
+        )}
         <span className="truncate font-medium text-text-primary">{sender}</span>
         {recipient && (
           <span className="truncate text-text-tertiary">→ {recipient}</span>

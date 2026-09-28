@@ -939,7 +939,7 @@ describe("EmailSubmission/set create", () => {
     expect(reply.threadId).toBe(original.threadId);
   });
 
-  it("runs the on-success step and treats update/destroy as read-only", async () => {
+  it("runs the on-success step, refuses to unsend a sent submission, and never destroys one", async () => {
     const { sender } = recordingSender();
     const draft = await createDraft(userId, sender);
     // PR 6 supports the on-success arguments: a destroy now takes the draft away
@@ -984,7 +984,8 @@ describe("EmailSubmission/set create", () => {
       sender,
     );
     const result = changed[1] as Record<string, any>;
-    expect(result.notUpdated[id].type).toBe("forbidden");
+    // RFC 8621 §7.5: an immediate send is final, so it can't be unsent.
+    expect(result.notUpdated[id].type).toBe("cannotUnsend");
     expect(result.notUpdated.Enope.type).toBe("notFound");
     expect(result.notDestroyed[id].type).toBe("forbidden");
     expect(result.notDestroyed.Enope.type).toBe("notFound");

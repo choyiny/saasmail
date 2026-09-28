@@ -36,9 +36,19 @@ describe("JMAP submission capability", () => {
       await authFetch("/.well-known/jmap", { apiKey })
     ).json()) as Record<string, any>;
     expect(session.capabilities[SUBMISSION_CAPABILITY]).toEqual({});
-    expect(
-      session.accounts[acct(userId)].accountCapabilities[SUBMISSION_CAPABILITY],
-    ).toEqual({ maxDelayedSend: 0, submissionExtensions: {} });
+    // RFC 4865 §3: FUTURERELEASE carries both EHLO arguments, the longest hold
+    // in seconds and the latest release date-time in UTC.
+    const submission =
+      session.accounts[acct(userId)].accountCapabilities[SUBMISSION_CAPABILITY];
+    expect(submission.maxDelayedSend).toBe(86400);
+    expect(Object.keys(submission.submissionExtensions)).toEqual([
+      "FUTURERELEASE",
+    ]);
+    const [interval, latest] = submission.submissionExtensions.FUTURERELEASE;
+    expect(interval).toBe("86400");
+    expect(latest).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    const expected = Date.now() + 86400_000;
+    expect(Math.abs(Date.parse(latest) - expected)).toBeLessThan(10_000);
     expect(session.primaryAccounts[SUBMISSION_CAPABILITY]).toBe(acct(userId));
 
     const echo = await authFetch("/jmap/api", {

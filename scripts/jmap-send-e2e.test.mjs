@@ -12,6 +12,7 @@ import {
   resolveUrl,
   run,
   stableStringify,
+  delayedSendCapabilityOk,
 } from "./jmap-send-e2e.mjs";
 
 const REQUIRED = {
@@ -301,5 +302,42 @@ describe("jmap-send-e2e runner", () => {
     expect(result.ok).toBe(false);
     expect(result.failure).toContain("account id is the hashed form");
     expect(lines.filter((line) => line.startsWith("FAIL"))).toHaveLength(1);
+  });
+});
+
+describe("jmap-send-e2e delayed send capability", () => {
+  const NOW = Date.parse("2026-09-28T10:00:00Z");
+  const good = {
+    maxDelayedSend: 86400,
+    submissionExtensions: {
+      FUTURERELEASE: ["86400", "2026-09-29T10:00:00Z"],
+    },
+  };
+
+  it("accepts maxDelayedSend 86400 with both FUTURERELEASE arguments", () => {
+    expect(delayedSendCapabilityOk(good, NOW)).toBe(true);
+  });
+
+  it("rejects an empty max date-time, a local time, or a stale date", () => {
+    for (const args of [
+      ["86400", ""],
+      ["86400"],
+      ["86400", "2026-09-29T12:00:00+02:00"],
+      ["86400", "2026-09-28T10:00:00Z"],
+      [86400, "2026-09-29T10:00:00Z"],
+    ]) {
+      expect(
+        delayedSendCapabilityOk(
+          { ...good, submissionExtensions: { FUTURERELEASE: args } },
+          NOW,
+        ),
+      ).toBe(false);
+    }
+    expect(
+      delayedSendCapabilityOk(
+        { maxDelayedSend: 0, submissionExtensions: {} },
+        NOW,
+      ),
+    ).toBe(false);
   });
 });

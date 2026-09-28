@@ -11,6 +11,7 @@ import {
   CORE_CAPABILITY,
   MAIL_CAPABILITY,
   MAX_CALLS_IN_REQUEST,
+  MAX_DELAYED_SEND,
   MAX_OBJECTS_IN_GET,
   MAX_OBJECTS_IN_SET,
   MAX_SIZE_REQUEST,
@@ -175,6 +176,7 @@ export async function makeSession(
   // One limit for uploads and for an Email's attachments: whatever the
   // configured provider accepts as attachments (spec §2).
   const maxUpload = createEmailSender(env).maxAttachmentBytes();
+  const nowSeconds = Math.floor(Date.now() / 1000);
   return {
     capabilities: {
       [CORE_CAPABILITY]: {
@@ -205,9 +207,17 @@ export async function makeSession(
             mayCreateTopLevelMailbox: false,
           },
           [SUBMISSION_CAPABILITY]: {
-            // No delayed send: a submission goes out during the request.
-            maxDelayedSend: 0,
-            submissionExtensions: {},
+            maxDelayedSend: MAX_DELAYED_SEND,
+            // RFC 4865 §3: the EHLO keyword takes both arguments, the longest
+            // hold in seconds and the latest release date-time (UTC).
+            submissionExtensions: {
+              FUTURERELEASE: [
+                String(MAX_DELAYED_SEND),
+                new Date((nowSeconds + MAX_DELAYED_SEND) * 1000)
+                  .toISOString()
+                  .replace(/\.\d{3}Z$/, "Z"),
+              ],
+            },
           },
         },
       },

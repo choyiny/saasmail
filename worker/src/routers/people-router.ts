@@ -15,6 +15,7 @@ import {
 import type { Variables } from "../variables";
 import { isInboxAllowed } from "../lib/inbox-permissions";
 import { deleteMessageState } from "../lib/messages/state";
+import { cancelScheduledSendsFor } from "../lib/scheduled-sends";
 import {
   collectPersonGroupConversations,
   deletePersonConversationState,
@@ -793,6 +794,7 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
       ),
     );
   await db.delete(emails).where(eq(emails.personId, id));
+  await cancelScheduledSendsFor(db, sql`person_id = ${id}`);
   await db.delete(sentEmails).where(eq(sentEmails.personId, id));
   await cleanupCustomerForPersonDeletion(db, id);
   await deletePersonConversationState(db, id, groupConversations);

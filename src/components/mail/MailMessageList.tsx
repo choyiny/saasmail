@@ -2,6 +2,7 @@ import type { ReactNode, RefObject } from "react";
 import { ArrowLeft, MailOpen, Paperclip, Search, Star } from "lucide-react";
 import type { InboxAssignee, MailMessage } from "@/lib/api";
 import type { SystemFolder } from "@/hooks/useMailMessages";
+import DeliveryBadge from "./DeliveryBadge";
 
 function counterparty(message: MailMessage): string {
   if (message.direction === "inbound") {
@@ -171,6 +172,10 @@ export function MailMessageRow({
         </p>
       )}
       <div className="mt-1.5 flex flex-wrap items-center gap-1">
+        <DeliveryBadge
+          status={message.delivery?.status}
+          sendAt={message.occurredAt}
+        />
         {message.source.campaignId && (
           <span className="rounded bg-bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-text-secondary">
             Campaign

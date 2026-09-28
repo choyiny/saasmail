@@ -1,7 +1,8 @@
 //
 // End-to-end check of JMAP sending against a running saasmail deployment
 // (docs/superpowers/specs/2026-09-25-jmap-email-submission-design.md §7).
-// It SENDS REAL EMAIL to JMAP_TO (and JMAP_CC when set).
+// It SENDS REAL EMAIL to JMAP_TO (and JMAP_CC when set), including one delayed
+// send (HOLDFOR=20) that the queue releases while the script waits.
 //
 //   JMAP_BASE_URL=https://mail.example.com \
 //   JMAP_API_KEY=sk_... \
@@ -70,6 +71,36 @@ export const EMAIL_GET_PROPERTIES = [
 export const IMMUTABLE_EMAIL_PROPERTIES = EMAIL_GET_PROPERTIES.filter(
   (property) => !["id", "mailboxIds", "keywords"].includes(property),
 );
+
+export const MAX_DELAYED_SEND = 86400;
+
+/**
+ * RFC 8621 §7 + RFC 4865 §3: maxDelayedSend and FUTURERELEASE's two EHLO
+ * arguments, the longest hold in seconds and the latest release date-time in
+ * UTC (about now + maxDelayedSend).
+ */
+export function delayedSendCapabilityOk(capability, nowMs) {
+  if (!isPlainObject(capability)) return false;
+  const extensions = capability.submissionExtensions;
+  if (
+    capability.maxDelayedSend !== MAX_DELAYED_SEND ||
+    !isPlainObject(extensions) ||
+    stableStringify(Object.keys(extensions)) !==
+      stableStringify(["FUTURERELEASE"])
+  ) {
+    return false;
+  }
+  const args = extensions.FUTURERELEASE;
+  if (!Array.isArray(args) || args.length !== 2) return false;
+  const [interval, latest] = args;
+  return (
+    interval === String(MAX_DELAYED_SEND) &&
+    typeof latest === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(latest) &&
+    Math.abs(Date.parse(latest) - (nowMs + MAX_DELAYED_SEND * 1000)) <
+      5 * 60_000
+  );
+}
 
 export class CheckFailed extends Error {}
 
@@ -610,9 +641,8 @@ async function stepSession(ctx) {
     `${step}: submission capability`,
     isPlainObject(session.capabilities?.[SUBMISSION_CAPABILITY]) &&
       session.primaryAccounts?.[SUBMISSION_CAPABILITY] === accountId &&
-      stableStringify(accountSubmission) ===
-        stableStringify({ maxDelayedSend: 0, submissionExtensions: {} }),
-    "maxDelayedSend 0",
+      delayedSendCapabilityOk(accountSubmission, Date.now()),
+    "maxDelayedSend 86400, FUTURERELEASE with both arguments",
     `capabilities ${JSON.stringify(
       Object.keys(session.capabilities ?? {}),
     )}, account capability ${JSON.stringify(accountSubmission)}`,
@@ -1493,6 +1523,198 @@ async function stepMultiRecipient(ctx, env, blobs) {
   await awaitDelivery(ctx, env, step, subject, config.from);
 }
 
+async function stepDelayed(ctx, env, blobs) {
+  const { client, report, config } = ctx;
+  const step = "9 delayed send";
+  const intoSent = {
+    "keywords/$draft": null,
+    [`mailboxIds/${env.draftsMailboxId}`]: null,
+    [`mailboxIds/${env.sentMailboxId}`]: true,
+  };
+  const schedule = (subject, parameters) => [
+    [
+      "Email/set",
+      {
+        accountId: env.accountId,
+        create: { draft: draftEmail(ctx, env, blobs, { subject }) },
+      },
+      "0",
+    ],
+    [
+      "EmailSubmission/set",
+      {
+        accountId: env.accountId,
+        create: {
+          sub: {
+            emailId: "#draft",
+            identityId: env.identity.id,
+            envelope: {
+              mailFrom: { email: env.identity.email, parameters },
+              rcptTo: [config.to, ...(config.cc ? [config.cc] : [])].map(
+                (email) => ({ email }),
+              ),
+            },
+          },
+        },
+        onSuccessUpdateEmail: { "#sub": intoSent },
+      },
+      "1",
+    ],
+  ];
+
+  // A one-hour hold: scheduled, filed into Sent now, canceled, moved back.
+  const held = await client.call(
+    schedule(`${ctx.marker} held`, { HOLDFOR: "3600" }),
+  );
+  const draft = methodResponse(held, "Email/set", "0").created?.draft;
+  if (!draft) {
+    report.fail(`${step}: draft create`, JSON.stringify(held));
+  }
+  ctx.liveDrafts.add(draft.id);
+  const submission = methodResponse(held, "EmailSubmission/set", "1").created
+    ?.sub;
+  const sendAt = Date.parse(submission?.sendAt ?? "");
+  report.check(
+    `${step}: HOLDFOR=3600 is scheduled, undoStatus pending`,
+    submission?.undoStatus === "pending" &&
+      Math.abs(sendAt - (Date.now() + 3600_000)) < 5 * 60_000,
+    submission?.sendAt ?? "",
+    JSON.stringify(methodResponse(held, "EmailSubmission/set", "1")),
+  );
+  ctx.liveDrafts.delete(draft.id);
+  const filed = await client.call([
+    emailGet(env, "g", [draft.id]),
+    [
+      "EmailSubmission/set",
+      {
+        accountId: env.accountId,
+        update: { [submission.id]: { undoStatus: "canceled" } },
+      },
+      "c",
+    ],
+    [
+      "EmailSubmission/get",
+      { accountId: env.accountId, ids: [submission.id] },
+      "r",
+    ],
+  ]);
+  report.check(
+    `${step}: the same Email is in Sent before it goes out`,
+    stableStringify(
+      methodResponse(filed, "Email/get", "g").list[0]?.mailboxIds,
+    ) === stableStringify({ [env.sentMailboxId]: true }),
+    draft.id,
+    JSON.stringify(methodResponse(filed, "Email/get", "g")),
+  );
+  report.check(
+    `${step}: cancel while scheduled`,
+    Object.prototype.hasOwnProperty.call(
+      methodResponse(filed, "EmailSubmission/set", "c").updated ?? {},
+      submission.id,
+    ) &&
+      methodResponse(filed, "EmailSubmission/get", "r").list[0]?.undoStatus ===
+        "canceled",
+    "",
+    JSON.stringify(filed),
+  );
+  const back = await client.call([
+    [
+      "Email/set",
+      {
+        accountId: env.accountId,
+        update: {
+          [draft.id]: {
+            mailboxIds: { [env.draftsMailboxId]: true },
+            keywords: { $draft: true, $seen: true },
+          },
+        },
+      },
+      "b",
+    ],
+    emailGet(env, "g", [draft.id]),
+  ]);
+  const restored = methodResponse(back, "Email/get", "g").list[0];
+  report.check(
+    `${step}: the canceled Email moves back to Drafts under the same id`,
+    restored?.id === draft.id &&
+      stableStringify(restored?.mailboxIds) ===
+        stableStringify({ [env.draftsMailboxId]: true }) &&
+      restored?.keywords?.$draft === true,
+    draft.id,
+    JSON.stringify(back),
+  );
+  ctx.liveDrafts.add(draft.id);
+
+  // A hold past maxDelayedSend is refused.
+  const tooLong = await client.call([
+    [
+      "EmailSubmission/set",
+      {
+        accountId: env.accountId,
+        create: {
+          sub: {
+            emailId: draft.id,
+            identityId: env.identity.id,
+            envelope: {
+              mailFrom: {
+                email: env.identity.email,
+                parameters: { HOLDFOR: String(MAX_DELAYED_SEND + 1) },
+              },
+              rcptTo: [config.to, ...(config.cc ? [config.cc] : [])].map(
+                (email) => ({ email }),
+              ),
+            },
+          },
+        },
+      },
+      "x",
+    ],
+  ]);
+  report.check(
+    `${step}: HOLDFOR past maxDelayedSend is refused`,
+    methodResponse(tooLong, "EmailSubmission/set", "x").notCreated?.sub
+      ?.type === "invalidProperties",
+    "",
+    JSON.stringify(tooLong),
+  );
+
+  // A short hold really goes out: the queue releases it and undoStatus turns
+  // final. This sends one more real email.
+  const short = await client.call(
+    schedule(`${ctx.marker} released`, { HOLDFOR: "20" }),
+  );
+  const shortDraft = methodResponse(short, "Email/set", "0").created?.draft;
+  const shortSubmission = methodResponse(short, "EmailSubmission/set", "1")
+    .created?.sub;
+  if (!shortDraft || !shortSubmission) {
+    report.fail(`${step}: short hold`, JSON.stringify(short));
+  }
+  const deadline = Date.now() + config.deliveryTimeoutSeconds * 1000;
+  let undoStatus = "pending";
+  while (undoStatus === "pending" && Date.now() < deadline) {
+    await ctx.sleep(5000);
+    const read = await client.call([
+      [
+        "EmailSubmission/get",
+        { accountId: env.accountId, ids: [shortSubmission.id] },
+        "r",
+      ],
+    ]);
+    undoStatus =
+      methodResponse(read, "EmailSubmission/get", "r").list[0]?.undoStatus ??
+      "missing";
+  }
+  report.check(
+    `${step}: HOLDFOR=20 is released by the queue and becomes final`,
+    undoStatus === "final",
+    shortSubmission.id,
+    `undoStatus ${undoStatus} after ${config.deliveryTimeoutSeconds}s`,
+  );
+  if (config.expectDelivery) {
+    await awaitDelivery(ctx, env, step, `${ctx.marker} released`);
+  }
+}
+
 async function stepNegative(ctx, env, blobs) {
   const { client, report } = ctx;
   const step = "8 negative";
@@ -1636,6 +1858,7 @@ export async function run(
     await stepDestroyVariant(ctx, env, blobs);
     await stepFlagVariant(ctx, env, blobs);
     await stepMultiRecipient(ctx, env, blobs);
+    await stepDelayed(ctx, env, blobs);
     await stepNegative(ctx, env, blobs);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);

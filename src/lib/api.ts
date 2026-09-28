@@ -71,7 +71,10 @@ export interface Email {
   isRead: number | null;
   cc: CcEntry[];
   timestamp: number;
-  /** Delivery status for sent messages: "sent" | "failed" | "retrying". Null for received. */
+  /**
+   * Delivery status for sent messages: "sent" | "failed" | "retrying", or for
+   * a delayed send "scheduled" | "canceled". Null for received.
+   */
   status?: string | null;
   attachmentCount?: number;
   attachments?: Attachment[];
@@ -1578,6 +1581,35 @@ export async function cancelOutboxItem(
   id: string,
 ): Promise<{ deleted: boolean }> {
   return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
+}
+
+/** A delayed send a JMAP client scheduled; only its author sees it. */
+export interface ScheduledSend {
+  id: string;
+  sentEmailId: string;
+  fromAddress: string;
+  toAddress: string;
+  subject: string;
+  /** Unix seconds when it goes out. */
+  sendAt: number;
+}
+
+export async function fetchScheduledSends(): Promise<{
+  items: ScheduledSend[];
+}> {
+  return apiFetch("/api/outbox/scheduled");
+}
+
+/**
+ * Cancel a delayed send, then move its message back to Drafts. Rejects (409)
+ * once the send has started.
+ */
+export async function cancelScheduledSend(
+  id: string,
+): Promise<{ canceled: true; movedToDrafts: boolean; willMove: boolean }> {
+  return apiFetch(`/api/outbox/scheduled/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  });
 }
 
 // --- Newsletters: lists, members, subscribe forms, campaigns -----------------

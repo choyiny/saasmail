@@ -1,4 +1,6 @@
+import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import { createEmailSender } from "../lib/email-sender";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 import {
@@ -46,6 +48,7 @@ import {
   publicDraftEmailId,
   publicEmailId,
 } from "./public-ids";
+import { restoreCanceledToDrafts } from "./release";
 import { currentJmapState, parseJmapState } from "./state";
 
 type SystemDescriptor = Extract<MailboxDescriptor, { kind: "system" }>;
@@ -410,6 +413,75 @@ async function updateMessage(
 }
 
 /**
+ * The reverse alias (delayed-send spec D2): the aliased Sent Email of a
+ * canceled delayed send may become its draft again, under the same id. A
+ * patch asks for it by giving the Email `$draft` or a Drafts mailbox; the
+ * target then follows the draft rules. Every other Sent -> Drafts move stays
+ * refused. Returns undefined when the patch isn't such a move.
+ */
+async function restoreCanceledSent(
+  db: DrizzleD1Database<any>,
+  env: CloudflareBindings,
+  userId: string,
+  message: UnifiedMessage,
+  patch: unknown,
+  descriptorsById: Map<string, MailboxDescriptor>,
+  now: number,
+): Promise<SetError | null | undefined> {
+  if (message.ref.kind !== "sent" || !message.jmap?.emailId) return undefined;
+  const targets = patchTargets(
+    {
+      keywords: new Set(Object.keys(jmapKeywords(message))),
+      mailboxIds: new Set(Object.keys(jmapMailboxIds(message))),
+    },
+    patch,
+    DRAFT_KEYWORDS,
+  );
+  if ("type" in targets) return undefined;
+  const toDrafts = [...targets.mailboxIds].some((id) => {
+    const descriptor = descriptorsById.get(id);
+    return (
+      descriptor !== undefined &&
+      isSystemDescriptor(descriptor) &&
+      descriptor.role === "drafts"
+    );
+  });
+  if (!targets.keywords.has("$draft") && !toDrafts) return undefined;
+
+  const refused = { type: "invalidProperties", properties: ["mailboxIds"] };
+  const [submission] = await db
+    .select({ id: jmapSubmissions.id })
+    .from(jmapSubmissions)
+    .where(
+      and(
+        eq(jmapSubmissions.sentEmailId, message.ref.id),
+        eq(jmapSubmissions.userId, userId),
+        eq(jmapSubmissions.undoStatus, "canceled"),
+      ),
+    )
+    .limit(1);
+  if (!submission) return refused;
+  const target = validateDraftTarget(
+    message.inbox,
+    targets.mailboxIds,
+    descriptorsById,
+  );
+  if ("type" in target) return target;
+  const restored = await restoreCanceledToDrafts(env, {
+    submissionId: submission.id,
+    userId,
+    target: {
+      role: target.role,
+      folders: target.folders,
+      seen: targets.keywords.has("$seen"),
+      flagged: targets.keywords.has("$flagged"),
+    },
+    now,
+  });
+  return restored ? null : refused;
+}
+
+/**
  * Spec §3.3, draft row: a draft lives in exactly one system mailbox of its own
  * inbox (role `drafts` or `trash`) and always keeps `$draft`.
  *
@@ -607,6 +679,17 @@ export async function emailSet(
       notUpdated[id] = { type: "notFound" };
       continue;
     }
+    const restore = item
+      ? undefined
+      : await restoreCanceledSent(
+          db,
+          ctx.env,
+          userId,
+          message!,
+          patch,
+          descriptorsById,
+          now,
+        );
     const error = item
       ? await updateDraft(
           db,
@@ -616,14 +699,16 @@ export async function emailSet(
           now,
           windowFor(item.draft.id),
         )
-      : await updateMessage(
-          db,
-          allowed,
-          userId,
-          message!,
-          patch,
-          descriptorsById,
-        );
+      : restore !== undefined
+        ? restore
+        : await updateMessage(
+            db,
+            allowed,
+            userId,
+            message!,
+            patch,
+            descriptorsById,
+          );
     if (error) notUpdated[id] = error;
     else updated[id] = null;
   }

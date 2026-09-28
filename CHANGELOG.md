@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **JMAP: delayed send.** A JMAP client can hold a message for up to 24 hours with RFC 4865 FUTURERELEASE (`HOLDFOR` or `HOLDUNTIL` on `envelope.mailFrom.parameters`); the Session advertises `maxDelayedSend: 86400` and both FUTURERELEASE arguments. The submission is `pending` and its Email is filed into Sent right away, marked "Scheduled for …" in the web UI; a queue message sends it at its time, and the hourly cron sends any the queue missed. Until the send starts it can be canceled with `EmailSubmission/set` `{"undoStatus": "canceled"}` (afterwards `cannotUnsend`), and the canceled Email can then be moved back to Drafts under the same id. The web **Outbox** lists your scheduled sends, and its Cancel does both steps. Migrations 0071 (`jmap_submissions.released_at`, `restore_to_drafts`, `sent_emails.alias_restore`) and 0072 (change triggers).
+
 - **JMAP: drafts in custom folders.** A draft can be filed in custom folders of its inbox besides Drafts or Trash, from creation on (`Email/set` create with Drafts plus folders) or later; it shows in `Email/query` and in the folders' counts for its author. A draft can still never be in Inbox, Archive, Junk or Sent except through its own submission. Deleting a folder takes it off every draft. Migrations 0069 (`jmap_drafts.folder_ids`) and 0070 (change triggers).
 
 - **JMAP: received mail keeps its raw message.** Inbound mail is now stored exactly as it arrived (in R2, deleted with the message), and a JMAP client can download it: the received Email's `blobId` is that raw message and its `size` is exact. Mail received earlier keeps `blobId: null`. Migration 0068 adds `emails.raw_r2_key` and `raw_size`.

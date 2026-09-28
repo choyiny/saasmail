@@ -33,19 +33,19 @@ The web UI, the HTTP API and MCP are unaffected: the internal message references
 
 The Session advertises `urn:ietf:params:jmap:core`, `urn:ietf:params:jmap:mail` and `urn:ietf:params:jmap:submission`, and the account is primary for mail and submission.
 
-| Capability value                          | saasmail                                                       |
-| ----------------------------------------- | -------------------------------------------------------------- |
-| core `maxSizeUpload`                      | the configured provider's attachment limit (table below)       |
-| core `maxConcurrentUpload`                | 4                                                              |
-| core `maxSizeRequest`                     | 10,000,000 bytes                                               |
-| core `maxConcurrentRequests`              | 4                                                              |
-| core `maxCallsInRequest`                  | 16                                                             |
-| core `maxObjectsInGet`, `maxObjectsInSet` | 256                                                            |
-| core `collationAlgorithms`                | `i;ascii-casemap`                                              |
-| mail `maxSizeAttachmentsPerEmail`         | same as `maxSizeUpload`                                        |
-| mail `emailQuerySortOptions`              | `receivedAt`                                                   |
-| submission `maxDelayedSend`               | 0: messages are sent immediately; delayed send isn't supported |
-| submission `submissionExtensions`         | `{}`                                                           |
+| Capability value                          | saasmail                                                 |
+| ----------------------------------------- | -------------------------------------------------------- |
+| core `maxSizeUpload`                      | the configured provider's attachment limit (table below) |
+| core `maxConcurrentUpload`                | 4                                                        |
+| core `maxSizeRequest`                     | 10,000,000 bytes                                         |
+| core `maxConcurrentRequests`              | 4                                                        |
+| core `maxCallsInRequest`                  | 16                                                       |
+| core `maxObjectsInGet`, `maxObjectsInSet` | 256                                                      |
+| core `collationAlgorithms`                | `i;ascii-casemap`                                        |
+| mail `maxSizeAttachmentsPerEmail`         | same as `maxSizeUpload`                                  |
+| mail `emailQuerySortOptions`              | `receivedAt`                                             |
+| submission `maxDelayedSend`               | 86400 (24 hours)                                         |
+| submission `submissionExtensions`         | `{"FUTURERELEASE": ["86400", "<now + 24 h, UTC>"]}`      |
 
 Two limits come from the outbound provider. The upload and per-Email attachment limit is the provider's attachment allowance. The whole-message limit is checked when a draft is submitted; a larger message is refused with `tooLarge`, whose `maxSize` is this number.
 
@@ -107,7 +107,7 @@ Drafts are visible only to their author, and only while the author can still acc
 
 ## Sending
 
-`EmailSubmission/set` `create` takes `{ identityId, emailId, envelope? }` and sends the draft immediately. Sending follows the web composer's rules for a manual message: it is **transactional**, a single message with the visible To and Cc, with no suppression-list filtering, no unsubscribe footer and no `List-Unsubscribe` header.
+`EmailSubmission/set` `create` takes `{ identityId, emailId, envelope? }` and sends the draft immediately, or at a later time ([Delayed send](#delayed-send)). Sending follows the web composer's rules for a manual message: it is **transactional**, a single message with the visible To and Cc, with no suppression-list filtering, no unsubscribe footer and no `List-Unsubscribe` header.
 
 Rules, each reported per submission as a SetError (nothing is sent when one fails):
 
@@ -122,7 +122,8 @@ Rules, each reported per submission as a SetError (nothing is sent when one fail
 | More than 50 recipients (To, Cc and Bcc together)                               | `tooManyRecipients`, `maxRecipients: 50`                |
 | `envelope.mailFrom` isn't the identity's address                                | `forbiddenMailFrom`                                     |
 | `envelope.rcptTo` isn't exactly the To, Cc and Bcc addresses                    | `invalidEmail`                                          |
-| SMTP parameters in the envelope                                                 | `invalidProperties` on `envelope`                       |
+| An SMTP parameter other than one `HOLDFOR` or `HOLDUNTIL` on `mailFrom`         | `invalidProperties` on `envelope`                       |
+| A `HOLDFOR` or `HOLDUNTIL` more than 86400 seconds ahead, or malformed          | `invalidProperties` on `envelope`                       |
 | More than one Reply-To (it goes out as one bare address)                        | `invalidEmail`, `properties: ["replyTo"]`               |
 | A text part that is neither the text nor the HTML body (upload it as a blob)    | `invalidEmail`, `properties: ["bodyStructure"]`         |
 | A stored attachment can't be read                                               | `invalidEmail` on `attachments`                         |
@@ -143,9 +144,21 @@ Some providers replace the `Message-ID` a message is sent with. **Cloudflare Ema
 
 Clients keep citing the Email's own id. When a draft's `inReplyTo` or `references` cites the own id of a message sent through JMAP, the message goes out citing that message's delivered id instead, so the recipient's client threads it; the stored draft and its `blobId` keep what the client wrote. A draft that cites either id joins the sent message's thread. With Postmark, Resend and Bavimail, saasmail records the id it sent, and the two are the same.
 
-A submission is accepted when the provider accepted the message, or when the provider failed temporarily and the outbox owns the retries. Accepted submissions have `undoStatus: "final"` (sent messages can't be recalled), `deliveryStatus: null` and `sendAt`. The submission's `emailId` stays the draft's `D…` id even after that Email is destroyed or filed into Sent. A permanently refused message creates no Sent Email and leaves no stored attachments behind; the draft is left as it was. A draft whose send is still in flight is locked: a second `EmailSubmission/set` for it is `forbiddenToSend` until the send settles, after which the draft can be submitted again, updated or destroyed.
+A submission is accepted when the provider accepted the message, or when the provider failed temporarily and the outbox owns the retries. Accepted submissions have `undoStatus: "final"` (sent messages can't be recalled), `deliveryStatus: null` and `sendAt`; a delayed one is `pending` until then. The submission's `emailId` stays the draft's `D…` id even after that Email is destroyed or filed into Sent. A permanently refused message creates no Sent Email and leaves no stored attachments behind; the draft is left as it was. A draft whose send is still in flight is locked: a second `EmailSubmission/set` for it is `forbiddenToSend` until the send settles, after which the draft can be submitted again, updated or destroyed.
 
-`EmailSubmission/get` and `/query` show accepted submissions only. `/query` filters by `identityIds`, `emailIds`, `threadIds`, `undoStatus`, `before` and `after`, and sorts by `emailId`, `threadId` or `sentAt`. Submissions are kept for 7 days and then pruned. Updating or destroying a submission returns `notFound` for an unknown id and `forbidden` for a known one: there is no unsend.
+`EmailSubmission/get` and `/query` show accepted and delayed submissions. `/query` filters by `identityIds`, `emailIds`, `threadIds`, `undoStatus`, `before` and `after`, and sorts by `emailId`, `threadId` or `sentAt`. Settled submissions are kept for 7 days after their `sendAt` and then pruned. The only update is `{"undoStatus": "canceled"}` on a delayed send ([below](#delayed-send)); a sent submission answers `cannotUnsend`, any other change `invalidProperties`, and an unknown id `notFound`. Destroying a submission returns `notFound` for an unknown id and `forbidden` for a known one.
+
+### Delayed send
+
+A client holds a message with an RFC 4865 FUTURERELEASE parameter on `envelope.mailFrom.parameters`: `{"HOLDFOR": "<seconds>"}` or `{"HOLDUNTIL": "<RFC 3339 date-time>"}`, at most 86400 seconds (24 hours) ahead. The Session advertises both FUTURERELEASE arguments RFC 4865 defines, the longest hold in seconds and the latest release time in UTC. A hold that is already over (`HOLDFOR=0`, a `HOLDUNTIL` in the past) sends now. Every other rule in the table above is checked when the submission is created.
+
+- **At create**, nothing is sent. The submission is created with `undoStatus: "pending"` and `sendAt` set to the release time, and the on-success step runs now, as RFC 8621 §7.5 requires: filing the draft into Sent puts the same `D…` Email in Sent immediately. The web UI shows it in Sent marked "Scheduled for …".
+- **At `sendAt`**, a queue message releases it: attachments are staged and the message goes through the outbox like any other send. `undoStatus` stays `pending` while it is being sent and becomes `final` once the provider accepted it or the outbox owns its retries. A permanent refusal leaves the Email in Sent, marked failed in the web UI, with `undoStatus: "final"`. If the queue misses a release, the hourly maintenance sends it (late by up to an hour).
+- **Cancel** with `EmailSubmission/set` `update: {"<id>": {"undoStatus": "canceled"}}`. The cancel and the release race on the same row: the cancel wins only while the submission is still waiting; once the release has claimed it, the answer is `cannotUnsend`. Canceling changes only the submission (and marks the Sent message "Canceled" in the web UI). The client then moves the Email back: an `Email/set` update that gives the `D…` Email `$draft` and a Drafts (or Trash) mailbox makes it a draft again, under the same id and with the same content. Only the submission's author can do this, only after a cancel, and only for the Email the draft was filed into Sent as; every other Sent-to-Drafts move stays `invalidProperties`. Other inbox members see that Email destroyed.
+- **Deleting** a scheduled message in the web UI (or its person) before it goes out cancels it at once. Moving it to Trash doesn't: a trashed scheduled message is still sent.
+- **Access** is checked again at release: if the author can no longer send from the identity, the message isn't sent and is marked failed.
+
+In the web UI, **Outbox → Scheduled** lists your own delayed sends with their time. Its **Cancel** cancels the submission and then moves the message back to Drafts; if that second step fails, the send stays canceled and the hourly maintenance finishes the move. A send whose draft was never filed into Sent (no `onSuccessUpdateEmail`) has nothing to move: its draft is where the client left it, and the canceled copy stays in Sent.
 
 ### After sending: `onSuccessUpdateEmail` and `onSuccessDestroyEmail`
 
@@ -168,7 +181,7 @@ One set of rules applies to every `Email/set` update, whether the client sends i
 | Sent (including a draft filed into Sent) | Sent or Trash                           | any                          | `$seen` (required), `$flagged`           |
 | Draft                                    | Drafts or Trash (Drafts when created)   | any                          | `$draft` (required), `$seen`, `$flagged` |
 
-A draft can move into Sent only inside the implicit update of its own accepted submission (the patch must also remove `$draft`). Outside that window, filing a draft into Sent or Inbox, or removing `$draft`, is `invalidProperties`. A draft's custom folders are personal, like the draft: other members don't see it in them. When a draft is filed into Sent, ordinary patch rules decide its folders: a patch that doesn't remove a folder keeps it on the Sent Email, and a full `mailboxIds` keeps only what it lists. Deleting a custom folder takes it off every draft filed in it.
+A draft can move into Sent only inside the implicit update of its own accepted or delayed submission (the patch must also remove `$draft`). Outside that window, filing a draft into Sent or Inbox, or removing `$draft`, is `invalidProperties`. The one move back, Sent to Drafts, is for a canceled delayed send ([Delayed send](#delayed-send)). A draft's custom folders are personal, like the draft: other members don't see it in them. When a draft is filed into Sent, ordinary patch rules decide its folders: a patch that doesn't remove a folder keeps it on the Sent Email, and a full `mailboxIds` keeps only what it lists. Deleting a custom folder takes it off every draft filed in it.
 
 `Email/set` `destroy` removes drafts. Destroying a received or sent Email returns `forbidden`: saasmail doesn't delete mail over JMAP.
 
@@ -227,7 +240,8 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 
 ## Known gaps
 
-- Delayed send, and cancelling or recalling a submission.
+- Delayed send beyond 24 hours, changing a scheduled send's time, and scheduling from the web composer. Recalling a message that was sent.
+- A canceled delayed send whose Sent copy is a separate `S…` Email (the submission didn't file the draft into Sent) can't be destroyed over JMAP; move it to Trash.
 - Raw-message `blobId` for sent mail that wasn't created through JMAP, and for mail received before the raw message was kept (it stays `null`).
 - The web composer's drafts don't appear in JMAP, and JMAP drafts don't appear in the web UI.
 - A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
@@ -235,7 +249,7 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 - EventSource push, search snippets, mailbox mutation, `Email/import` and `Email/copy`.
 - `Thread/changes`, `Identity/changes` and query-change calculation.
 
-The API does not add a scheduler or keep separate mailbox state; reads go through the same `queryMessages()` and state tables the saasmail UI and HTTP API use. Drafts and the stored form of JMAP-sent messages live in their own tables, and sending goes through the same outbox as the web composer.
+The API keeps no separate mailbox state; reads go through the same `queryMessages()` and state tables the saasmail UI and HTTP API use. Drafts and the stored form of JMAP-sent messages live in their own tables, and sending goes through the same outbox as the web composer.
 
 ## Upgrading and rollback
 

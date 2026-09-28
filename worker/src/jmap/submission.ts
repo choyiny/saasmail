@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { attachments } from "../db/attachments.schema";
@@ -13,7 +13,7 @@ import {
   type EmailSender,
   type SendEmailAttachment,
 } from "../lib/email-sender";
-import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
 import type { OutboxSendResult } from "../lib/outbox";
 import {
   buildSubmissionMessage,
@@ -51,6 +51,7 @@ import {
   publicSubmissionId,
   publicThreadId,
 } from "./public-ids";
+import { cancelScheduledSubmission, enqueueRelease } from "./release";
 import { buildJmapSentRow } from "./sent-row";
 import { currentJmapState, parseJmapState } from "./state";
 import {
@@ -165,6 +166,10 @@ async function claimAndRecordIntention(
     onSuccessPatchJson: string | null;
     /** The exact From header of the first attempt; retries reuse it. */
     fromHeader: string;
+    /** When the message goes out: now, or a delayed send's release time. */
+    sendAt: number;
+    /** `final` for an immediate send; `pending` while a delayed one waits. */
+    undoStatus: "final" | "pending";
     now: number;
   },
 ): Promise<boolean> {
@@ -179,7 +184,7 @@ async function claimAndRecordIntention(
     d1
       .prepare(
         `INSERT INTO jmap_submissions (id, user_id, attempt_state, on_success_state, draft_id, content_id, identity_id, identity_email, email_id, thread_id, sent_email_id, envelope_json, on_success_mode, on_success_patch_json, from_header, send_at, undo_status, created_at)
-         SELECT ?, ?, 'claimed', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'final', ?
+         SELECT ?, ?, 'claimed', 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE ${ours}`,
       )
       .bind(
@@ -196,7 +201,8 @@ async function claimAndRecordIntention(
         input.onSuccessMode,
         input.onSuccessPatchJson,
         input.fromHeader,
-        input.now,
+        input.sendAt,
+        input.undoStatus,
         input.now,
         input.draftId,
         input.submissionId,
@@ -393,6 +399,142 @@ async function recordAcceptedSubmission(
   }
 }
 
+/**
+ * A delayed send (delayed-send spec D2): claim the draft and record the
+ * intention, then in one batch write the Sent row as `scheduled` and make the
+ * submission visible as `scheduled` with undoStatus `pending`. Nothing is sent
+ * and no attachment is staged until the release (release.ts). The on-success
+ * step runs now, as for any created submission (RFC 8621 §7.5).
+ */
+async function scheduleSubmission(
+  db: Db,
+  ctx: JmapMethodContext,
+  input: {
+    userId: string;
+    draft: JmapDraftRow;
+    content: JmapContentRow;
+    identityEmail: string;
+    identity: IdentityRow;
+    envelope: Envelope;
+    releaseAt: number;
+    onSuccess: ParsedOnSuccess;
+    creationId: string;
+  },
+): Promise<CreateOutcome> {
+  const { draft, content, identityEmail } = input;
+  const now = Math.floor(Date.now() / 1000);
+  const submissionId = nanoid();
+  const sentEmailId = nanoid();
+  const threadId = publicThreadId(content.threadKey);
+  const forCreate = onSuccessForCreation(input.onSuccess, input.creationId);
+  const fromHeader = submissionFromHeader(content, {
+    email: identityEmail,
+    displayName: input.identity.displayName ?? null,
+  });
+  const claimed = await claimAndRecordIntention(ctx.env.DB, {
+    submissionId,
+    sentEmailId,
+    userId: input.userId,
+    draftId: draft.id,
+    contentId: content.id,
+    identityId: publicIdentityId(identityEmail),
+    identityEmail,
+    emailId: publicDraftEmailId(draft.id),
+    threadId,
+    envelope: input.envelope,
+    staged: [],
+    onSuccessMode: forCreate.mode,
+    onSuccessPatchJson: forCreate.patch
+      ? JSON.stringify(forCreate.patch)
+      : null,
+    fromHeader,
+    sendAt: input.releaseAt,
+    undoStatus: "pending",
+    now,
+  });
+  if (!claimed) {
+    return rejected({
+      type: "forbiddenToSend",
+      description: "This message is already being sent",
+    });
+  }
+
+  try {
+    const message = buildSubmissionMessage(
+      content,
+      { email: identityEmail, displayName: null },
+      [],
+      await loadDeliveredMessageIds(db, content),
+    );
+    message.from = fromHeader;
+    const sentRow = await buildJmapSentRow(db, {
+      sentEmailId,
+      content,
+      message,
+      status: "scheduled",
+      now,
+    });
+    const statements = [
+      // `sent_at` is when it goes out (the web shows "Scheduled for"); the JMAP
+      // Email's receivedAt is pinned to now, so the release can move sent_at.
+      db
+        .insert(sentEmails)
+        .values({ ...sentRow, sentAt: input.releaseAt, jmapReceivedAt: now }),
+      db
+        .update(jmapSubmissions)
+        .set({ attemptState: "scheduled" })
+        .where(
+          and(
+            eq(jmapSubmissions.id, submissionId),
+            eq(jmapSubmissions.attemptState, "claimed"),
+          ),
+        ),
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await db.batch(statements as any);
+  } catch (error) {
+    // The batch may have committed even though the call failed: remove its Sent
+    // row first (still hidden, since the on-success step hasn't run), or it
+    // would show as scheduled with no submission to release or cancel it.
+    await db
+      .delete(sentEmails)
+      .where(
+        and(
+          eq(sentEmails.id, sentEmailId),
+          sql`${sentEmails.jmapContentId} IS NOT NULL`,
+        ),
+      );
+    await abandonIntention(db, ctx.env, {
+      submissionId,
+      sentEmailId,
+      draftId: draft.id,
+      staged: [],
+    });
+    throw error;
+  }
+
+  try {
+    await enqueueRelease(ctx.env, submissionId, input.releaseAt - now);
+  } catch (error) {
+    // The hourly sweep releases every overdue scheduled submission.
+    console.error(
+      `[jmap] enqueueing the release of ${submissionId} failed; the hourly sweep will release it:`,
+      error,
+    );
+  }
+
+  return {
+    created: {
+      id: publicSubmissionId(submissionId),
+      threadId,
+      sendAt: utcDate(input.releaseAt),
+      undoStatus: "pending",
+    },
+    error: null,
+    acceptedId: submissionId,
+  };
+}
+
 async function createSubmission(
   db: Db,
   allowed: AllowedInboxes,
@@ -522,6 +664,22 @@ async function createSubmission(
     });
   }
 
+  // RFC 4865: a held message is scheduled here and sent by its release.
+  if (envelope.releaseAt !== null) {
+    await releaseFinishedQueuedLock(db, draft);
+    return scheduleSubmission(db, ctx, {
+      userId,
+      draft,
+      content,
+      identityEmail,
+      identity,
+      envelope: envelope.envelope!,
+      releaseAt: envelope.releaseAt,
+      onSuccess,
+      creationId,
+    });
+  }
+
   // Step 7: claim + intention + staged rows, atomically.
   await releaseFinishedQueuedLock(db, draft);
   const now = Math.floor(Date.now() / 1000);
@@ -561,6 +719,8 @@ async function createSubmission(
       email: identityEmail,
       displayName: identity.displayName ?? null,
     }),
+    sendAt: now,
+    undoStatus: "final",
     now,
   });
   if (!claimed) {
@@ -697,6 +857,7 @@ async function createSubmission(
 
 async function knownSubmissionIds(
   db: Db,
+  allowed: AllowedInboxes,
   userId: string,
   publicIds: string[],
 ): Promise<Set<string>> {
@@ -711,16 +872,24 @@ async function knownSubmissionIds(
   // Chunked: D1 binds at most 100 parameters per statement.
   for (let start = 0; start < internal.length; start += 90) {
     const rows = await db
-      .select({ id: jmapSubmissions.id })
+      .select({
+        id: jmapSubmissions.id,
+        identityEmail: jmapSubmissions.identityEmail,
+      })
       .from(jmapSubmissions)
       .where(
         and(
           eq(jmapSubmissions.userId, userId),
-          eq(jmapSubmissions.attemptState, "accepted"),
+          ne(jmapSubmissions.attemptState, "claimed"),
           inArray(jmapSubmissions.id, internal.slice(start, start + 90)),
         ),
       );
-    for (const row of rows) known.add(publicSubmissionId(row.id));
+    // As EmailSubmission/get: only submissions from inboxes still allowed.
+    for (const row of rows) {
+      if (isInboxAllowed(allowed, row.identityEmail)) {
+        known.add(publicSubmissionId(row.id));
+      }
+    }
   }
   return known;
 }
@@ -780,7 +949,7 @@ export async function emailSubmissionSet(
 
   // Read before any create sends: nothing that can fail runs between the
   // first provider call and the response.
-  const known = await knownSubmissionIds(db, userId, [
+  const known = await knownSubmissionIds(db, allowed, userId, [
     ...Object.keys(update),
     ...destroy,
   ]);
@@ -829,11 +998,46 @@ export async function emailSubmissionSet(
     known.has(id)
       ? {
           type: "forbidden",
-          description: "Submissions can't be changed or deleted",
+          description: "Submissions can't be deleted",
         }
       : { type: "notFound" };
+  // RFC 8621 §7.5: the one change a client may make is undoStatus → canceled,
+  // which wins only while a delayed send is still scheduled.
+  const updated: Record<string, null> = {};
   const notUpdated: Record<string, SubmissionSetError> = {};
-  for (const id of Object.keys(update)) notUpdated[id] = readOnly(id);
+  for (const [id, patch] of Object.entries(update)) {
+    if (!known.has(id)) {
+      notUpdated[id] = { type: "notFound" };
+      continue;
+    }
+    if (
+      !isObject(patch) ||
+      Object.keys(patch).length !== 1 ||
+      patch.undoStatus !== "canceled"
+    ) {
+      notUpdated[id] = {
+        type: "invalidProperties",
+        properties: ["undoStatus"],
+        description: 'The only change allowed is undoStatus to "canceled"',
+      };
+      continue;
+    }
+    const outcome = await cancelScheduledSubmission(ctx.env, {
+      submissionId: parseSubmissionId(id)!,
+      userId,
+      restoreToDrafts: false,
+    });
+    if (outcome === "canceled" || outcome === "alreadyCanceled") {
+      updated[id] = null;
+    } else if (outcome === "notFound") {
+      notUpdated[id] = { type: "notFound" };
+    } else {
+      notUpdated[id] = {
+        type: "cannotUnsend",
+        description: "The message is already being sent or was sent",
+      };
+    }
+  }
   const notDestroyed: Record<string, SubmissionSetError> = {};
   for (const id of destroy) notDestroyed[id] = readOnly(id);
 
@@ -842,7 +1046,7 @@ export async function emailSubmissionSet(
     oldState: current.state,
     newState: current.state,
     created: nonEmptyOrNull(created),
-    updated: null,
+    updated: nonEmptyOrNull(updated),
     destroyed: null,
     notCreated: nonEmptyOrNull(notCreated),
     notUpdated: nonEmptyOrNull(notUpdated),

@@ -3,9 +3,10 @@ import { users } from "./auth.schema";
 
 /**
  * One row per EmailSubmission create (spec §3.4, §4). `claimed` is the durable
- * intention written before the provider call; `accepted` rows are the only
- * ones JMAP exposes. `email_id` keeps the original public D… id after the
- * draft is gone (RFC 8621 §7).
+ * intention written before the provider call and the only state JMAP never
+ * exposes. A delayed send (RFC 4865 FUTURERELEASE) is `scheduled` until its
+ * release claims it (`releasing`), then `accepted`. `email_id` keeps the
+ * original public D… id after the draft is gone (RFC 8621 §7).
  */
 export const jmapSubmissions = sqliteTable(
   "jmap_submissions",
@@ -15,7 +16,7 @@ export const jmapSubmissions = sqliteTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     attemptState: text("attempt_state", {
-      enum: ["claimed", "accepted"],
+      enum: ["claimed", "scheduled", "releasing", "accepted"],
     }).notNull(),
     onSuccessState: text("on_success_state", {
       enum: ["pending", "applied"],
@@ -35,7 +36,17 @@ export const jmapSubmissions = sqliteTable(
     /** The exact From header of the first attempt; retries reuse it (spec §10.1). */
     fromHeader: text("from_header"),
     sendAt: integer("send_at").notNull(),
-    undoStatus: text("undo_status").notNull().default("final"),
+    /** `pending` until the send is irreversible, then `final`; or `canceled`. */
+    undoStatus: text("undo_status", { enum: ["pending", "final", "canceled"] })
+      .notNull()
+      .default("final"),
+    /** When a delayed send's release claimed it (`releasing`); recovery ages it. */
+    releasedAt: integer("released_at"),
+    /**
+     * 1 when the web Outbox canceled this scheduled send and still owes the move
+     * of its Email back to Drafts; recovery finishes a move that failed.
+     */
+    restoreToDrafts: integer("restore_to_drafts").notNull().default(0),
     createdAt: integer("created_at").notNull(),
   },
   (table) => [

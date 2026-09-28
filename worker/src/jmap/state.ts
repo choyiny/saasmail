@@ -1,6 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { MAX_DELAYED_SEND } from "./constants";
 import { listAllowedInboxAddresses } from "./mailboxes";
 import { JMAP_ID_FORMAT_VERSION } from "./public-ids";
 
@@ -29,6 +30,9 @@ export async function sessionState(
     user: user.id,
     username: user.email ?? user.id,
     inboxes: await listAllowedInboxAddresses(db, allowed),
+    // The submission capability's stable part. FUTURERELEASE's max date-time
+    // moves every second and is left out, or the state would never settle.
+    maxDelayedSend: MAX_DELAYED_SEND,
   });
 }
 

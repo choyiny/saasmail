@@ -54,8 +54,18 @@ export const sentEmails = sqliteTable(
      * row as `D<jmapEmailId>`, never as `S<id>`. Null for every other row.
      */
     jmapEmailId: text("jmap_email_id"),
-    /** The aliased draft's receivedAt (RFC 8621 keeps it immutable). */
+    /**
+     * The JMAP Email's receivedAt, which RFC 8621 keeps immutable: the aliased
+     * draft's, or for a delayed send the time it was scheduled (`sent_at` then
+     * moves to the real send time).
+     */
     jmapReceivedAt: integer("jmap_received_at"),
+    /**
+     * Set to 1 immediately before the reverse alias deletes this row (a canceled
+     * delayed send moved back to Drafts), so its triggers write no change rows:
+     * the same Email id lives on as a draft.
+     */
+    aliasRestore: integer("alias_restore").notNull().default(0),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },

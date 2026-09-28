@@ -8,6 +8,7 @@ import {
   SYSTEM_INBOX_ACCESS,
 } from "./delete-email";
 import { deleteMessageState } from "./messages/state";
+import { cancelScheduledSendsFor } from "./scheduled-sends";
 import {
   collectPersonGroupConversations,
   deletePersonConversationState,
@@ -64,6 +65,7 @@ export async function purgeBlockedMail(
       db,
       sent.map((message) => ({ kind: "sent" as const, id: message.id })),
     );
+    await cancelScheduledSendsFor(db, sql`person_id = ${personId}`);
     await db.delete(sentEmails).where(eq(sentEmails.personId, personId));
     await deletePersonConversationState(db, personId, groupConversations);
     // Finally the person row.

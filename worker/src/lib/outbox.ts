@@ -57,6 +57,12 @@ export interface OutboxSendParams {
   sender: EmailSender;
   /** Pre-generated id of the sent_emails row the caller will write. */
   sentEmailId: string;
+  /**
+   * The outbox row's id, when a caller may repeat the same send after an
+   * attempt that threw (a JMAP delayed send's release): reusing it keeps the
+   * provider idempotency key the same. Otherwise a fresh id.
+   */
+  outboxId?: string;
   /** Set for sequence-step sends. */
   sequenceEmailId?: string | null;
   /**
@@ -151,7 +157,7 @@ export async function sendViaOutbox(
   // address, so never trust a caller to have canonicalized it already.
   const fromAddress = rawFromAddress.trim().toLowerCase();
   const now = Math.floor(Date.now() / 1000);
-  const outboxId = nanoid();
+  const outboxId = params.outboxId ?? nanoid();
   const owner = bookkeepingOwnerOf({
     bookkeepingOwner: bookkeepingOwner ?? null,
     campaignRecipientId: campaignRecipientId ?? null,

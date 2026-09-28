@@ -31,6 +31,7 @@ import {
 import type { InboxAssignee, MailMessage, Mailbox, Stats } from "@/lib/api";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { showToast } from "@/lib/toast";
+import DeliveryBadge from "./DeliveryBadge";
 
 function addressLabel(
   address: { email: string; name?: string | null } | null,
@@ -431,6 +432,11 @@ export default function MailReadingPane({
                       </time>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-1">
+                      <DeliveryBadge
+                        status={selectedMessage.delivery?.status}
+                        sendAt={selectedMessage.occurredAt}
+                        size="md"
+                      />
                       {selectedMessage.source.campaignId && (
                         <span className="rounded bg-bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">
                           Campaign

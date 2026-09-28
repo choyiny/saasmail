@@ -20,7 +20,7 @@ operate.
 | **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.0)                                   |
 | **Database**        | Cloudflare D1 (SQLite)                                                    |
 | **File storage**    | Cloudflare R2 (attachments)                                               |
-| **Queue**           | Cloudflare Queues (sequence processing)                                   |
+| **Queue**           | Cloudflare Queues (sequence processing, JMAP delayed-send release)        |
 | **Realtime + Push** | Durable Object (`NotificationsHub`, one per user) — WebSockets + Web Push |
 | **Web Push**        | VAPID + `aes128gcm` payload encryption (RFC 8291), implemented in-worker  |
 | **Service Worker**  | `public/sw.js` — receives push events, renders OS notifications           |
@@ -84,7 +84,7 @@ flowchart LR
     DO --> D1
 ```
 
-The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). On inbound mail the worker fans out to each recipient's hub, which pushes WebSocket frames to live tabs and sends encrypted Web Push to registered devices. The queue carries scheduled sequence emails — the cron trigger enqueues due steps and a queue consumer in the same worker sends them.
+The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). On inbound mail the worker fans out to each recipient's hub, which pushes WebSocket frames to live tabs and sends encrypted Web Push to registered devices. The queue carries scheduled sequence emails — the cron trigger enqueues due steps and a queue consumer in the same worker sends them. It also releases JMAP delayed sends: each one is enqueued with its delay (at most 24 hours, the queue's limit), and the hourly cron sends any the queue missed.
 
 ---
 

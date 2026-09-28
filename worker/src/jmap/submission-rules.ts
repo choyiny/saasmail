@@ -1,4 +1,6 @@
 import { MAX_RECIPIENTS, MAX_SEND_ATTACHMENTS } from "../lib/send-limits";
+import { MAX_DELAYED_SEND } from "./constants";
+import { parseJmapDate } from "./dates";
 
 /** To, Cc and Bcc together, within the provider's per-message recipient cap. */
 export const MAX_SUBMISSION_RECIPIENTS = MAX_RECIPIENTS;
@@ -14,7 +16,11 @@ export type SubmissionSetError = {
 };
 
 export type EnvelopeAddress = { email: string; parameters: null };
-export type Envelope = { mailFrom: EnvelopeAddress; rcptTo: EnvelopeAddress[] };
+/** mailFrom may carry one RFC 4865 parameter: HOLDFOR or HOLDUNTIL. */
+export type Envelope = {
+  mailFrom: { email: string; parameters: Record<string, string> | null };
+  rcptTo: EnvelopeAddress[];
+};
 
 type Address = { name: string | null; email: string };
 type RecipientColumns = { toJson: string; ccJson: string; bccJson: string };
@@ -107,27 +113,108 @@ export function checkContentRecipients(
   return null;
 }
 
+type EnvelopeResult = {
+  envelope: Envelope | null;
+  error: SubmissionSetError | null;
+  /** Epoch seconds the send is held until (RFC 4865); null sends now. */
+  releaseAt: number | null;
+};
+
+function envelopeError(error: SubmissionSetError): EnvelopeResult {
+  return { envelope: null, error, releaseAt: null };
+}
+
+const HOLD_FOR = /^[0-9]{1,9}$/;
+
+/**
+ * RFC 4865 FUTURERELEASE on `mailFrom.parameters`: exactly one of
+ * `HOLDFOR=<seconds>` or `HOLDUNTIL=<RFC 3339 date-time>`, at most
+ * MAX_DELAYED_SEND ahead. A hold that is already over (HOLDFOR=0, a past
+ * HOLDUNTIL) releases the message now. Parameter names are case-insensitive,
+ * as in SMTP; any other parameter is refused.
+ */
+function parseFutureRelease(
+  value: unknown,
+  now: number,
+): {
+  parameters: Record<string, string> | null;
+  releaseAt: number | null;
+  error: SubmissionSetError | null;
+} {
+  if (value === undefined || value === null) {
+    return { parameters: null, releaseAt: null, error: null };
+  }
+  const invalid = (description: string) => ({
+    parameters: null,
+    releaseAt: null,
+    error: {
+      type: "invalidProperties",
+      properties: ["envelope"],
+      description,
+    },
+  });
+  if (!isObject(value)) return invalid("parameters must be an object");
+  const entries = Object.entries(value);
+  if (
+    entries.length !== 1 ||
+    !["HOLDFOR", "HOLDUNTIL"].includes(entries[0][0].toUpperCase())
+  ) {
+    return invalid(
+      "The only SMTP parameter supported is one FUTURERELEASE parameter on mailFrom: HOLDFOR or HOLDUNTIL",
+    );
+  }
+  const [rawName, rawValue] = entries[0];
+  const name = rawName.toUpperCase();
+  if (typeof rawValue !== "string") {
+    return invalid(`${name} needs a value`);
+  }
+  let releaseAt: number;
+  if (name === "HOLDFOR") {
+    if (!HOLD_FOR.test(rawValue)) {
+      return invalid("HOLDFOR must be a number of seconds");
+    }
+    releaseAt = now + Number(rawValue);
+  } else {
+    const millis = parseJmapDate(rawValue);
+    if (millis === null) {
+      return invalid("HOLDUNTIL must be an RFC 3339 date-time");
+    }
+    releaseAt = Math.ceil(millis / 1000);
+  }
+  if (releaseAt - now > MAX_DELAYED_SEND) {
+    return invalid(
+      `A send can be held for at most ${MAX_DELAYED_SEND} seconds (maxDelayedSend)`,
+    );
+  }
+  return {
+    parameters: { [name]: rawValue },
+    releaseAt: releaseAt > now ? releaseAt : null,
+    error: null,
+  };
+}
+
 /**
  * Spec §3.2 step 5. A null/omitted envelope is derived (RFC 8621 §7): mailFrom
  * is the identity's address and rcptTo is To ∪ Cc. A supplied one must match
- * exactly and carry no SMTP parameters.
+ * exactly; its only SMTP parameter may be a FUTURERELEASE hold on mailFrom.
  */
 export function resolveEnvelope(
   value: unknown,
   identityEmail: string,
   recipients: string[],
-): { envelope: Envelope | null; error: SubmissionSetError | null } {
+  now: number = Math.floor(Date.now() / 1000),
+): EnvelopeResult {
   const derived: Envelope = {
     mailFrom: { email: identityEmail, parameters: null },
     rcptTo: recipients.map((email) => ({ email, parameters: null })),
   };
   if (value === undefined || value === null) {
-    return { envelope: derived, error: null };
+    return { envelope: derived, error: null, releaseAt: null };
   }
-  const shapeError = {
-    envelope: null,
-    error: { type: "invalidProperties", properties: ["envelope"] },
-  };
+  const shapeError = envelopeError({
+    type: "invalidProperties",
+    properties: ["envelope"],
+  });
   if (
     !isObject(value) ||
     !isObject(value.mailFrom) ||
@@ -144,13 +231,10 @@ export function resolveEnvelope(
     return shapeError;
   }
   if (mailFrom.email.trim().toLowerCase() !== identityEmail) {
-    return {
-      envelope: null,
-      error: {
-        type: "forbiddenMailFrom",
-        description: "mailFrom must be the identity's address",
-      },
-    };
+    return envelopeError({
+      type: "forbiddenMailFrom",
+      description: "mailFrom must be the identity's address",
+    });
   }
   const given = uniqueLower(
     (rcptTo as Record<string, unknown>[]).map((item) => item.email as string),
@@ -160,33 +244,33 @@ export function resolveEnvelope(
     given.length !== expected.size ||
     !given.every((email) => expected.has(email))
   ) {
-    return {
-      envelope: null,
-      error: {
-        type: "invalidEmail",
-        properties: ["to", "cc", "bcc"],
-        description: "rcptTo must equal the Email's To, Cc and Bcc addresses",
-      },
-    };
+    return envelopeError({
+      type: "invalidEmail",
+      properties: ["to", "cc", "bcc"],
+      description: "rcptTo must equal the Email's To, Cc and Bcc addresses",
+    });
   }
-  const withParameters = [
-    mailFrom,
-    ...(rcptTo as Record<string, unknown>[]),
-  ].some(
+  const rcptParameters = (rcptTo as Record<string, unknown>[]).some(
     (address) =>
       address.parameters !== undefined && address.parameters !== null,
   );
-  if (withParameters) {
-    return {
-      envelope: null,
-      error: {
-        type: "invalidProperties",
-        properties: ["envelope"],
-        description: "SMTP parameters are not supported",
-      },
-    };
+  if (rcptParameters) {
+    return envelopeError({
+      type: "invalidProperties",
+      properties: ["envelope"],
+      description: "SMTP parameters are not supported on rcptTo",
+    });
   }
-  return { envelope: derived, error: null };
+  const hold = parseFutureRelease(mailFrom.parameters, now);
+  if (hold.error) return envelopeError(hold.error);
+  return {
+    envelope: {
+      ...derived,
+      mailFrom: { email: identityEmail, parameters: hold.parameters },
+    },
+    error: null,
+    releaseAt: hold.releaseAt,
+  };
 }
 
 /** Every stored part goes out as an attachment, inline or not. */

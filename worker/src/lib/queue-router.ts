@@ -13,6 +13,10 @@ import {
   type CampaignSendMessage,
 } from "./campaign-sender";
 import { runSuggestedReply } from "./agent/suggest-reply";
+import {
+  releaseScheduledSubmission,
+  type ReleaseMessage,
+} from "../jmap/release";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -34,7 +38,8 @@ export type QueueMessageBody =
   | ListImportMessage
   | CampaignFanOutMessage
   | CampaignSendMessage
-  | SuggestReplyMessage;
+  | SuggestReplyMessage
+  | ReleaseMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
@@ -45,6 +50,7 @@ export type QueueMessageKind =
   | "campaign_fan_out"
   | "campaign_send"
   | "suggest_reply"
+  | "jmap_submission_release"
   | "unknown";
 
 /**
@@ -85,6 +91,11 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
   }
   if (b.type === "suggest_reply") {
     return typeof b.emailId === "string" ? "suggest_reply" : "unknown";
+  }
+  if (b.type === "jmap_submission_release") {
+    return typeof b.submissionId === "string"
+      ? "jmap_submission_release"
+      : "unknown";
   }
   return "unknown";
 }
@@ -141,6 +152,12 @@ export async function handleQueueBatch(
       } else if (kind === "campaign_send") {
         const body = msg.body as CampaignSendMessage;
         await sendCampaignRecipient(db, env, sender, body.campaignRecipientId);
+      } else if (kind === "jmap_submission_release") {
+        // A failed release gives its claim back, so a retry (or the hourly
+        // sweep) sends it; one that may have reached the provider stays for
+        // recovery.
+        const body = msg.body as ReleaseMessage;
+        await releaseScheduledSubmission(env, body.submissionId, { sender });
       } else {
         const body = msg.body as SuggestReplyMessage;
         await suggestedReplyRunner(db, env, body.emailId);

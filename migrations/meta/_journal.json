@@ -498,6 +498,20 @@
       "when": 1790589668819,
       "tag": "0070_jmap_draft_folder_triggers",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1790593086362,
+      "tag": "0071_jmap_delayed_send",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1790593091444,
+      "tag": "0072_jmap_delayed_send_triggers",
+      "breakpoints": true
     }
   ]
 }

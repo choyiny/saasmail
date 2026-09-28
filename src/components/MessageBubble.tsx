@@ -12,6 +12,7 @@ import {
 import CcChips from "@/components/CcChips";
 import type { Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
+import DeliveryBadge from "@/components/mail/DeliveryBadge";
 
 interface MessageBubbleProps {
   email: Email;
@@ -154,6 +155,9 @@ export default function MessageBubble({
             <Clock size={10} />
             Retrying
           </span>
+        )}
+        {isSent && (
+          <DeliveryBadge status={email.status} sendAt={email.timestamp} />
         )}
         {isSent && email.campaignId && (
           <span

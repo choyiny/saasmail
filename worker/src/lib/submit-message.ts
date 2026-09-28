@@ -314,6 +314,8 @@ export async function sendSubmission(params: {
   sentEmailId: string;
   message: SubmissionMessage;
   bookkeepingOwner: BookkeepingOwner | null;
+  /** See OutboxSendParams.outboxId. */
+  outboxId?: string;
 }): Promise<OutboxSendResult> {
   const { message } = params;
   return sendViaOutbox({
@@ -321,6 +323,7 @@ export async function sendSubmission(params: {
     env: params.env,
     sender: params.sender,
     sentEmailId: params.sentEmailId,
+    outboxId: params.outboxId,
     bookkeepingOwner: params.bookkeepingOwner,
     fromAddress: message.fromAddress,
     from: message.from,

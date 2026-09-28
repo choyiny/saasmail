@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
@@ -280,6 +280,48 @@ export async function revealSubmission(
 }
 
 /**
+ * A delayed send whose Sent message was deleted before its on-success step ran
+ * (the web delete, or its person's): cancel it with the cancel's own atomic
+ * rule, unlock the draft, which stays a draft, and finish the step. If the
+ * release claimed it first, nothing here applies and recovery settles it.
+ */
+async function settleDeletedScheduled(
+  env: CloudflareBindings,
+  submission: PendingSubmission,
+  now: number,
+): Promise<void> {
+  const db = env.DB;
+  const canceled = `EXISTS (SELECT 1 FROM jmap_submissions WHERE id = ? AND undo_status = 'canceled')
+    AND NOT EXISTS (SELECT 1 FROM sent_emails WHERE id = ?)`;
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE jmap_submissions SET undo_status = 'canceled'
+          WHERE id = ? AND attempt_state = 'scheduled' AND undo_status = 'pending'`,
+      )
+      .bind(submission.id),
+    db
+      .prepare(
+        `UPDATE jmap_drafts SET submit_state = NULL, submit_attempt_id = NULL, updated_at = ?
+          WHERE id = ? AND submit_attempt_id = ? AND ${canceled}`,
+      )
+      .bind(
+        now,
+        submission.draftId,
+        submission.id,
+        submission.id,
+        submission.sentEmailId,
+      ),
+    db
+      .prepare(
+        `UPDATE jmap_submissions SET on_success_state = 'applied'
+          WHERE id = ? AND on_success_state = 'pending' AND ${canceled}`,
+      )
+      .bind(submission.id, submission.id, submission.sentEmailId),
+  ]);
+}
+
+/**
  * The on-success step for a set of accepted submissions (spec §3.3, §3.4): one
  * implicit `Email/set` through the ordinary `emailSet` rules, then a reveal of
  * every Sent row the alias didn't take over. Idempotent — submissions already
@@ -317,7 +359,8 @@ export async function applyOnSuccessStep(input: {
               input.submissionIds.slice(start, start + 90),
             ),
             eq(jmapSubmissions.userId, userId),
-            eq(jmapSubmissions.attemptState, "accepted"),
+            // Accepted, or a delayed send (whose step runs at create).
+            ne(jmapSubmissions.attemptState, "claimed"),
             eq(jmapSubmissions.onSuccessState, "pending"),
           ),
         )),
@@ -327,9 +370,15 @@ export async function applyOnSuccessStep(input: {
   // Cleanup spec §2: repair a missing Sent row before anything can delete the
   // draft or mark the submission applied.
   const repairedAt = Math.floor(Date.now() / 1000);
+  const withSentRow: PendingSubmission[] = [];
   for (const submission of pending) {
-    await ensureSubmissionSentRow(db, submission, repairedAt);
+    if (await ensureSubmissionSentRow(db, submission, repairedAt)) {
+      withSentRow.push(submission);
+    } else {
+      await settleDeletedScheduled(ctx.env, submission, repairedAt);
+    }
   }
+  pending.splice(0, pending.length, ...withSentRow);
 
   const update: Record<string, Record<string, unknown>> = {};
   const destroy: string[] = [];

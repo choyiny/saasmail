@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
@@ -64,7 +64,10 @@ export function submissionObject(row: SubmissionRow): Record<string, unknown> {
   };
 }
 
-/** The caller's accepted submissions from inboxes they may still use. */
+/**
+ * The caller's visible submissions (every state but the `claimed` intention)
+ * from inboxes they may still use.
+ */
 async function visibleSubmissions(
   db: Db,
   allowed: AllowedInboxes,
@@ -76,7 +79,7 @@ async function visibleSubmissions(
     .where(
       and(
         eq(jmapSubmissions.userId, userId),
-        eq(jmapSubmissions.attemptState, "accepted"),
+        ne(jmapSubmissions.attemptState, "claimed"),
       ),
     );
   return rows.filter((row) => isInboxAllowed(allowed, row.identityEmail));

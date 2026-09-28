@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, ne, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { users } from "../db/auth.schema";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
@@ -10,6 +10,11 @@ import { bracketedMessageId } from "../lib/message-id";
 import { discardSentAttachments } from "../lib/sent-attachments";
 import { queuedLockReleasableSql } from "./queued-lock";
 import { applyOnSuccessStep } from "./on-success";
+import {
+  recoverReleasingSubmissions,
+  releaseOverdueSubmissions,
+  restoreOwedDrafts,
+} from "./release";
 import { writeSentRow } from "./sent-row";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -211,7 +216,7 @@ export async function applyPendingOnSuccess(
     .from(jmapSubmissions)
     .where(
       and(
-        eq(jmapSubmissions.attemptState, "accepted"),
+        ne(jmapSubmissions.attemptState, "claimed"),
         eq(jmapSubmissions.onSuccessState, "pending"),
         lt(jmapSubmissions.createdAt, now - JMAP_RECOVERY_AGE_SECONDS),
       ),
@@ -272,7 +277,16 @@ export async function unlockQueuedDrafts(db: Db, now: number): Promise<number> {
   return result.meta.changes ?? 0;
 }
 
-/** Forget accepted, applied submissions after 7 days; their trigger writes tombstones. */
+/**
+ * Settled submissions: accepted and applied, or a canceled delayed send whose
+ * web move back to Drafts is not still owed.
+ */
+const PRUNABLE = sql`on_success_state = 'applied' AND (
+  attempt_state = 'accepted'
+  OR (attempt_state = 'scheduled' AND undo_status = 'canceled' AND restore_to_drafts = 0)
+)`;
+
+/** Forget settled submissions after 7 days; their trigger writes tombstones. */
 export async function pruneJmapSubmissions(
   db: Db,
   now: number,
@@ -284,8 +298,7 @@ export async function pruneJmapSubmissions(
   // conditions on the delete keeps the cut idempotent.
   const rows = await db.all<{ id: string }>(sql`
     SELECT id FROM jmap_submissions
-     WHERE attempt_state = 'accepted'
-       AND on_success_state = 'applied'
+     WHERE ${PRUNABLE}
        AND send_at < ${now - JMAP_SUBMISSION_RETENTION_SECONDS}
      ORDER BY send_at
      LIMIT ${PRUNE_BATCH}
@@ -300,8 +313,7 @@ export async function pruneJmapSubmissions(
     await db.run(sql`
       DELETE FROM jmap_submissions
        WHERE id IN (${list})
-         AND attempt_state = 'accepted'
-         AND on_success_state = 'applied'
+         AND ${PRUNABLE}
     `);
     const left = await db.all<{ id: string }>(sql`
       SELECT id FROM jmap_submissions WHERE id IN (${list})
@@ -328,6 +340,15 @@ export async function runJmapSubmissionMaintenance(
   );
   await applyPendingOnSuccess(db, env, now).catch((err) =>
     console.error("[cron] JMAP on-success recovery failed:", err),
+  );
+  await releaseOverdueSubmissions(env, now).catch((err) =>
+    console.error("[cron] JMAP delayed-send release failed:", err),
+  );
+  await recoverReleasingSubmissions(env, now).catch((err) =>
+    console.error("[cron] JMAP release recovery failed:", err),
+  );
+  await restoreOwedDrafts(env, now).catch((err) =>
+    console.error("[cron] JMAP canceled-send restore failed:", err),
   );
   await unlockQueuedDrafts(db, now).catch((err) =>
     console.error("[cron] JMAP queued-draft unlock failed:", err),

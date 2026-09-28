@@ -93,7 +93,7 @@ export async function buildJmapSentRow(
  * (email-handler). Only the web copy changes: the JMAP Email keeps `cid:`
  * because it projects from the content row, and the recipient got the content.
  */
-async function withInlineAttachmentUrls(
+export async function withInlineAttachmentUrls(
   db: Db,
   sentEmailId: string,
   html: string,
@@ -121,7 +121,7 @@ async function withInlineAttachmentUrls(
 export async function writeSentRow(
   db: Db,
   submission: typeof jmapSubmissions.$inferSelect,
-  status: "sent" | "retrying",
+  status: "sent" | "retrying" | "scheduled" | "canceled",
   now: number,
   /** From the held outbox row: the id the accepted message went out with. */
   deliveredId: string | null = null,
@@ -152,21 +152,29 @@ export async function writeSentRow(
     await loadDeliveredMessageIds(db, content),
   );
   if (submission.fromHeader) message.from = submission.fromHeader;
+  const row = await buildJmapSentRow(db, {
+    sentEmailId: submission.sentEmailId,
+    content,
+    message,
+    status,
+    providerResult: {
+      id: null,
+      deliveredMessageId: deliveredId,
+      error: null,
+    },
+    now,
+  });
   await db
     .insert(sentEmails)
     .values(
-      await buildJmapSentRow(db, {
-        sentEmailId: submission.sentEmailId,
-        content,
-        message,
-        status,
-        providerResult: {
-          id: null,
-          deliveredMessageId: deliveredId,
-          error: null,
-        },
-        now,
-      }),
+      status === "scheduled" || status === "canceled"
+        ? // As scheduleSubmission writes it: sent_at is the release time.
+          {
+            ...row,
+            sentAt: submission.sendAt,
+            jmapReceivedAt: submission.createdAt,
+          }
+        : row,
     )
     .onConflictDoNothing({ target: sentEmails.id });
 }
@@ -182,13 +190,19 @@ export async function ensureSubmissionSentRow(
   db: Db,
   submission: typeof jmapSubmissions.$inferSelect,
   now: number,
-): Promise<void> {
+): Promise<boolean> {
   const [existing] = await db
     .select({ id: sentEmails.id })
     .from(sentEmails)
     .where(eq(sentEmails.id, submission.sentEmailId))
     .limit(1);
-  if (existing) return;
+  if (existing) return true;
+  if (submission.attemptState === "scheduled") {
+    // A delayed send whose Sent message was deleted before it went out is
+    // canceled, never re-created: re-creating it would send it after all. The
+    // draft stays a draft (settleDeletedScheduled).
+    return false;
+  }
   const [outbox] = await db
     .select({
       status: outboxEmails.status,
@@ -200,11 +214,19 @@ export async function ensureSubmissionSentRow(
   console.warn(
     `[jmap] Sent row ${submission.sentEmailId} of submission ${submission.id} was missing; re-creating it`,
   );
+  // A release in progress with no outbox row yet hasn't sent anything.
+  const status =
+    outbox?.status === "pending"
+      ? "retrying"
+      : submission.attemptState === "releasing" && !outbox
+        ? "scheduled"
+        : "sent";
   await writeSentRow(
     db,
     submission,
-    outbox?.status === "pending" ? "retrying" : "sent",
+    status,
     now,
     outbox?.deliveredMessageId ?? null,
   );
+  return true;
 }
