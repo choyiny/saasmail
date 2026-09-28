@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createDb } from "./db/client";
 import { people } from "./db/people.schema";
@@ -67,12 +67,18 @@ export async function handleEmail(
     return;
   }
 
-  // Deduplicate by Message-ID
+  // Deduplicate by Message-ID within this inbox: a redelivery is dropped, but a
+  // message addressed to two of our inboxes is stored in each.
   if (parsed.messageId) {
     const existing = await db
       .select({ id: emails.id })
       .from(emails)
-      .where(eq(emails.messageId, parsed.messageId))
+      .where(
+        and(
+          eq(emails.messageId, parsed.messageId),
+          eq(emails.recipient, recipientCanonical),
+        ),
+      )
       .limit(1);
     if (existing.length > 0) {
       console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);

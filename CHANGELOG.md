@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A message addressed to two of your inboxes appears in both.** Inbound mail was deduplicated by Message-ID across all inboxes, so the second inbox's copy was dropped; it is now deduplicated per inbox (migration 0067 replaces the unique index on `emails.message_id` with one on `(message_id, recipient)`). A redelivery to the same inbox is still dropped. Found while sending a JMAP message To one inbox and Bcc another.
+
 - **The mailbox list no longer drops a message you just moved.** Restoring, unarchiving or otherwise changing a message and then opening another folder before the change reached the server could show that folder without the message until a reload; the list now reloads when a change lands after you moved on. An older folder's list can also no longer overwrite the newer one when you switch folders quickly. This also fixes the intermittently failing "custom folders" end-to-end test.
 
 - **JMAP dates are validated strictly.** An impossible `sentAt` such as `2026-02-30` used to be stored as March 2; it is now refused, and `before`/`after` filters accept only UTCDates.
@@ -41,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upgrading to the mailbox/agent/JMAP release
 
-- Apply D1 migrations `0037` through `0066` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
+- Apply D1 migrations `0037` through `0067` with `yarn db:migrate:prod` **before** deploying the new Worker. Every outbound send writes the `outbox_emails.bookkeeping_owner` column added in `0053`, so a Worker deployed ahead of that migration fails every send: compose, reply, sequences, campaigns and auto-replies. Migrations `0054` through `0060` add the JMAP upload, draft, message-content and submission tables and their change-log triggers; the JMAP routes fail without them in the same way.
 - Diff your gitignored `wrangler.jsonc` against `wrangler.jsonc.example` and add the `AI` binding, the `MAIL_AGENT` Durable Object binding for `MailAgent`, and the `v2` Durable Object migration that creates `MailAgent`.
 - Review the optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables. Enabling the `AI` binding enables paid Workers AI fallback usage when no Anthropic or OpenAI API key is configured.
 

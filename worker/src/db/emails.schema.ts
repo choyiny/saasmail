@@ -4,6 +4,7 @@ import {
   integer,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 export const emails = sqliteTable(
@@ -16,7 +17,7 @@ export const emails = sqliteTable(
     bodyHtml: text("body_html"),
     bodyText: text("body_text"),
     rawHeaders: text("raw_headers"),
-    messageId: text("message_id").unique(),
+    messageId: text("message_id"),
     /**
      * The raw `In-Reply-To` and `References` header values, as received
      * (one or more `<id>`s). JMAP exposes them as `inReplyTo`/`references`.
@@ -53,5 +54,11 @@ export const emails = sqliteTable(
       table.receivedAt,
     ),
     index("emails_conversation_idx").on(table.conversationId),
+    // One row per Message-ID per inbox: a message addressed to two inboxes is
+    // stored in both, and a redelivery to the same inbox is dropped.
+    uniqueIndex("emails_message_id_recipient_unique").on(
+      table.messageId,
+      table.recipient,
+    ),
   ],
 );
