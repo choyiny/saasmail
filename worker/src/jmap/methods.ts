@@ -166,11 +166,17 @@ function filterProperties(
   return result;
 }
 
+/**
+ * The Session object (RFC 8620 §2). `origin` is the scheme and host the client
+ * reached: the URLs are absolute because clients use them as given (go-jmap,
+ * and with it aerc, can't resolve a relative `apiUrl`).
+ */
 export async function makeSession(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
   user: any,
   env: CloudflareBindings,
+  origin: string,
 ): Promise<Record<string, unknown>> {
   const accountId = publicAccountId(user.id);
   // One limit for uploads and for an Email's attachments: whatever the
@@ -229,11 +235,11 @@ export async function makeSession(
       [SUBMISSION_CAPABILITY]: accountId,
     },
     username: user.email ?? user.id,
-    apiUrl: "/jmap/api",
-    downloadUrl: "/jmap/download/{accountId}/{blobId}/{name}?type={type}",
-    uploadUrl: "/jmap/upload/{accountId}/",
+    apiUrl: `${origin}/jmap/api`,
+    downloadUrl: `${origin}/jmap/download/{accountId}/{blobId}/{name}?type={type}`,
+    uploadUrl: `${origin}/jmap/upload/{accountId}/`,
     eventSourceUrl: "",
-    state: await sessionState(db, allowed, user),
+    state: await sessionState(db, allowed, user, origin),
   };
 }
 

@@ -244,7 +244,7 @@ Use the deployment origin as the JMAP host. A client that supports automatic JMA
 https://your-domain.example/.well-known/jmap
 ```
 
-For clients that ask for endpoints manually, use `https://your-domain.example/jmap/api` for the API endpoint and authenticate with an API key as a bearer token. The Session response supplies the exact API, upload and download URL templates.
+For clients that ask for endpoints manually, use `https://your-domain.example/jmap/api` for the API endpoint and authenticate with an API key as a bearer token. The Session response supplies the exact API, upload and download URL templates, as absolute URLs on the host the client reached.
 
 To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mjs`). It sends real email; the variables it needs are listed at the top of the script.
 

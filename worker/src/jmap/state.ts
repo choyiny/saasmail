@@ -16,17 +16,20 @@ export async function opaqueState(value: unknown): Promise<string> {
 
 /**
  * The Session object's `state` (RFC 8620 §2): it changes only when the Session
- * itself does (id format, account, username, the inboxes it covers), never
- * because mail arrived. Mail and mailbox state is `currentJmapState`.
+ * itself does (id format, account, username, the inboxes it covers, the origin
+ * its URLs are on), never because mail arrived. Mail and mailbox state is
+ * `currentJmapState`.
  */
 export async function sessionState(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
   user: { id: string; email?: string | null },
+  origin: string,
 ): Promise<string> {
   return opaqueState({
     kind: "session",
     v: JMAP_ID_FORMAT_VERSION,
+    origin,
     user: user.id,
     username: user.email ?? user.id,
     inboxes: await listAllowedInboxAddresses(db, allowed),

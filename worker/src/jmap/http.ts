@@ -308,7 +308,13 @@ export function registerJmapRoutes(
     const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));
     if (auth instanceof Response) return auth;
     return jsonResponse(
-      await makeSession(c.get("db"), auth.allowed, auth.user, c.env),
+      await makeSession(
+        c.get("db"),
+        auth.allowed,
+        auth.user,
+        c.env,
+        new URL(c.req.url).origin,
+      ),
     );
   });
 
@@ -344,6 +350,7 @@ export function registerJmapRoutes(
       auth.allowed,
       auth.user,
       c.env,
+      new URL(c.req.url).origin,
     );
     return jsonResponse({
       methodResponses,

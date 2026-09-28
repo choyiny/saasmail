@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import {
   applyMigrations,
   authFetch,
@@ -97,6 +97,24 @@ describe("JMAP", () => {
     await cleanDb();
   });
 
+  it("puts the Session's URLs, and its state, on the host the client reached", async () => {
+    const { apiKey } = await createTestUser({ id: "jmap-user" });
+    const sessionAt = async (origin: string) =>
+      (await (
+        await exports.default.fetch(`${origin}/.well-known/jmap`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        })
+      ).json()) as any;
+    const local = await sessionAt("http://localhost");
+    const other = await sessionAt("https://mail.other.test");
+    expect(other.apiUrl).toBe("https://mail.other.test/jmap/api");
+    expect(other.uploadUrl).toBe(
+      "https://mail.other.test/jmap/upload/{accountId}/",
+    );
+    expect(other.state).not.toBe(local.state);
+    expect((await sessionAt("http://localhost")).state).toBe(local.state);
+  });
+
   it("serves the RFC 8620 session shape and requires authentication", async () => {
     const unauthorized = await authFetch("/.well-known/jmap");
     expect(unauthorized.status).toBe(401);
@@ -110,11 +128,12 @@ describe("JMAP", () => {
     expect(response.status).toBe(200);
     const session = (await response.json()) as any;
 
-    expect(session.apiUrl).toBe("/jmap/api");
+    // Absolute: go-jmap (aerc) uses them as given.
+    expect(session.apiUrl).toBe("http://localhost/jmap/api");
     expect(session.downloadUrl).toBe(
-      "/jmap/download/{accountId}/{blobId}/{name}?type={type}",
+      "http://localhost/jmap/download/{accountId}/{blobId}/{name}?type={type}",
     );
-    expect(session.uploadUrl).toBe("/jmap/upload/{accountId}/");
+    expect(session.uploadUrl).toBe("http://localhost/jmap/upload/{accountId}/");
     const maxUpload = createEmailSender(
       env as unknown as CloudflareBindings,
     ).maxAttachmentBytes();
