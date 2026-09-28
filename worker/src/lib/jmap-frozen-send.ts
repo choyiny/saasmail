@@ -21,7 +21,9 @@ export type FrozenSend = {
   from: string;
   to: string;
   toName: string | null;
+  additionalTo: CcRecipient[];
   cc: CcRecipient[];
+  bcc: CcRecipient[];
   subject: string;
   html: string;
   text: string | undefined;
@@ -93,7 +95,9 @@ export async function loadFrozenJmapSend(
     from: submission.fromHeader ?? message.from,
     to: message.to,
     toName: message.toName,
+    additionalTo: message.additionalTo,
     cc: message.cc,
+    bcc: message.bcc,
     subject: message.subject,
     html: message.html,
     text: message.text,

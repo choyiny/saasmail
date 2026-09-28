@@ -9,6 +9,7 @@ import { sentEmails } from "../db/sent-emails.schema";
 import { cancelSequencesForPerson } from "../lib/cancel-sequence";
 import {
   createEmailSender,
+  recipientSupportOf,
   type EmailSender,
   type SendEmailAttachment,
 } from "../lib/email-sender";
@@ -54,6 +55,7 @@ import { currentJmapState, parseJmapState } from "./state";
 import {
   checkAttachmentCount,
   checkContentRecipients,
+  checkRecipientSupport,
   resolveEnvelope,
   submissionRecipients,
   type Envelope,
@@ -462,7 +464,7 @@ async function createSubmission(
     });
   }
 
-  // Steps 3–4: exactly one To, Cc, no Bcc, sendable, at most 50 in all.
+  // Steps 3–4: at least one To, sendable, To + Cc + Bcc at most 50 in all.
   const recipientError = checkContentRecipients(content);
   if (recipientError) return rejected(recipientError);
 
@@ -484,6 +486,11 @@ async function createSubmission(
       description: "No email provider is configured on this server",
     });
   }
+  const supportError = checkRecipientSupport(
+    content,
+    recipientSupportOf(sender),
+  );
+  if (supportError) return rejected(supportError);
   const replyTo = parseContentJson<ContentAddress[] | null>(
     content.replyToJson,
     null,

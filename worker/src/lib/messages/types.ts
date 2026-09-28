@@ -38,7 +38,11 @@ export interface UnifiedMessage {
   references?: string | null;
   from: MailAddress | null;
   to: MailAddress;
+  /** Further To recipients of a sent message (JMAP), after `to`. */
+  additionalTo?: MailAddress[];
   cc: MailAddress[];
+  /** Blind recipients of a sent message (JMAP). Only the sender sees these. */
+  bcc?: MailAddress[];
   subject: string | null;
   bodyText: string | null;
   bodyHtml: string | null;

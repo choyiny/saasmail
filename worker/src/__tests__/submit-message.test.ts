@@ -124,10 +124,12 @@ describe("buildSubmissionMessage", () => {
       from: '"Mine, Team" <mine@saasmail.test>',
       to: "john@example.com",
       toName: "Doe, John",
+      additionalTo: [],
       cc: [
         { email: "jane@example.com", name: "Jane" },
         { email: "ops@example.com", name: null },
       ],
+      bcc: [],
       subject: "Re: exactly this",
       html: "<p>Hello</p>",
       text: "Hello",

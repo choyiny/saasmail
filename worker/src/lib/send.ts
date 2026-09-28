@@ -28,7 +28,11 @@ export interface SendInput {
    * sends address every recipient separately and keep bare addresses.
    */
   toName?: string | null;
+  /** More To recipients (JMAP submissions). Transactional sends only. */
+  additionalTo?: CcRecipient[];
   cc?: CcRecipient[];
+  /** Blind recipients (JMAP submissions). Transactional sends only. */
+  bcc?: CcRecipient[];
   subject: string;
   html?: string;
   text?: string;
@@ -132,7 +136,9 @@ export async function sendWithSuppressionCheck(
     from,
     to,
     toName,
+    additionalTo,
     cc,
+    bcc,
     subject,
     html,
     text,
@@ -141,6 +147,14 @@ export async function sendWithSuppressionCheck(
     transactional,
     unsubscribeContext,
   } = input;
+  if (
+    transactional !== true &&
+    ((additionalTo?.length ?? 0) > 0 || (bcc?.length ?? 0) > 0)
+  ) {
+    // Marketing sends address each recipient separately; several To or a Bcc
+    // have no meaning there.
+    throw new Error("additionalTo and bcc are for transactional sends only");
+  }
 
   // Partition recipients into delivered vs suppressed. Transactional sends
   // bypass the suppression list entirely.
@@ -188,7 +202,11 @@ export async function sendWithSuppressionCheck(
       to: toName
         ? formatCcForTransport({ email: primaryTo, name: toName })
         : primaryTo,
+      ...(additionalTo && additionalTo.length > 0
+        ? { additionalTo: additionalTo.map(formatCcForTransport) }
+        : {}),
       ...(ccArg ? { cc: ccArg } : {}),
+      ...(bcc && bcc.length > 0 ? { bcc: bcc.map(formatCcForTransport) } : {}),
       subject,
       html: html ?? "",
       ...(text !== undefined ? { text } : {}),
@@ -274,7 +292,14 @@ export async function sendWithSuppressionCheck(
   }
 
   return {
-    delivered: [primaryTo, ...deliveredCc.map((c) => c.email)],
+    delivered: [
+      primaryTo,
+      ...(transactional === true
+        ? (additionalTo ?? []).map((c) => c.email)
+        : []),
+      ...deliveredCc.map((c) => c.email),
+      ...(transactional === true ? (bcc ?? []).map((c) => c.email) : []),
+    ],
     suppressed,
     result: lastResult,
     ...(renderedHtml !== undefined ? { renderedHtml } : {}),

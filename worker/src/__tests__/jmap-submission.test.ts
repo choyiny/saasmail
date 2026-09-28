@@ -342,7 +342,7 @@ describe("EmailSubmission/set create", () => {
     await expectNothingStaged(draft.id);
   });
 
-  it("rejects a second To, Bcc, and a missing To", async () => {
+  it("with a provider that can't send them, refuses a second To and Bcc; always refuses a missing To", async () => {
     const { sender, calls } = recordingSender();
     const twoTo = await createDraft(userId, sender, {
       to: [

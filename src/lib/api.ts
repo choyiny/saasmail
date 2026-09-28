@@ -488,7 +488,9 @@ export interface MailMessage {
   inReplyTo: string | null;
   from: MailAddress | null;
   to: MailAddress;
+  additionalTo?: MailAddress[];
   cc: MailAddress[];
+  bcc?: MailAddress[];
   subject: string | null;
   bodyText: string | null;
   bodyHtml: string | null;

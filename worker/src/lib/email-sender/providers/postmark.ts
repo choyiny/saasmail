@@ -30,7 +30,7 @@ export class PostmarkSender implements EmailSender {
     try {
       const payload: Record<string, unknown> = {
         From: params.from,
-        To: params.to,
+        To: [params.to, ...(params.additionalTo ?? [])].join(","),
         Subject: params.subject,
       };
       // A text-only message (a JMAP draft) has no HTML body to send.
@@ -42,6 +42,9 @@ export class PostmarkSender implements EmailSender {
       }
       if (params.cc && params.cc.length > 0) {
         payload.Cc = params.cc.join(",");
+      }
+      if (params.bcc && params.bcc.length > 0) {
+        payload.Bcc = params.bcc.join(",");
       }
       if (params.headers) {
         const entries = Object.entries(params.headers);
@@ -112,6 +115,10 @@ export class PostmarkSender implements EmailSender {
       );
       return { id: null, error: { message, transient: true } };
     }
+  }
+
+  recipientSupport() {
+    return { multipleTo: true, bcc: true };
   }
 
   maxAttachmentBytes(): number {

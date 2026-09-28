@@ -25,7 +25,11 @@ export type SubmissionMessage = {
   from: string;
   to: string;
   toName: string | null;
+  /** The To addresses after the first, with their names. */
+  additionalTo: CcRecipient[];
   cc: CcRecipient[];
+  /** Blind recipients: in the envelope, never in the headers. */
+  bcc: CcRecipient[];
   subject: string;
   html: string;
   text: string | undefined;
@@ -244,8 +248,16 @@ export function buildSubmissionMessage(
 ): SubmissionMessage {
   const onWire = (id: string) => bracketed(deliveredIds.get(bare(id)) ?? id);
   const fromAddress = identity.email.trim().toLowerCase();
-  const to = parseContentJson<ContentAddress[]>(content.toJson, [])[0];
+  const [to, ...moreTo] = parseContentJson<ContentAddress[]>(
+    content.toJson,
+    [],
+  );
   if (!to) throw new Error("content has no To address");
+  const recipients = (addresses: ContentAddress[]): CcRecipient[] =>
+    addresses.map((address) => ({
+      email: address.email.trim().toLowerCase(),
+      name: address.name ?? null,
+    }));
   const values = parseContentJson<Record<string, string>>(
     content.bodyValuesJson,
     {},
@@ -283,12 +295,9 @@ export function buildSubmissionMessage(
     from: submissionFromHeader(content, identity),
     to: to.email.trim().toLowerCase(),
     toName: to.name ?? null,
-    cc: parseContentJson<ContentAddress[]>(content.ccJson, []).map(
-      (address) => ({
-        email: address.email.trim().toLowerCase(),
-        name: address.name ?? null,
-      }),
-    ),
+    additionalTo: recipients(moreTo),
+    cc: recipients(parseContentJson<ContentAddress[]>(content.ccJson, [])),
+    bcc: recipients(parseContentJson<ContentAddress[]>(content.bccJson, [])),
     subject: content.subject,
     html: bodyValue(bodies.html, values) ?? "",
     text: bodyValue(bodies.text, values) ?? undefined,
@@ -317,7 +326,10 @@ export async function sendSubmission(params: {
     from: message.from,
     to: message.to,
     toName: message.toName,
+    additionalTo:
+      message.additionalTo.length > 0 ? message.additionalTo : undefined,
     cc: message.cc.length > 0 ? message.cc : undefined,
+    bcc: message.bcc.length > 0 ? message.bcc : undefined,
     subject: message.subject,
     html: message.html,
     text: message.text,

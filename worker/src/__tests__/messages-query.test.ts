@@ -131,6 +131,31 @@ describe("queryMessages", () => {
     });
   });
 
+  it("carries a sent message's further To and Bcc (JMAP sends)", async () => {
+    await seedPair();
+    await getDb()
+      .update(sentEmails)
+      .set({
+        additionalTo: JSON.stringify([
+          { email: "bob@example.com", name: "Bob" },
+        ]),
+        bcc: JSON.stringify([{ email: "hidden@example.com", name: null }]),
+      })
+      .where(eq(sentEmails.id, "sent-1"));
+    const page = await queryMessages(
+      getDb(),
+      { isAdmin: false, inboxes: ["support@saasmail.test"] },
+      { limit: 10 },
+    );
+    const [received, sent] = page.messages;
+    expect(sent.additionalTo).toEqual([
+      { email: "bob@example.com", name: "Bob" },
+    ]);
+    expect(sent.bcc).toEqual([{ email: "hidden@example.com", name: null }]);
+    expect(received.additionalTo).toBeUndefined();
+    expect(received.bcc).toBeUndefined();
+  });
+
   it("uses inbox/timestamp indexes for the real inbox-scoped query", async () => {
     const db = getDb();
     const built = buildMessageQuerySql(

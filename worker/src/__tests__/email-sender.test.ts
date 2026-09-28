@@ -994,3 +994,92 @@ describe("inline attachments and exact headers", () => {
     ]);
   });
 });
+
+describe("several To and Bcc", () => {
+  const params = {
+    from: "Mine <mine@x.com>",
+    to: "Ann <ann@x.com>",
+    additionalTo: ["Bob <bob@x.com>", "carl@x.com"],
+    cc: ["dee@x.com"],
+    bcc: ["Eve <eve@x.com>"],
+    subject: "s",
+    html: "<p>h</p>",
+  };
+
+  it("each provider says what it can deliver", () => {
+    expect(
+      createEmailSender({
+        EMAIL: { send: async () => ({ messageId: "x" }) },
+      } as unknown as CloudflareBindings).recipientSupport?.(),
+    ).toEqual({ multipleTo: true, bcc: true });
+    expect(new ResendSender("re_test").recipientSupport?.()).toEqual({
+      multipleTo: true,
+      bcc: true,
+    });
+    expect(new PostmarkSender("pm_test").recipientSupport?.()).toEqual({
+      multipleTo: true,
+      bcc: true,
+    });
+    expect(
+      new BavimailSender("bm", "alias", vi.fn()).recipientSupport?.(),
+    ).toEqual({ multipleTo: false, bcc: false });
+  });
+
+  it("Cloudflare: every To and the Bcc are recipients", async () => {
+    const binding = { send: vi.fn().mockResolvedValue({ messageId: "cf" }) };
+    await createEmailSender({
+      EMAIL: binding,
+    } as unknown as CloudflareBindings).send(params);
+    const sent = binding.send.mock.calls[0][0];
+    expect(sent.to).toEqual([
+      { email: "ann@x.com", name: "Ann" },
+      { email: "bob@x.com", name: "Bob" },
+      "carl@x.com",
+    ]);
+    expect(sent.cc).toEqual(["dee@x.com"]);
+    expect(sent.bcc).toEqual([{ email: "eve@x.com", name: "Eve" }]);
+  });
+
+  it("Resend: to is a list, bcc is passed", async () => {
+    const sender = new ResendSender("re_test");
+    const send = vi.fn().mockResolvedValue({ data: { id: "rs" }, error: null });
+    (
+      sender as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+    await sender.send(params);
+    const payload = send.mock.calls[0][0];
+    expect(payload.to).toEqual([
+      "Ann <ann@x.com>",
+      "Bob <bob@x.com>",
+      "carl@x.com",
+    ]);
+    expect(payload.bcc).toEqual(["Eve <eve@x.com>"]);
+  });
+
+  it("Postmark: To and Bcc are comma-separated lists", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ MessageID: "pm", ErrorCode: 0 }), {
+        status: 200,
+      }),
+    );
+    await new PostmarkSender(
+      "pm_test",
+      fetchMock as unknown as typeof fetch,
+    ).send(params);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.To).toBe("Ann <ann@x.com>,Bob <bob@x.com>,carl@x.com");
+    expect(body.Bcc).toBe("Eve <eve@x.com>");
+  });
+
+  it("Bavimail: refuses rather than dropping recipients, without calling the API", async () => {
+    const fetchMock = vi.fn();
+    const result = await new BavimailSender(
+      "bm",
+      "alias",
+      fetchMock as unknown as typeof fetch,
+    ).send(params);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.id).toBeNull();
+    expect(result.error?.transient).toBe(false);
+  });
+});

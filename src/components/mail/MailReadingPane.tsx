@@ -395,7 +395,12 @@ export default function MailReadingPane({
                           <span className="font-medium text-text-primary">
                             To:
                           </span>{" "}
-                          {addressLabel(selectedMessage.to)}
+                          {[
+                            selectedMessage.to,
+                            ...(selectedMessage.additionalTo ?? []),
+                          ]
+                            .map((entry) => addressLabel(entry))
+                            .join(", ")}
                         </p>
                         {selectedMessage.cc.length > 0 && (
                           <p className="mt-1 text-xs text-text-secondary">
@@ -404,6 +409,19 @@ export default function MailReadingPane({
                             </span>{" "}
                             {selectedMessage.cc
                               .map((entry) => addressLabel(entry))
+                              .join(", ")}
+                          </p>
+                        )}
+                        {(selectedMessage.bcc?.length ?? 0) > 0 && (
+                          <p
+                            className="mt-1 text-xs text-text-secondary"
+                            data-testid="mail-reading-bcc"
+                          >
+                            <span className="font-medium text-text-primary">
+                              Bcc:
+                            </span>{" "}
+                            {selectedMessage
+                              .bcc!.map((entry) => addressLabel(entry))
                               .join(", ")}
                           </p>
                         )}

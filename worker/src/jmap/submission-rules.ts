@@ -1,6 +1,6 @@
 import { MAX_RECIPIENTS, MAX_SEND_ATTACHMENTS } from "../lib/send-limits";
 
-/** One To plus Cc, within the provider's per-message recipient cap. */
+/** To, Cc and Bcc together, within the provider's per-message recipient cap. */
 export const MAX_SUBMISSION_RECIPIENTS = MAX_RECIPIENTS;
 
 /** An RFC 8621 §7.5 SetError, with every extra field this server uses. */
@@ -45,13 +45,40 @@ function uniqueLower(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim().toLowerCase()))];
 }
 
-/** The deduplicated, lowercased To ∪ Cc of a content row. */
+/** The deduplicated, lowercased To ∪ Cc ∪ Bcc of a content row: the envelope. */
 export function submissionRecipients(content: RecipientColumns): string[] {
   return uniqueLower(
-    [...addresses(content.toJson), ...addresses(content.ccJson)].map(
-      (address) => address.email,
-    ),
+    [
+      ...addresses(content.toJson),
+      ...addresses(content.ccJson),
+      ...addresses(content.bccJson),
+    ].map((address) => address.email),
   );
+}
+
+/**
+ * Several To addresses and Bcc are sent only through a provider that delivers
+ * them (EmailSender.recipientSupport); refusing beats dropping recipients.
+ */
+export function checkRecipientSupport(
+  content: RecipientColumns,
+  support: { multipleTo: boolean; bcc: boolean },
+): SubmissionSetError | null {
+  if (addresses(content.toJson).length > 1 && !support.multipleTo) {
+    return {
+      type: "invalidEmail",
+      properties: ["to"],
+      description: "The configured email provider sends to one To address only",
+    };
+  }
+  if (addresses(content.bccJson).length > 0 && !support.bcc) {
+    return {
+      type: "invalidEmail",
+      properties: ["bcc"],
+      description: "The configured email provider can't send Bcc",
+    };
+  }
+  return null;
 }
 
 /** Spec §3.2 steps 3–4. */
@@ -59,18 +86,6 @@ export function checkContentRecipients(
   content: RecipientColumns,
 ): SubmissionSetError | null {
   const to = addresses(content.toJson);
-  const bcc = addresses(content.bccJson);
-  const invalidProperties: string[] = [];
-  if (to.length > 1) invalidProperties.push("to");
-  if (bcc.length > 0) invalidProperties.push("bcc");
-  if (invalidProperties.length > 0) {
-    return {
-      type: "invalidEmail",
-      properties: invalidProperties,
-      description:
-        "saasmail sends to exactly one To address plus Cc, and does not support Bcc",
-    };
-  }
   if (to.length === 0) {
     return { type: "noRecipients", description: "The Email has no To address" };
   }
@@ -149,8 +164,8 @@ export function resolveEnvelope(
       envelope: null,
       error: {
         type: "invalidEmail",
-        properties: ["to", "cc"],
-        description: "rcptTo must equal the Email's To and Cc addresses",
+        properties: ["to", "cc", "bcc"],
+        description: "rcptTo must equal the Email's To, Cc and Bcc addresses",
       },
     };
   }

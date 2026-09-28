@@ -75,9 +75,12 @@ export class CloudflareSender implements EmailSender {
     try {
       const result = await this.binding.send({
         from: address(params.from),
-        to: [address(params.to)],
+        to: [params.to, ...(params.additionalTo ?? [])].map(address),
         ...(params.cc && params.cc.length > 0
           ? { cc: params.cc.map(address) }
+          : {}),
+        ...(params.bcc && params.bcc.length > 0
+          ? { bcc: params.bcc.map(address) }
           : {}),
         ...(replyTo ? { replyTo } : {}),
         subject: params.subject,
@@ -120,6 +123,11 @@ export class CloudflareSender implements EmailSender {
         },
       };
     }
+  }
+
+  recipientSupport() {
+    // 50 recipients in all, To, Cc and Bcc combined (lib/send-limits.ts).
+    return { multipleTo: true, bcc: true };
   }
 
   maxAttachmentBytes(): number {

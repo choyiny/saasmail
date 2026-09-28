@@ -14,8 +14,12 @@ export class ResendSender implements EmailSender {
   async send(params: SendEmailParams): Promise<SendEmailResult> {
     const result = await this.client.emails.send({
       from: params.from,
-      to: params.to,
+      to:
+        params.additionalTo && params.additionalTo.length > 0
+          ? [params.to, ...params.additionalTo]
+          : params.to,
       ...(params.cc && params.cc.length > 0 ? { cc: params.cc } : {}),
+      ...(params.bcc && params.bcc.length > 0 ? { bcc: params.bcc } : {}),
       subject: params.subject,
       // A text-only message (a JMAP draft) has no HTML body to send.
       ...(params.html ? { html: params.html } : {}),
@@ -47,6 +51,10 @@ export class ResendSender implements EmailSender {
       };
     }
     return { id: result.data?.id ?? null, error: null };
+  }
+
+  recipientSupport() {
+    return { multipleTo: true, bcc: true };
   }
 
   maxAttachmentBytes(): number {

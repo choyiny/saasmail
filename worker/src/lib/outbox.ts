@@ -79,7 +79,10 @@ export interface OutboxSendParams {
   to: string;
   /** Display name for `to` (transactional sends); the row stores the bare address. */
   toName?: string | null;
+  /** More To recipients and blind recipients (JMAP submissions). */
+  additionalTo?: CcRecipient[];
   cc?: CcRecipient[];
+  bcc?: CcRecipient[];
   subject: string;
   html?: string;
   text?: string;
@@ -127,7 +130,9 @@ export async function sendViaOutbox(
     from,
     to,
     toName,
+    additionalTo,
     cc,
+    bcc,
     subject,
     html,
     text,
@@ -156,6 +161,11 @@ export async function sendViaOutbox(
     fromAddress,
     toAddress: to,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
+    additionalTo:
+      additionalTo && additionalTo.length > 0
+        ? JSON.stringify(additionalTo)
+        : null,
+    bcc: bcc && bcc.length > 0 ? JSON.stringify(bcc) : null,
     subject,
     bodyHtml: html ?? null,
     bodyText: text ?? null,
@@ -187,7 +197,9 @@ export async function sendViaOutbox(
       from,
       to,
       toName,
+      additionalTo,
       cc,
+      bcc,
       subject,
       html,
       text,
@@ -373,6 +385,16 @@ export async function attemptOutboxRow(
         : undefined
       : row.cc
         ? (JSON.parse(row.cc) as CcRecipient[])
+        : undefined,
+    additionalTo: frozen
+      ? frozen.additionalTo
+      : row.additionalTo
+        ? (JSON.parse(row.additionalTo) as CcRecipient[])
+        : undefined,
+    bcc: frozen
+      ? frozen.bcc
+      : row.bcc
+        ? (JSON.parse(row.bcc) as CcRecipient[])
         : undefined,
     subject: frozen ? frozen.subject : row.subject,
     html: frozen ? frozen.html : (row.bodyHtml ?? undefined),

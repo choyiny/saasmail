@@ -60,11 +60,18 @@ export async function buildJmapSentRow(
     resendId: input.resendId ?? null,
     status: input.status,
     cc: message.cc.length > 0 ? JSON.stringify(message.cc) : null,
+    additionalTo:
+      message.additionalTo.length > 0
+        ? JSON.stringify(message.additionalTo)
+        : null,
+    bcc: message.bcc.length > 0 ? JSON.stringify(message.bcc) : null,
+    // Every visible recipient takes part in the thread; Bcc does not, since
+    // nobody else sees them.
     conversationId: await outboundConversationId(
       db,
       message.fromAddress,
       message.to,
-      message.cc.map((cc) => cc.email),
+      [...message.additionalTo, ...message.cc].map((address) => address.email),
     ),
     jmapContentId: input.content.id,
     sentAt: now,

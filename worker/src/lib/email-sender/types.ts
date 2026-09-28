@@ -15,8 +15,18 @@ export interface SendEmailAttachment {
 export interface SendEmailParams {
   from: string;
   to: string;
+  /**
+   * More To recipients after `to`, bare or "Name <addr>". Only for a sender
+   * whose `recipientSupport().multipleTo` is true.
+   */
+  additionalTo?: string[];
   /** Optional CC list — each entry can be a bare address or "Name <addr>". */
   cc?: string[];
+  /**
+   * Blind recipients: delivered to, never written into the message's headers.
+   * Only for a sender whose `recipientSupport().bcc` is true.
+   */
+  bcc?: string[];
   subject: string;
   html: string;
   text?: string;
@@ -51,6 +61,11 @@ export interface SendEmailResult {
 export interface EmailSender {
   provider: "resend" | "cloudflare" | "none" | "demo" | "bavimail" | "postmark";
   send(params: SendEmailParams): Promise<SendEmailResult>;
+  /**
+   * Recipient forms the provider delivers besides one To and Cc. Absent means
+   * neither: callers must not pass `additionalTo` or `bcc`.
+   */
+  recipientSupport?(): RecipientSupport;
   maxAttachmentBytes(): number;
   /**
    * The provider's documented cap on a whole message, in octets, measured the
@@ -58,4 +73,14 @@ export interface EmailSender {
    * `tooLarge.maxSize`; it is never derived from `maxAttachmentBytes()`.
    */
   maxMessageBytes(): number;
+}
+
+export interface RecipientSupport {
+  multipleTo: boolean;
+  bcc: boolean;
+}
+
+/** What a sender delivers; a sender that doesn't say supports neither. */
+export function recipientSupportOf(sender: EmailSender): RecipientSupport {
+  return sender.recipientSupport?.() ?? { multipleTo: false, bcc: false };
 }

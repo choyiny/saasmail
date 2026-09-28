@@ -33,6 +33,17 @@ export class BavimailSender implements EmailSender {
   ) {}
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
+    if (params.additionalTo?.length || params.bcc?.length) {
+      // Its API takes one to_email and a cc list. Dropping recipients silently
+      // would be worse than refusing; callers check recipientSupport() first.
+      return {
+        id: null,
+        error: {
+          message: "Bavimail can't send to several To addresses or to Bcc",
+          transient: false,
+        },
+      };
+    }
     try {
       let attachmentIds: string[] = [];
       if (params.attachments && params.attachments.length > 0) {
@@ -149,6 +160,10 @@ export class BavimailSender implements EmailSender {
     }
 
     return { ids, error: null };
+  }
+
+  recipientSupport() {
+    return { multipleTo: false, bcc: false };
   }
 
   maxAttachmentBytes(): number {

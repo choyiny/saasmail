@@ -440,7 +440,7 @@ function recipient(email, name = "JMAP E2E Recipient") {
   return { name, email };
 }
 
-function draftEmail(ctx, env, blobs, { subject, to, bcc }) {
+function draftEmail(ctx, env, blobs, { subject, to, cc, bcc }) {
   return {
     mailboxIds: { [env.draftsMailboxId]: true },
     keywords: { $draft: true, $seen: true },
@@ -452,7 +452,7 @@ function draftEmail(ctx, env, blobs, { subject, to, bcc }) {
       },
     ],
     to: to ?? [recipient(ctx.config.to)],
-    cc: ctx.config.cc ? [recipient(ctx.config.cc, "JMAP E2E Cc")] : [],
+    cc: cc ?? (ctx.config.cc ? [recipient(ctx.config.cc, "JMAP E2E Cc")] : []),
     ...(bcc ? { bcc } : {}),
     subject,
     references: [`${ctx.marker}.ref@jmap-e2e.invalid`],
@@ -524,14 +524,14 @@ async function sentEmailsWithSubject(ctx, env, subject) {
   );
 }
 
-/** Poll JMAP_TO's inbox for this run's message with `subject`, or fail. */
-async function awaitDelivery(ctx, env, step, subject) {
+/** Poll `address`'s inbox (JMAP_TO by default) for `subject`, or fail. */
+async function awaitDelivery(ctx, env, step, subject, address = ctx.config.to) {
   const { client, report, config } = ctx;
-  const inbox = findMailbox(env.mailboxes, "inbox", config.to);
+  const inbox = findMailbox(env.mailboxes, "inbox", address);
   if (!inbox) {
     report.fail(
       `${step}: delivery`,
-      `no Inbox mailbox of ${config.to} is visible to this API key`,
+      `no Inbox mailbox of ${address} is visible to this API key`,
     );
   }
   const deadline = Date.now() + config.deliveryTimeoutSeconds * 1000;
@@ -559,6 +559,7 @@ async function awaitDelivery(ctx, env, step, subject) {
             "messageId",
             "inReplyTo",
             "references",
+            "to",
             "attachments",
           ],
         },
@@ -574,10 +575,10 @@ async function awaitDelivery(ctx, env, step, subject) {
   if (!delivered) {
     report.fail(
       `${step}: delivery`,
-      `nothing with subject "${subject}" reached ${config.to} within ${config.deliveryTimeoutSeconds}s`,
+      `nothing with subject "${subject}" reached ${address} within ${config.deliveryTimeoutSeconds}s`,
     );
   }
-  report.pass(`${step}: delivered to ${config.to}`, delivered.id);
+  report.pass(`${step}: delivered to ${address}`, delivered.id);
   return delivered;
 }
 
@@ -1416,23 +1417,97 @@ async function stepFlagVariant(ctx, env, blobs) {
   ctx.liveDrafts.delete(created.id);
 }
 
-async function stepNegative(ctx, env, blobs) {
-  const { client, report } = ctx;
-  const step = "7 negative";
-  const extra = `second-${ctx.marker}@jmap-e2e.invalid`;
+/**
+ * Several To and a Bcc in one send: JMAP_TO and JMAP_CC (when set) as To, the
+ * sending address itself as Bcc (its saasmail inbox is readable with this key).
+ */
+async function stepMultiRecipient(ctx, env, blobs) {
+  const { client, report, config } = ctx;
+  const step = "7 several To and Bcc";
+  const subject = `${ctx.marker} multi`;
+  const to = [
+    recipient(config.to),
+    ...(config.cc ? [recipient(config.cc, "Second To")] : []),
+  ];
+  const bcc = [recipient(config.from, "Hidden Bcc")];
   const responses = await client.call([
     [
       "Email/set",
       {
         accountId: env.accountId,
         create: {
-          dTwo: draftEmail(ctx, env, blobs, {
-            subject: `${ctx.marker} two-to`,
-            to: [recipient(ctx.config.to), recipient(extra, "Second To")],
-          }),
-          dBcc: draftEmail(ctx, env, blobs, {
-            subject: `${ctx.marker} bcc`,
-            bcc: [recipient(extra, "Hidden")],
+          draft: draftEmail(ctx, env, blobs, { subject, to, cc: [], bcc }),
+        },
+      },
+      "0",
+    ],
+    [
+      "EmailSubmission/set",
+      {
+        accountId: env.accountId,
+        create: { sub: { emailId: "#draft", identityId: env.identity.id } },
+        onSuccessDestroyEmail: ["#sub"],
+      },
+      "1",
+    ],
+  ]);
+  const created = methodResponse(responses, "Email/set", "0").created?.draft;
+  if (!created) {
+    report.fail(
+      `${step}: draft create`,
+      JSON.stringify(methodResponse(responses, "Email/set", "0").notCreated),
+    );
+  }
+  ctx.liveDrafts.add(created.id);
+  const submissions = methodResponse(responses, "EmailSubmission/set", "1");
+  if (!submissions.created?.sub) {
+    report.fail(`${step}: submission`, JSON.stringify(submissions.notCreated));
+  }
+  ctx.liveDrafts.delete(created.id);
+  report.pass(`${step}: accepted`, `${to.length} To, 1 Bcc`);
+
+  const [sent] = await sentEmailsWithSubject(ctx, env, subject);
+  report.check(
+    `${step}: the Sent Email keeps every To and the Bcc`,
+    stableStringify((sent?.to ?? []).map((a) => a.email.toLowerCase())) ===
+      stableStringify(to.map((a) => a.email)) &&
+      stableStringify((sent?.bcc ?? []).map((a) => a.email.toLowerCase())) ===
+        stableStringify([config.from]),
+    sent?.id ?? "?",
+    JSON.stringify({ to: sent?.to, bcc: sent?.bcc }),
+  );
+
+  if (!config.expectDelivery) {
+    report.skip(`${step}: delivery`, "needs JMAP_EXPECT_DELIVERY=1");
+    return;
+  }
+  const atTo = await awaitDelivery(ctx, env, step, subject);
+  const visible = (atTo.to ?? []).map((a) => a.email.toLowerCase());
+  report.check(
+    `${step}: the To copy lists every To and not the Bcc`,
+    to.every((a) => visible.includes(a.email)) &&
+      !visible.includes(config.from),
+    visible.join(", "),
+    JSON.stringify(atTo.to),
+  );
+  await awaitDelivery(ctx, env, step, subject, config.from);
+}
+
+async function stepNegative(ctx, env, blobs) {
+  const { client, report } = ctx;
+  const step = "8 negative";
+  const cc = Array.from({ length: 50 }, (_, i) =>
+    recipient(`r${i}-${ctx.marker}@jmap-e2e.invalid`, null),
+  );
+  const responses = await client.call([
+    [
+      "Email/set",
+      {
+        accountId: env.accountId,
+        create: {
+          dMany: draftEmail(ctx, env, blobs, {
+            subject: `${ctx.marker} too-many`,
+            cc,
           }),
         },
       },
@@ -1442,34 +1517,21 @@ async function stepNegative(ctx, env, blobs) {
       "EmailSubmission/set",
       {
         accountId: env.accountId,
-        create: {
-          sTwo: { emailId: "#dTwo", identityId: env.identity.id },
-          sBcc: { emailId: "#dBcc", identityId: env.identity.id },
-        },
+        create: { sMany: { emailId: "#dMany", identityId: env.identity.id } },
       },
       "1",
     ],
   ]);
-  const drafts = methodResponse(responses, "Email/set", "0").created ?? {};
-  for (const key of ["dTwo", "dBcc"]) {
-    if (!drafts[key]) report.fail(`${step}: draft ${key}`, "not created");
-    ctx.liveDrafts.add(drafts[key].id);
-  }
+  const draft = methodResponse(responses, "Email/set", "0").created?.dMany;
+  if (!draft) report.fail(`${step}: draft`, "not created");
+  ctx.liveDrafts.add(draft.id);
   const submissions = methodResponse(responses, "EmailSubmission/set", "1");
-  const errors = submissions.notCreated ?? {};
+  const error = submissions.notCreated?.sMany;
   report.check(
-    `${step}: two To → invalidEmail ["to"]`,
-    errors.sTwo?.type === "invalidEmail" &&
-      stableStringify(errors.sTwo.properties) === stableStringify(["to"]),
+    `${step}: 51 recipients → tooManyRecipients (50)`,
+    error?.type === "tooManyRecipients" && error.maxRecipients === 50,
     "",
-    JSON.stringify(errors.sTwo),
-  );
-  report.check(
-    `${step}: Bcc → invalidEmail ["bcc"]`,
-    errors.sBcc?.type === "invalidEmail" &&
-      stableStringify(errors.sBcc.properties) === stableStringify(["bcc"]),
-    "",
-    JSON.stringify(errors.sBcc),
+    JSON.stringify(error),
   );
   report.check(
     `${step}: nothing was accepted`,
@@ -1480,34 +1542,31 @@ async function stepNegative(ctx, env, blobs) {
     "",
     JSON.stringify(submissions.created),
   );
-  for (const suffix of ["two-to", "bcc"]) {
-    const leaked = await sentEmailsWithSubject(
-      ctx,
-      env,
-      `${ctx.marker} ${suffix}`,
-    );
-    report.check(
-      `${step}: no Sent Email for the ${suffix} draft`,
-      leaked.length === 0,
-      "",
-      JSON.stringify(leaked.map((email) => email.id)),
-    );
-  }
-  const ids = [drafts.dTwo.id, drafts.dBcc.id];
+  const leaked = await sentEmailsWithSubject(
+    ctx,
+    env,
+    `${ctx.marker} too-many`,
+  );
+  report.check(
+    `${step}: no Sent Email for the refused draft`,
+    leaked.length === 0,
+    "",
+    JSON.stringify(leaked.map((email) => email.id)),
+  );
   const destroyed = methodResponse(
     await client.call([
-      ["Email/set", { accountId: env.accountId, destroy: ids }, "x"],
+      ["Email/set", { accountId: env.accountId, destroy: [draft.id] }, "x"],
     ]),
     "Email/set",
     "x",
   );
   report.check(
-    `${step}: the refused drafts are destroyable`,
-    ids.every((id) => (destroyed.destroyed ?? []).includes(id)),
+    `${step}: the refused draft is destroyable`,
+    (destroyed.destroyed ?? []).includes(draft.id),
     "",
     JSON.stringify(destroyed.notDestroyed),
   );
-  for (const id of ids) ctx.liveDrafts.delete(id);
+  ctx.liveDrafts.delete(draft.id);
 }
 
 /** Destroy drafts this run created and did not already remove. */
@@ -1576,6 +1635,7 @@ export async function run(
     await stepFollowUp(ctx, env, blobs, sent, delivered);
     await stepDestroyVariant(ctx, env, blobs);
     await stepFlagVariant(ctx, env, blobs);
+    await stepMultiRecipient(ctx, env, blobs);
     await stepNegative(ctx, env, blobs);
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);

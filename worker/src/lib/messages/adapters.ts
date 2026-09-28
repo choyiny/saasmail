@@ -39,6 +39,9 @@ export type SentSelect = {
   personName: string | null;
   /** The inbox identity's display name, when the select joined it. */
   fromName?: string | null;
+  /** JSON [{email,name}], set by JMAP sends with several To or Bcc. */
+  additionalTo?: string | null;
+  bcc?: string | null;
 };
 
 export function parseCc(raw: string | null | undefined): MailAddress[] {
@@ -107,7 +110,9 @@ export function adaptSent(row: SentSelect): UnifiedMessage {
       email: row.toAddress,
       name: row.personName,
     },
+    ...(row.additionalTo ? { additionalTo: parseCc(row.additionalTo) } : {}),
     cc: parseCc(row.cc),
+    ...(row.bcc ? { bcc: parseCc(row.bcc) } : {}),
     subject: row.subject,
     bodyText: row.bodyText,
     bodyHtml: row.bodyHtml,

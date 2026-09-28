@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkAttachmentCount,
   checkContentRecipients,
+  checkRecipientSupport,
   resolveEnvelope,
   submissionRecipients,
 } from "../jmap/submission-rules";
@@ -24,12 +25,41 @@ describe("checkContentRecipients (spec §3.2 steps 3–4)", () => {
     ).toBeNull();
   });
 
-  it("rejects a second To and any Bcc with invalidEmail naming both", () => {
+  it("accepts several To and Bcc", () => {
     expect(
       checkContentRecipients(
         content([addr("a@x.com"), addr("b@x.com")], [], [addr("c@x.com")]),
       ),
-    ).toMatchObject({ type: "invalidEmail", properties: ["to", "bcc"] });
+    ).toBeNull();
+  });
+
+  it("counts Bcc toward the 50-recipient cap", () => {
+    const cc = Array.from({ length: 48 }, (_, i) => addr(`cc${i}@x.com`));
+    expect(
+      checkContentRecipients(
+        content([addr("a@x.com")], cc, [addr("h@x.com"), addr("i@x.com")]),
+      ),
+    ).toMatchObject({ type: "tooManyRecipients", maxRecipients: 50 });
+    expect(
+      checkContentRecipients(content([addr("a@x.com")], cc, [addr("h@x.com")])),
+    ).toBeNull();
+  });
+
+  it("refuses several To or Bcc for a provider that can't send them", () => {
+    const both = content(
+      [addr("a@x.com"), addr("b@x.com")],
+      [],
+      [addr("c@x.com")],
+    );
+    expect(
+      checkRecipientSupport(both, { multipleTo: false, bcc: true }),
+    ).toMatchObject({ type: "invalidEmail", properties: ["to"] });
+    expect(
+      checkRecipientSupport(both, { multipleTo: true, bcc: false }),
+    ).toMatchObject({ type: "invalidEmail", properties: ["bcc"] });
+    expect(
+      checkRecipientSupport(both, { multipleTo: true, bcc: true }),
+    ).toBeNull();
   });
 
   it("rejects a missing To with noRecipients", () => {
@@ -121,7 +151,7 @@ describe("resolveEnvelope (spec §3.2 step 5)", () => {
         "me@x.com",
         recipients,
       ).error,
-    ).toMatchObject({ type: "invalidEmail", properties: ["to", "cc"] });
+    ).toMatchObject({ type: "invalidEmail", properties: ["to", "cc", "bcc"] });
     expect(
       resolveEnvelope(
         {

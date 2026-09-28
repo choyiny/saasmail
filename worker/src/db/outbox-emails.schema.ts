@@ -36,6 +36,10 @@ export const outboxEmails = sqliteTable(
     toAddress: text("to_address").notNull(),
     /** JSON [{email,name}] — same shape as sent_emails.cc. NULL = no CC. */
     cc: text("cc"),
+    /** JSON [{email,name}]: To recipients after `to_address` (JMAP). */
+    additionalTo: text("additional_to"),
+    /** JSON [{email,name}]: blind recipients (JMAP). Never in any header. */
+    bcc: text("bcc"),
     subject: text("subject").notNull(),
     /**
      * Pre-render input, not the wire payload: retries re-run

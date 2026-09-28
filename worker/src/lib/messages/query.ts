@@ -104,6 +104,8 @@ type RawMessageRow = {
   to_email: string;
   to_name: string | null;
   cc: string | null;
+  additional_to: string | null;
+  bcc: string | null;
   subject: string | null;
   body_text: string | null;
   body_html: string | null;
@@ -579,6 +581,8 @@ function receivedArm(
       e.recipient AS to_email,
       NULL AS to_name,
       e.cc AS cc,
+      NULL AS additional_to,
+      NULL AS bcc,
       e.subject AS subject,
       e.body_text AS body_text,
       e.body_html AS body_html,
@@ -684,6 +688,8 @@ function sentArm(
       se.to_address AS to_email,
       p.name AS to_name,
       se.cc AS cc,
+      se.additional_to AS additional_to,
+      se.bcc AS bcc,
       se.subject AS subject,
       se.body_text AS body_text,
       se.body_html AS body_html,
@@ -824,6 +830,8 @@ function toUnified(
       messageId: row.message_id,
       status: row.delivery_status ?? "sent",
       cc: row.cc,
+      additionalTo: row.additional_to,
+      bcc: row.bcc,
       conversationId: row.conversation_id,
       campaignId: row.campaign_id,
       sequenceId: row.sequence_id,

@@ -60,7 +60,7 @@ Two limits come from the outbound provider. The upload and per-Email attachment 
 
 Cloudflare accepts at most 5 MiB per message to arbitrary recipients (25 MiB only to verified destination addresses), attachments included. Its attachment limit is that 5 MiB divided by 1.4, to leave room for base64 and the rest of the message: a conservative estimate, while the whole-message check at submission measures the real message.
 
-Every provider also gets Cloudflare's per-message counts, the strictest of the four: at most 50 recipients (one To plus up to 49 Cc) and 32 attachments, inline images included.
+Every provider also gets Cloudflare's per-message counts, the strictest of the four: at most 50 recipients (To, Cc and Bcc together) and 32 attachments, inline images included.
 
 ## Supported methods
 
@@ -115,13 +115,13 @@ Rules, each reported per submission as a SetError (nothing is sent when one fail
 | ------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `emailId` isn't one of your drafts, or `identityId` isn't a usable identity now | `invalidProperties` naming the property                 |
 | The draft's `from` isn't the identity's address                                 | `forbiddenFrom`                                         |
-| More than one To                                                                | `invalidEmail`, `properties: ["to"]`                    |
-| Any Bcc                                                                         | `invalidEmail`, `properties: ["bcc"]`                   |
+| More than one To, with a provider that sends to one To only (Bavimail)          | `invalidEmail`, `properties: ["to"]`                    |
+| Any Bcc, with a provider that can't send Bcc (Bavimail)                         | `invalidEmail`, `properties: ["bcc"]`                   |
 | No To                                                                           | `noRecipients`                                          |
 | An invalid recipient address                                                    | `invalidRecipients` with the list                       |
-| More than 50 recipients (one To plus up to 49 Cc)                               | `tooManyRecipients`, `maxRecipients: 50`                |
+| More than 50 recipients (To, Cc and Bcc together)                               | `tooManyRecipients`, `maxRecipients: 50`                |
 | `envelope.mailFrom` isn't the identity's address                                | `forbiddenMailFrom`                                     |
-| `envelope.rcptTo` isn't exactly the To and Cc addresses                         | `invalidEmail`                                          |
+| `envelope.rcptTo` isn't exactly the To, Cc and Bcc addresses                    | `invalidEmail`                                          |
 | SMTP parameters in the envelope                                                 | `invalidProperties` on `envelope`                       |
 | More than one Reply-To (it goes out as one bare address)                        | `invalidEmail`, `properties: ["replyTo"]`               |
 | A text part that is neither the text nor the HTML body (upload it as a blob)    | `invalidEmail`, `properties: ["bodyStructure"]`         |
@@ -132,7 +132,7 @@ Rules, each reported per submission as a SetError (nothing is sent when one fail
 | The draft is already being sent                                                 | `forbiddenToSend`: "This message is already being sent" |
 | The provider refused the message permanently                                    | `forbiddenToSend` with the provider's reason            |
 
-The message carries the draft's From name, To and Cc display names, subject, `Message-ID`, `In-Reply-To`, `References`, `Reply-To` and every stored part, inline or attached (inline parts keep their `cid`). Cloudflare assembles the MIME message from those parts itself, so the delivered message's structure can differ from the draft's `blobId`, and it sets its own `Message-ID` and `Date` (see below). It also appends a line break to text attachments and drops the filename of inline images ([Email providers](email-providers.md#per-message-limits)). The text body is the draft's `text/plain` body parts and the HTML body its `text/html` ones, so a text-only draft goes out without an HTML part and an HTML-only draft without a text part. If one create in a call fails unexpectedly, it gets `serverFail` and the call still reports the others.
+The message carries the draft's From name, every To and Cc with their display names (Bcc recipients receive it through the envelope and appear nowhere in it), subject, `Message-ID`, `In-Reply-To`, `References`, `Reply-To` and every stored part, inline or attached (inline parts keep their `cid`). Cloudflare assembles the MIME message from those parts itself, so the delivered message's structure can differ from the draft's `blobId`, and it sets its own `Message-ID` and `Date` (see below). It also appends a line break to text attachments and drops the filename of inline images ([Email providers](email-providers.md#per-message-limits)). The text body is the draft's `text/plain` body parts and the HTML body its `text/html` ones, so a text-only draft goes out without an HTML part and an HTML-only draft without a text part. If one create in a call fails unexpectedly, it gets `serverFail` and the call still reports the others.
 
 ### Message-IDs: the Email's own and the delivered one
 
@@ -221,7 +221,6 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 
 ## Known gaps
 
-- Multiple To recipients and Bcc.
 - Delayed send, and cancelling or recalling a submission.
 - Drafts in custom folders.
 - Editable identities (`Identity/set` is read-only).

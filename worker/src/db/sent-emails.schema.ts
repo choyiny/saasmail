@@ -26,6 +26,12 @@ export const sentEmails = sqliteTable(
      */
     cc: text("cc"),
     /**
+     * JSON [{email,name}]: To recipients after `to_address`, and blind
+     * recipients. Only JMAP submissions set them. NULL = none.
+     */
+    additionalTo: text("additional_to"),
+    bcc: text("bcc"),
+    /**
      * Group-thread identity. Mirrors `emails.conversation_id`. See
      * migration 0022 for the algorithm + rationale.
      */

@@ -25,9 +25,13 @@ At runtime: **Bavimail** (when both env vars are set) > **Postmark** (when `POST
 Setting more than one provider's variables is not an error — the highest one in
 that order wins, and the others are ignored.
 
+## Several To and Bcc
+
+JMAP submissions can have several To addresses and Bcc recipients. Cloudflare, Resend and Postmark deliver them; Bcc recipients are in the envelope only, never in the message's headers. Bavimail's API takes one To address and a Cc list, so on Bavimail a JMAP submission with a second To or any Bcc is refused rather than sent to fewer people.
+
 ## Per-message limits
 
-Every send path applies Cloudflare's limits, the strictest of the four, whichever provider is configured: at most **50 recipients** (one To plus up to 49 Cc) and **32 attachments**, inline images included. The attachment size allowance is each provider's own; on Cloudflare the whole message must fit 5 MiB to arbitrary recipients.
+Every send path applies Cloudflare's limits, the strictest of the four, whichever provider is configured: at most **50 recipients** (To, Cc and Bcc together) and **32 attachments**, inline images included. The attachment size allowance is each provider's own; on Cloudflare the whole message must fit 5 MiB to arbitrary recipients.
 
 On Cloudflare, saasmail uses the `send_email` binding's structured form: every To and Cc is a real recipient, with its display name, and Cloudflare assembles the message and assigns its `Message-ID` and `Date` itself.
 
