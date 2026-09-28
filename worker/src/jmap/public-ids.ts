@@ -127,6 +127,20 @@ export function parseRawBlobId(id: string): string | null {
   return decodeReversible(id, "X", "x");
 }
 
+/**
+ * The raw RFC 5322 message of received mail, exactly as it arrived. The
+ * payload is the emails row id; only rows with a stored raw copy have one.
+ */
+export function publicReceivedRawBlobId(emailId: string): string {
+  const encoded = reversible("W", "w", emailId);
+  if (!encoded) throw new Error("email id too long for a JMAP id");
+  return encoded;
+}
+
+export function parseReceivedRawBlobId(id: string): string | null {
+  return decodeReversible(id, "W", "w");
+}
+
 /** EmailSubmissions (PR 5). The payload is the jmap_submissions row id. */
 export function publicSubmissionId(id: string): string {
   const encoded = reversible("E", "e", id);

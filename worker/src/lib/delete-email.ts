@@ -34,6 +34,7 @@ export async function deleteEmailWithAttachments(
       personId: emails.personId,
       isRead: emails.isRead,
       recipient: emails.recipient,
+      rawR2Key: emails.rawR2Key,
     })
     .from(emails)
     .where(eq(emails.id, emailId))
@@ -52,6 +53,7 @@ export async function deleteEmailWithAttachments(
     for (const att of atts) {
       await r2.delete(att.r2Key);
     }
+    if (email.rawR2Key) await r2.delete(email.rawR2Key);
 
     // Delete attachment DB records
     await db.delete(attachments).where(eq(attachments.emailId, emailId));

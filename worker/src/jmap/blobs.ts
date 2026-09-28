@@ -1,7 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { emails } from "../db/emails.schema";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { jmapBlobs } from "../db/jmap-blobs.schema";
-import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
 import { sanitizeFilename } from "../lib/sanitize-filename";
 import { findReadableAttachment } from "../routers/attachments-router";
 import {
@@ -20,6 +21,7 @@ import {
   parseAttachmentBlobId,
   parseBodyPartBlobId,
   parseRawBlobId,
+  parseReceivedRawBlobId,
   parseUploadBlobId,
 } from "./public-ids";
 
@@ -163,6 +165,28 @@ export async function resolveReadableBlob(
   const bodyPart = parseBodyPartBlobId(blobId);
   if (bodyPart !== null) {
     return resolveBodyPartBlob(db, allowed, userId, blobId, bodyPart);
+  }
+
+  const receivedId = parseReceivedRawBlobId(blobId);
+  if (receivedId !== null) {
+    // Readable by anyone who can read the message's inbox.
+    const [row] = await db
+      .select({
+        recipient: emails.recipient,
+        rawR2Key: emails.rawR2Key,
+        rawSize: emails.rawSize,
+      })
+      .from(emails)
+      .where(and(eq(emails.id, receivedId), isNotNull(emails.rawR2Key)))
+      .limit(1);
+    if (!row || !isInboxAllowed(allowed, row.recipient)) return null;
+    return {
+      blobId,
+      type: "message/rfc822",
+      size: row.rawSize ?? 0,
+      name: null,
+      source: { r2Key: row.rawR2Key! },
+    };
   }
 
   const uploadId = parseUploadBlobId(blobId);

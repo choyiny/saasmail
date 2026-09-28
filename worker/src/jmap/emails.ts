@@ -44,6 +44,7 @@ import {
   publicBodyPartBlobId,
   publicDraftEmailId,
   publicEmailId,
+  publicReceivedRawBlobId,
   publicThreadId,
 } from "./public-ids";
 import { currentJmapState, jmapState } from "./state";
@@ -364,11 +365,16 @@ export function toJmapEmail(
   const from = emailAddress(message.from);
   const full: Record<string, unknown> = {
     id,
-    blobId: null,
+    // Received mail stored with its raw message has an exact blob and size;
+    // older mail keeps null and the approximation it always had.
+    blobId:
+      message.ref.kind === "received" && message.rawSize !== undefined
+        ? publicReceivedRawBlobId(message.ref.id)
+        : null,
     threadId: jmapThreadId(message),
     mailboxIds: jmapMailboxIds(message),
     keywords: jmapKeywords(message),
-    size: approximateSize(message),
+    size: message.rawSize ?? approximateSize(message),
     receivedAt: utcDate(message.occurredAt),
     messageId: messageIds(message.messageId),
     inReplyTo: messageIds(message.inReplyTo),

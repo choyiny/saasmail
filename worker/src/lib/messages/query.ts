@@ -99,6 +99,7 @@ type RawMessageRow = {
   message_id: string | null;
   in_reply_to: string | null;
   references_header: string | null;
+  raw_size: number | null;
   from_email: string | null;
   from_name: string | null;
   to_email: string;
@@ -576,6 +577,7 @@ function receivedArm(
       e.message_id AS message_id,
       e.in_reply_to AS in_reply_to,
       e.references_header AS references_header,
+      e.raw_size AS raw_size,
       p.email AS from_email,
       p.name AS from_name,
       e.recipient AS to_email,
@@ -680,6 +682,7 @@ function sentArm(
       se.message_id AS message_id,
       se.in_reply_to AS in_reply_to,
       NULL AS references_header,
+      NULL AS raw_size,
       se.from_address AS from_email,
       -- The inbox identity's current display name: the sent row doesn't keep
       -- the name the message went out with.
@@ -809,6 +812,7 @@ function toUnified(
       messageId: row.message_id,
       inReplyTo: row.in_reply_to,
       referencesHeader: row.references_header,
+      rawSize: row.raw_size,
       isRead: row.is_read ?? 0,
       cc: row.cc,
       conversationId: row.conversation_id,

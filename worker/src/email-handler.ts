@@ -225,6 +225,19 @@ export async function handleEmail(
   // Insert email (with rewritten HTML and auth results). Store the
   // canonical (lowercased) recipient so it matches the conversation
   // group key.
+  // The message exactly as received, for JMAP's blobId. Written before the row
+  // so a new Email never gains a blobId after a client has seen it; a failed
+  // write stores the mail without one rather than losing it.
+  let rawR2Key: string | null = `inbound-raw/${emailId}.eml`;
+  try {
+    await env.R2.put(rawR2Key, parsed.raw, {
+      httpMetadata: { contentType: "message/rfc822" },
+    });
+  } catch (err) {
+    console.error(`[inbound] raw message not stored for ${emailId}:`, err);
+    rawR2Key = null;
+  }
+
   await db.insert(emails).values({
     id: emailId,
     personId: actualPersonId,
@@ -238,6 +251,8 @@ export async function handleEmail(
     // inReplyTo/references.
     inReplyTo: parsed.headers["in-reply-to"]?.trim() || null,
     referencesHeader: parsed.headers["references"]?.trim() || null,
+    rawR2Key,
+    rawSize: rawR2Key ? parsed.raw.byteLength : null,
     spf: parsed.auth.spf,
     dkim: parsed.auth.dkim,
     dmarc: parsed.auth.dmarc,

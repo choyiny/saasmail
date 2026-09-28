@@ -477,6 +477,13 @@
       "when": 1790582461491,
       "tag": "0067_emails_dedupe_per_inbox",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1790584394814,
+      "tag": "0068_emails_raw_message",
+      "breakpoints": true
     }
   ]
 }

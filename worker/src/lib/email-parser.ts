@@ -12,6 +12,8 @@ export interface ParsedEmailAddress {
 }
 
 export interface ParsedEmail {
+  /** The message exactly as received. */
+  raw: Uint8Array;
   from: { address: string; name: string };
   to: string;
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
@@ -181,6 +183,7 @@ export async function parseEmail(
     }));
 
   return {
+    raw: new Uint8Array(rawEmail),
     from: {
       address: parsed.from?.address || message.from,
       name: parsed.from?.name || "",

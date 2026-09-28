@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { desc, like, or, eq, sql, and, inArray } from "drizzle-orm";
+import { desc, like, or, eq, sql, and, inArray, isNotNull } from "drizzle-orm";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
@@ -771,6 +771,14 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
 
   for (const att of atts) {
     await r2.delete(att.r2Key);
+  }
+  // And each received message's raw copy (JMAP blobId).
+  const raws = await db
+    .select({ r2Key: emails.rawR2Key })
+    .from(emails)
+    .where(and(eq(emails.personId, id), isNotNull(emails.rawR2Key)));
+  for (const raw of raws) {
+    await r2.delete(raw.r2Key!);
   }
 
   await db

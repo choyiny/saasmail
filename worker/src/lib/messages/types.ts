@@ -36,6 +36,8 @@ export interface UnifiedMessage {
   inReplyTo: string | null;
   /** The raw References header of received mail; null for sent mail. */
   references?: string | null;
+  /** Octets of received mail's stored raw message (JMAP blobId and size). */
+  rawSize?: number;
   from: MailAddress | null;
   to: MailAddress;
   /** Further To recipients of a sent message (JMAP), after `to`. */

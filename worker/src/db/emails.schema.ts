@@ -25,6 +25,13 @@ export const emails = sqliteTable(
      */
     inReplyTo: text("in_reply_to"),
     referencesHeader: text("references_header"),
+    /**
+     * The message exactly as received (RFC 5322 bytes) in R2, and its size in
+     * octets: JMAP's `blobId` and `size`. Kept for the life of the row. NULL
+     * for mail received before migration 0068, or if the R2 write failed.
+     */
+    rawR2Key: text("raw_r2_key"),
+    rawSize: integer("raw_size"),
     spf: text("spf"),
     dkim: text("dkim"),
     dmarc: text("dmarc"),
