@@ -32,14 +32,21 @@ import type { ContentAddress, ContentLeaf, JmapContentRow } from "./content";
 import { resolveCreationRef } from "./creation-refs";
 import { loadDraftsByIds, type JmapDraftRow } from "./drafts";
 import type { JmapMethodError } from "./emails";
-import { listUsableIdentities, type IdentityRow } from "./mailboxes";
+import {
+  listUsableIdentities,
+  loadMailboxDescriptors,
+  type IdentityRow,
+  type MailboxDescriptor,
+} from "./mailboxes";
 import type { JmapMethodContext } from "./methods";
 import {
   applyOnSuccessStep,
   isMethodError,
   onSuccessForCreation,
   parseOnSuccessArgs,
+  remapOnSuccessPatch,
   wantsImplicitEmailSet,
+  type OnSuccessForCreate,
   type ParsedOnSuccess,
 } from "./on-success";
 import {
@@ -417,16 +424,14 @@ async function scheduleSubmission(
     identity: IdentityRow;
     envelope: Envelope;
     releaseAt: number;
-    onSuccess: ParsedOnSuccess;
-    creationId: string;
+    forCreate: OnSuccessForCreate;
   },
 ): Promise<CreateOutcome> {
-  const { draft, content, identityEmail } = input;
+  const { draft, content, identityEmail, forCreate } = input;
   const now = Math.floor(Date.now() / 1000);
   const submissionId = nanoid();
   const sentEmailId = nanoid();
   const threadId = publicThreadId(content.threadKey);
-  const forCreate = onSuccessForCreation(input.onSuccess, input.creationId);
   const fromHeader = submissionFromHeader(content, {
     email: identityEmail,
     displayName: input.identity.displayName ?? null,
@@ -545,6 +550,7 @@ async function createSubmission(
   identities: Map<string, IdentityRow>,
   onSuccess: ParsedOnSuccess,
   creationId: string,
+  descriptors: () => Promise<Map<string, MailboxDescriptor>>,
 ): Promise<CreateOutcome> {
   if (!isObject(input)) return rejected({ type: "invalidProperties" });
   const unknownProperties = Object.keys(input).filter(
@@ -664,6 +670,18 @@ async function createSubmission(
     });
   }
 
+  // Spec §3.4 step 1: the intention records what its on-success step will do.
+  // A patch naming another inbox's system mailboxes is remapped to the
+  // draft's own inbox here, where that inbox is known (import spec §2).
+  const forCreate = onSuccessForCreation(onSuccess, creationId);
+  if (forCreate.patch) {
+    forCreate.patch = remapOnSuccessPatch(
+      forCreate.patch,
+      draft.inbox,
+      await descriptors(),
+    );
+  }
+
   // RFC 4865: a held message is scheduled here and sent by its release.
   if (envelope.releaseAt !== null) {
     await releaseFinishedQueuedLock(db, draft);
@@ -675,8 +693,7 @@ async function createSubmission(
       identity,
       envelope: envelope.envelope!,
       releaseAt: envelope.releaseAt,
-      onSuccess,
-      creationId,
+      forCreate,
     });
   }
 
@@ -696,9 +713,8 @@ async function createSubmission(
     };
   });
   const threadId = publicThreadId(content.threadKey);
-  // Spec §3.4 step 1: the intention records what its on-success step will do and
+  // Spec §3.4 step 1: the intention records its on-success step (above) and
   // the exact From the first attempt uses, so a retry can replay it verbatim.
-  const forCreate = onSuccessForCreation(onSuccess, creationId);
   const claimed = await claimAndRecordIntention(ctx.env.DB, {
     submissionId,
     sentEmailId,
@@ -954,6 +970,15 @@ export async function emailSubmissionSet(
     ...destroy,
   ]);
 
+  // Loaded once, and only when a create has an on-success patch to remap.
+  let descriptorsById: Promise<Map<string, MailboxDescriptor>> | null = null;
+  const descriptors = () => {
+    descriptorsById ??= loadMailboxDescriptors(db, allowed).then(
+      (list) => new Map(list.map((descriptor) => [descriptor.id, descriptor])),
+    );
+    return descriptorsById;
+  };
+
   const created: Record<string, Record<string, unknown>> = {};
   const notCreated: Record<string, SubmissionSetError> = {};
   /** Internal ids of submissions accepted in this call; Task 5 runs their steps. */
@@ -975,6 +1000,7 @@ export async function emailSubmissionSet(
         identities,
         onSuccess,
         creationId,
+        descriptors,
       );
     } catch (error) {
       console.error(

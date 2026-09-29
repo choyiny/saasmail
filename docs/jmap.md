@@ -69,7 +69,7 @@ Every provider also gets Cloudflare's per-message counts, the strictest of the f
 
 - `Core/echo`
 - `Mailbox/get`, `Mailbox/query`, `Mailbox/changes`
-- `Email/get`, `Email/query`, `Email/changes`, `Email/queryChanges`, `Email/set`
+- `Email/get`, `Email/query`, `Email/changes`, `Email/queryChanges`, `Email/set`, `Email/import` (drafts only, see [Importing a message](#importing-a-message-emailimport))
 - `Thread/get`, `Thread/changes`
 - `Identity/get`, `Identity/set` (read-only, see below)
 - `EmailSubmission/get`, `EmailSubmission/query`, `EmailSubmission/changes`, `EmailSubmission/set`
@@ -78,7 +78,7 @@ Every provider also gets Cloudflare's per-message counts, the strictest of the f
 
 `Identity/set` never changes anything: a create is refused with `forbidden`; an update or destroy returns `notFound` for an unknown id and `forbidden` for a known one. Identities are managed in the saasmail web UI.
 
-Result references (`#property` with JSON-pointer paths, including `*` wildcards) and creation references (`#creationId`, RFC 8620 §3.3) are supported. A creation id can be used in a later call's `ids`, in `Email/set` `update` keys and `destroy`, and in `EmailSubmission/set`'s `emailId`. The response echoes `createdIds` when the request sent it.
+Result references (`#property` with JSON-pointer paths, including `*` wildcards) and creation references (`#creationId`, RFC 8620 §3.3) are supported. A creation id from `Email/set` or `Email/import` can be used in a later call's `ids`, in `Email/set` `update` keys and `destroy`, and in `EmailSubmission/set`'s `emailId`. The response echoes `createdIds` when the request sent it.
 
 ## Mailboxes
 
@@ -113,6 +113,38 @@ A client creates a draft with `Email/set` `create`:
 - A draft that replies to a message you can see (matched by Message-ID in `inReplyTo` or `references`) joins that message's thread. Otherwise it joins the conversation its recipients would form in saasmail, and failing that it starts its own thread (`Td…`).
 
 Drafts are visible only to their author, and only while the author can still access the draft's inbox.
+
+### Importing a message (`Email/import`)
+
+Some clients, aerc among them, write the whole RFC 5322 message themselves, upload it, and `Email/import` it into Drafts before sending it (RFC 8621 §4.8). saasmail imports **drafts only**: `keywords` must include `$draft` and `mailboxIds` must name a Drafts mailbox and no other system mailbox, otherwise the import fails with `forbidden` ("Email/import only creates drafts"). Custom folders of the draft's inbox may be named next to Drafts.
+
+The message is not stored as uploaded. It is parsed into saasmail's own draft structure and created through the same path as an `Email/set` create, so every draft rule above applies:
+
+- Kept: `From`, `To`, `Cc`, `Bcc` and `Reply-To` with their names, `Subject`, `Date` (as `sentAt`, when valid), `Message-ID`, `In-Reply-To` and `References` (the last 100 ids), the text and HTML bodies, and every other part as an attachment or, inside `multipart/related` or marked inline, an inline part, with its name, type, `cid` and disposition. An attached `message/rfc822` is kept as an attachment with its bytes unchanged.
+- Dropped: every other header (`X-Mailer`, `User-Agent`, `Autocrypt`, custom headers) and the message's original MIME layout, which saasmail rebuilds.
+- The created Email's `blobId` is that rebuilt message, not the uploaded blob, which is left to expire like any upload. `receivedAt` is the one given, or the time of import.
+
+An import is refused, with nothing stored, when:
+
+| Condition                                                                                                                                                | SetError                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| An unknown property, a wrong type, a `null`, or a `receivedAt` that isn't a UTCDate                                                                      | `invalidProperties` naming the properties                   |
+| `blobId` is not a blob you can read (your uploads, and the attachments, parts and raw messages of Emails you can read)                                   | `invalidProperties`, `properties: ["blobId"]`               |
+| Not a draft target (see above)                                                                                                                           | `forbidden`                                                 |
+| The message is larger than `maxSizeUpload`, has more than 32 attachments and inline parts, or its parts exceed `maxSizeAttachmentsPerEmail`              | `tooLarge`                                                  |
+| A signed or encrypted part at any depth (`multipart/signed`, `multipart/encrypted`, `application/pkcs7-mime`, `application/pgp-encrypted`)               | `invalidEmail`                                              |
+| More than one inline `text/plain` or `text/html` body part (a draft keeps one of each), more than 100 MIME parts, or nesting deeper than 10              | `invalidEmail`                                              |
+| A part (or the message itself) with more than one `Content-Type`, `Content-Transfer-Encoding` or `Content-Disposition` header (RFC 2045 allows one each) | `invalidEmail`                                              |
+| A `Content-Type` or `Content-Disposition` that repeats a parameter (two `boundary`, `charset` or `filename`, including `filename` next to `filename*`)   | `invalidEmail`                                              |
+| A `Content-Transfer-Encoding` other than `7bit`, `8bit`, `binary`, `base64` or `quoted-printable` (a trailing comment such as `base64 (x)` is fine)      | `invalidEmail`                                              |
+| A header saasmail can't store as a draft (for example a subject over 900 characters or a malformed address)                                              | `invalidEmail` naming the header                            |
+| The From isn't one of your usable identities                                                                                                             | `invalidProperties`, `properties: ["from"]`, as `Email/set` |
+
+Signed and encrypted mail is refused because rebuilding the message would break its signature or lose its content. The parts of an attached `message/rfc822` are not inspected.
+
+**Another inbox's Drafts.** A client that keeps one Drafts mailbox for the whole account (aerc does) may import a message from one inbox into another inbox's Drafts. When `mailboxIds` names exactly one Drafts mailbox and it belongs to another inbox you can access, the draft is created in the Drafts of its From's inbox instead. Custom folders are not remapped, so they must still belong to the From's inbox. A plain `Email/set` never remaps.
+
+A call takes up to `maxObjectsInSet` messages (`requestTooLarge` beyond that), honours `ifInState`, and answers with `oldState`, `newState`, `created` (`id`, `blobId`, `threadId`, `size` per creation id) and `notCreated`.
 
 ### Drafts written in the web UI
 
@@ -189,6 +221,8 @@ These run exactly as RFC 8621 §7.5 describes. After **all** creates in the `Ema
 - **A patch that keeps it a draft** (`$flagged`, or moving it to Trash) applies to the draft, and the Sent message appears as a separate `S…` Email.
 - **`onSuccessDestroyEmail`** destroys the draft, and the Sent message appears as a separate `S…` Email. If the same submission is also in `onSuccessUpdateEmail`, the destroy wins and the update is reported `notUpdated` with `willDestroy`.
 - **Neither argument:** the draft stays as it was and the Sent message appears as `S…`.
+
+**Another inbox's Sent or Drafts in the patch.** For the same reason as on import, a client may name another inbox's Sent and Drafts in `onSuccessUpdateEmail`. When the submission is created, each `mailboxIds/<id>` key (and each id of a whole `mailboxIds` value) that names a system mailbox (Inbox, Drafts, Sent, Archive, Junk, Trash) of another inbox you can access is rewritten to the same mailbox of the draft's own inbox. If two keys then name the same mailbox with the same value they become one; if their values differ, both are left as the client sent them, and the implicit `Email/set` applies them exactly as a plain `Email/set` would. For example, `{own Sent: true, other Sent: null}` files the draft into its own Sent (removing it from a mailbox it isn't in changes nothing), while `{own Drafts: true, other Drafts: null, other Sent: true}` leaves it in Drafts next to Sent and is refused with `invalidProperties`. Custom folders and mailboxes you can't access are never rewritten. Only this implicit update is remapped; a client's own `Email/set` that moves a draft into another inbox's Sent is refused.
 
 An `S…` Email created from a draft has every immutable property of that draft, including a downloadable raw-message `blobId`, except `receivedAt`, which is the send time.
 
@@ -283,7 +317,7 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 - Drafts made in a JMAP client are read-only in the web UI (edit and send them in the client), and a web draft's attachments aren't published to JMAP ([Drafts written in the web UI](#drafts-written-in-the-web-ui)).
 - A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
 - Mailbox thread counts group JMAP-sent mail by its saasmail conversation, not by its JMAP `threadId`.
-- Search snippets, mailbox mutation, `Email/import` and `Email/copy`.
+- Search snippets, mailbox mutation and `Email/copy`. `Email/import` creates drafts only, and signed or encrypted mail can't be imported ([Importing a message](#importing-a-message-emailimport)).
 - `Identity/changes` and query changes other than `Email/queryChanges`. `Thread/changes` never reports a destroyed thread.
 - `to`, `cc` and `header` filters, `OR` and `NOT` filter operators, and sorts other than `receivedAt` descending.
 

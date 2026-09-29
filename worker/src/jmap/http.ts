@@ -283,7 +283,7 @@ export async function executeJmapCalls(
         methodResponses.push(["error", result.error, callId]);
       } else {
         methodResponses.push([result.name, result.result, callId]);
-        if (result.name.endsWith("/set")) {
+        if (result.name.endsWith("/set") || result.name === "Email/import") {
           recordCreated(result.result, ctx.createdIds);
         }
         // RFC 8621 §7.5: the implicit Email/set answers after the

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   citesDeliveredOriginal,
+  aercOnSuccessPatch,
   bodyValueMatches,
+  buildImportMessage,
   bytesEqual,
   collectJmapIds,
   expandUriTemplate,
@@ -267,6 +269,65 @@ describe("jmap-send-e2e threading", () => {
     expect(
       citesDeliveredOriginal({ inReplyTo: null, references: null }, original),
     ).toBe(false);
+  });
+});
+
+describe("jmap-send-e2e aerc import", () => {
+  const DATE = new Date("2026-09-29T10:00:00Z");
+  const MESSAGE = {
+    from: "hello@example.com",
+    fromName: "Hello Sender",
+    to: "privacy@example.com",
+    cc: "cc@example.com",
+    subject: "jmap-e2e-abc import",
+    messageId: "jmap-e2e-abc.import@jmap-e2e.invalid",
+    date: DATE,
+  };
+
+  it("builds a CRLF RFC 5322 message with the headers aerc writes", () => {
+    const message = buildImportMessage(MESSAGE);
+    expect(message).not.toMatch(/(?<!\r)\n/);
+    expect(message.endsWith("\r\n")).toBe(true);
+    expect(message).toContain("From: Hello Sender <hello@example.com>\r\n");
+    expect(message).toContain("To: privacy@example.com\r\n");
+    expect(message).toContain("Cc: cc@example.com\r\n");
+    expect(message).toContain("Subject: jmap-e2e-abc import\r\n");
+    expect(message).toContain("Date: Tue, 29 Sep 2026 10:00:00 GMT\r\n");
+    expect(message).toContain(
+      "Message-ID: <jmap-e2e-abc.import@jmap-e2e.invalid>\r\n",
+    );
+    expect(message).toContain("MIME-Version: 1.0\r\n");
+    expect(message).toContain("Content-Type: text/plain; charset=UTF-8\r\n");
+    expect(message).toContain("Content-Transfer-Encoding: 8bit\r\n");
+    const [headers, body] = message.split("\r\n\r\n");
+    expect(headers.split("\r\n")).toHaveLength(9);
+    expect(body).toContain("jmap-e2e-abc import");
+  });
+
+  it("omits Cc without one and writes a bare From without a name", () => {
+    const message = buildImportMessage({
+      ...MESSAGE,
+      cc: null,
+      fromName: "",
+    });
+    expect(message).not.toContain("Cc:");
+    expect(message).toContain("From: hello@example.com\r\n");
+  });
+});
+
+describe("jmap-send-e2e aerc onSuccessUpdateEmail patch", () => {
+  it("is the Sent/Drafts patch aerc sends, in its key order", () => {
+    const patch = aercOnSuccessPatch("bSent", "bDrafts");
+    expect(patch).toEqual({
+      "keywords/$draft": null,
+      "mailboxIds/bSent": true,
+      "mailboxIds/bDrafts": null,
+    });
+    expect(Object.keys(patch)).toEqual([
+      "keywords/$draft",
+      "mailboxIds/bSent",
+      "mailboxIds/bDrafts",
+    ]);
   });
 });
 

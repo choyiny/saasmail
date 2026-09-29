@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { jmapDrafts } from "../db/jmap-drafts.schema";
@@ -6,12 +6,13 @@ import { jmapMessageContent } from "../db/jmap-message-content.schema";
 import { people } from "../db/people.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { computeConversationId, externalsOnly } from "../lib/conversation-id";
-import { inboxScopeSql, type AllowedInboxes } from "../lib/inbox-permissions";
+import type { AllowedInboxes } from "../lib/inbox-permissions";
 import { parseJmapDate } from "./dates";
 import { readBlobBytes, resolveReadableBlob, type ResolvedBlob } from "./blobs";
 import {
   contentLeaves,
   contentPreview,
+  deleteContentIfUnreferenced,
   deriveBodyLists,
   toCrlf,
   utf8Bytes,
@@ -713,18 +714,28 @@ async function threadKeyForMessageId(
   messageId: string,
 ): Promise<string | null> {
   const forms = [messageId, `<${messageId}>`];
+  // The inbox list is bound once, as JSON, and shared by the three arms: D1
+  // takes at most 100 bound parameters per statement.
+  const inboxes = allowed.isAdmin
+    ? null
+    : JSON.stringify((allowed as { inboxes: string[] }).inboxes);
+  const scope = (column: SQL) =>
+    inboxes === null
+      ? sql``
+      : sql`AND ${column} IN (SELECT value FROM scope_inboxes)`;
   const rows = await db.all<{ kind: "received" | "sent"; id: string }>(sql`
+    WITH scope_inboxes(value) AS (SELECT value FROM json_each(${inboxes ?? "[]"}))
     SELECT 'received' AS kind, e.id AS id FROM emails e
-     WHERE e.message_id IN ${forms} ${inboxScopeSql(allowed, sql`e.recipient`)}
+     WHERE e.message_id IN ${forms} ${scope(sql`e.recipient`)}
     UNION ALL
     SELECT 'sent' AS kind, se.id AS id FROM sent_emails se
-     WHERE se.message_id IN ${forms} ${inboxScopeSql(allowed, sql`se.from_address`)}
+     WHERE se.message_id IN ${forms} ${scope(sql`se.from_address`)}
     UNION ALL
     -- A JMAP send is recorded under the id it was delivered with, which a
     -- provider like Cloudflare assigns; a JMAP client cites the Email's own.
     SELECT 'sent' AS kind, se.id AS id FROM sent_emails se
       JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
-     WHERE jmc.message_id IN ${forms} ${inboxScopeSql(allowed, sql`se.from_address`)}
+     WHERE jmc.message_id IN ${forms} ${scope(sql`se.from_address`)}
     LIMIT 1
   `);
   const row = rows[0];
@@ -802,6 +813,22 @@ export type CreatedDraft = {
   size: number;
 };
 
+/**
+ * A part held in memory rather than in a blob store: `Email/import` passes the
+ * parts it decoded from the imported message under synthetic blob ids, so a
+ * rejected import stores nothing. Only server code builds this map; a client's
+ * blob id is never looked up in it.
+ */
+export type InternalBlob = {
+  bytes: Uint8Array;
+  type: string;
+  name: string | null;
+};
+
+export type DraftCreateOptions = {
+  internalBlobs?: Map<string, InternalBlob>;
+};
+
 function rfc3339Utc(seconds: number): string {
   return new Date(seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -814,6 +841,7 @@ function rfc3339Utc(seconds: number): string {
 export async function createDraftEmail(
   ctx: DraftCreateContext,
   input: unknown,
+  options: DraftCreateOptions = {},
 ): Promise<CreatedDraft | Rejection> {
   const parsed = parseEmailCreate(input);
   if (parsed instanceof Rejection) return parsed;
@@ -842,6 +870,17 @@ export async function createDraftEmail(
   const notFound: string[] = [];
   for (const leaf of blobLeaves) {
     if (blobs.has(leaf.blobId) || notFound.includes(leaf.blobId)) continue;
+    const internal = options.internalBlobs?.get(leaf.blobId);
+    if (internal) {
+      blobs.set(leaf.blobId, {
+        blobId: leaf.blobId,
+        type: internal.type,
+        size: internal.bytes.byteLength,
+        name: internal.name,
+        source: { bytes: internal.bytes },
+      });
+      continue;
+    }
     const blob = await resolveReadableBlob(
       ctx.db,
       ctx.allowed,
@@ -1020,19 +1059,34 @@ export async function createDraftEmail(
     throw failed.reason;
   }
 
-  await ctx.db.insert(jmapDrafts).values({
-    id: draftId,
-    userId: ctx.userId,
-    contentId,
-    inbox,
-    receivedAt,
-    mailboxRole: "drafts",
-    seen: parsed.seen ? 1 : 0,
-    flagged: parsed.flagged ? 1 : 0,
-    folderIds: JSON.stringify([...new Set(target.folders)].sort()),
-    createdAt: ctx.now,
-    updatedAt: ctx.now,
-  });
+  try {
+    await ctx.db.insert(jmapDrafts).values({
+      id: draftId,
+      userId: ctx.userId,
+      contentId,
+      inbox,
+      receivedAt,
+      mailboxRole: "drafts",
+      seen: parsed.seen ? 1 : 0,
+      flagged: parsed.flagged ? 1 : 0,
+      folderIds: JSON.stringify([...new Set(target.folders)].sort()),
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+    });
+  } catch (insertError) {
+    // Nothing references the content yet: remove it and its R2 objects now
+    // rather than leaving them to the content GC (which still catches them
+    // if this cleanup fails too).
+    try {
+      await deleteContentIfUnreferenced(ctx.db, ctx.env, contentId);
+    } catch (cleanupError) {
+      console.error(
+        `[jmap] cleanup of content ${contentId} failed:`,
+        cleanupError,
+      );
+    }
+    throw insertError;
+  }
 
   return {
     id: publicDraftEmailId(draftId),

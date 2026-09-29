@@ -591,6 +591,7 @@ async function awaitDelivery(ctx, env, step, subject, address = ctx.config.to) {
             "inReplyTo",
             "references",
             "to",
+            "cc",
             "attachments",
           ],
         },
@@ -1523,6 +1524,204 @@ async function stepMultiRecipient(ctx, env, blobs) {
   await awaitDelivery(ctx, env, step, subject, config.from);
 }
 
+/**
+ * The raw RFC 5322 message aerc writes itself and `Email/import`s, CRLF line
+ * endings and all. The From carries a display name only when there is one.
+ */
+export function buildImportMessage({
+  from,
+  fromName,
+  to,
+  cc,
+  subject,
+  messageId,
+  date,
+}) {
+  const headers = [
+    `From: ${fromName ? `${fromName} <${from}>` : from}`,
+    `To: ${to}`,
+    ...(cc ? [`Cc: ${cc}`] : []),
+    `Subject: ${subject}`,
+    `Date: ${date.toUTCString()}`,
+    `Message-ID: <${messageId}>`,
+    "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 8bit",
+  ];
+  return `${headers.join("\r\n")}\r\n\r\nSent by the JMAP e2e script: ${subject}\r\n`;
+}
+
+/** aerc's onSuccessUpdateEmail patch: out of Drafts, into Sent, not a draft. */
+export function aercOnSuccessPatch(sentMailboxId, draftsMailboxId) {
+  return {
+    "keywords/$draft": null,
+    [`mailboxIds/${sentMailboxId}`]: true,
+    [`mailboxIds/${draftsMailboxId}`]: null,
+  };
+}
+
+/**
+ * aerc's send, in one request: upload the message, `Email/import` it into
+ * Drafts, submit it, and on success move it to Sent with $draft removed. It
+ * keeps one Drafts and one Sent for the whole account, so it may well name
+ * another inbox's — the server remaps both to the From inbox's own.
+ */
+async function stepImport(ctx, env) {
+  const { client, report, config } = ctx;
+  const step = "7b Email/import like aerc";
+  const otherDrafts = findMailbox(env.mailboxes, "drafts", config.to);
+  const otherSent = findMailbox(env.mailboxes, "sent", config.to);
+  const foreign = Boolean(
+    otherDrafts && otherSent && otherDrafts.id !== env.draftsMailboxId,
+  );
+  const chosenDrafts = foreign ? otherDrafts.id : env.draftsMailboxId;
+  const chosenSent = foreign ? otherSent.id : env.sentMailboxId;
+  report.pass(
+    `${step}: import target`,
+    foreign
+      ? `another inbox's Drafts and Sent (remapped): ${chosenDrafts}, ${chosenSent}`
+      : `${config.from}'s own Drafts and Sent: ${chosenDrafts}, ${chosenSent}`,
+  );
+
+  const subject = `${ctx.marker} import`;
+  const bytes = new TextEncoder().encode(
+    buildImportMessage({
+      from: config.from,
+      fromName:
+        env.identity.name !== env.identity.email ? env.identity.name : "",
+      to: config.to,
+      cc: config.cc,
+      subject,
+      messageId: `${ctx.marker}.import@jmap-e2e.invalid`,
+      date: new Date(),
+    }),
+  );
+  const uploaded = await client.upload(env.accountId, bytes, "message/rfc822");
+  // The CRLF bytes are the whole point, so the blob must be them, byte for byte.
+  report.check(
+    `${step}: the raw message uploads`,
+    (uploaded.status === 200 || uploaded.status === 201) &&
+      typeof uploaded.json?.blobId === "string" &&
+      uploaded.json.size === bytes.byteLength,
+    `${uploaded.json?.blobId ?? ""}, ${uploaded.json?.size ?? "?"} of ${
+      bytes.byteLength
+    } bytes`,
+    `HTTP ${uploaded.status}: ${uploaded.text.slice(0, 300)}`,
+  );
+
+  const responses = await client.call([
+    [
+      "Email/import",
+      {
+        accountId: env.accountId,
+        emails: {
+          aerc: {
+            blobId: uploaded.json.blobId,
+            mailboxIds: { [chosenDrafts]: true },
+            keywords: { $draft: true, $seen: true },
+          },
+        },
+      },
+      "0",
+    ],
+    [
+      "EmailSubmission/set",
+      {
+        accountId: env.accountId,
+        create: {
+          sub: {
+            identityId: env.identity.id,
+            emailId: "#aerc",
+            envelope: {
+              mailFrom: { email: config.from },
+              rcptTo: [config.to, ...(config.cc ? [config.cc] : [])].map(
+                (email) => ({ email }),
+              ),
+            },
+          },
+        },
+        onSuccessUpdateEmail: {
+          "#sub": aercOnSuccessPatch(chosenSent, chosenDrafts),
+        },
+      },
+      "1",
+    ],
+  ]);
+  const imported = methodResponse(responses, "Email/import", "0");
+  if (!imported.created?.aerc) {
+    report.fail(`${step}: import`, JSON.stringify(imported.notCreated));
+  }
+  ctx.liveDrafts.add(imported.created.aerc.id);
+  const submissions = methodResponse(responses, "EmailSubmission/set", "1");
+  if (!submissions.created?.sub) {
+    report.fail(`${step}: submission`, JSON.stringify(submissions.notCreated));
+  }
+  ctx.liveDrafts.delete(imported.created.aerc.id);
+  report.pass(
+    `${step}: imported and submitted`,
+    `${imported.created.aerc.id}, ${submissions.created.sub.id}`,
+  );
+
+  const implicit = methodResponse(responses, "Email/set", "1");
+  report.check(
+    `${step}: the implicit Email/set updated the imported Email`,
+    Object.prototype.hasOwnProperty.call(
+      implicit.updated ?? {},
+      imported.created.aerc.id,
+    ) && !implicit.notUpdated,
+    imported.created.aerc.id,
+    JSON.stringify(implicit),
+  );
+
+  // sentEmailsWithSubject queries env.sentMailboxId, so finding the id there
+  // is the From inbox's own Sent; exactly that mailbox is the whole patch.
+  const copies = await sentEmailsWithSubject(ctx, env, subject);
+  const filed = copies.find((email) => email.id === imported.created.aerc.id);
+  report.check(
+    `${step}: the imported Email is in ${config.from}'s Sent, $draft removed`,
+    Boolean(filed) &&
+      stableStringify(filed.mailboxIds) ===
+        stableStringify({ [env.sentMailboxId]: true }) &&
+      !("$draft" in (filed.keywords ?? {})),
+    filed?.id ?? "?",
+    JSON.stringify(
+      copies.map((email) => ({
+        id: email.id,
+        mailboxIds: email.mailboxIds,
+        keywords: email.keywords,
+      })),
+    ),
+  );
+
+  if (!config.expectDelivery) {
+    report.skip(`${step}: delivery`, "needs JMAP_EXPECT_DELIVERY=1");
+    return;
+  }
+  const delivered = await awaitDelivery(ctx, env, step, subject);
+  report.check(
+    `${step}: the delivered From is ${config.from}`,
+    delivered.from?.[0]?.email?.toLowerCase() === config.from,
+    "",
+    JSON.stringify(delivered.from),
+  );
+  const atTo = (delivered.to ?? []).map((a) => a.email.toLowerCase());
+  report.check(
+    `${step}: the delivered To lists ${config.to}`,
+    atTo.includes(config.to),
+    atTo.join(", "),
+    JSON.stringify(delivered.to),
+  );
+  if (config.cc) {
+    const atCc = (delivered.cc ?? []).map((a) => a.email.toLowerCase());
+    report.check(
+      `${step}: the delivered Cc lists ${config.cc}`,
+      atCc.includes(config.cc),
+      atCc.join(", "),
+      JSON.stringify(delivered.cc),
+    );
+  }
+}
+
 async function stepDelayed(ctx, env, blobs) {
   const { client, report, config } = ctx;
   const step = "9 delayed send";
@@ -1858,6 +2057,7 @@ export async function run(
     await stepDestroyVariant(ctx, env, blobs);
     await stepFlagVariant(ctx, env, blobs);
     await stepMultiRecipient(ctx, env, blobs);
+    await stepImport(ctx, env);
     await stepDelayed(ctx, env, blobs);
     await stepNegative(ctx, env, blobs);
   } catch (error) {

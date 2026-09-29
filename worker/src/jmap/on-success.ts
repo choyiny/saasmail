@@ -5,6 +5,7 @@ import type { AllowedInboxes } from "../lib/inbox-permissions";
 import { ensureSubmissionSentRow } from "./sent-row";
 import { emailSet } from "./email-set";
 import type { JmapMethodError } from "./emails";
+import { isSystemDescriptor, type MailboxDescriptor } from "./mailboxes";
 import type { JmapMethodContext } from "./methods";
 import { publicAccountId } from "./public-ids";
 import { currentJmapState } from "./state";
@@ -59,16 +60,150 @@ export function parseOnSuccessArgs(
  * `#creationId` keys can name a submission created in this call; keys naming an
  * existing submission never apply (see the plan's Decision 4).
  */
+export type OnSuccessForCreate = {
+  mode: OnSuccessMode;
+  patch: Record<string, unknown> | null;
+};
+
 export function onSuccessForCreation(
   parsed: ParsedOnSuccess,
   creationId: string,
-): { mode: OnSuccessMode; patch: Record<string, unknown> | null } {
+): OnSuccessForCreate {
   const key = `#${creationId}`;
   const patch = parsed.update?.[key] ?? null;
   const destroy = parsed.destroy?.includes(key) ?? false;
   const mode: OnSuccessMode =
     patch && destroy ? "both" : patch ? "update" : destroy ? "destroy" : "none";
   return { mode, patch };
+}
+
+function decodePointer(segment: string): string | null {
+  if (/~(?:[^01]|$)/.test(segment)) return null;
+  return segment.replaceAll("~1", "/").replaceAll("~0", "~");
+}
+
+function encodePointer(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  return left === right || JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * Rewrite mailbox ids per `targetFor`, collapsing ids that land on the same
+ * target when their values agree. Where they don't, every id of that target is
+ * kept as the client sent it, and the implicit Email/set applies the patch
+ * exactly as a plain Email/set would.
+ */
+type MailboxEntry = { id: string; key: string; value: unknown };
+
+/** Keyed by the original key of each entry kept; `id` is the id it now names. */
+function remapEntries(
+  entries: MailboxEntry[],
+  targetFor: (id: string) => string,
+): Map<string, { id: string; value: unknown; changed: boolean }> {
+  const groups = new Map<string, MailboxEntry[]>();
+  for (const entry of entries) {
+    const target = targetFor(entry.id);
+    const group = groups.get(target) ?? [];
+    group.push(entry);
+    groups.set(target, group);
+  }
+  const out = new Map<
+    string,
+    { id: string; value: unknown; changed: boolean }
+  >();
+  for (const [target, group] of groups) {
+    const rewrites = group.some((item) => item.id !== target);
+    const agree = group.every((item) => sameValue(item.value, group[0].value));
+    if (!rewrites || !agree) {
+      for (const item of group) {
+        out.set(item.key, { id: item.id, value: item.value, changed: false });
+      }
+      continue;
+    }
+    // One key, at the position of the group's first entry.
+    out.set(group[0].key, { id: target, value: group[0].value, changed: true });
+  }
+  return out;
+}
+
+/**
+ * Spec 2026-09-28 §2: aerc keeps one mailbox per role across every inbox, so
+ * its on-success patch may name another inbox's Sent or Drafts. A system
+ * mailbox of another inbox the caller can access becomes the same role's
+ * mailbox of the draft's own inbox, in `mailboxIds/<id>` keys and in a
+ * whole-object `mailboxIds`. Custom folders and unknown ids are left for the
+ * implicit Email/set to reject as usual. Only the stored on-success patch is
+ * remapped; a plain Email/set stays strict.
+ */
+export function remapOnSuccessPatch(
+  patch: Record<string, unknown>,
+  inbox: string,
+  descriptorsById: Map<string, MailboxDescriptor>,
+): Record<string, unknown> {
+  const own = inbox.toLowerCase();
+  const ownByRole = new Map<string, string>();
+  for (const descriptor of descriptorsById.values()) {
+    if (
+      isSystemDescriptor(descriptor) &&
+      descriptor.inbox.toLowerCase() === own
+    ) {
+      ownByRole.set(descriptor.role, descriptor.id);
+    }
+  }
+  const targetFor = (id: string): string => {
+    const descriptor = descriptorsById.get(id);
+    if (
+      !descriptor ||
+      !isSystemDescriptor(descriptor) ||
+      descriptor.inbox.toLowerCase() === own
+    ) {
+      return id;
+    }
+    return ownByRole.get(descriptor.role) ?? id;
+  };
+
+  const PREFIX = "mailboxIds/";
+  const pathEntries: MailboxEntry[] = [];
+  for (const [key, value] of Object.entries(patch)) {
+    if (!key.startsWith(PREFIX)) continue;
+    const id = decodePointer(key.slice(PREFIX.length));
+    if (id !== null) pathEntries.push({ id, key, value });
+  }
+  const paths = remapEntries(pathEntries, targetFor);
+  const pathKeys = new Set(pathEntries.map((entry) => entry.key));
+
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (pathKeys.has(key)) {
+      const entry = paths.get(key);
+      if (!entry) continue; // collapsed into an earlier key
+      out[entry.changed ? `${PREFIX}${encodePointer(entry.id)}` : key] =
+        entry.value;
+      continue;
+    }
+    if (key === "mailboxIds" && isObject(value)) {
+      const whole = remapEntries(
+        Object.entries(value).map(([id, item]) => ({
+          id,
+          key: id,
+          value: item,
+        })),
+        targetFor,
+      );
+      const remapped: Record<string, unknown> = {};
+      for (const id of Object.keys(value)) {
+        const entry = whole.get(id);
+        if (entry) remapped[entry.id] = entry.value;
+      }
+      out[key] = remapped;
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 /** Either argument present: the call answers with an implicit Email/set. */

@@ -30,6 +30,7 @@ import {
 import { listJmapMailboxes, listUsableIdentities } from "./mailboxes";
 import { draftThreadMembers, listDraftThreadKeys } from "./drafts";
 import { emailChanges, mailboxChanges, submissionChanges } from "./changes";
+import { emailImport } from "./email-import";
 import { emailSet } from "./email-set";
 import { threadChanges } from "./thread-changes";
 import { emailSubmissionSet } from "./submission";
@@ -728,6 +729,24 @@ export async function executeMethod(
     const account = accountError(args.accountId, user.id);
     if (account) return account;
     const result = await emailSet(
+      db,
+      allowed,
+      user.id,
+      publicAccountId(user.id),
+      args,
+      ctx,
+    );
+    const error = result as JmapMethodError;
+    if (typeof error.type === "string") {
+      return methodError(error.type, error.description, error.properties);
+    }
+    return { ok: true, name, result };
+  }
+
+  if (name === "Email/import") {
+    const account = accountError(args.accountId, user.id);
+    if (account) return account;
+    const result = await emailImport(
       db,
       allowed,
       user.id,
