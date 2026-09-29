@@ -1,7 +1,11 @@
-import { inArray, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { mailboxes } from "../db/mailboxes.schema";
-import { inboxScopeSql, type AllowedInboxes } from "../lib/inbox-permissions";
+import {
+  inboxScopeSql,
+  jsonList,
+  type AllowedInboxes,
+} from "../lib/inbox-permissions";
 import { SYSTEM_MAILBOX_ROLES } from "./constants";
 import { customMailboxId, systemMailboxId } from "./ids";
 import { publicIdForChangeObject } from "./public-ids";
@@ -18,8 +22,6 @@ export const JMAP_CHANGE_STATE_MAX_AGE_SECONDS = 29 * 24 * 60 * 60;
 export const JMAP_CHANGE_PRUNE_LIMIT = 5000;
 export const JMAP_CHANGE_WINDOW_LIMIT = 10_000;
 export const JMAP_MAX_CHANGES = 256;
-
-const JMAP_CHANGE_INBOX_CHUNK_SIZE = 40;
 
 type ChangeRow = {
   object_id: string;
@@ -52,27 +54,6 @@ export function maxChanges(value: unknown): number | JmapMethodError {
     return { type: "invalidArguments", properties: ["maxChanges"] };
   }
   return Math.min(value, JMAP_MAX_CHANGES);
-}
-
-function allowedChunks(allowed: AllowedInboxes): AllowedInboxes[] {
-  if (!("inboxes" in allowed)) return [allowed];
-  if (allowed.inboxes.length === 0) return [allowed];
-
-  const inboxes = [
-    ...new Set(allowed.inboxes.map((inbox) => inbox.toLowerCase())),
-  ];
-  const chunks: AllowedInboxes[] = [];
-  for (
-    let start = 0;
-    start < inboxes.length;
-    start += JMAP_CHANGE_INBOX_CHUNK_SIZE
-  ) {
-    chunks.push({
-      isAdmin: false,
-      inboxes: inboxes.slice(start, start + JMAP_CHANGE_INBOX_CHUNK_SIZE),
-    });
-  }
-  return chunks;
 }
 
 /** Every object type a client can name in a change set. */
@@ -115,21 +96,16 @@ async function scopedWindowCount(
   userId: string,
   sinceSeq: number,
 ): Promise<number> {
-  let total = 0;
-  for (const chunk of allowedChunks(allowed)) {
-    const scoped = scopedChangesSql(chunk, userId, sinceSeq);
-    const rows = await db.all<{ count: number }>(sql`
-      SELECT COUNT(*) AS count
-      FROM (
-        SELECT 1
-        FROM (${scoped}) scoped
-        LIMIT ${JMAP_CHANGE_WINDOW_LIMIT + 1}
-      )
-    `);
-    total += Number(rows[0]?.count ?? 0);
-    if (total > JMAP_CHANGE_WINDOW_LIMIT) return total;
-  }
-  return total;
+  const scoped = scopedChangesSql(allowed, userId, sinceSeq);
+  const rows = await db.all<{ count: number }>(sql`
+    SELECT COUNT(*) AS count
+    FROM (
+      SELECT 1
+      FROM (${scoped}) scoped
+      LIMIT ${JMAP_CHANGE_WINDOW_LIMIT + 1}
+    )
+  `);
+  return Number(rows[0]?.count ?? 0);
 }
 
 async function validateSinceState(
@@ -205,16 +181,9 @@ async function loadGroupedChanges(
   objectType: ChangeObjectType,
   limit?: number,
 ): Promise<ChangeRow[]> {
-  const rows: ChangeRow[] = [];
-  for (const chunk of allowedChunks(allowed)) {
-    rows.push(
-      ...(await db.all<ChangeRow>(
-        groupedChangesSql(chunk, userId, sinceSeq, objectType, limit),
-      )),
-    );
-  }
-  rows.sort((left, right) => left.last_seq - right.last_seq);
-  return limit === undefined ? rows : rows.slice(0, limit);
+  return db.all<ChangeRow>(
+    groupedChangesSql(allowed, userId, sinceSeq, objectType, limit),
+  );
 }
 
 async function changedEmailInboxes(
@@ -223,17 +192,13 @@ async function changedEmailInboxes(
   userId: string,
   sinceSeq: number,
 ): Promise<string[]> {
-  const inboxes = new Set<string>();
-  for (const chunk of allowedChunks(allowed)) {
-    const scoped = scopedChangesSql(chunk, userId, sinceSeq, "email");
-    const rows = await db.all<{ inbox: string }>(sql`
-      SELECT DISTINCT inbox
-      FROM (${scoped}) scoped
-      WHERE inbox IS NOT NULL
-    `);
-    for (const row of rows) inboxes.add(row.inbox);
-  }
-  return [...inboxes].sort();
+  const scoped = scopedChangesSql(allowed, userId, sinceSeq, "email");
+  const rows = await db.all<{ inbox: string }>(sql`
+    SELECT DISTINCT inbox
+    FROM (${scoped}) scoped
+    WHERE inbox IS NOT NULL
+  `);
+  return rows.map((row) => row.inbox).sort();
 }
 
 export async function emailChanges(
@@ -422,24 +387,13 @@ export async function mailboxChanges(
     userId,
     validation.since.seq,
   );
-  const currentMailboxes: (typeof mailboxes.$inferSelect)[] = [];
-  for (
-    let start = 0;
-    start < changedInboxes.length;
-    start += JMAP_CHANGE_INBOX_CHUNK_SIZE
-  ) {
-    currentMailboxes.push(
-      ...(await db
-        .select()
-        .from(mailboxes)
-        .where(
-          inArray(
-            mailboxes.inbox,
-            changedInboxes.slice(start, start + JMAP_CHANGE_INBOX_CHUNK_SIZE),
-          ),
-        )),
-    );
-  }
+  const currentMailboxes: (typeof mailboxes.$inferSelect)[] =
+    changedInboxes.length === 0
+      ? []
+      : await db
+          .select()
+          .from(mailboxes)
+          .where(sql`${mailboxes.inbox} IN ${jsonList(changedInboxes)}`);
   const customByInbox = new Map<string, (typeof mailboxes.$inferSelect)[]>();
   for (const mailbox of currentMailboxes) {
     const inbox = mailbox.inbox.toLowerCase();

@@ -4,6 +4,7 @@ import { createDb } from "../db/client";
 import {
   inboxScopeSql,
   isInboxAllowed,
+  jsonList,
   type AllowedInboxes,
 } from "../lib/inbox-permissions";
 import { conversationKeySql } from "../lib/messages/conversation-state";
@@ -29,8 +30,11 @@ import {
  */
 export const THREAD_CHANGES_QUERY_BUDGET = 30;
 
-/** Ids per lookup statement: D1 caps the bound parameters of one statement. */
-const IDS_PER_QUERY = 90;
+/**
+ * Ids per lookup statement. Each list is bound once, as JSON (D1 caps a
+ * statement at 100 bound parameters), so this only bounds the parameter's size.
+ */
+const IDS_PER_QUERY = 1000;
 
 class QueryBudgetExceeded extends Error {}
 
@@ -112,7 +116,7 @@ async function changedThreadKeys(
         SELECT e.id AS id, e.recipient AS inbox,
           COALESCE(${naturalKey}, 'received:' || e.id) AS thread_key
         FROM emails e
-        WHERE e.id IN ${chunk}
+        WHERE e.id IN ${jsonList(chunk)}
       `),
       (id) => publicEmailId({ kind: "received", id }),
     );
@@ -128,7 +132,7 @@ async function changedThreadKeys(
         SELECT se.id AS id, se.from_address AS inbox, ${sentKey} AS thread_key
         FROM sent_emails se
         LEFT JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
-        WHERE se.id IN ${chunk}
+        WHERE se.id IN ${jsonList(chunk)}
           AND NOT ${jmapHiddenSentSql(sql`se.id`)}
       `),
       (id) => publicEmailId({ kind: "sent", id }),
@@ -138,18 +142,21 @@ async function changedThreadKeys(
   // A `D…` id is the caller's draft, or the Sent row a submission aliased it
   // onto (spec §3.3).
   for (const chunk of chunks(drafts, IDS_PER_QUERY)) {
+    // The ids are bound once and shared by both arms.
     keep(
       await db.all<KeyRow>(sql`
+        WITH draft_ids(value) AS (SELECT value FROM json_each(${JSON.stringify(chunk)}))
         SELECT d.id AS id, d.inbox AS inbox, c.thread_key AS thread_key
         FROM jmap_drafts d
         JOIN jmap_message_content c ON c.id = d.content_id
-        WHERE d.user_id = ${userId} AND d.id IN ${chunk}
+        WHERE d.user_id = ${userId}
+          AND d.id IN (SELECT value FROM draft_ids)
         UNION ALL
         SELECT se.jmap_email_id AS id, se.from_address AS inbox,
           ${sentKey} AS thread_key
         FROM sent_emails se
         LEFT JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
-        WHERE se.jmap_email_id IN ${chunk}
+        WHERE se.jmap_email_id IN (SELECT value FROM draft_ids)
           AND NOT ${jmapHiddenSentSql(sql`se.id`)}
       `),
       publicDraftEmailId,
@@ -225,7 +232,7 @@ async function threadMembers(
         jmc.thread_key AS thread_key
       FROM sent_emails se
       JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id
-      WHERE jmc.thread_key IN ${chunk}
+      WHERE jmc.thread_key IN ${jsonList(chunk)}
         AND NOT ${jmapHiddenSentSql(sql`se.id`)}
       ${inboxScopeSql(allowed, sql`se.from_address`)}
     `);

@@ -389,7 +389,7 @@ describe("EventSource push: disconnects, races and the query budget", () => {
     ).toBeGreaterThan(2);
   });
 
-  it("stays within its 40-query budget with a change on every tick: member with 85 inboxes (4 seq queries a tick)", async () => {
+  it("stays within its 40-query budget with a change on every tick: member with 85 inboxes (one seq query a tick)", async () => {
     const { userId, apiKey } = await createTestUser({
       id: "edge-budget-member",
       role: "member",
@@ -591,5 +591,147 @@ describe("EventSource loop: pings, keepalives and failures", () => {
     await runPushLoop(fake.loop);
     expect(checks).toBe(1);
     expect(fake.writes).toHaveLength(2);
+  });
+});
+
+describe("EventSource push: the budget counts from the first statement of the request", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createTestPerson({ id: "edge-person", email: "edge@example.com" });
+  });
+
+  /**
+   * One stream with the budget at `queryBudget` and a change before every
+   * tick; returns what it wrote and every statement that reached D1.
+   */
+  async function streamWithBudget(apiKey: string, queryBudget?: number) {
+    const counted = instrumentedD1();
+    let nowMs = START_MS;
+    let done: Promise<unknown> | null = null;
+    const response = await openEventSource(
+      new Request("http://localhost/jmap/eventsource/?types=*&ping=0", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }),
+      { ...env, DB: counted.db } as unknown as CloudflareBindings,
+      {
+        queryBudget,
+        now: () => nowMs,
+        sleep: async (ms) => {
+          nowMs += ms;
+          await newEmail("cbox00@saasmail.test");
+        },
+        waitUntil: (promise) => {
+          done = promise;
+        },
+      },
+    );
+    const text = await readAll(response);
+    await done;
+    return { response, text, events: parseEvents(text), counted };
+  }
+
+  /** What connecting costs: authentication, the grant, the state, and the initial event's re-check. */
+  async function connectCost(apiKey: string): Promise<number> {
+    const counted = instrumentedD1();
+    let atFirstSleep = -1;
+    const abort = new AbortController();
+    let done: Promise<unknown> | null = null;
+    const response = await openEventSource(
+      new Request("http://localhost/jmap/eventsource/?types=*&ping=0", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: abort.signal,
+      }),
+      { ...env, DB: counted.db } as unknown as CloudflareBindings,
+      {
+        now: () => START_MS,
+        sleep: async () => {
+          if (atFirstSleep === -1) atFirstSleep = counted.count();
+          abort.abort();
+        },
+        waitUntil: (promise) => {
+          done = promise;
+        },
+      },
+    );
+    // An aborted stream is left for the runtime to drain, not closed: read
+    // only up to the event.
+    const text = await readUntil(response.body!.getReader(), "event: state");
+    await done;
+    expect(parseEvents(text).filter((e) => e.event === "state")).toHaveLength(
+      1,
+    );
+    return atFirstSleep;
+  }
+
+  async function memberWithGrant(id: string) {
+    const { userId, apiKey } = await createTestUser({
+      id,
+      role: "member",
+      email: `${id}@example.com`,
+    });
+    await grant(
+      userId,
+      Array.from(
+        { length: 45 },
+        (_, index) => `cbox${String(index).padStart(2, "0")}@saasmail.test`,
+      ),
+    );
+    return apiKey;
+  }
+
+  it("connect costing one under, exactly, and one over the budget: two serve the event, the third closes with only retry", async () => {
+    const apiKey = await memberWithGrant("edge-connect-budget");
+    const cost = await connectCost(apiKey);
+    expect(cost).toBeGreaterThan(2);
+    expect(cost).toBeLessThan(PUSH_QUERY_BUDGET);
+
+    // Budgets arranged so connect costs budget - 1, budget and budget + 1
+    // (39, 40 and 41 against a budget of 40).
+    for (const [budget, served] of [
+      [cost + 1, true],
+      [cost, true],
+      [cost - 1, false],
+    ] as const) {
+      const run = await streamWithBudget(apiKey, budget);
+      expect(run.response.status, `budget ${budget}`).toBe(200);
+      expect(run.text.startsWith(RETRY_PREAMBLE), `budget ${budget}`).toBe(
+        true,
+      );
+      const states = run.events.filter((e) => e.event === "state");
+      expect(states.length, `budget ${budget}`).toBe(served ? 1 : 0);
+      // The statement past the budget never runs.
+      expect(run.counted.count(), `budget ${budget}`).toBeLessThanOrEqual(
+        budget,
+      );
+      if (!served) expect(run.text).toBe(RETRY_PREAMBLE);
+    }
+  });
+
+  it("a refusal while connecting answers 200 with only retry: during authentication or the state read", async () => {
+    const apiKey = await memberWithGrant("edge-connect-refused");
+    for (const budget of [0, 1, 2]) {
+      const run = await streamWithBudget(apiKey, budget);
+      expect(run.response.status, `budget ${budget}`).toBe(200);
+      expect(run.response.headers.get("Content-Type")).toContain(
+        "text/event-stream",
+      );
+      expect(run.text, `budget ${budget}`).toBe(RETRY_PREAMBLE);
+      expect(run.counted.count(), `budget ${budget}`).toBeLessThanOrEqual(
+        budget,
+      );
+    }
+  });
+
+  it("with the real budget, a stream never sends more than 40 statements", async () => {
+    const apiKey = await memberWithGrant("edge-connect-real");
+    const run = await streamWithBudget(apiKey);
+    expect(
+      run.events.filter((e) => e.event === "state").length,
+    ).toBeGreaterThan(1);
+    expect(run.counted.count()).toBeLessThanOrEqual(PUSH_QUERY_BUDGET);
   });
 });

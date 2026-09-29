@@ -113,7 +113,11 @@ function turn() {
  * clock: `tick()` releases one 10 s sleep and waits until the loop sleeps
  * again or the stream closes.
  */
-async function openStream(apiKey: string | null, query: string) {
+async function openStream(
+  apiKey: string | null,
+  query: string,
+  queryBudget?: number,
+) {
   let nowMs = START_MS;
   const sleepers: (() => void)[] = [];
   const headers: Record<string, string> = apiKey
@@ -123,6 +127,7 @@ async function openStream(apiKey: string | null, query: string) {
     new Request(`http://localhost/jmap/eventsource/${query}`, { headers }),
     env as unknown as CloudflareBindings,
     {
+      queryBudget,
       now: () => nowMs,
       sleep: (ms) =>
         new Promise<void>((resolve) => {
@@ -330,17 +335,18 @@ describe("JMAP EventSource push", () => {
   });
 
   it("closes once the query budget is spent, before five minutes", async () => {
-    // A member pays two seq queries per tick.
+    // A member's seq check is cheap enough that the full 40 can outlast the
+    // five minutes; a budget of 25 is spent first.
     const { apiKey } = await member("push-budget");
-    const stream = await openStream(apiKey, "?types=Email&ping=0");
+    const stream = await openStream(apiKey, "?types=Email&ping=0", 25);
     await stream.idle();
     expect(stream.stateEvents()).toHaveLength(1);
     for (let index = 0; index < 30 && !stream.closed(); index += 1) {
       await stream.tick();
     }
     expect(stream.closed()).toBe(true);
-    // Connect (auth, state, the initial event's re-check) plus two per tick:
-    // well past a minute, well before the five.
+    // Connect (auth, state, the initial event's re-check) plus the seq check
+    // each tick: well past a minute, well before the five.
     expect(stream.elapsedMs()).toBeGreaterThan(60 * 1000);
     expect(stream.elapsedMs()).toBeLessThan(5 * 60 * 1000);
     expect(stream.stateEvents()).toHaveLength(1);

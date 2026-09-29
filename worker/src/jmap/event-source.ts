@@ -134,6 +134,8 @@ export type PushLoop = {
   recheck(): Promise<boolean>;
   /** D1 queries the stream has used so far, connect included. */
   queriesUsed(): number;
+  /** The most D1 queries the stream may use, connect included (default `PUSH_QUERY_BUDGET`). */
+  budget?: number;
   /** False when the client is gone. */
   write(chunk: string): boolean;
   /** True once the client disconnected. */
@@ -153,6 +155,7 @@ export async function runPushLoop(loop: PushLoop): Promise<void> {
   let lastState = loop.connectState;
   const wantsState = params.types.length > 0;
   let recheckCost = loop.recheckQueryCount ?? 0;
+  const budget = loop.budget ?? PUSH_QUERY_BUDGET;
 
   const send = (chunk: string): boolean => {
     if (loop.cancelled() || !loop.write(chunk)) return false;
@@ -161,7 +164,10 @@ export async function runPushLoop(loop: PushLoop): Promise<void> {
   };
   const sendState = async (state: string): Promise<boolean> => {
     // Access is re-checked before every state event: a revoked key or a
-    // removed inbox must not learn that anything changed.
+    // removed inbox must not learn that anything changed. The re-check is
+    // reserved first, the initial one included: one that can't fit the budget
+    // ends the stream without the event.
+    if (loop.queriesUsed() + recheckCost > budget) return false;
     const before = loop.queriesUsed();
     const allowed = await loop.recheck();
     recheckCost = Math.max(recheckCost, loop.queriesUsed() - before);
@@ -184,10 +190,7 @@ export async function runPushLoop(loop: PushLoop): Promise<void> {
       if (wantsState) {
         // A tick may cost the seq check and, when the state moved, a re-check:
         // start one only if both fit the budget.
-        if (
-          loop.queriesUsed() + loop.seqQueryCount + recheckCost >
-          PUSH_QUERY_BUDGET
-        ) {
+        if (loop.queriesUsed() + loop.seqQueryCount + recheckCost > budget) {
           return;
         }
         const seq = await loop.checkSeq();
@@ -216,11 +219,23 @@ export async function runPushLoop(loop: PushLoop): Promise<void> {
       }
     }
   } catch {
-    // A DB error ends the stream; nothing half-built was written.
+    // A DB error, or a statement the budget refused, ends the stream; nothing
+    // half-built was written.
   }
 }
 
-/** Counts the statements a stream sends to D1, for the query budget. */
+/** Thrown by the stream's D1 wrapper for a statement past the query budget. */
+export class PushBudgetExceeded extends Error {
+  constructor() {
+    super("EventSource query budget exhausted");
+    this.name = "PushBudgetExceeded";
+  }
+}
+
+/**
+ * Counts the statements a stream sends to D1. `count` runs before each one and
+ * throws to refuse it, so a statement past the budget never reaches D1.
+ */
 function countingD1(db: D1Database, count: () => void): D1Database {
   return new Proxy(db, {
     get(target, prop) {
@@ -246,10 +261,26 @@ function scopeKey(allowed: AllowedInboxes): string {
   return `member:${inboxes.join(",")}`;
 }
 
+/** A stream that closes at once with only the reconnect delay: clients back off and retry. */
+function closedEventStream(): Response {
+  return new Response(RETRY_PREAMBLE, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+    },
+  });
+}
+
 /**
  * `GET /jmap/eventsource/` (RFC 8620 §7.3): a `text/event-stream` that reports
  * state changes until it closes after `PUSH_LIFETIME_SECONDS` or
  * `PUSH_QUERY_BUDGET` queries. Clients reconnect on a clean close.
+ *
+ * The budget covers the whole request from its first statement: the D1
+ * wrapper refuses the one past it before it runs. A refusal while connecting
+ * (authentication, the grant, the first state) answers `200` with only the
+ * `retry:` line and no event.
  */
 export async function openEventSource(
   request: Request,
@@ -259,19 +290,36 @@ export async function openEventSource(
     /** Test seams: the clock (milliseconds) and the wait between ticks. */
     now?: () => number;
     sleep?: (ms: number) => Promise<void>;
+    /** Test seam: the query budget (default `PUSH_QUERY_BUDGET`). */
+    queryBudget?: number;
   } = {},
 ): Promise<Response> {
   const now = options.now ?? (() => Date.now());
+  const budget = options.queryBudget ?? PUSH_QUERY_BUDGET;
   let queries = 0;
+  // Set once the wrapper refuses a statement, so a refusal that some caller
+  // catches and turns into something else (a failed login) is still seen.
+  let refused = false;
   const countedEnv = {
     ...env,
     DB: countingD1(env.DB, () => {
+      if (queries >= budget) {
+        refused = true;
+        throw new PushBudgetExceeded();
+      }
       queries += 1;
     }),
   } as CloudflareBindings;
   const db = createDb(countedEnv);
 
-  const auth = await authenticateJmap(request, countedEnv, db);
+  let auth: Awaited<ReturnType<typeof authenticateJmap>>;
+  try {
+    auth = await authenticateJmap(request, countedEnv, db);
+  } catch (error) {
+    if (refused) return closedEventStream();
+    throw error;
+  }
+  if (refused) return closedEventStream();
   if (auth instanceof Response) return auth;
   const authQueries = queries;
 
@@ -285,12 +333,18 @@ export async function openEventSource(
   const allowed = auth.allowed;
   const seqQueryCount = currentJmapSeqQueries(allowed, userId).length;
   const beforeState = queries;
-  const connect = await currentJmapState(
-    db,
-    allowed,
-    userId,
-    Math.floor(now() / 1000),
-  );
+  let connect: Awaited<ReturnType<typeof currentJmapState>>;
+  try {
+    connect = await currentJmapState(
+      db,
+      allowed,
+      userId,
+      Math.floor(now() / 1000),
+    );
+  } catch (error) {
+    if (refused) return closedEventStream();
+    throw error;
+  }
   // A re-check is the authentication again plus the fingerprint (what the
   // connect state cost beyond its seq queries).
   const recheckQueryCount =
@@ -340,6 +394,7 @@ export async function openEventSource(
     connectState: connect.state,
     seqQueryCount,
     recheckQueryCount,
+    budget,
     sleep: options.sleep ?? timerSleep,
     now,
     checkSeq: () => currentJmapSeq(db, allowed, userId),

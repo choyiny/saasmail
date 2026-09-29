@@ -1,7 +1,11 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq, inArray, isNull, or } from "drizzle-orm";
+import { eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { assertInboxAllowed, isInboxAllowed } from "../lib/inbox-permissions";
+import {
+  assertInboxAllowed,
+  isInboxAllowed,
+  jsonList,
+} from "../lib/inbox-permissions";
 import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import { analyzeTemplate, TemplateParseError } from "../lib/interpolate";
@@ -177,7 +181,7 @@ emailTemplatesRouter.openapi(listTemplatesRoute, async (c) => {
       .where(
         or(
           isNull(emailTemplates.fromAddress),
-          inArray(emailTemplates.fromAddress, allowed.inboxes),
+          sql`${emailTemplates.fromAddress} IN ${jsonList(allowed.inboxes)}`,
         ),
       );
   }

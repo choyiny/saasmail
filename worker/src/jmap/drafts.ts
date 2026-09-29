@@ -6,6 +6,7 @@ import { escapeLike } from "../lib/helpers";
 import {
   inboxScopeSql,
   isInboxAllowed,
+  jsonList,
   type AllowedInboxes,
 } from "../lib/inbox-permissions";
 import {
@@ -220,17 +221,40 @@ function likePattern(value: string | undefined): string | null {
   return trimmed ? `%${escapeLike(trimmed)}%` : null;
 }
 
+/**
+ * `DraftFilter.exclude`, in a fixed number of bound parameters however many
+ * mailboxes it names (D1 takes at most 100 per statement): one JSON list of
+ * inboxes per system role, one JSON list of [inbox, folder id] pairs.
+ */
 function draftExclusionSql(exclusions: DraftExclusion[] | undefined): SQL {
   if (!exclusions || exclusions.length === 0) return sql``;
-  return sql.join(
-    exclusions.map((exclusion) => {
-      const inbox = exclusion.inbox.toLowerCase();
-      return exclusion.mailboxId !== undefined
-        ? sql`AND NOT (d.inbox = ${inbox} AND EXISTS (SELECT 1 FROM json_each(d.folder_ids) jf WHERE jf.value = ${exclusion.mailboxId}))`
-        : sql`AND NOT (d.inbox = ${inbox} AND d.mailbox_role = ${exclusion.role})`;
-    }),
-    sql` `,
-  );
+  const roleInboxes = new Map<string, Set<string>>();
+  const folderPairs: [string, string][] = [];
+  for (const exclusion of exclusions) {
+    const inbox = exclusion.inbox.toLowerCase();
+    if (exclusion.mailboxId !== undefined) {
+      folderPairs.push([inbox, exclusion.mailboxId]);
+    } else if (exclusion.role !== undefined) {
+      const inboxes = roleInboxes.get(exclusion.role) ?? new Set<string>();
+      inboxes.add(inbox);
+      roleInboxes.set(exclusion.role, inboxes);
+    }
+  }
+  const clauses: SQL[] = [];
+  for (const [role, inboxes] of roleInboxes) {
+    clauses.push(
+      sql`AND NOT (d.mailbox_role = ${role} AND d.inbox IN ${jsonList([...inboxes])})`,
+    );
+  }
+  if (folderPairs.length > 0) {
+    clauses.push(sql`AND NOT EXISTS (
+      SELECT 1 FROM json_each(d.folder_ids) jf
+      JOIN json_each(${JSON.stringify(folderPairs)}) excluded
+        ON json_extract(excluded.value, '$[0]') = d.inbox
+        AND json_extract(excluded.value, '$[1]') = jf.value
+    )`);
+  }
+  return sql.join(clauses, sql` `);
 }
 
 /** WHERE clause over `jmap_drafts d JOIN jmap_message_content c`. */
@@ -281,7 +305,7 @@ export function draftWhereSql(
         ? sql``
         : filter.threadKeys.length === 0
           ? sql`AND 0`
-          : sql`AND c.thread_key IN ${filter.threadKeys}`
+          : sql`AND c.thread_key IN ${jsonList(filter.threadKeys)}`
     }`;
 }
 

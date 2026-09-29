@@ -232,18 +232,19 @@ describe("JMAP change log", () => {
     ]);
   });
 
-  it("uses indexed state queries without scanning jmap_changes", async () => {
+  it("reads the state in one indexed query whatever the grant size", async () => {
     const queries = currentJmapSeqQueries(
       {
         isAdmin: false,
         inboxes: Array.from(
-          { length: 41 },
+          { length: 150 },
           (_, index) => `inbox-${index}@example.com`,
         ),
       },
       "plan-user",
     );
-    expect(queries).toHaveLength(3);
+    // One statement, one JSON-bound inbox list: a push tick costs one query.
+    expect(queries).toHaveLength(1);
 
     for (const query of queries) {
       const plan = await getDb().all<{ detail: string }>(

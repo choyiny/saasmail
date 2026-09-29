@@ -102,7 +102,6 @@ export async function stateFingerprint(
     .slice(0, 16);
 }
 
-const JMAP_STATE_INBOX_CHUNK_SIZE = 40;
 const JMAP_STATE_DAY_SECONDS = 24 * 60 * 60;
 
 /** A state's `issuedAt`: the start of the UTC day `now` (Unix seconds) is in. */
@@ -110,22 +109,12 @@ export function jmapStateIssuedAt(now: number): number {
   return Math.floor(now / JMAP_STATE_DAY_SECONDS) * JMAP_STATE_DAY_SECONDS;
 }
 
-function memberInboxChunks(allowed: AllowedInboxes): string[][] {
-  if (!("inboxes" in allowed)) return [];
-  const inboxes = [
-    ...new Set(allowed.inboxes.map((inbox) => inbox.toLowerCase())),
-  ].sort();
-  const chunks: string[][] = [];
-  for (
-    let start = 0;
-    start < inboxes.length;
-    start += JMAP_STATE_INBOX_CHUNK_SIZE
-  ) {
-    chunks.push(inboxes.slice(start, start + JMAP_STATE_INBOX_CHUNK_SIZE));
-  }
-  return chunks;
-}
-
+/**
+ * The statements that read the caller's change-log head: always exactly one,
+ * whatever the grant size, so a push tick costs one query. A member's inbox
+ * list is bound once, as JSON (D1 takes at most 100 bound parameters), and
+ * each inbox is still a separate indexed lookup.
+ */
 export function currentJmapSeqQueries(
   allowed: AllowedInboxes,
   userId: string,
@@ -151,33 +140,36 @@ export function currentJmapSeqQueries(
     ];
   }
 
-  const queries: SQL[] = [];
-  for (const chunk of memberInboxChunks(allowed)) {
-    const inboxValues = sql.join(
-      chunk.map((inbox) => sql`(${inbox})`),
-      sql`, `,
-    );
-    queries.push(sql`
-      WITH allowed_inboxes(inbox) AS (VALUES ${inboxValues})
-      SELECT COALESCE(
-        MAX((
+  const inboxes = [
+    ...new Set(
+      (allowed as { inboxes: string[] }).inboxes.map((inbox) =>
+        inbox.toLowerCase(),
+      ),
+    ),
+  ].sort();
+  return [
+    sql`
+      WITH allowed_inboxes(inbox) AS (
+        SELECT value FROM json_each(${JSON.stringify(inboxes)})
+      )
+      SELECT COALESCE(MAX(seq), 0) AS seq
+      FROM (
+        SELECT MAX((
           SELECT MAX(seq)
           FROM jmap_changes
           WHERE inbox = allowed_inboxes.inbox
             AND user_id IS NULL
-        )),
-        0
-      ) AS seq
-      FROM allowed_inboxes
-    `);
-  }
-
-  queries.push(sql`
-    SELECT COALESCE(MAX(seq), 0) AS seq
-    FROM jmap_changes
-    WHERE user_id = ${userId}
-  `);
-  return queries;
+        )) AS seq
+        FROM allowed_inboxes
+        UNION ALL
+        SELECT (
+          SELECT MAX(seq)
+          FROM jmap_changes
+          WHERE user_id = ${userId}
+        ) AS seq
+      )
+    `,
+  ];
 }
 
 /** The change-log head the caller sees: one query per `currentJmapSeqQueries`. */

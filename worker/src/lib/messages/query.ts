@@ -4,7 +4,11 @@ import { attachments } from "../../db/attachments.schema";
 import { messageMailboxes } from "../../db/message-mailboxes.schema";
 import { conversationKeySql } from "./conversation-state";
 import { escapeFts, escapeLike } from "../helpers";
-import { inboxScopeSql, type AllowedInboxes } from "../inbox-permissions";
+import {
+  inboxScopeSql,
+  jsonList,
+  type AllowedInboxes,
+} from "../inbox-permissions";
 import {
   adaptReceived,
   adaptSent,
@@ -149,7 +153,7 @@ function normalizeInboxes(inboxes: string[] | undefined): string[] | undefined {
 function explicitInboxScope(column: SQL, inboxes: string[] | undefined): SQL {
   if (inboxes === undefined) return sql``;
   if (inboxes.length === 0) return sql`AND 0`;
-  return sql`AND ${column} IN ${inboxes}`;
+  return sql`AND ${column} IN ${jsonList(inboxes)}`;
 }
 
 function personScope(column: SQL, personId: string | undefined): SQL {
@@ -195,7 +199,9 @@ function messageRefsScope(
   const ids = [
     ...new Set(refs.filter((ref) => ref.kind === kind).map((ref) => ref.id)),
   ];
-  return ids.length === 0 ? sql`AND 0` : sql`AND ${idColumn} IN ${ids}`;
+  return ids.length === 0
+    ? sql`AND 0`
+    : sql`AND ${idColumn} IN ${jsonList(ids)}`;
 }
 
 function threadKeysScope(
@@ -214,7 +220,7 @@ function threadKeysScope(
   const uniqueKeys = [...new Set(keys)];
   return uniqueKeys.length === 0
     ? sql`AND 0`
-    : sql`AND ${threadKey} IN ${uniqueKeys}`;
+    : sql`AND ${threadKey} IN ${jsonList(uniqueKeys)}`;
 }
 
 function fromScope(column: SQL, value: string | undefined): SQL {
@@ -419,7 +425,14 @@ export function folderMembershipSql(
     ))`;
 }
 
-/** `MessageQuery.excludeFolders`: in none of the listed (inbox, folder) pairs. */
+/**
+ * `MessageQuery.excludeFolders`: in none of the listed (inbox, folder) pairs.
+ *
+ * The pairs are grouped so the clause binds a fixed number of parameters
+ * however many there are (D1 takes at most 100 per statement, and every arm
+ * of the message query repeats this): one JSON list of inboxes per system
+ * folder, and one JSON list of [inbox, mailbox id] pairs for custom folders.
+ */
 function excludedFoldersScope(
   excluded: MessageQuery["excludeFolders"],
   kind: MessageKind,
@@ -427,13 +440,41 @@ function excludedFoldersScope(
   inboxColumn: SQL,
 ): SQL {
   if (!excluded || excluded.length === 0) return sql``;
-  return sql.join(
-    excluded.map(
-      ({ inbox, folder }) =>
-        sql`AND NOT (${inboxColumn} = ${inbox.trim().toLowerCase()} AND ${folderMembershipSql(folder, kind, idColumn, inboxColumn)})`,
-    ),
-    sql` `,
-  );
+  const systemInboxes = new Map<string, Set<string>>();
+  const customPairs: [string, string][] = [];
+  for (const { inbox, folder } of excluded) {
+    const normalized = inbox.trim().toLowerCase();
+    if (typeof folder === "object") {
+      customPairs.push([normalized, folder.mailboxId]);
+      continue;
+    }
+    const inboxes = systemInboxes.get(folder) ?? new Set<string>();
+    inboxes.add(normalized);
+    systemInboxes.set(folder, inboxes);
+  }
+  const clauses: SQL[] = [];
+  for (const [folder, inboxes] of systemInboxes) {
+    clauses.push(
+      sql`AND NOT (${inboxColumn} IN ${jsonList([...inboxes])} AND ${folderMembershipSql(folder as MessageFolder, kind, idColumn, inboxColumn)})`,
+    );
+  }
+  if (customPairs.length > 0) {
+    // What `folderMembershipSql` says for one custom folder, for any of them:
+    // the mailbox must belong to the pair's inbox, and the message's inbox too.
+    clauses.push(sql`AND NOT (mms.trashed_at IS NULL
+      AND EXISTS (
+        SELECT 1
+        FROM message_mailboxes mm
+        JOIN mailboxes mb ON mb.id = mm.mailbox_id
+        JOIN json_each(${JSON.stringify(customPairs)}) excluded
+          ON json_extract(excluded.value, '$[0]') = mb.inbox
+          AND json_extract(excluded.value, '$[1]') = mm.mailbox_id
+        WHERE mm.message_kind = ${kind}
+          AND mm.message_id = ${idColumn}
+          AND mb.inbox = ${inboxColumn}
+      ))`);
+  }
+  return sql.join(clauses, sql` `);
 }
 
 function stateScope(

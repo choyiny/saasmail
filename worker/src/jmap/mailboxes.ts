@@ -211,75 +211,98 @@ async function mailboxCounts(
   return { totalEmails, unreadEmails, totalThreads, unreadThreads };
 }
 
+/** A Mailbox object and what it describes; counts are filled on request. */
+export type JmapMailboxEntry = {
+  descriptor: MailboxDescriptor;
+  mailbox: Record<string, unknown>;
+};
+
+const MAILBOX_RIGHTS = {
+  mayReadItems: true,
+  mayAddItems: true,
+  mayRemoveItems: true,
+  maySetSeen: true,
+  maySetKeywords: true,
+  mayCreateChild: false,
+  mayRename: false,
+  mayDelete: false,
+  maySubmit: false,
+};
+
+/**
+ * Every Mailbox the caller sees, in order, without counts: the four count
+ * properties are null until `fillMailboxCounts` runs for the entry. Counting
+ * costs four statements a mailbox, so only the mailboxes a response returns
+ * pay for them.
+ */
 export async function listJmapMailboxes(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
-  userId: string,
-): Promise<Record<string, unknown>[]> {
+): Promise<JmapMailboxEntry[]> {
   const descriptors = await loadMailboxDescriptors(db, allowed);
   const customRows = await db.select().from(mailboxes);
   const customById = new Map(customRows.map((row) => [row.id, row]));
-  const list: Record<string, unknown>[] = [];
+  const list: JmapMailboxEntry[] = [];
 
   for (const descriptor of descriptors) {
-    const counts = await mailboxCounts(db, allowed, userId, descriptor);
-    if (descriptor.kind === "system") {
+    if (isSystemDescriptor(descriptor)) {
       list.push({
-        id: descriptor.id,
-        name: `${ROLE_NAMES[descriptor.role]} — ${descriptor.inbox}`,
-        parentId: null,
-        role: descriptor.role,
-        sortOrder: ROLE_SORT_ORDER[descriptor.role],
-        totalEmails: counts.totalEmails,
-        unreadEmails: counts.unreadEmails,
-        totalThreads: counts.totalThreads,
-        unreadThreads: counts.unreadThreads,
-        myRights: {
-          mayReadItems: true,
-          mayAddItems: true,
-          mayRemoveItems: true,
-          maySetSeen: true,
-          maySetKeywords: true,
-          mayCreateChild: false,
-          mayRename: false,
-          mayDelete: false,
-          maySubmit: false,
+        descriptor,
+        mailbox: {
+          id: descriptor.id,
+          name: `${ROLE_NAMES[descriptor.role]} — ${descriptor.inbox}`,
+          parentId: null,
+          role: descriptor.role,
+          sortOrder: ROLE_SORT_ORDER[descriptor.role],
+          totalEmails: null,
+          unreadEmails: null,
+          totalThreads: null,
+          unreadThreads: null,
+          myRights: { ...MAILBOX_RIGHTS },
+          isSubscribed: true,
         },
-        isSubscribed: true,
       });
       continue;
     }
 
-    const row = customById.get(descriptor.mailboxId);
+    const custom = descriptor as Extract<MailboxDescriptor, { kind: "custom" }>;
+    const row = customById.get(custom.mailboxId);
     if (!row) continue;
     const parent = row.parentId ? customById.get(row.parentId) : undefined;
     list.push({
-      id: descriptor.id,
-      name: row.name,
-      parentId:
-        parent && isInboxAllowed(allowed, parent.inbox)
-          ? customMailboxId(parent.id)
-          : null,
-      role: null,
-      sortOrder: 100 + row.sortOrder,
-      totalEmails: counts.totalEmails,
-      unreadEmails: counts.unreadEmails,
-      totalThreads: counts.totalThreads,
-      unreadThreads: counts.unreadThreads,
-      myRights: {
-        mayReadItems: true,
-        mayAddItems: true,
-        mayRemoveItems: true,
-        maySetSeen: true,
-        maySetKeywords: true,
-        mayCreateChild: false,
-        mayRename: false,
-        mayDelete: false,
-        maySubmit: false,
+      descriptor,
+      mailbox: {
+        id: descriptor.id,
+        name: row.name,
+        parentId:
+          parent && isInboxAllowed(allowed, parent.inbox)
+            ? customMailboxId(parent.id)
+            : null,
+        role: null,
+        sortOrder: 100 + row.sortOrder,
+        totalEmails: null,
+        unreadEmails: null,
+        totalThreads: null,
+        unreadThreads: null,
+        myRights: { ...MAILBOX_RIGHTS },
+        isSubscribed: true,
       },
-      isSubscribed: true,
     });
   }
 
   return list;
+}
+
+/** Sets the entry's four count properties (four statements). */
+export async function fillMailboxCounts(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  entry: JmapMailboxEntry,
+): Promise<void> {
+  const counts = await mailboxCounts(db, allowed, userId, entry.descriptor);
+  entry.mailbox.totalEmails = counts.totalEmails;
+  entry.mailbox.unreadEmails = counts.unreadEmails;
+  entry.mailbox.totalThreads = counts.totalThreads;
+  entry.mailbox.unreadThreads = counts.unreadThreads;
 }

@@ -242,8 +242,9 @@ describe("Email/import raw MIME scan: hostile structure", () => {
     }
   });
 
-  it("splits on a very long boundary and ignores boundary look-alikes inside a body", () => {
-    const boundary = "b".repeat(500);
+  it("splits on the longest boundary RFC 2046 allows and ignores boundary look-alikes inside a body", () => {
+    // 70 characters is the RFC 2046 maximum; a longer one is refused.
+    const boundary = "b".repeat(70);
     const raw = lines(
       `Content-Type: multipart/mixed; boundary="${boundary}"`,
       "",
@@ -321,10 +322,6 @@ describe("Email/import raw MIME scan: hostile structure", () => {
       lines("Content-Type:", " multipart/signed;", ' boundary="s"'),
     ],
     [
-      "whitespace before the colon",
-      "Content-Type : multipart/signed; boundary=s",
-    ],
-    [
       "x-pkcs7-mime",
       "Content-Type: Application/X-PKCS7-MIME; smime-type=signed-data",
     ],
@@ -388,7 +385,25 @@ describe("Email/import raw MIME scan: hostile structure", () => {
     ]);
   });
 
-  it("does not throw on a part with no blank line after its headers", () => {
+  it("refuses signed mail whose Content-Type name has whitespace before the colon", () => {
+    // postal-mime reads "Content-Type :" as Content-Type; the strict header
+    // grammar refuses the line, so the signed part can't slip through.
+    const raw = lines(
+      "Content-Type : multipart/signed; boundary=s",
+      "",
+      "--s",
+      "Content-Type: text/plain",
+      "",
+      "signed",
+      "--s--",
+    );
+    const scan = scanMimeStructure(encode(raw));
+    expect(scan.error).toMatch(/header name that is not printable US-ASCII/);
+  });
+
+  it("refuses, without throwing, a part with no blank line after its headers", () => {
+    // The body line has no colon, so it is not a header line: the header
+    // block isn't strict header lines and the message is refused.
     const raw = lines(
       'Content-Type: multipart/mixed; boundary="m"',
       "",
@@ -398,8 +413,7 @@ describe("Email/import raw MIME scan: hostile structure", () => {
       "--m--",
     );
     const scan = scanMimeStructure(encode(raw));
-    expect(scan.error).toBeNull();
-    expect(scan.textLeaf).not.toBeNull();
+    expect(scan.error).toMatch(/a line that is not a header/);
   });
 
   it("walks a 5 MiB body of boundary lines within bounds", () => {

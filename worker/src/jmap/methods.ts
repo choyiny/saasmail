@@ -27,7 +27,11 @@ import {
   jmapThreadKey,
   type JmapMethodError,
 } from "./emails";
-import { listJmapMailboxes, listUsableIdentities } from "./mailboxes";
+import {
+  fillMailboxCounts,
+  listJmapMailboxes,
+  listUsableIdentities,
+} from "./mailboxes";
 import { draftThreadMembers, listDraftThreadKeys } from "./drafts";
 import { emailChanges, mailboxChanges, submissionChanges } from "./changes";
 import { emailImport } from "./email-import";
@@ -271,25 +275,33 @@ async function mailboxGet(
   }
 
   const state = (await currentJmapState(db, allowed, userId)).state;
-  const all = await listJmapMailboxes(db, allowed, userId);
-  const byId = new Map(all.map((mailbox) => [mailbox.id as string, mailbox]));
+  const all = await listJmapMailboxes(db, allowed);
+  const byId = new Map(all.map((entry) => [entry.mailbox.id as string, entry]));
   const requested =
     ids === undefined || ids === null
-      ? all.map((mailbox) => mailbox.id as string)
+      ? all.map((entry) => entry.mailbox.id as string)
       : (ids as string[]);
+  // RFC 8620 §5.1: a server may refuse `ids: null` when there are more objects
+  // than maxObjectsInGet. Refused before any count runs.
   if (requested.length > MAX_OBJECTS_IN_GET) {
     return methodError("requestTooLarge");
   }
 
   const list: Record<string, unknown>[] = [];
   const notFound: string[] = [];
+  const counted = new Set<string>();
   for (const id of requested) {
-    const mailbox = byId.get(id);
-    if (!mailbox) {
+    const entry = byId.get(id);
+    if (!entry) {
       notFound.push(id);
       continue;
     }
-    const selected = filterProperties(mailbox, args.properties);
+    // Counts only for the mailboxes this response returns, once each.
+    if (!counted.has(id)) {
+      await fillMailboxCounts(db, allowed, userId, entry);
+      counted.add(id);
+    }
+    const selected = filterProperties(entry.mailbox, args.properties);
     if (!selected) {
       return methodError("invalidArguments", undefined, ["properties"]);
     }
@@ -327,8 +339,9 @@ async function mailboxQuery(
     return methodError("invalidArguments", undefined, ["position", "limit"]);
   }
 
-  const all = await listJmapMailboxes(db, allowed, userId);
-  const ids = all.map((mailbox) => mailbox.id as string);
+  // No filter or sort is supported, so nothing here needs a count.
+  const all = await listJmapMailboxes(db, allowed);
+  const ids = all.map((entry) => entry.mailbox.id as string);
   const position =
     window.position < 0
       ? Math.max(0, ids.length + window.position)

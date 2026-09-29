@@ -1,8 +1,9 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq, sql, and, inArray } from "drizzle-orm";
+import { eq, sql, and } from "drizzle-orm";
 import { emails } from "../db/emails.schema";
 import { people } from "../db/people.schema";
 import { json200Response } from "../lib/helpers";
+import { inboxFilter, jsonList } from "../lib/inbox-permissions";
 import { queryMessages } from "../lib/messages/query";
 import { EmailSchema } from "./emails-router";
 import type { Variables } from "../variables";
@@ -84,7 +85,7 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
             name: people.name,
           })
           .from(people)
-          .where(inArray(people.id, personIds))
+          .where(sql`${people.id} IN ${jsonList(personIds)}`)
       : [];
 
   const mapped = messages.map((message) => ({
@@ -174,8 +175,8 @@ conversationsRouter.openapi(bulkMarkConversationsReadRoute, async (c) => {
       .from(emails)
       .where(
         and(
-          inArray(emails.conversationId, conversationIds),
-          inArray(emails.recipient, allowed.inboxes),
+          sql`${emails.conversationId} IN ${jsonList(conversationIds)}`,
+          sql`${emails.recipient} IN ${jsonList(allowed.inboxes)}`,
         )!,
       )
       .groupBy(emails.conversationId);
@@ -187,10 +188,13 @@ conversationsRouter.openapi(bulkMarkConversationsReadRoute, async (c) => {
     }
   }
 
-  // Count + flip unread emails in those conversations.
+  // Count + flip the caller's unread emails in those conversations. A
+  // conversation id can span inboxes: rows in inboxes outside the grant are
+  // never touched, whatever else the conversation holds.
   const where = and(
-    inArray(emails.conversationId, inScopeIds),
+    sql`${emails.conversationId} IN ${jsonList(inScopeIds)}`,
     eq(emails.isRead, 0),
+    inboxFilter(allowed, emails.recipient),
   )!;
   const countRows = await db
     .select({ count: sql<number>`COUNT(*)` })
