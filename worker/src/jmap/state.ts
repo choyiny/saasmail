@@ -1,7 +1,7 @@
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
-import { MAX_DELAYED_SEND } from "./constants";
+import { EVENT_SOURCE_PATH, MAX_DELAYED_SEND } from "./constants";
 import { listAllowedInboxAddresses } from "./mailboxes";
 import { JMAP_ID_FORMAT_VERSION } from "./public-ids";
 
@@ -36,6 +36,9 @@ export async function sessionState(
     // The submission capability's stable part. FUTURERELEASE's max date-time
     // moves every second and is left out, or the state would never settle.
     maxDelayedSend: MAX_DELAYED_SEND,
+    // Advertising push changed the Session: a client that cached it (aerc
+    // does) refetches and finds the eventSourceUrl.
+    eventSource: EVENT_SOURCE_PATH,
   });
 }
 
@@ -80,7 +83,11 @@ export function parseJmapState(value: unknown): ParsedJmapState | null {
   return { seq, issuedAt, fp: match[3] };
 }
 
-async function stateFingerprint(
+/**
+ * The part of the state that names who is asking and which inboxes they see.
+ * A state issued under another fingerprint can't be diffed against.
+ */
+export async function stateFingerprint(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
   userId: string,
@@ -97,6 +104,11 @@ async function stateFingerprint(
 
 const JMAP_STATE_INBOX_CHUNK_SIZE = 40;
 const JMAP_STATE_DAY_SECONDS = 24 * 60 * 60;
+
+/** A state's `issuedAt`: the start of the UTC day `now` (Unix seconds) is in. */
+export function jmapStateIssuedAt(now: number): number {
+  return Math.floor(now / JMAP_STATE_DAY_SECONDS) * JMAP_STATE_DAY_SECONDS;
+}
 
 function memberInboxChunks(allowed: AllowedInboxes): string[][] {
   if (!("inboxes" in allowed)) return [];
@@ -168,7 +180,8 @@ export function currentJmapSeqQueries(
   return queries;
 }
 
-async function currentJmapSeq(
+/** The change-log head the caller sees: one query per `currentJmapSeqQueries`. */
+export async function currentJmapSeq(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
   userId: string,
@@ -189,8 +202,7 @@ export async function currentJmapState(
 ): Promise<{ state: string; parts: ParsedJmapState }> {
   const seq = await currentJmapSeq(db, allowed, userId);
   const fp = await stateFingerprint(db, allowed, userId);
-  const issuedAt =
-    Math.floor(now / JMAP_STATE_DAY_SECONDS) * JMAP_STATE_DAY_SECONDS;
+  const issuedAt = jmapStateIssuedAt(now);
   const parts = { seq, issuedAt, fp };
   return { state: formatJmapState(seq, issuedAt, fp), parts };
 }

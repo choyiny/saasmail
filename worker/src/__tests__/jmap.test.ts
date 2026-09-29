@@ -146,7 +146,10 @@ describe("JMAP", () => {
       session.accounts[acct(userId)].accountCapabilities[MAIL_CAPABILITY]
         .maxSizeAttachmentsPerEmail,
     ).toBe(maxUpload);
-    expect(session.eventSourceUrl).toBe("");
+    // Absolute, with the three RFC 8620 §7.3 template variables.
+    expect(session.eventSourceUrl).toBe(
+      "http://localhost/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}",
+    );
     expect(session.capabilities[CORE_CAPABILITY]).toMatchObject({
       maxSizeRequest: 10_000_000,
       maxCallsInRequest: 16,
@@ -631,7 +634,7 @@ describe("JMAP", () => {
     expect(filtered.methodResponses[0][1]).toMatchObject({
       ids: [rid("alice-mail")],
       total: 1,
-      canCalculateChanges: false,
+      canCalculateChanges: true,
     });
     expect(filtered.methodResponses[1]).toEqual([
       "error",

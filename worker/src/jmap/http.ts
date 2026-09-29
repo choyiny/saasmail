@@ -12,6 +12,7 @@ import {
   SUPPORTED_CAPABILITIES,
 } from "./constants";
 import { executeMethod, makeSession, type JmapMethodContext } from "./methods";
+import { openEventSource } from "./event-source";
 import { publicAccountId } from "./public-ids";
 import { applyResultReferences, type MethodResponse } from "./result-reference";
 import { recordCreated, resolveCallCreationRefs } from "./creation-refs";
@@ -317,6 +318,20 @@ export function registerJmapRoutes(
       ),
     );
   });
+
+  // The advertised template ends with a slash; accept both spellings.
+  for (const path of ["/jmap/eventsource/", "/jmap/eventsource"]) {
+    app.get(path, async (c) => {
+      let waitUntil: ((promise: Promise<unknown>) => void) | undefined;
+      try {
+        const ctx = c.executionCtx;
+        waitUntil = (promise) => ctx.waitUntil(promise);
+      } catch {
+        // No execution context (some test harnesses): the stream still runs.
+      }
+      return openEventSource(c.req.raw, c.env, { waitUntil });
+    });
+  }
 
   app.post("/jmap/api", async (c) => {
     const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));

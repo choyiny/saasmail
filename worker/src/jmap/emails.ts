@@ -31,6 +31,7 @@ import {
   draftEmailObject,
   listDrafts,
   loadDraftsByIds,
+  type DraftExclusion,
   type DraftFilter,
 } from "./drafts";
 import {
@@ -49,7 +50,8 @@ import {
   publicThreadId,
 } from "./public-ids";
 import { currentJmapState } from "./state";
-import { MAX_OBJECTS_IN_GET } from "./constants";
+import { MAX_OBJECTS_IN_GET, MAX_QUERY_RESULTS } from "./constants";
+import { emailChangesSince } from "./changes";
 
 export type JmapMethodError = {
   type: string;
@@ -617,7 +619,10 @@ function hasOnlySupportedFilterFields(
 ): boolean {
   const allowed = new Set([
     "inMailbox",
+    "inMailboxOtherThan",
     "text",
+    "subject",
+    "body",
     "from",
     "after",
     "before",
@@ -625,6 +630,64 @@ function hasOnlySupportedFilterFields(
     "notKeyword",
   ]);
   return Object.keys(filter).every((key) => allowed.has(key));
+}
+
+type FlattenedFilter = {
+  condition: Record<string, unknown> | null;
+  error: JmapMethodError | null;
+};
+
+/**
+ * One FilterCondition for a filter (RFC 8620 §5.5): an AND whose conditions
+ * flatten, recursively, into one condition naming no property twice is that
+ * condition, and any operator but NOT over a single condition is that
+ * condition. Anything else (OR, NOT, a repeated property) can't be one
+ * condition and is `unsupportedFilter`.
+ */
+function flattenFilter(value: unknown): FlattenedFilter {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return {
+      condition: null,
+      error: { type: "invalidArguments", properties: ["filter"] },
+    };
+  }
+  const filter = value as Record<string, unknown>;
+  if (!("operator" in filter)) return { condition: filter, error: null };
+
+  const { operator, conditions } = filter;
+  if (
+    (operator !== "AND" && operator !== "OR" && operator !== "NOT") ||
+    !Array.isArray(conditions) ||
+    Object.keys(filter).some(
+      (key) => key !== "operator" && key !== "conditions",
+    )
+  ) {
+    return {
+      condition: null,
+      error: { type: "invalidArguments", properties: ["filter"] },
+    };
+  }
+  if (conditions.length === 1 && operator !== "NOT") {
+    return flattenFilter(conditions[0]);
+  }
+  if (operator !== "AND") {
+    return { condition: null, error: { type: "unsupportedFilter" } };
+  }
+
+  const merged: Record<string, unknown> = {};
+  for (const condition of conditions) {
+    const flattened = flattenFilter(condition);
+    if (flattened.error) return flattened;
+    for (const [key, property] of Object.entries(
+      flattened.condition as Record<string, unknown>,
+    )) {
+      if (key in merged) {
+        return { condition: null, error: { type: "unsupportedFilter" } };
+      }
+      merged[key] = property;
+    }
+  }
+  return { condition: merged, error: null };
 }
 
 function descriptorFolder(descriptor: MailboxDescriptor): MessageFolder | null {
@@ -719,26 +782,55 @@ async function mergedEmailPage(
   });
 }
 
-export async function emailQuery(
-  db: DrizzleD1Database<any>,
-  allowed: AllowedInboxes,
+/** Strict mode is off: the query, or the method error (`error` null on success). */
+type EmailQueryPlan = {
+  messageQuery: MessageQuery;
+  draftFilter: DraftFilter;
+  messagesImpossible: boolean;
+  draftsImpossible: boolean;
+  /** Mailbox ids the filter names, resolved by `resolveMailboxFilters`. */
+  inMailbox?: string;
+  inMailboxOtherThan?: string[];
+};
+
+type ParsedEmailQuery = {
+  query: EmailQueryPlan | null;
+  error: JmapMethodError | null;
+};
+
+function parseFailure(error: JmapMethodError): ParsedEmailQuery {
+  return { query: null, error };
+}
+
+/**
+ * `Email/query` and `Email/queryChanges` arguments other than the window:
+ * collapseThreads, calculateTotal, sort and filter. Validation only, no
+ * database: the mailboxes the filter names are resolved by
+ * `resolveMailboxFilters`, after the caller has read its state.
+ */
+function parseEmailQuery(
   userId: string,
-  accountId: string,
   args: Record<string, unknown>,
-): Promise<Record<string, unknown> | JmapMethodError> {
+): ParsedEmailQuery {
   if (args.collapseThreads !== undefined && args.collapseThreads !== false) {
-    return { type: "invalidArguments", properties: ["collapseThreads"] };
+    return parseFailure({
+      type: "invalidArguments",
+      properties: ["collapseThreads"],
+    });
   }
   if (
     args.calculateTotal !== undefined &&
     typeof args.calculateTotal !== "boolean"
   ) {
-    return { type: "invalidArguments", properties: ["calculateTotal"] };
+    return parseFailure({
+      type: "invalidArguments",
+      properties: ["calculateTotal"],
+    });
   }
 
   if (args.sort !== undefined && args.sort !== null) {
     if (!Array.isArray(args.sort) || args.sort.length !== 1) {
-      return { type: "unsupportedSort" };
+      return parseFailure({ type: "unsupportedSort" });
     }
     const comparator = args.sort[0];
     if (
@@ -749,30 +841,45 @@ export async function emailQuery(
       ((comparator as Record<string, unknown>).collation !== undefined &&
         (comparator as Record<string, unknown>).collation !== null)
     ) {
-      return { type: "unsupportedSort" };
+      return parseFailure({ type: "unsupportedSort" });
     }
   }
 
-  const filterValue = args.filter ?? {};
-  if (
-    typeof filterValue !== "object" ||
-    filterValue === null ||
-    Array.isArray(filterValue)
-  ) {
-    return { type: "invalidArguments", properties: ["filter"] };
-  }
-  const filter = filterValue as Record<string, unknown>;
+  const flattened = flattenFilter(args.filter ?? {});
+  if (flattened.error) return parseFailure(flattened.error);
+  const filter = flattened.condition as Record<string, unknown>;
   if (!hasOnlySupportedFilterFields(filter)) {
-    return { type: "invalidArguments", properties: ["filter"] };
+    return parseFailure({ type: "invalidArguments", properties: ["filter"] });
   }
 
-  for (const stringField of ["inMailbox", "text", "from"] as const) {
+  for (const stringField of [
+    "inMailbox",
+    "text",
+    "subject",
+    "body",
+    "from",
+  ] as const) {
     if (
       filter[stringField] !== undefined &&
       typeof filter[stringField] !== "string"
     ) {
-      return { type: "invalidArguments", properties: ["filter"] };
+      return parseFailure({ type: "invalidArguments", properties: ["filter"] });
     }
+  }
+  const otherThan = filter.inMailboxOtherThan;
+  if (
+    otherThan !== undefined &&
+    (!Array.isArray(otherThan) ||
+      !otherThan.every((id) => typeof id === "string"))
+  ) {
+    return parseFailure({ type: "invalidArguments", properties: ["filter"] });
+  }
+  // One search per query: each arm has one search predicate.
+  if (
+    ["text", "subject", "body"].filter((key) => filter[key] !== undefined)
+      .length > 1
+  ) {
+    return parseFailure({ type: "unsupportedFilter" });
   }
 
   for (const value of [filter.hasKeyword, filter.notKeyword]) {
@@ -780,7 +887,7 @@ export async function emailQuery(
       value !== undefined &&
       (typeof value !== "string" || !QUERY_KEYWORDS.includes(value))
     ) {
-      return { type: "invalidArguments", properties: ["filter"] };
+      return parseFailure({ type: "invalidArguments", properties: ["filter"] });
     }
   }
   const keywords = keywordFilter(filter);
@@ -788,22 +895,17 @@ export async function emailQuery(
   const after = parseAfter(filter.after);
   const before = parseBefore(filter.before);
   if (after === null || before === null) {
-    return { type: "invalidArguments", properties: ["filter"] };
+    return parseFailure({ type: "invalidArguments", properties: ["filter"] });
   }
 
-  const position = args.position === undefined ? 0 : args.position;
-  const requestedLimit =
-    args.limit === undefined ? MAX_OBJECTS_IN_GET : args.limit;
-  if (
-    typeof position !== "number" ||
-    !Number.isInteger(position) ||
-    typeof requestedLimit !== "number" ||
-    !Number.isInteger(requestedLimit) ||
-    requestedLimit < 0
-  ) {
-    return { type: "invalidArguments", properties: ["position", "limit"] };
-  }
-  const limit = Math.min(requestedLimit, MAX_OBJECTS_IN_GET);
+  const search =
+    typeof filter.text === "string"
+      ? { search: filter.text, searchMode: "fulltext" as const }
+      : typeof filter.subject === "string"
+        ? { search: filter.subject, searchMode: "subject" as const }
+        : typeof filter.body === "string"
+          ? { search: filter.body, searchMode: "body" as const }
+          : {};
 
   let messagesImpossible = keywords === null || keywords.draft === true;
   let draftsImpossible = keywords === null || keywords.draft === false;
@@ -812,9 +914,7 @@ export async function emailQuery(
     ignoreSnooze: true,
     withJmap: true,
     viewer: { userId },
-    ...(typeof filter.text === "string"
-      ? { search: filter.text, searchMode: "fulltext" as const }
-      : {}),
+    ...search,
     ...(typeof filter.from === "string" ? { from: filter.from } : {}),
     ...(after !== undefined ? { after } : {}),
     ...(before !== undefined ? { before } : {}),
@@ -825,6 +925,8 @@ export async function emailQuery(
   };
   const draftFilter: DraftFilter = {
     ...(typeof filter.text === "string" ? { text: filter.text } : {}),
+    ...(typeof filter.subject === "string" ? { subject: filter.subject } : {}),
+    ...(typeof filter.body === "string" ? { body: filter.body } : {}),
     ...(typeof filter.from === "string" ? { from: filter.from } : {}),
     ...(after !== undefined ? { after } : {}),
     ...(before !== undefined ? { before } : {}),
@@ -834,9 +936,41 @@ export async function emailQuery(
       : {}),
   };
 
-  if (typeof filter.inMailbox === "string") {
-    const descriptors = await loadMailboxDescriptors(db, allowed);
-    const descriptor = descriptors.find((item) => item.id === filter.inMailbox);
+  return {
+    query: {
+      messageQuery,
+      draftFilter,
+      messagesImpossible,
+      draftsImpossible,
+      ...(typeof filter.inMailbox === "string"
+        ? { inMailbox: filter.inMailbox }
+        : {}),
+      ...(otherThan !== undefined
+        ? { inMailboxOtherThan: otherThan as string[] }
+        : {}),
+    },
+    error: null,
+  };
+}
+
+/**
+ * The plan with the mailboxes its filter names resolved. Read after the
+ * state: a mailbox (and mail in it) created in between is then in the next
+ * call's changes, never folded into a state this answer already reported.
+ */
+async function resolveMailboxFilters(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  plan: EmailQueryPlan,
+): Promise<EmailQueryPlan> {
+  const otherThan = plan.inMailboxOtherThan;
+  if (plan.inMailbox === undefined && otherThan === undefined) return plan;
+  let { messageQuery, messagesImpossible, draftsImpossible } = plan;
+  const draftFilter: DraftFilter = { ...plan.draftFilter };
+  const descriptors = await loadMailboxDescriptors(db, allowed);
+
+  if (plan.inMailbox !== undefined) {
+    const descriptor = descriptors.find((item) => item.id === plan.inMailbox);
     if (!descriptor) {
       messagesImpossible = true;
       draftsImpossible = true;
@@ -858,42 +992,215 @@ export async function emailQuery(
     }
   }
 
+  if (otherThan !== undefined) {
+    // Unknown ids name no mailbox, so they exclude nothing.
+    const excluded = new Set(otherThan);
+    const excludeFolders: NonNullable<MessageQuery["excludeFolders"]> = [];
+    const exclude: DraftExclusion[] = [];
+    for (const descriptor of descriptors) {
+      if (!excluded.has(descriptor.id)) continue;
+      const folder = descriptorFolder(descriptor);
+      if (folder) excludeFolders.push({ inbox: descriptor.inbox, folder });
+      if (descriptor.kind === "custom") {
+        exclude.push({
+          inbox: descriptor.inbox,
+          mailboxId: descriptor.mailboxId,
+        });
+      } else {
+        const role = descriptorDraftRole(descriptor);
+        if (role) exclude.push({ inbox: descriptor.inbox, role });
+      }
+    }
+    if (excludeFolders.length > 0) {
+      messageQuery = { ...messageQuery, excludeFolders };
+    }
+    if (exclude.length > 0) draftFilter.exclude = exclude;
+  }
+
+  return { messageQuery, draftFilter, messagesImpossible, draftsImpossible };
+}
+
+/** Ids of the query's results from `position`, at most `limit` of them. */
+async function emailQueryIds(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  query: EmailQueryPlan,
+  position: number,
+  limit: number,
+): Promise<string[]> {
+  if (limit <= 0 || (query.messagesImpossible && query.draftsImpossible)) {
+    return [];
+  }
+  return mergedEmailPage(
+    db,
+    allowed,
+    userId,
+    query.messagesImpossible ? null : query.messageQuery,
+    query.draftsImpossible ? null : query.draftFilter,
+    position,
+    limit,
+  );
+}
+
+/**
+ * `Email/query`. `ceiling` is the largest page (`MAX_QUERY_RESULTS`; tests pass
+ * a small one): without a limit, or with a larger one, the page is the ceiling
+ * and the response says so (RFC 8620 §5.5).
+ */
+export async function emailQuery(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  accountId: string,
+  args: Record<string, unknown>,
+  ceiling = MAX_QUERY_RESULTS,
+): Promise<Record<string, unknown> | JmapMethodError> {
+  const parsed = parseEmailQuery(userId, args);
+  if (parsed.error) return parsed.error;
+
+  const position = args.position ?? 0;
+  const requestedLimit = args.limit ?? null;
+  if (
+    typeof position !== "number" ||
+    !Number.isInteger(position) ||
+    (requestedLimit !== null &&
+      (typeof requestedLimit !== "number" ||
+        !Number.isInteger(requestedLimit) ||
+        requestedLimit < 0))
+  ) {
+    return { type: "invalidArguments", properties: ["position", "limit"] };
+  }
+  const limitCapped =
+    requestedLimit === null || (requestedLimit as number) > ceiling;
+  const limit = limitCapped ? ceiling : (requestedLimit as number);
+
+  // The state first, then everything the answer is computed from.
   const queryState = (await currentJmapState(db, allowed, userId)).state;
+  const query = await resolveMailboxFilters(
+    db,
+    allowed,
+    parsed.query as EmailQueryPlan,
+  );
   let total: number | undefined;
   if (position < 0 || args.calculateTotal === true) {
     total =
-      (messagesImpossible
+      (query.messagesImpossible
         ? 0
-        : await countMessages(db, allowed, messageQuery)) +
-      (draftsImpossible
+        : await countMessages(db, allowed, query.messageQuery)) +
+      (query.draftsImpossible
         ? 0
-        : await countDrafts(db, allowed, userId, draftFilter));
+        : await countDrafts(db, allowed, userId, query.draftFilter));
   }
   const resolvedPosition =
     position < 0 ? Math.max(0, (total ?? 0) + position) : position;
 
-  let ids: string[] = [];
-  if (limit > 0 && (!messagesImpossible || !draftsImpossible)) {
-    ids = await mergedEmailPage(
-      db,
-      allowed,
-      userId,
-      messagesImpossible ? null : messageQuery,
-      draftsImpossible ? null : draftFilter,
-      resolvedPosition,
-      limit,
-    );
-  }
+  // One extra row says whether the page is the whole result.
+  const page = await emailQueryIds(
+    db,
+    allowed,
+    userId,
+    query,
+    resolvedPosition,
+    limit === 0 ? 0 : limit + 1,
+  );
+  const ids = page.slice(0, limit);
+  const wholeResultFits =
+    total !== undefined
+      ? total <= ceiling
+      : resolvedPosition === 0 && limit > 0 && page.length <= limit;
 
   const result: Record<string, unknown> = {
     accountId,
     queryState,
-    canCalculateChanges: false,
+    // Email/queryChanges diffs the whole result, so only a result that fits
+    // the ceiling can be diffed.
+    canCalculateChanges: wholeResultFits,
     position: resolvedPosition,
     ids,
   };
   if (args.calculateTotal === true) {
     result.total = total;
   }
+  if (limitCapped) result.limit = limit;
+  return result;
+}
+
+/**
+ * `Email/queryChanges` (RFC 8620 §5.6). The current state is read first, then
+ * the change log and the results, so a write landing in between is reported
+ * again by the next call rather than missed. Every Email changed since the
+ * state is in `removed` unless it was created since (it can't have been in the
+ * old results); every changed Email in the current results is in `added`.
+ */
+export async function emailQueryChanges(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  accountId: string,
+  args: Record<string, unknown>,
+  ceiling = MAX_QUERY_RESULTS,
+): Promise<Record<string, unknown> | JmapMethodError> {
+  const parsed = parseEmailQuery(userId, args);
+  if (parsed.error) return parsed.error;
+
+  const maxChanges = args.maxChanges ?? null;
+  if (
+    maxChanges !== null &&
+    (typeof maxChanges !== "number" ||
+      !Number.isInteger(maxChanges) ||
+      maxChanges <= 0)
+  ) {
+    return { type: "invalidArguments", properties: ["maxChanges"] };
+  }
+  // Only meaningful for immutable filters and sorts; ours can match on
+  // keywords and mailboxes, so it is accepted and ignored.
+  if (
+    args.upToId !== undefined &&
+    args.upToId !== null &&
+    typeof args.upToId !== "string"
+  ) {
+    return { type: "invalidArguments", properties: ["upToId"] };
+  }
+
+  const changes = await emailChangesSince(
+    db,
+    allowed,
+    userId,
+    args.sinceQueryState,
+  );
+  if (changes.error) return changes.error;
+  const since = changes.changes as NonNullable<typeof changes.changes>;
+
+  // Mailboxes resolve after the state (read first, in emailChangesSince).
+  const query = await resolveMailboxFilters(
+    db,
+    allowed,
+    parsed.query as EmailQueryPlan,
+  );
+  const ids = await emailQueryIds(db, allowed, userId, query, 0, ceiling + 1);
+  if (ids.length > ceiling) return { type: "cannotCalculateChanges" };
+
+  const indexById = new Map(ids.map((id, index) => [id, index]));
+  const removed = since.touchedIds;
+  const added = [...new Set([...since.createdIds, ...since.touchedIds])]
+    .filter((id) => indexById.has(id))
+    .map((id) => ({ id, index: indexById.get(id) as number }))
+    .sort((left, right) => left.index - right.index);
+  if (
+    maxChanges !== null &&
+    removed.length + added.length > (maxChanges as number)
+  ) {
+    return { type: "tooManyChanges" };
+  }
+
+  const result: Record<string, unknown> = {
+    accountId,
+    oldQueryState: args.sinceQueryState as string,
+    newQueryState: since.newState,
+    removed,
+    added,
+  };
+  if (args.calculateTotal === true) result.total = ids.length;
   return result;
 }

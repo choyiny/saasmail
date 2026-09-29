@@ -192,14 +192,46 @@ export type DraftFilter = {
   role?: "drafts" | "trash";
   /** A custom folder (internal `mailboxes.id`) the draft is filed in. */
   mailboxId?: string;
+  /** Subject or any body value contains (JMAP `text`). */
   text?: string;
+  /** Subject contains. */
+  subject?: string;
+  /** A text body value contains (never the JSON around the values). */
+  body?: string;
   from?: string;
   after?: number;
   before?: number;
   seen?: boolean;
   flagged?: boolean;
   threadKeys?: string[];
+  /** In none of these mailboxes (JMAP `inMailboxOtherThan`). */
+  exclude?: DraftExclusion[];
 };
+
+/** A mailbox a draft can be in: its system role, or a custom folder. */
+export type DraftExclusion = {
+  inbox: string;
+  role?: "drafts" | "trash";
+  mailboxId?: string;
+};
+
+function likePattern(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? `%${escapeLike(trimmed)}%` : null;
+}
+
+function draftExclusionSql(exclusions: DraftExclusion[] | undefined): SQL {
+  if (!exclusions || exclusions.length === 0) return sql``;
+  return sql.join(
+    exclusions.map((exclusion) => {
+      const inbox = exclusion.inbox.toLowerCase();
+      return exclusion.mailboxId !== undefined
+        ? sql`AND NOT (d.inbox = ${inbox} AND EXISTS (SELECT 1 FROM json_each(d.folder_ids) jf WHERE jf.value = ${exclusion.mailboxId}))`
+        : sql`AND NOT (d.inbox = ${inbox} AND d.mailbox_role = ${exclusion.role})`;
+    }),
+    sql` `,
+  );
+}
 
 /** WHERE clause over `jmap_drafts d JOIN jmap_message_content c`. */
 export function draftWhereSql(
@@ -207,8 +239,9 @@ export function draftWhereSql(
   userId: string,
   filter: DraftFilter,
 ): SQL {
-  const text = filter.text?.trim();
-  const textPattern = text ? `%${escapeLike(text)}%` : null;
+  const textPattern = likePattern(filter.text);
+  const subjectPattern = likePattern(filter.subject);
+  const bodyPattern = likePattern(filter.body);
   return sql`d.user_id = ${userId}
     ${inboxScopeSql(allowed, sql`d.inbox`)}
     ${filter.inbox === undefined ? sql`` : sql`AND d.inbox = ${filter.inbox.toLowerCase()}`}
@@ -223,6 +256,17 @@ export function draftWhereSql(
         ? sql``
         : sql`AND (c.subject LIKE ${textPattern} ESCAPE '\\' OR EXISTS (SELECT 1 FROM json_each(c.body_values_json) bv WHERE bv.value LIKE ${textPattern} ESCAPE '\\'))`
     }
+    ${
+      subjectPattern === null
+        ? sql``
+        : sql`AND c.subject LIKE ${subjectPattern} ESCAPE '\\'`
+    }
+    ${
+      bodyPattern === null
+        ? sql``
+        : sql`AND EXISTS (SELECT 1 FROM json_each(c.body_values_json) bv WHERE bv.key IN (SELECT tb.value FROM json_each(c.text_body_json) tb) AND bv.value LIKE ${bodyPattern} ESCAPE '\\')`
+    }
+    ${draftExclusionSql(filter.exclude)}
     ${
       filter.from === undefined
         ? sql``

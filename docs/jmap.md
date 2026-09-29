@@ -10,6 +10,7 @@ saasmail exposes a bounded subset of [JMAP Core (RFC 8620)](https://www.rfc-edit
 - `POST /jmap/api`: method calls.
 - `POST /jmap/upload/{accountId}/`: blob upload.
 - `GET /jmap/download/{accountId}/{blobId}/{name}?type={type}`: blob download.
+- `GET /jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}`: push ([Push](#push-eventsource)).
 
 Authenticate with the same credentials as the HTTP API: either a signed-in session cookie or `Authorization: Bearer sk_...`. Session-cookie callers have the same passkey-registration gate as `/api/*`; API keys keep their normal issuance-time passkey guarantee. A session-cookie `POST /jmap/api` must send `Content-Type: application/json`, and a session-cookie upload must carry an `Origin` header from a trusted origin (`BASE_URL` or `TRUSTED_ORIGINS`); otherwise each is refused with `403`. Bearer callers are not browsers and may omit the `Origin`. Every object is scoped through the caller's allowed inboxes. Objects outside that scope are reported as not found rather than disclosed.
 
@@ -68,12 +69,12 @@ Every provider also gets Cloudflare's per-message counts, the strictest of the f
 
 - `Core/echo`
 - `Mailbox/get`, `Mailbox/query`, `Mailbox/changes`
-- `Email/get`, `Email/query`, `Email/changes`, `Email/set`
-- `Thread/get`
+- `Email/get`, `Email/query`, `Email/changes`, `Email/queryChanges`, `Email/set`
+- `Thread/get`, `Thread/changes`
 - `Identity/get`, `Identity/set` (read-only, see below)
 - `EmailSubmission/get`, `EmailSubmission/query`, `EmailSubmission/changes`, `EmailSubmission/set`
 
-`EmailSubmission/queryChanges`, `Thread/changes`, `Identity/changes` and every other `*/queryChanges` return `cannotCalculateChanges`.
+`Mailbox/queryChanges`, `Thread/queryChanges`, `EmailSubmission/queryChanges`, `Identity/changes` and `Identity/queryChanges` return `cannotCalculateChanges`.
 
 `Identity/set` never changes anything: a create is refused with `forbidden`; an update or destroy returns `notFound` for an unknown id and `forbidden` for a known one. Identities are managed in the saasmail web UI.
 
@@ -91,7 +92,13 @@ Email ids are derived from the underlying message: `R…` for received mail, `S�
 
 `Email/get` exposes addresses, subject, dates, preview, keywords, mailbox membership, text/HTML body structure, optional body values, and attachment blob ids. For Emails that saasmail created through JMAP (drafts and everything sent from them), every property is modeled from the stored message: `blobId` (the raw RFC 5322 message), exact `size`, `messageId`, `inReplyTo`, `references`, `sender`, `bcc`, `replyTo`, names on every address, and the full `bodyStructure`. Received mail lists every address of its To header in `to`, and other sent mail every To and its Bcc. Received mail also has the `inReplyTo` and `references` it arrived with, and mail received since saasmail began keeping it has a raw-message `blobId` (the message exactly as it arrived, kept for as long as the Email exists) and an exact `size`. For other received and sent mail, properties the unified mail model can't supply cheaply (raw-message `blobId` of older received mail and of sent mail, `references` of sent mail, `sender`, `replyTo`, `bodyStructure`, `headers` and `header:*` selectors) are returned as `null`, a deliberate deviation from the stricter RFC field types. `Email/get` accepts the full RFC 8621 property-name set, including well-formed `header:{name}[:as{Form}][:all]` selectors; names outside it return `invalidArguments`.
 
-`Email/query` supports `inMailbox`, `text`, `from`, `after`, `before`, `hasKeyword` and `notKeyword` for `$seen`, `$flagged` and `$draft`. The only supported sort is `receivedAt` descending. Drafts take part in queries, totals and mailbox counts like any other Email.
+`Email/query` supports `inMailbox`, `inMailboxOtherThan`, `text`, `subject`, `body`, `from`, `after`, `before`, `hasKeyword` and `notKeyword` for `$seen`, `$flagged` and `$draft`. The only supported sort is `receivedAt` descending. Drafts take part in queries, totals and mailbox counts like any other Email.
+
+`subject` matches a subject that contains the value, ignoring case. `body` matches the stored text body the same way, for every kind of Email: received mail's text body, sent mail's text body, and a draft's text body values (the values only, never the JSON they are stored in); a value inside a word matches too. `text` keeps its broader search of subject and body. A query uses at most one of `text`, `subject` and `body`; two of them are `unsupportedFilter`. `inMailboxOtherThan` keeps Emails that are in none of the listed mailboxes, which is how a client builds an "All mail" view; ids that name no mailbox are ignored, and it can be combined with `inMailbox`.
+
+A filter can be a `FilterOperator` as long as it reduces to one condition: an `AND` whose conditions flatten, however deeply nested, into one condition that names no property twice is that condition, and an `AND` or `OR` over a single condition is that condition. That covers what clients such as aerc send (their search terms joined with `AND`). An `OR` or `NOT` over several conditions, a `NOT` at all, and an `AND` that names a property twice (two `hasKeyword` conditions, say) are `unsupportedFilter`.
+
+One `Email/query` call returns at most 10,000 ids. Without a `limit`, or with a larger one, the page holds up to 10,000 and the response carries `"limit": 10000` (RFC 8620 §5.5); a smaller `limit`, including 0, is used as given and not echoed. The page size is not a cap on the result: `position` beyond it works and `calculateTotal` counts everything. `canCalculateChanges` is `true` when the whole result is known to fit in one page (the page started at position 0 and nothing followed it, or the computed `total` is at most 10,000), since `Email/queryChanges` can only diff such a result. `Email/get` stays limited to 256 ids per call.
 
 ## Drafts
 
@@ -222,9 +229,25 @@ Two states are not mail state and follow their own objects. The Session's `state
 
 Email/changes coalesces repeated activity for an Email into created/updated/destroyed ids and supports paging through an intermediate state. Mailbox/changes also reports mailbox count changes caused by Email activity. Because mailbox counts are small, saasmail does not page Mailbox/changes: if the result would exceed `maxChanges`, it returns `cannotCalculateChanges` instead.
 
+`Email/queryChanges` takes the same filter and sort as `Email/query`, with the same validation and errors, plus `sinceQueryState`, `maxChanges` and `calculateTotal`. A state `Email/changes` would refuse gets `cannotCalculateChanges`, as does a query whose result is larger than 10,000. The server reads the current state first, then the change log and the current results. Every Email changed since the state is in `removed`, except one created since (it can't have been in the old results), and every changed or created Email in the current results is in `added` with its index; so `removed` may list Emails that were never in the old results, which RFC 8620 allows. A write that lands while the answer is being assembled can show up in `added` and again in the next call's answer, which is harmless for a client applying it; it is never missed. `maxChanges` counts `removed` and `added` together, and more changes than that is `tooManyChanges`. `upToId` is accepted and ignored: RFC 8620 only lets a server use it for immutable filters and sorts, and these filters can match on keywords and mailboxes.
+
+`Thread/changes` is derived from the Emails changed since the state: each changed Email that still exists names its thread, which is `created` when every Email in it was created since the state and `updated` otherwise. `destroyed` is always empty, because the change log keeps no thread for an Email that is gone: a thread whose last Email was destroyed is not reported, and `Thread/get` answers `notFound` for it. More changed threads than `maxChanges` is `cannotCalculateChanges` rather than a page, so the client refetches. The call also stays within 30 D1 queries: a change set too large to look up in that many (a few thousand changed Emails) is `cannotCalculateChanges` too.
+
 Drafts are personal: creating, changing and destroying one shows up only in its author's change log. When a draft is filed into Sent by its submission, the author sees the same Email id as **updated**, and other members of the inbox see it **created**; no one ever sees a separate `S…` for it. A Sent message that is waiting for its submission's on-success step is hidden from JMAP until that step has run. `EmailSubmission/changes` reports accepted submissions and their pruning.
 
 Snooze is intentionally invisible to JMAP. A snoozed conversation remains in its normal JMAP system mailbox (normally Inbox), is returned by matching Email/query calls, and contributes to mailbox counts. Snooze-only changes therefore do not advance JMAP Email or Mailbox state.
+
+## Push (EventSource)
+
+The Session's `eventSourceUrl` is `https://your-domain.example/jmap/eventsource/?types={types}&closeafter={closeafter}&ping={ping}` (RFC 8620 §7.3), on the host the client reached. It takes the same credentials as the rest of JMAP and answers `401` without them. The response is a `text/event-stream` that starts with `retry: 5000`, the reconnect delay browsers honour.
+
+- `types` is `*` or a comma-separated list of `Email`, `Mailbox`, `Thread` and `EmailSubmission`; other names are ignored (without `types`, every type). With none left, the stream carries only pings and keepalives.
+- `closeafter` is `state` or `no` (the default). With `state`, the stream sends no initial event and closes right after the first change.
+- `ping` is a whole number of seconds, 0 (the default) for none. Any other value is raised to at least 10 and at most 300, rounded up to a multiple of 10, and each `ping` event's data says the interval in use, as `{"interval": 20}` for a requested 15.
+
+Unless `closeafter=state`, the stream opens with a `state` event carrying the current state of every requested type. Every 10 seconds it checks the change log, and when the state moved it sends one `state` event, a `StateChange` naming only the requested types on one line of JSON. The four types share one state string, so a change to any of them moves all four. Before any `state` event goes out the caller is authenticated again: a revoked API key, an expired session, a change of role (an admin made a member, even of the same inboxes) or a changed set of inboxes closes the stream without the event. A comment line goes out after 30 seconds without any bytes, since Cloudflare closes connections idle for 100 seconds.
+
+A stream lasts at most 5 minutes, and less once it has used 40 D1 queries (the free Workers plan allows 50 per request), counting its connection and each re-authentication (a tick starts only if its check and a re-check both fit): an admin's check costs one query and a member's one per 40 inboxes plus one, so a member's stream usually ends before the 5 minutes. It then closes cleanly and the client reconnects. It also ends when the client disconnects and on a database error, without a partial event. Noticing a disconnect needs the `enable_request_signal` compatibility flag in `wrangler.jsonc` (it is in `wrangler.jsonc.example`; add it to an existing deployment's config and redeploy): without it the Worker never learns the client left, and a stream whose client is gone keeps checking the change log until its 5 minutes or its query budget run out. Advertising push changed the Session, so its `state` moved once; clients that cache the Session, such as aerc, pick up the URL on their next request.
 
 ## Delivery, retries and failures
 
@@ -260,8 +283,9 @@ To check a deployment end to end, run `yarn jmap:e2e` (`scripts/jmap-send-e2e.mj
 - Drafts made in a JMAP client are read-only in the web UI (edit and send them in the client), and a web draft's attachments aren't published to JMAP ([Drafts written in the web UI](#drafts-written-in-the-web-ui)).
 - A send whose Worker stopped after the provider accepted it but before saasmail wrote the provider's answer down records the Message-ID saasmail submitted, since the delivered one was never saved. Crash recovery and the campaign sweep otherwise use the delivered id kept on the held outbox row.
 - Mailbox thread counts group JMAP-sent mail by its saasmail conversation, not by its JMAP `threadId`.
-- EventSource push, search snippets, mailbox mutation, `Email/import` and `Email/copy`.
-- `Thread/changes`, `Identity/changes` and query-change calculation.
+- Search snippets, mailbox mutation, `Email/import` and `Email/copy`.
+- `Identity/changes` and query changes other than `Email/queryChanges`. `Thread/changes` never reports a destroyed thread.
+- `to`, `cc` and `header` filters, `OR` and `NOT` filter operators, and sorts other than `receivedAt` descending.
 
 The API keeps no separate mailbox state; reads go through the same `queryMessages()` and state tables the saasmail UI and HTTP API use. Drafts and the stored form of JMAP-sent messages live in their own tables, and sending goes through the same outbox as the web composer.
 

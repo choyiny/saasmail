@@ -21,7 +21,12 @@ import type {
   UnifiedMessage,
 } from "./types";
 
-export type MessageSearchMode = "subject" | "fulltext";
+/**
+ * `subject`: subject contains. `fulltext`: the web's search (FTS for received
+ * mail). `body`: the stored text body contains, case-insensitively, for every
+ * kind of message (JMAP's `body` filter).
+ */
+export type MessageSearchMode = "subject" | "fulltext" | "body";
 export type MessageFolder =
   | "inbox"
   | "sent"
@@ -63,6 +68,8 @@ export interface MessageQuery {
   viewer?: { userId: string };
   withState?: boolean;
   folder?: MessageFolder;
+  /** In none of these folders of these inboxes (JMAP `inMailboxOtherThan`). */
+  excludeFolders?: { inbox: string; folder: MessageFolder }[];
   starred?: boolean;
   seen?: boolean;
   unseen?: true;
@@ -360,6 +367,75 @@ function assignmentScope(
   )`;
 }
 
+/**
+ * Whether a message is in one folder, as JMAP and the web see it: the positive
+ * predicate over `mms` (mailbox_message_state, joined by every arm). Received
+ * mail is never in Sent and sent mail never in Inbox, Archive, Junk or Snoozed
+ * (queries on those folders also drop the other arm entirely).
+ */
+export function folderMembershipSql(
+  folder: MessageFolder,
+  kind: MessageKind,
+  idColumn: SQL,
+  inboxColumn: SQL,
+): SQL {
+  const mailboxId = mailboxFolderId(folder);
+  if (folder === "inbox") {
+    if (kind === "sent") return sql`0`;
+    return sql`(mms.trashed_at IS NULL
+      AND mms.spam_at IS NULL
+      AND mms.archived_at IS NULL)`;
+  }
+  if (folder === "sent") {
+    if (kind === "received") return sql`0`;
+    return sql`(mms.trashed_at IS NULL)`;
+  }
+  if (folder === "archive") {
+    if (kind === "sent") return sql`0`;
+    return sql`(mms.archived_at IS NOT NULL
+      AND mms.trashed_at IS NULL
+      AND mms.spam_at IS NULL)`;
+  }
+  if (folder === "junk") {
+    if (kind === "sent") return sql`0`;
+    return sql`(mms.spam_at IS NOT NULL
+      AND mms.trashed_at IS NULL)`;
+  }
+  if (folder === "trash") return sql`(mms.trashed_at IS NOT NULL)`;
+  if (folder === "snoozed") {
+    if (kind === "sent") return sql`0`;
+    return sql`(mms.trashed_at IS NULL
+      AND mms.spam_at IS NULL)`;
+  }
+  return sql`(mms.trashed_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM message_mailboxes mm
+      JOIN mailboxes mb ON mb.id = mm.mailbox_id
+      WHERE mm.message_kind = ${kind}
+        AND mm.message_id = ${idColumn}
+        AND mm.mailbox_id = ${mailboxId}
+        AND mb.inbox = ${inboxColumn}
+    ))`;
+}
+
+/** `MessageQuery.excludeFolders`: in none of the listed (inbox, folder) pairs. */
+function excludedFoldersScope(
+  excluded: MessageQuery["excludeFolders"],
+  kind: MessageKind,
+  idColumn: SQL,
+  inboxColumn: SQL,
+): SQL {
+  if (!excluded || excluded.length === 0) return sql``;
+  return sql.join(
+    excluded.map(
+      ({ inbox, folder }) =>
+        sql`AND NOT (${inboxColumn} = ${inbox.trim().toLowerCase()} AND ${folderMembershipSql(folder, kind, idColumn, inboxColumn)})`,
+    ),
+    sql` `,
+  );
+}
+
 function stateScope(
   query: MessageQuery,
   kind: MessageKind,
@@ -368,38 +444,10 @@ function stateScope(
   readColumn?: SQL,
 ): SQL {
   const folder = query.folder;
-  const mailboxId = mailboxFolderId(folder);
   let folderScope = sql``;
 
-  if (folder === "inbox") {
-    folderScope = sql`AND mms.trashed_at IS NULL
-      AND mms.spam_at IS NULL
-      AND mms.archived_at IS NULL`;
-  } else if (folder === "sent") {
-    folderScope = sql`AND mms.trashed_at IS NULL`;
-  } else if (folder === "archive") {
-    folderScope = sql`AND mms.archived_at IS NOT NULL
-      AND mms.trashed_at IS NULL
-      AND mms.spam_at IS NULL`;
-  } else if (folder === "junk") {
-    folderScope = sql`AND mms.spam_at IS NOT NULL
-      AND mms.trashed_at IS NULL`;
-  } else if (folder === "trash") {
-    folderScope = sql`AND mms.trashed_at IS NOT NULL`;
-  } else if (folder === "snoozed") {
-    folderScope = sql`AND mms.trashed_at IS NULL
-      AND mms.spam_at IS NULL`;
-  } else if (mailboxId !== undefined) {
-    folderScope = sql`AND mms.trashed_at IS NULL
-      AND EXISTS (
-        SELECT 1
-        FROM message_mailboxes mm
-        JOIN mailboxes mb ON mb.id = mm.mailbox_id
-        WHERE mm.message_kind = ${kind}
-          AND mm.message_id = ${idColumn}
-          AND mm.mailbox_id = ${mailboxId}
-          AND mb.inbox = ${inboxColumn}
-      )`;
+  if (folder !== undefined) {
+    folderScope = sql`AND ${folderMembershipSql(folder, kind, idColumn, inboxColumn)}`;
   } else {
     const archived =
       query.includeArchived === false
@@ -411,6 +459,12 @@ function stateScope(
       query.includeTrashed === false ? sql`AND mms.trashed_at IS NULL` : sql``;
     folderScope = sql`${archived} ${spam} ${trashed}`;
   }
+  folderScope = sql`${folderScope} ${excludedFoldersScope(
+    query.excludeFolders,
+    kind,
+    idColumn,
+    inboxColumn,
+  )}`;
 
   const starred =
     query.starred === undefined
@@ -486,6 +540,13 @@ function receivedSearch(
     };
   }
 
+  if (mode === "body") {
+    return {
+      join: sql``,
+      where: sql`AND e.body_text LIKE ${`%${escapeLike(value)}%`} ESCAPE '\\'`,
+    };
+  }
+
   return {
     join: sql``,
     where: sql`AND e.subject LIKE ${`%${escapeLike(value)}%`} ESCAPE '\\'`,
@@ -497,6 +558,9 @@ function sentSearch(search: string | undefined, mode: MessageSearchMode): SQL {
   if (!value) return sql``;
 
   const pattern = `%${escapeLike(value)}%`;
+  if (mode === "body") {
+    return sql`AND se.body_text LIKE ${pattern} ESCAPE '\\'`;
+  }
   return mode === "fulltext"
     ? sql`AND (
         se.subject LIKE ${pattern} ESCAPE '\\'

@@ -46,7 +46,7 @@ function classify(rows: ChangeRow[]): ChangeSets {
   return result;
 }
 
-function maxChanges(value: unknown): number | JmapMethodError {
+export function maxChanges(value: unknown): number | JmapMethodError {
   if (value === undefined || value === null) return JMAP_MAX_CHANGES;
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
     return { type: "invalidArguments", properties: ["maxChanges"] };
@@ -280,6 +280,63 @@ export async function emailChanges(
     updated: sets.updated.map(publicIdForChangeObject),
     destroyed: sets.destroyed.map(publicIdForChangeObject),
     updatedProperties: null,
+  };
+}
+
+export type EmailChangeSet = {
+  /** The state read before anything else: the response's new state. */
+  newState: string;
+  /** Public ids of the Emails created since (and not destroyed again). */
+  createdIds: string[];
+  updatedIds: string[];
+  destroyedIds: string[];
+  /** Every other changed id: updated or destroyed. */
+  touchedIds: string[];
+};
+
+/**
+ * Every Email change since `sinceState`, unpaged, for `Email/queryChanges` and
+ * `Thread/changes`. The current state is read first, so a write that lands
+ * while the caller assembles its answer shows up again next time. Strict mode
+ * is off: `error` is null on success.
+ */
+export async function emailChangesSince(
+  db: DrizzleD1Database<any>,
+  allowed: AllowedInboxes,
+  userId: string,
+  sinceState: unknown,
+): Promise<{ changes: EmailChangeSet | null; error: JmapMethodError | null }> {
+  const now = Math.floor(Date.now() / 1000);
+  const validation = await validateSinceState(
+    db,
+    allowed,
+    userId,
+    sinceState,
+    now,
+  );
+  if ("type" in validation) {
+    return { changes: null, error: validation as JmapMethodError };
+  }
+
+  const rows = await loadGroupedChanges(
+    db,
+    allowed,
+    userId,
+    validation.since.seq,
+    "email",
+  );
+  const sets = classify(rows);
+  const updatedIds = sets.updated.map(publicIdForChangeObject);
+  const destroyedIds = sets.destroyed.map(publicIdForChangeObject);
+  return {
+    changes: {
+      newState: validation.current.state,
+      createdIds: sets.created.map(publicIdForChangeObject),
+      updatedIds,
+      destroyedIds,
+      touchedIds: [...updatedIds, ...destroyedIds],
+    },
+    error: null,
   };
 }
 

@@ -5,7 +5,9 @@
   "main": "worker/src/index.ts",
   "account_id": "<your-cloudflare-account-id>",
   "compatibility_date": "2026-04-14",
-  "compatibility_flags": ["nodejs_compat"],
+  // enable_request_signal: request.signal aborts when the client disconnects,
+  // which is how a JMAP push stream (/jmap/eventsource/) learns to stop.
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   // Uncomment and configure if using a custom domain:
   // "routes": [
   //   {
