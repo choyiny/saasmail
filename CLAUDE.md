@@ -34,3 +34,9 @@ Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, 
 - When work ships or is dropped, `git mv` its spec and tasks to `docs/archive/` under the same names, add a line to `docs/archive/README.md` (file, what shipped or why it was dropped, month) and fix any path that cites them (`git grep <file name>`).
 - Never edit an archived spec to match today's code; new work gets a new spec.
 - When `docs/specs/` or `docs/tasks/` holds something that looks finished or untouched for a month, list it and move it on my yes.
+
+## Cloudflare
+
+- Use the `cf` CLI, except in a folder with a Wrangler config (`wrangler.toml`/`wrangler.jsonc`), where `wrangler` and the package scripts stay until that folder is migrated with `cf migrate`.
+- Find commands with `cf cli search "<task>"` and `cf schema <command>`; run every write with `--dry-run` first; cf takes resource IDs, not names.
+- Not in cf yet: live logs (`npx wrangler tail <worker>`) and single secrets (`npx wrangler secret put <NAME> --name <worker>`).
