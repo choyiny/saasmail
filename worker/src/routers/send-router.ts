@@ -5,6 +5,7 @@ import type { Variables } from "../variables";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { replyToEmail, sendEmail } from "../lib/send-email";
 import { bearerSecurity } from "../lib/openapi-auth";
+import { MAX_CC_ENTRIES } from "../lib/send-limits";
 import {
   inboxForbiddenResponse,
   multipartParseErrorResponses,
@@ -23,19 +24,20 @@ export const CcEntrySchema = z
     email: z.string().email().openapi({ example: "cc@example.com" }),
     // Constrain the rendered "Name <addr>" header — long display names
     // can blow up the wire format and email headers in general.
-    name: z.string().max(200).nullable().optional().openapi({
-      description: "Display name rendered as 'Name <email>' in headers.",
-      example: "Jane Smith",
-    }),
+    name: z
+      .string()
+      .max(200)
+      // A line break would end the header it is written into.
+      .regex(/^[^\r\n]*$/, "Display names cannot contain line breaks")
+      .nullable()
+      .optional()
+      .openapi({
+        description: "Display name rendered as 'Name <email>' in headers.",
+        example: "Jane Smith",
+      }),
   })
   .openapi("CcEntry");
 type CcEntry = z.infer<typeof CcEntrySchema>;
-
-// Practical cap on CC participants per message. Real-world replies-
-// all rarely exceed a dozen; 50 is a generous ceiling that still
-// blocks address-list spam payloads (stored as JSON in `cc`, then
-// concatenated into outbound headers).
-const MAX_CC_ENTRIES = 50;
 
 /** Format a CC entry as a header-friendly "Name <addr>" string. */
 function formatCc(c: CcEntry): string {
@@ -85,7 +87,7 @@ export const SendEmailSchema = z
     // receipts). Marketing-style sends default to false and respect the list.
     transactional: z.boolean().optional().default(false).openapi({
       description:
-        "When true, bypasses the suppression list (for transactional mail like password resets, OTPs, and receipts). Defaults to false, which respects the suppression list.",
+        "When true, bypasses the suppression list and skips the List-Unsubscribe headers and unsubscribe footer. Use for transactional or 1:1 mail such as password resets, OTPs, receipts, and person-to-person messages. Defaults to false, which respects suppression and adds unsubscribe metadata.",
     }),
   })
   .openapi("SendEmailSchema");

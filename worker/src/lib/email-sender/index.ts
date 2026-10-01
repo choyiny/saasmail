@@ -13,7 +13,9 @@ export type {
   SendEmailResult,
   SendEmailError,
   EmailSender,
+  RecipientSupport,
 } from "./types";
+export { recipientSupportOf } from "./types";
 export { transientFromStatus, classifyErrorMessage } from "./classify";
 export { ResendSender } from "./providers/resend";
 export { CloudflareSender } from "./providers/cloudflare";

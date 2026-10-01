@@ -1,5 +1,6 @@
 import { isSuppressed, type Database } from "./suppressions";
 import { signToken } from "./unsubscribe-token";
+import { encodeDisplayName } from "./format-from-address";
 import type {
   EmailSender,
   SendEmailParams,
@@ -22,13 +23,40 @@ export interface SendInput {
   sender: EmailSender;
   from: SendEmailParams["from"];
   to: string;
+  /**
+   * Display name for `to`. Honoured by transactional sends only: marketing
+   * sends address every recipient separately and keep bare addresses.
+   */
+  toName?: string | null;
+  /** More To recipients (JMAP submissions). Transactional sends only. */
+  additionalTo?: CcRecipient[];
   cc?: CcRecipient[];
+  /** Blind recipients (JMAP submissions). Transactional sends only. */
+  bcc?: CcRecipient[];
   subject: string;
   html?: string;
   text?: string;
   headers?: Record<string, string>;
   attachments?: SendEmailParams["attachments"];
   transactional?: boolean;
+  /**
+   * Stable across attempts of this send (the outbox row). A marketing send
+   * keys each recipient's copy as `<key>:<n>`.
+   */
+  idempotencyKey?: string;
+  /**
+   * An unsubscribe URL the caller has already minted.
+   *
+   * Campaign sends need a v2 (per-list) token, but this helper otherwise mints
+   * its own v1 (global) one. Supplying it here makes the same URL appear in the
+   * body placeholder, the footer fallback and both `List-Unsubscribe` headers,
+   * so a subscriber's link means the same thing everywhere.
+   *
+   * Only honoured for a single-recipient send: with several recipients each
+   * needs their own token, and reusing one would let a recipient unsubscribe
+   * somebody else.
+   */
+  unsubscribeContext?: { url: string };
 }
 
 export interface SendOutput {
@@ -47,26 +75,60 @@ export interface SendOutput {
 
 const UNSUB_PLACEHOLDER = /\{\{unsubscribe_url\}\}/g;
 
+/**
+ * Pull the URL back out of a stored `List-Unsubscribe: <url>` header.
+ *
+ * The outbox persists the wire headers so a retry reproduces the original
+ * message; this is what lets the retry reuse the same unsubscribe link rather
+ * than minting a new one, the same way it reuses the original Message-ID.
+ */
+function readListUnsubscribeHeader(
+  headers: Record<string, string> | undefined,
+): string | null {
+  const raw = headers?.["List-Unsubscribe"];
+  if (!raw) return null;
+  const match = raw.match(/^<(.+)>$/);
+  return match ? match[1] : null;
+}
+
 function buildUnsubscribeUrl(baseUrl: string, token: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/unsubscribe?token=${encodeURIComponent(
     token,
   )}`;
 }
 
+/**
+ * Append the fallback unsubscribe footer.
+ *
+ * Inserted before `</body>` when the body is a complete HTML document, and
+ * plainly appended when it is a fragment.
+ *
+ * The distinction started to matter with block-authored templates: those
+ * compile to a full `<!doctype html>` document, so a bare append put the footer
+ * *after* `</html>` — outside the styled 600px container, unstyled and
+ * left-aligned against the page background. Mail clients tolerate the markup,
+ * so it rendered rather than failing, which is the sort of thing only a real
+ * send reveals. Hand-written templates are usually fragments and were never
+ * affected, which is why this went unnoticed.
+ *
+ * This is a fallback either way — it only fires when the template does not
+ * already contain the unsubscribe URL. A template with its own link is
+ * untouched.
+ */
 function appendHtmlFooter(html: string, url: string): string {
-  return (
-    html +
-    `<hr/>\n<p style="font-size:12px;color:#666"><a href="${url}">Unsubscribe</a></p>`
-  );
+  const footer = `<hr/>\n<p style="font-size:12px;color:#666"><a href="${url}">Unsubscribe</a></p>`;
+  const closingBody = html.toLowerCase().lastIndexOf("</body>");
+  if (closingBody === -1) return html + footer;
+  return html.slice(0, closingBody) + footer + html.slice(closingBody);
 }
 
 function appendTextFooter(text: string, url: string): string {
   return text + `\n\n---\nUnsubscribe: ${url}`;
 }
 
-/** Format a CcRecipient as a header-friendly `"Name <addr>"` string. */
+/** Format an address as a header-safe `Name <addr>` (quoting names with specials). */
 function formatCcForTransport(c: CcRecipient): string {
-  return c.name ? `${c.name} <${c.email}>` : c.email;
+  return c.name ? `${encodeDisplayName(c.name)} <${c.email}>` : c.email;
 }
 
 export async function sendWithSuppressionCheck(
@@ -78,14 +140,27 @@ export async function sendWithSuppressionCheck(
     sender,
     from,
     to,
+    toName,
+    additionalTo,
     cc,
+    bcc,
     subject,
     html,
     text,
     headers,
     attachments,
     transactional,
+    unsubscribeContext,
+    idempotencyKey,
   } = input;
+  if (
+    transactional !== true &&
+    ((additionalTo?.length ?? 0) > 0 || (bcc?.length ?? 0) > 0)
+  ) {
+    // Marketing sends address each recipient separately; several To or a Bcc
+    // have no meaning there.
+    throw new Error("additionalTo and bcc are for transactional sends only");
+  }
 
   // Partition recipients into delivered vs suppressed. Transactional sends
   // bypass the suppression list entirely.
@@ -130,13 +205,20 @@ export async function sendWithSuppressionCheck(
 
     lastResult = await sender.send({
       from,
-      to: primaryTo,
+      to: toName
+        ? formatCcForTransport({ email: primaryTo, name: toName })
+        : primaryTo,
+      ...(additionalTo && additionalTo.length > 0
+        ? { additionalTo: additionalTo.map(formatCcForTransport) }
+        : {}),
       ...(ccArg ? { cc: ccArg } : {}),
+      ...(bcc && bcc.length > 0 ? { bcc: bcc.map(formatCcForTransport) } : {}),
       subject,
       html: html ?? "",
       ...(text !== undefined ? { text } : {}),
       ...(headers ? { headers } : {}),
       ...(attachments ? { attachments } : {}),
+      ...(idempotencyKey ? { idempotencyKey } : {}),
     });
 
     renderedHtml = html;
@@ -151,10 +233,23 @@ export async function sendWithSuppressionCheck(
       ...deliveredCc.map((c) => ({ email: c.email, cc: c })),
     ];
 
+    // A caller-supplied URL is only safe when there is exactly one recipient;
+    // see `unsubscribeContext`. On an outbox retry the URL also arrives via the
+    // stored `List-Unsubscribe` header, which is how a campaign's v2 link
+    // survives a retry instead of silently reverting to a freshly minted v1.
+    const singleRecipient = allDelivered.length === 1;
+    const providedUnsubUrl = singleRecipient
+      ? (unsubscribeContext?.url ?? readListUnsubscribeHeader(headers))
+      : null;
+
     const results = await Promise.all(
-      allDelivered.map(async (recipient) => {
-        const token = await signToken(recipient.email, env.UNSUBSCRIBE_SECRET);
-        const url = buildUnsubscribeUrl(env.BASE_URL, token);
+      allDelivered.map(async (recipient, index) => {
+        const url =
+          providedUnsubUrl ??
+          buildUnsubscribeUrl(
+            env.BASE_URL,
+            await signToken(recipient.email, env.UNSUBSCRIBE_SECRET),
+          );
 
         let recipientHtml = html;
         let recipientText = text;
@@ -192,6 +287,10 @@ export async function sendWithSuppressionCheck(
           ...(recipientText !== undefined ? { text: recipientText } : {}),
           headers: recipientHeaders,
           ...(attachments ? { attachments } : {}),
+          // The recipient order is stable across retries (the stored Cc list).
+          ...(idempotencyKey
+            ? { idempotencyKey: `${idempotencyKey}:${index}` }
+            : {}),
         });
 
         return { result, recipientHtml, recipientText };
@@ -204,7 +303,14 @@ export async function sendWithSuppressionCheck(
   }
 
   return {
-    delivered: [primaryTo, ...deliveredCc.map((c) => c.email)],
+    delivered: [
+      primaryTo,
+      ...(transactional === true
+        ? (additionalTo ?? []).map((c) => c.email)
+        : []),
+      ...deliveredCc.map((c) => c.email),
+      ...(transactional === true ? (bcc ?? []).map((c) => c.email) : []),
+    ],
     suppressed,
     result: lastResult,
     ...(renderedHtml !== undefined ? { renderedHtml } : {}),

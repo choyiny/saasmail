@@ -177,6 +177,63 @@ export default function AdminInboxTable() {
     }
   }
 
+  async function commitSpamThreshold(
+    inbox: AdminInbox,
+    spamThreshold: number | null,
+  ) {
+    if (spamThreshold === inbox.spamThreshold) return;
+    const res = await updateInboxSettings(inbox.email, { spamThreshold });
+    setInboxes((prev) =>
+      prev.map((row) =>
+        row.email === inbox.email
+          ? { ...row, spamThreshold: res.spamThreshold }
+          : row,
+      ),
+    );
+  }
+
+  async function commitAgentInstructions(inbox: AdminInbox, value: string) {
+    if (value === (inbox.agentInstructions ?? "")) return;
+    const res = await updateInboxSettings(inbox.email, {
+      agentInstructions: value,
+    });
+    setInboxes((prev) =>
+      prev.map((row) =>
+        row.email === inbox.email
+          ? { ...row, agentInstructions: res.agentInstructions }
+          : row,
+      ),
+    );
+  }
+
+  async function commitAgentAutodraft(inbox: AdminInbox, value: boolean) {
+    if (value === inbox.agentAutodraft) return;
+    const before = inbox.agentAutodraft;
+    setInboxes((prev) =>
+      prev.map((row) =>
+        row.email === inbox.email ? { ...row, agentAutodraft: value } : row,
+      ),
+    );
+    try {
+      const res = await updateInboxSettings(inbox.email, {
+        agentAutodraft: value,
+      });
+      setInboxes((prev) =>
+        prev.map((row) =>
+          row.email === inbox.email
+            ? { ...row, agentAutodraft: res.agentAutodraft }
+            : row,
+        ),
+      );
+    } catch {
+      setInboxes((prev) =>
+        prev.map((row) =>
+          row.email === inbox.email ? { ...row, agentAutodraft: before } : row,
+        ),
+      );
+    }
+  }
+
   async function commitSignature(inbox: AdminInbox, html: string) {
     // Treat an empty Tiptap doc as "no signature" so admins can clear it
     // without remembering the canonical empty form.
@@ -416,6 +473,10 @@ export default function AdminInboxTable() {
                   <th className="px-3 py-2.5 font-semibold">Signature</th>
                   <th className="px-3 py-2.5 font-semibold">Mode</th>
                   <th className="px-3 py-2.5 font-semibold">Forward to</th>
+                  <th className="px-3 py-2.5 font-semibold">Spam threshold</th>
+                  <th className="px-3 py-2.5 font-semibold">
+                    Agent instructions
+                  </th>
                   <th className="px-3 py-2.5 font-semibold">Members</th>
                   <th className="w-16 px-3 py-2.5 text-right font-semibold">
                     {/* actions */}
@@ -534,6 +595,59 @@ export default function AdminInboxTable() {
                         />
                       </td>
 
+                      {/* Spam threshold */}
+                      <td className="px-3 py-2.5">
+                        <SpamThresholdInput
+                          inbox={inbox}
+                          onCommit={(value) =>
+                            commitSpamThreshold(inbox, value)
+                          }
+                        />
+                      </td>
+
+                      {/* Agent suggested replies + instructions */}
+                      <td className="px-3 py-2.5 align-top">
+                        <div className="min-w-[260px] space-y-2">
+                          <label className="flex items-center gap-2 text-[11px] font-medium text-text-secondary">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={inbox.agentAutodraft}
+                              aria-label={`Auto-suggest replies for ${inbox.email}`}
+                              data-testid="inbox-agent-autodraft"
+                              onClick={() =>
+                                void commitAgentAutodraft(
+                                  inbox,
+                                  !inbox.agentAutodraft,
+                                )
+                              }
+                              className={cn(
+                                "relative h-5 w-9 rounded-full transition-colors",
+                                inbox.agentAutodraft
+                                  ? "bg-text-primary"
+                                  : "bg-bg-muted ring-1 ring-border",
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "absolute top-0.5 h-4 w-4 rounded-full bg-card shadow-sm transition-transform",
+                                  inbox.agentAutodraft
+                                    ? "translate-x-4"
+                                    : "translate-x-0.5",
+                                )}
+                              />
+                            </button>
+                            Auto-suggest replies
+                          </label>
+                          <AgentInstructionsInput
+                            inbox={inbox}
+                            onCommit={(value) =>
+                              commitAgentInstructions(inbox, value)
+                            }
+                          />
+                        </div>
+                      </td>
+
                       {/* Members — inline chip toggles */}
                       <td className="px-3 py-2.5">
                         {members.length === 0 ? (
@@ -608,6 +722,16 @@ export default function AdminInboxTable() {
           Copies are sent from this inbox's address with the original sender in{" "}
           <span className="font-mono">Reply-To</span>, so they authenticate on
           your own domain.
+        </p>
+      )}
+      {inboxes.length > 0 && (
+        <p className="px-1 text-xs font-light leading-relaxed text-text-tertiary">
+          <span className="font-medium text-text-secondary">
+            Spam threshold
+          </span>{" "}
+          — SpamAssassin-style score from the X-Spam-Score header (5.0 is
+          typical). Only applies when incoming mail carries that header. Leave
+          empty to disable.
         </p>
       )}
     </div>
@@ -700,6 +824,106 @@ function ForwardToInput({ inbox, error, onCommit }: ForwardToInputProps) {
           {error}
         </div>
       )}
+    </div>
+  );
+}
+
+interface SpamThresholdInputProps {
+  inbox: AdminInbox;
+  onCommit: (value: number | null) => Promise<void>;
+}
+
+function SpamThresholdInput({ inbox, onCommit }: SpamThresholdInputProps) {
+  const [value, setValue] = useState(
+    inbox.spamThreshold === null ? "" : String(inbox.spamThreshold),
+  );
+
+  useEffect(() => {
+    setValue(inbox.spamThreshold === null ? "" : String(inbox.spamThreshold));
+  }, [inbox.spamThreshold]);
+
+  async function commit() {
+    const trimmed = value.trim();
+    if (trimmed === "") {
+      await onCommit(null);
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+      setValue(inbox.spamThreshold === null ? "" : String(inbox.spamThreshold));
+      return;
+    }
+    await onCommit(parsed);
+  }
+
+  return (
+    <input
+      type="number"
+      min="0"
+      max="100"
+      step="0.1"
+      value={value}
+      onChange={(event) => setValue(event.currentTarget.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          event.currentTarget.blur();
+        } else if (event.key === "Escape") {
+          setValue(
+            inbox.spamThreshold === null ? "" : String(inbox.spamThreshold),
+          );
+          event.currentTarget.blur();
+        }
+      }}
+      placeholder="Disabled"
+      aria-label={`Spam threshold for ${inbox.email}`}
+      data-testid="inbox-spam-threshold-input"
+      className="h-8 w-28 rounded-[6px] border border-transparent bg-transparent px-2 font-mono text-xs text-text-primary placeholder:font-sans placeholder:font-light placeholder:italic placeholder:text-text-tertiary hover:border-border focus:border-border focus:bg-card focus:outline-none focus:ring-2 focus:ring-text-primary/15"
+    />
+  );
+}
+
+interface AgentInstructionsInputProps {
+  inbox: AdminInbox;
+  onCommit: (value: string) => Promise<void>;
+}
+
+function AgentInstructionsInput({
+  inbox,
+  onCommit,
+}: AgentInstructionsInputProps) {
+  const [value, setValue] = useState(inbox.agentInstructions ?? "");
+
+  useEffect(() => {
+    setValue(inbox.agentInstructions ?? "");
+  }, [inbox.agentInstructions]);
+
+  return (
+    <div className="min-w-[260px]">
+      <textarea
+        value={value}
+        maxLength={4000}
+        rows={3}
+        onChange={(event) => setValue(event.currentTarget.value)}
+        onBlur={() => void onCommit(value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setValue(inbox.agentInstructions ?? "");
+            event.currentTarget.blur();
+          }
+        }}
+        placeholder="Guidance for the mail agent…"
+        aria-label={`Agent instructions for ${inbox.email}`}
+        data-testid="inbox-agent-instructions"
+        className="w-full resize-y rounded-[6px] border border-border bg-card px-2 py-1.5 text-xs leading-relaxed text-text-primary placeholder:font-light placeholder:italic placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/15"
+      />
+      <div
+        data-testid="inbox-agent-instructions-count"
+        className="mt-1 text-right text-[10px] tabular-nums text-text-tertiary"
+      >
+        {value.length}/4000
+      </div>
     </div>
   );
 }

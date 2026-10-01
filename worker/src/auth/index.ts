@@ -3,8 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, openAPI, jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { MCP_SCOPES } from "./scopes";
 import { mcpAudience, oauthIssuer } from "../mcp/resource";
 
@@ -21,7 +20,7 @@ export const OAUTH_SCOPES = [
 ];
 
 export function createAuth(env?: CloudflareBindings) {
-  const db = env ? drizzle(env.DB, { schema, logger: true }) : ({} as any);
+  const db = env ? createDb(env) : ({} as any);
   const baseURL = env?.BASE_URL || "http://localhost:8080";
 
   // Fail closed rather than silently signing with better-auth's published

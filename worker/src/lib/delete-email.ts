@@ -5,6 +5,8 @@ import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { isInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
+import { deleteMessageState } from "./messages/state";
+import { cancelScheduledSendsFor } from "./scheduled-sends";
 
 /** Grants deletion of any email. For system callers (e.g. blocklist purge). */
 export const SYSTEM_INBOX_ACCESS: AllowedInboxes = { isAdmin: true };
@@ -33,6 +35,7 @@ export async function deleteEmailWithAttachments(
       personId: emails.personId,
       isRead: emails.isRead,
       recipient: emails.recipient,
+      rawR2Key: emails.rawR2Key,
     })
     .from(emails)
     .where(eq(emails.id, emailId))
@@ -51,9 +54,12 @@ export async function deleteEmailWithAttachments(
     for (const att of atts) {
       await r2.delete(att.r2Key);
     }
+    if (email.rawR2Key) await r2.delete(email.rawR2Key);
 
     // Delete attachment DB records
     await db.delete(attachments).where(eq(attachments.emailId, emailId));
+
+    await deleteMessageState(db, [{ kind: "received", id: emailId }]);
 
     // Delete the email
     await db.delete(emails).where(eq(emails.id, emailId));
@@ -96,6 +102,8 @@ export async function deleteEmailWithAttachments(
       await r2.delete(att.r2Key);
     }
     await db.delete(attachments).where(eq(attachments.emailId, emailId));
+    await deleteMessageState(db, [{ kind: "sent", id: emailId }]);
+    await cancelScheduledSendsFor(db, sql`id = ${emailId}`);
     await db.delete(sentEmails).where(eq(sentEmails.id, emailId));
 
     return { success: true, attachmentsDeleted: atts.length };

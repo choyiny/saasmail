@@ -13,7 +13,7 @@ export function PushOptInBanner({ onClose }: { onClose: () => void }) {
     if (result.ok) {
       markPromptDismissed();
       onClose();
-    } else {
+    } else if ("reason" in result) {
       setError(result.reason);
     }
   }

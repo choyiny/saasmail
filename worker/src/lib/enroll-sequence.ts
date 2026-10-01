@@ -92,12 +92,13 @@ export async function enrollPersonInSequence(
   const {
     personId: inputPersonId,
     personEmail,
-    fromAddress,
+    fromAddress: rawFromAddress,
     variables,
     skipSteps,
     delayOverrides,
   } = input;
   const now = Math.floor(Date.now() / 1000);
+  const fromAddress = rawFromAddress.trim().toLowerCase();
 
   // Check inbox permission before any other work
   assertInboxAllowed(allowed, fromAddress);

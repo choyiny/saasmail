@@ -12,6 +12,7 @@ import { attachments } from "../db/attachments.schema";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
+import { customerPeople, customers } from "../db/customers.schema";
 import { eq } from "drizzle-orm";
 
 describe("DELETE /api/people/:id", () => {
@@ -121,6 +122,57 @@ describe("DELETE /api/people/:id", () => {
       .from(sentEmails)
       .where(eq(sentEmails.personId, "p1"));
     expect(seRows).toHaveLength(0);
+  });
+
+  it("dissolves a two-person customer when one person is deleted", async () => {
+    await createTestPerson({ id: "linked-1", email: "linked-1@test.com" });
+    await createTestPerson({ id: "linked-2", email: "linked-2@test.com" });
+    await createTestEmail({
+      id: "linked-email-1",
+      personId: "linked-1",
+      messageId: "linked-1@test.com",
+    });
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(customers).values({
+      id: "delete-customer",
+      displayName: null,
+      createdBy: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(customerPeople).values([
+      {
+        customerId: "delete-customer",
+        personId: "linked-1",
+        linkedBy: null,
+        linkedAt: now,
+      },
+      {
+        customerId: "delete-customer",
+        personId: "linked-2",
+        linkedBy: null,
+        linkedAt: now,
+      },
+    ]);
+
+    const res = await authFetch("/api/people/linked-1", {
+      apiKey: adminKey,
+      method: "DELETE",
+    });
+    expect(res.status).toBe(200);
+    expect(
+      await db
+        .select()
+        .from(customers)
+        .where(eq(customers.id, "delete-customer")),
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select()
+        .from(customerPeople)
+        .where(eq(customerPeople.personId, "linked-2")),
+    ).toHaveLength(0);
   });
 
   it("returns 403 for non-admin users", async () => {

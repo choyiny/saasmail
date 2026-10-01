@@ -22,7 +22,7 @@ export const SendPathErrorSchema = z.object({
 export const multipartParseErrorResponses = {
   400: {
     description:
-      "Missing or invalid `payload` JSON, or too many attachment files (max 50).",
+      "Body is not multipart/form-data, `payload` JSON is missing or invalid, or there are too many attachment files (max 50).",
     content: {
       "application/json": { schema: SendPathErrorSchema },
     },

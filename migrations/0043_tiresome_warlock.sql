@@ -1,0 +1,1 @@
+ALTER TABLE `sender_identities` ADD `spam_threshold` real;

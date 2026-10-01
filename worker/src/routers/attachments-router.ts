@@ -18,7 +18,7 @@ export const attachmentsRouter = new OpenAPIHono<{
 // selects; the join predicate carries the `kind` test so only one side ever
 // matches. Null covers both "message row gone" (orphaned, fails closed) and
 // "not allowed" so both answer 404; a 403 would confirm the id exists.
-async function findReadableAttachment(
+export async function findReadableAttachment(
   db: Variables["db"],
   allowed: NonNullable<Variables["allowedInboxes"]>,
   id: string,

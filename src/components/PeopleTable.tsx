@@ -412,9 +412,19 @@ export default function PeopleTable({
                           {initials(person.name, person.email)}
                         </span>
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-text-primary">
-                            {person.name || person.email}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="truncate text-sm font-medium text-text-primary">
+                              {person.name || person.email}
+                            </p>
+                            {person.linkedCount > 0 && (
+                              <span
+                                data-testid="linked-count-badge"
+                                className="shrink-0 rounded-full bg-bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-text-secondary"
+                              >
+                                +{person.linkedCount}
+                              </span>
+                            )}
+                          </div>
                           {person.name && (
                             <p className="truncate text-xs font-light text-text-tertiary">
                               {person.email}

@@ -3,8 +3,7 @@ import { z } from "@hono/zod-openapi";
 import type { ZodType } from "zod";
 import type { Context } from "hono";
 import { sanitizeFilename } from "./sanitize-filename";
-
-export const MAX_ATTACHMENTS = 50;
+import { MAX_SEND_ATTACHMENTS } from "./send-limits";
 
 export interface ParsedSendBody<T> {
   payload: T;
@@ -25,7 +24,8 @@ export type SendParseError =
     }
   | { kind: "too-many-files"; limit: number; provided: number }
   | { kind: "too-large"; limitBytes: number; providedBytes: number }
-  | { kind: "missing-payload" };
+  | { kind: "missing-payload" }
+  | { kind: "not-multipart" };
 
 /**
  * Parse a multipart/form-data body for the send routes.
@@ -35,7 +35,7 @@ export type SendParseError =
  *     against `schema`.
  *   - `files`: zero or more file fields.
  *
- * Enforces MAX_ATTACHMENTS and a caller-supplied byte cap.
+ * Enforces MAX_SEND_ATTACHMENTS and a caller-supplied byte cap.
  */
 export async function parseSendBody<T>(
   c: Context,
@@ -44,7 +44,14 @@ export async function parseSendBody<T>(
 ): Promise<
   { ok: true; value: ParsedSendBody<T> } | { ok: false; err: SendParseError }
 > {
-  const form = await c.req.formData();
+  let form: FormData;
+  try {
+    form = await c.req.formData();
+  } catch {
+    // A JSON (or other non-form) body makes formData() throw; that is a
+    // caller error, not a server fault.
+    return { ok: false, err: { kind: "not-multipart" } };
+  }
 
   const payloadRaw = form.get("payload");
   if (typeof payloadRaw !== "string") {
@@ -80,12 +87,12 @@ export async function parseSendBody<T>(
   const rawFiles = form
     .getAll("files")
     .filter((f): f is File => f instanceof File);
-  if (rawFiles.length > MAX_ATTACHMENTS) {
+  if (rawFiles.length > MAX_SEND_ATTACHMENTS) {
     return {
       ok: false,
       err: {
         kind: "too-many-files",
-        limit: MAX_ATTACHMENTS,
+        limit: MAX_SEND_ATTACHMENTS,
         provided: rawFiles.length,
       },
     };
@@ -125,6 +132,14 @@ export function sendParseErrorResponse(err: SendParseError): {
   switch (err.kind) {
     case "missing-payload":
       return { status: 400, body: { error: "Missing 'payload' field" } };
+    case "not-multipart":
+      return {
+        status: 400,
+        body: {
+          error:
+            "Request body must be multipart/form-data with a JSON 'payload' field",
+        },
+      };
     case "invalid-payload":
       return {
         status: 400,

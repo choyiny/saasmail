@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signIn } from "@/lib/auth-client";
+import { authClient } from "@/lib/auth-client";
 import { WordmarkLarge } from "@/components/Wordmark";
 import { useBranding } from "@/lib/branding";
 
@@ -69,7 +69,7 @@ export default function OnboardingPage() {
         if (res.status === 403) setStatus("unavailable");
         return;
       }
-      const result = await signIn.emailAndPassword({ email, password });
+      const result = await authClient.signIn.email({ email, password });
       if (result.error) {
         navigate("/login", { replace: true });
         return;

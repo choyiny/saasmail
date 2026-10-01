@@ -64,7 +64,26 @@ If the rebase still stops (e.g., a whole file conflict that `-X ours` can't reso
 
 Never run `git rebase --skip` without asking — that silently drops one of the user's commits.
 
-### 5. Check for new VAPID configuration
+### 5. Check `wrangler.jsonc` against the tracked example
+
+After rebasing, run:
+
+```bash
+diff -u wrangler.jsonc.example wrangler.jsonc
+```
+
+Inspect the diff and report any missing bindings, Durable Object migrations, or variables to the user. Do **not** edit `wrangler.jsonc` silently; it is gitignored and may contain deployment-specific settings.
+
+For the mailbox/agent/JMAP release, explicitly check for:
+
+- `"ai": { "binding": "AI" }`;
+- the `MAIL_AGENT` Durable Object binding with `class_name: "MailAgent"`;
+- the Durable Object migration `{ "tag": "v2", "new_sqlite_classes": ["MailAgent"] }`;
+- optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables.
+
+Tell the user that the worker fails at runtime without the `MailAgent` binding and migration. Also warn that enabling the `AI` binding enables paid Workers AI fallback usage when neither `ANTHROPIC_API_KEY` nor `OPENAI_API_KEY` is configured.
+
+### 6. Check for new VAPID configuration
 
 Run:
 
@@ -89,7 +108,7 @@ If `VAPID_PRIVATE_KEY` is missing from `wrangler secret list` **or** `VAPID_PUBL
 
 **If no**, proceed without blocking.
 
-### 5a. Apply database migrations
+### 6a. Apply database migrations
 
 Run:
 
@@ -99,7 +118,7 @@ yarn db:migrate:prod
 
 This ensures any new migrations (including the push-subscriptions table) are applied to the remote D1 database. If the command reports nothing to migrate, that's fine — continue.
 
-### 6. Restore stashed changes
+### 7. Restore stashed changes
 
 If you stashed in step 2:
 
@@ -109,7 +128,7 @@ git stash pop
 
 If `stash pop` itself conflicts, leave the stash entry in place and tell the user — don't drop their uncommitted work.
 
-### 7. Report what happened
+### 8. Report what happened
 
 Give the user a concise summary:
 

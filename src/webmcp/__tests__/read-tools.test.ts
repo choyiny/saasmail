@@ -41,6 +41,7 @@ describe("read tools", () => {
       "list_contacts",
       "get_contact",
       "list_emails",
+      "list_messages",
       "read_email",
       "search_emails",
       "list_templates",

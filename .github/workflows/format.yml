@@ -15,4 +15,6 @@ jobs:
           node-version: 22
           cache: yarn
       - run: yarn install --frozen-lockfile
+      - name: Check lockfile integrity
+        run: node scripts/check-lockfile-integrity.mjs
       - run: yarn format:check

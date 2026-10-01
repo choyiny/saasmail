@@ -19,6 +19,34 @@ function buildCrumbs(
     return [{ label: "Inbox" }];
   }
 
+  if (pathname.startsWith("/mail")) {
+    const parts = pathname.split("/").filter(Boolean);
+    if (parts.length <= 1) return [{ label: "Mail" }];
+
+    const inbox = parts[1] ? decodeURIComponent(parts[1]) : "Mail";
+    if (parts[2] === "f") {
+      return [
+        { label: "Mail", href: "/mail" },
+        { label: inbox, href: `/mail/${encodeURIComponent(inbox)}/inbox` },
+        { label: "Folder" },
+      ];
+    }
+
+    const folderLabels: Record<string, string> = {
+      inbox: "Inbox",
+      starred: "Starred",
+      snoozed: "Snoozed",
+      sent: "Sent",
+      archive: "Archive",
+      junk: "Junk",
+      trash: "Trash",
+    };
+    return [
+      { label: "Mail", href: "/mail" },
+      { label: folderLabels[parts[2] ?? ""] ?? "Mail" },
+    ];
+  }
+
   if (pathname.startsWith("/templates")) {
     if (pathname === "/templates") return [{ label: "Templates" }];
     if (pathname === "/templates/new")

@@ -4,7 +4,11 @@ import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { json200Response } from "../lib/helpers";
-import { inboxFilter, isInboxAllowed } from "../lib/inbox-permissions";
+import {
+  inboxFilter,
+  isInboxAllowed,
+  jsonList,
+} from "../lib/inbox-permissions";
 import type { Variables } from "../variables";
 
 export const statsRouter = new OpenAPIHono<{
@@ -75,7 +79,7 @@ statsRouter.openapi(statsRoute, async (c) => {
         ? sql`1=1`
         : allowed.inboxes.length === 0
           ? sql`0`
-          : sql`${people.id} IN (SELECT person_id FROM ${emails} WHERE ${emails.recipient} IN ${allowed.inboxes})`,
+          : sql`${people.id} IN (SELECT person_id FROM ${emails} WHERE ${emails.recipient} IN ${jsonList(allowed.inboxes)})`,
     );
 
   const allIdentities = await db.select().from(senderIdentities);

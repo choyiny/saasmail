@@ -1,13 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { asc } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
+import { rules } from "../db/rules.schema";
 import { SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE, hasScope } from "../auth/scopes";
 import { sendTemplate } from "../lib/send-template";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
 import { sendEmail, replyToEmail } from "../lib/send-email";
 import { listPeople, getPersonScoped } from "../lib/queries/people";
+import { getCustomerByPerson } from "../lib/customers";
 import {
   listPersonEmails,
   getEmailById,
@@ -20,6 +23,25 @@ import {
 import { templateVariablesSchema } from "../lib/template-variables-schema";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { searchEmails } from "../lib/queries/search";
+import { InvalidCursorError } from "../lib/messages/cursor";
+import {
+  InvalidQueryError,
+  queryMessages,
+  type MessageFolder,
+} from "../lib/messages/query";
+import {
+  parseMessageRef,
+  serializeMessageRef,
+  type MessageRef,
+} from "../lib/messages/types";
+import { snoozeConversations } from "../lib/messages/conversation-state";
+import {
+  InvalidMessageStateError,
+  MessageStateAccessError,
+  getMailbox,
+  setMailboxState,
+  setUserState,
+} from "../lib/messages/state";
 
 export interface McpUser {
   id: string;
@@ -87,6 +109,14 @@ function guard<Args extends unknown[]>(
       // third-party software the operator never vetted, so log the detail and
       // return an opaque failure.
       if (e instanceof HTTPException) return fail(e.message);
+      if (
+        e instanceof MessageStateAccessError ||
+        e instanceof InvalidMessageStateError ||
+        e instanceof InvalidQueryError ||
+        e instanceof InvalidCursorError
+      ) {
+        return fail(e.message);
+      }
       console.error("[mcp] tool failed:", e);
       return fail("The request could not be completed.");
     }
@@ -98,6 +128,16 @@ function guard<Args extends unknown[]>(
  * probe for the existence of ids outside its inboxes. Mirrors the HTTP API.
  */
 const NOT_FOUND = "Not found, or outside the inboxes you may access.";
+
+function parseRefs(values: string[]): MessageRef[] {
+  return values.map((value) => {
+    const ref = parseMessageRef(value);
+    if (!ref) {
+      throw new InvalidMessageStateError(`Invalid message ref: ${value}`);
+    }
+    return ref;
+  });
+}
 
 const pagination = {
   page: z.number().int().min(1).optional().describe("1-based page. Default 1."),
@@ -143,6 +183,34 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         scopes: ctx.scopes,
       }),
     ),
+  );
+
+  server.registerTool(
+    "list_rules",
+    {
+      description:
+        "List automation rules that apply globally or to inboxes this connection may access.",
+      annotations: { readOnlyHint: true, title: "List Rules" },
+      inputSchema: {},
+    },
+    guard(ctx, SCOPE_READ, async () => {
+      const rows = await db
+        .select()
+        .from(rules)
+        .orderBy(asc(rules.position), asc(rules.id));
+      return ok(
+        rows
+          .filter(
+            (rule) =>
+              rule.inbox === null || isInboxAllowed(allowed, rule.inbox),
+          )
+          .map((rule) => ({
+            ...rule,
+            stopProcessing: rule.stopProcessing === 1,
+            enabled: rule.enabled === 1,
+          })),
+      );
+    }),
   );
 
   server.registerTool(
@@ -196,6 +264,28 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   );
 
   server.registerTool(
+    "get_customer",
+    {
+      description:
+        "Return the linked customer identity for a person, including visible email addresses connected to the same customer.",
+      annotations: { readOnlyHint: true, title: "Get Customer" },
+      inputSchema: {
+        personId: z.string().describe("Person id, from list_people."),
+      },
+    },
+    guard(ctx, SCOPE_READ, async ({ personId }) => {
+      try {
+        return ok({
+          customer: await getCustomerByPerson(db, allowed, personId),
+        });
+      } catch (error: any) {
+        if (error?.status === 404) return fail(NOT_FOUND);
+        throw error;
+      }
+    }),
+  );
+
+  server.registerTool(
     "list_emails",
     {
       description:
@@ -226,6 +316,114 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         ),
       ),
     ),
+  );
+
+  server.registerTool(
+    "list_messages",
+    {
+      description:
+        "List unified messages with mailbox state, folder filters, cursor pagination, and attachment counts.",
+      annotations: { readOnlyHint: true, title: "List Messages" },
+      inputSchema: {
+        inbox: z.string().optional(),
+        folder: z
+          .enum(["inbox", "sent", "archive", "junk", "trash", "snoozed"])
+          .optional(),
+        mailboxId: z.string().optional(),
+        starred: z.boolean().optional(),
+        unseen: z.boolean().optional(),
+        personId: z.string().optional(),
+        q: z.string().optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        excludeCampaignSends: z.boolean().optional(),
+      },
+    },
+    guard(ctx, SCOPE_READ, async (input) => {
+      if (input.folder && input.mailboxId) {
+        throw new InvalidQueryError("folder and mailboxId cannot be combined");
+      }
+
+      let folder: MessageFolder | undefined = input.folder;
+      if (input.mailboxId) {
+        await getMailbox(db, allowed, input.mailboxId);
+        folder = { mailboxId: input.mailboxId };
+      }
+
+      const page = await queryMessages(db, allowed, {
+        inboxes: input.inbox ? [input.inbox] : undefined,
+        folder,
+        starred: input.starred ? true : undefined,
+        unseen: input.unseen ? true : undefined,
+        personId: input.personId,
+        search: input.q,
+        searchMode: input.q ? "fulltext" : undefined,
+        cursor: input.cursor,
+        limit: input.limit ?? 50,
+        viewer: { userId: ctx.user.id },
+        withState: true,
+        withAttachmentCounts: true,
+        excludeCampaignSends:
+          input.excludeCampaignSends ??
+          (input.folder === "sent" ? true : undefined),
+      });
+
+      return ok({
+        messages: page.messages.map((message) => ({
+          ...message,
+          ref: serializeMessageRef(message.ref),
+        })),
+        nextCursor: page.nextCursor,
+      });
+    }),
+  );
+
+  server.registerTool(
+    "set_message_state",
+    {
+      description:
+        "Set personal or shared state on one or more messages. Shared archive/spam state applies only to received mail.",
+      annotations: { readOnlyHint: false, title: "Set Message State" },
+      inputSchema: {
+        refs: z.array(z.string()).min(1).max(500),
+        seen: z.boolean().optional(),
+        starred: z.boolean().optional(),
+        archived: z.boolean().optional(),
+        spam: z.boolean().optional(),
+        trashed: z.boolean().optional(),
+        snoozeUntil: z.number().int().nullable().optional(),
+      },
+    },
+    guard(ctx, SCOPE_MANAGE, async (input) => {
+      const refs = parseRefs(input.refs);
+      if (
+        input.archived !== undefined ||
+        input.spam !== undefined ||
+        input.trashed !== undefined
+      ) {
+        await setMailboxState(db, allowed, ctx.user.id, refs, {
+          archived: input.archived,
+          spam: input.spam,
+          trashed: input.trashed,
+        });
+      }
+      if (input.seen !== undefined || input.starred !== undefined) {
+        await setUserState(db, ctx.user.id, refs, {
+          seen: input.seen,
+          starred: input.starred,
+        });
+      }
+      if (input.snoozeUntil !== undefined) {
+        await snoozeConversations(
+          db,
+          allowed,
+          ctx.user.id,
+          refs,
+          input.snoozeUntil,
+        );
+      }
+      return ok({ success: true });
+    }),
   );
 
   server.registerTool(

@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { desc, like, or, eq, sql, and, inArray } from "drizzle-orm";
+import { desc, like, or, eq, sql, and, inArray, isNotNull } from "drizzle-orm";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
@@ -13,7 +13,18 @@ import {
   peopleScopeClause,
 } from "../lib/queries/people";
 import type { Variables } from "../variables";
-import { isInboxAllowed } from "../lib/inbox-permissions";
+import {
+  inboxScopeSql,
+  isInboxAllowed,
+  jsonList,
+} from "../lib/inbox-permissions";
+import { deleteMessageState } from "../lib/messages/state";
+import { cancelScheduledSendsFor } from "../lib/scheduled-sends";
+import {
+  collectPersonGroupConversations,
+  deletePersonConversationState,
+} from "../lib/messages/conversation-state";
+import { cleanupCustomerForPersonDeletion } from "../lib/customers";
 
 export const peopleRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -43,6 +54,7 @@ const GroupedPersonSchema = z.object({
   recipientCount: z.number(),
   recipients: z.array(z.string()),
   hasAttachment: z.number(),
+  linkedCount: z.number(),
 });
 
 // Group conversation row — represents a single multi-participant thread.
@@ -179,12 +191,12 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
   const personConditions: any[] = [];
   if (recipient) {
     personConditions.push(
-      sql`s.id IN (SELECT person_id FROM emails WHERE recipient = ${recipient} AND conversation_id IS NULL)`,
+      sql`s.id IN (SELECT person_id FROM emails WHERE recipient = ${recipient} AND conversation_id IS NULL ${inboxScopeSql(allowed, sql`recipient`)})`,
     );
   }
   if (unread) {
     personConditions.push(
-      sql`s.id IN (SELECT person_id FROM emails WHERE is_read = 0 AND conversation_id IS NULL)`,
+      sql`s.id IN (SELECT person_id FROM emails WHERE is_read = 0 AND conversation_id IS NULL ${inboxScopeSql(allowed, sql`recipient`)})`,
     );
   }
   if (sequenced) {
@@ -200,6 +212,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
         WHERE d.user_id = ${draftsUserId}
           AND d.context_key LIKE 'reply:%'
           AND e.conversation_id IS NULL
+          ${inboxScopeSql(allowed, sql`e.recipient`)}
       )`,
     );
   }
@@ -210,7 +223,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       ? sql``
       : allowed.inboxes.length === 0
         ? sql`AND 0`
-        : sql`AND emails.recipient IN ${allowed.inboxes}`;
+        : sql`AND emails.recipient IN ${jsonList(allowed.inboxes)}`;
     personConditions.push(
       sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\'
         OR s.id IN (
@@ -235,17 +248,32 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       ? sql`AND ${sql.join(personConditions, sql` AND `)}`
       : sql``;
   const personWhereClause = sql`WHERE 1=1 ${personExtraConditions} ${scopeClause}`;
+  const linkedPeopleScope = allowed.isAdmin
+    ? sql``
+    : allowed.inboxes.length === 0
+      ? sql`AND 0`
+      : sql`AND cp2.person_id IN (
+          SELECT person_id FROM ${emails} WHERE recipient IN ${jsonList(allowed.inboxes)}
+          UNION
+          SELECT person_id FROM ${sentEmails}
+          WHERE from_address IN ${jsonList(allowed.inboxes)} AND person_id IS NOT NULL
+        )`;
 
   // Aggregate over both received and sent emails so people we've composed to
   // appear in the list, not just senders who have emailed us. We exclude
   // any rows with a non-null conversation_id — those belong under group rows.
+  // Both arms are scoped to the caller's inboxes: `peopleScopeClause` decides
+  // which people are listed, this decides which of their mail is counted, so
+  // a sender who also wrote to a private inbox shows none of that inbox's
+  // address, counts or recency.
   const activity = sql`(
     SELECT person_id, recipient AS inbox, received_at AS at, is_read, conversation_id
     FROM ${emails}
+    WHERE 1=1 ${inboxScopeSql(allowed, sql`recipient`)}
     UNION ALL
     SELECT person_id, from_address AS inbox, sent_at AS at, 1 AS is_read, conversation_id
     FROM ${sentEmails}
-    WHERE person_id IS NOT NULL
+    WHERE person_id IS NOT NULL ${inboxScopeSql(allowed, sql`from_address`)}
   )`;
 
   const personRowsRaw = await db.all<{
@@ -258,6 +286,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     recipientCount: number;
     recipientsCsv: string | null;
     hasAttachment: number;
+    linkedCount: number;
   }>(sql`
     SELECT
       s.id,
@@ -274,7 +303,22 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
         WHERE e2.person_id = s.id
         AND a.content_id IS NULL
         AND e2.conversation_id IS NULL
-      ) AS hasAttachment
+        ${inboxScopeSql(allowed, sql`e2.recipient`)}
+      ) AS hasAttachment,
+      MAX(
+        0,
+        (
+          SELECT COUNT(*)
+          FROM customer_people cp2
+          WHERE cp2.customer_id = (
+            SELECT cp.customer_id
+            FROM customer_people cp
+            WHERE cp.person_id = s.id
+            LIMIT 1
+          )
+          ${linkedPeopleScope}
+        ) - 1
+      ) AS linkedCount
     FROM ${activity} e
     JOIN ${people} s ON s.id = e.person_id
     ${personWhereClause}
@@ -293,6 +337,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     recipientCount: r.recipientCount,
     recipients: r.recipientsCsv ? r.recipientsCsv.split(",") : [],
     hasAttachment: r.hasAttachment,
+    linkedCount: r.linkedCount,
   }));
 
   // ----- GROUP CONVERSATION ROWS (conversation_id IS NOT NULL) -----
@@ -304,7 +349,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     ? sql``
     : allowed.inboxes.length === 0
       ? sql`AND 0`
-      : sql`AND inbox IN ${allowed.inboxes}`;
+      : sql`AND inbox IN ${jsonList(allowed.inboxes)}`;
 
   const groupConditions: any[] = [];
   if (recipient) {
@@ -326,6 +371,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
         WHERE d.user_id = ${draftsUserId}
           AND d.context_key LIKE 'reply:%'
           AND e.conversation_id IS NOT NULL
+          ${inboxScopeSql(allowed, sql`e.recipient`)}
       )`,
     );
   }
@@ -338,13 +384,14 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       ? sql``
       : allowed.inboxes.length === 0
         ? sql`AND 0`
-        : sql`AND emails.recipient IN ${allowed.inboxes}`;
+        : sql`AND emails.recipient IN ${jsonList(allowed.inboxes)}`;
     groupConditions.push(sql`(
       g.conversation_id IN (
         SELECT DISTINCT e.conversation_id FROM ${emails} e
         JOIN ${people} p ON p.id = e.person_id
         WHERE e.conversation_id IS NOT NULL
         AND (p.email LIKE ${pattern} ESCAPE '\\' OR p.name LIKE ${pattern} ESCAPE '\\')
+        ${inboxScopeSql(allowed, sql`e.recipient`)}
       )
       OR g.conversation_id IN (
         SELECT emails.conversation_id FROM emails
@@ -354,6 +401,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       OR g.conversation_id IN (
         SELECT conversation_id FROM ${sentEmails}
         WHERE conversation_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
+        ${inboxScopeSql(allowed, sql`from_address`)}
       )
     )`);
   }
@@ -389,6 +437,7 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
           JOIN ${emails} e2 ON e2.id = a.email_id
           WHERE e2.conversation_id = act.conversation_id
           AND a.content_id IS NULL
+          ${inboxScopeSql(allowed, sql`e2.recipient`)}
         ) AS hasAttachment
       FROM (
         SELECT conversation_id, recipient AS inbox, received_at AS at, is_read
@@ -493,7 +542,8 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
       FROM ${emails} e
       JOIN ${people} s ON s.id = e.person_id
-      WHERE e.conversation_id IN ${pageGroupIds}
+      WHERE e.conversation_id IN ${jsonList(pageGroupIds)}
+        ${inboxScopeSql(allowed, sql`e.recipient`)}
     `);
     const fromSentParticipants = await db.all<{
       conversation_id: string;
@@ -504,7 +554,8 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
       FROM ${sentEmails} se
       JOIN ${people} s ON s.id = se.person_id
-      WHERE se.conversation_id IN ${pageGroupIds} AND se.person_id IS NOT NULL
+      WHERE se.conversation_id IN ${jsonList(pageGroupIds)} AND se.person_id IS NOT NULL
+        ${inboxScopeSql(allowed, sql`se.from_address`)}
     `);
     const participantsByConv = new Map<
       string,
@@ -523,14 +574,16 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       cc: string | null;
     }>(sql`
       SELECT conversation_id, cc FROM ${emails}
-      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+      WHERE conversation_id IN ${jsonList(pageGroupIds)} AND cc IS NOT NULL
+        ${inboxScopeSql(allowed, sql`recipient`)}
     `);
     const fromSentCc = await db.all<{
       conversation_id: string;
       cc: string | null;
     }>(sql`
       SELECT conversation_id, cc FROM ${sentEmails}
-      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+      WHERE conversation_id IN ${jsonList(pageGroupIds)} AND cc IS NOT NULL
+        ${inboxScopeSql(allowed, sql`from_address`)}
     `);
     const ccByConv = new Map<
       string,
@@ -710,6 +763,25 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
     return c.json({ error: "Person not found" }, 404);
   }
 
+  const groupConversations = await collectPersonGroupConversations(db, id);
+
+  const received = await db
+    .select({ id: emails.id })
+    .from(emails)
+    .where(eq(emails.personId, id));
+  const sent = await db
+    .select({ id: sentEmails.id })
+    .from(sentEmails)
+    .where(eq(sentEmails.personId, id));
+
+  await deleteMessageState(db, [
+    ...received.map((message) => ({
+      kind: "received" as const,
+      id: message.id,
+    })),
+    ...sent.map((message) => ({ kind: "sent" as const, id: message.id })),
+  ]);
+
   // Delete R2 attachments for all received emails belonging to this person
   const atts = await db
     .select({ r2Key: attachments.r2Key })
@@ -719,6 +791,14 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
 
   for (const att of atts) {
     await r2.delete(att.r2Key);
+  }
+  // And each received message's raw copy (JMAP blobId).
+  const raws = await db
+    .select({ r2Key: emails.rawR2Key })
+    .from(emails)
+    .where(and(eq(emails.personId, id), isNotNull(emails.rawR2Key)));
+  for (const raw of raws) {
+    await r2.delete(raw.r2Key!);
   }
 
   await db
@@ -733,7 +813,10 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
       ),
     );
   await db.delete(emails).where(eq(emails.personId, id));
+  await cancelScheduledSendsFor(db, sql`person_id = ${id}`);
   await db.delete(sentEmails).where(eq(sentEmails.personId, id));
+  await cleanupCustomerForPersonDeletion(db, id);
+  await deletePersonConversationState(db, id, groupConversations);
   await db.delete(people).where(eq(people.id, id));
 
   return c.json({ success: true }, 200);
@@ -785,9 +868,9 @@ peopleRouter.openapi(bulkMarkReadRoute, async (c) => {
   // inboxes; explicit `recipient` narrows further).
   const recipientScope = (() => {
     if (recipient) {
-      if (!isInboxAllowed(allowed, recipient)) {
-        return null; // not permitted
-      }
+      // A recipient the caller can't access matches nothing (never "no
+      // scope", which would reach every inbox).
+      if (!isInboxAllowed(allowed, recipient)) return [];
       return [recipient];
     }
     if (allowed.isAdmin) return null; // no scope needed
@@ -802,11 +885,11 @@ peopleRouter.openapi(bulkMarkReadRoute, async (c) => {
   // Update emails. We compute the affected count via a SELECT first so we
   // can return a useful number to the UI.
   const conditions = [
-    inArray(emails.personId, personIds),
+    sql`${emails.personId} IN ${jsonList(personIds)}`,
     eq(emails.isRead, 0),
   ];
   if (recipientScope) {
-    conditions.push(inArray(emails.recipient, recipientScope));
+    conditions.push(sql`${emails.recipient} IN ${jsonList(recipientScope)}`);
   }
   const where = and(...conditions)!;
 

@@ -1,5 +1,6 @@
 import { createEmailSender } from "./email-sender";
 import { encodeDisplayName } from "./format-from-address";
+import { MAX_SEND_ATTACHMENTS } from "./send-limits";
 import type {
   SendEmailAttachment,
   SendEmailParams,
@@ -146,15 +147,18 @@ export function buildForwardMessage(
     : `${params.from.address} (via ${inboxLabel})`;
   const from = `${encodeDisplayName(fromLabel)} <${inbox}>`;
 
-  // Attachments are capped by the provider's ceiling. Anything that doesn't fit
-  // is named in the body rather than silently dropped, so the recipient knows to
-  // go look at the message in saasmail.
+  // Attachments are capped by the provider's byte ceiling and the per-message
+  // count. Anything that doesn't fit is named in the body rather than silently
+  // dropped, so the recipient knows to go look at the message in saasmail.
   const attachments: SendEmailAttachment[] = [];
   const skippedAttachments: string[] = [];
   let attachmentBytes = 0;
   for (const att of params.attachments) {
     const size = att.content.byteLength;
-    if (attachmentBytes + size > params.maxAttachmentBytes) {
+    if (
+      attachments.length >= MAX_SEND_ATTACHMENTS ||
+      attachmentBytes + size > params.maxAttachmentBytes
+    ) {
       skippedAttachments.push(att.filename);
       continue;
     }
@@ -189,7 +193,7 @@ export function buildForwardMessage(
   const noteLines: string[] = [];
   if (skippedAttachments.length > 0) {
     noteLines.push(
-      `${skippedAttachments.length} attachment(s) were too large to forward and are not included: ${skippedAttachments.join(", ")}`,
+      `${skippedAttachments.length} attachment(s) could not be forwarded (too large, or over ${MAX_SEND_ATTACHMENTS} attachments) and are not included: ${skippedAttachments.join(", ")}`,
     );
   }
 

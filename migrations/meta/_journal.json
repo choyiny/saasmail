@@ -246,6 +246,279 @@
       "when": 1788062708146,
       "tag": "0034_closed_krista_starr",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1788622787422,
+      "tag": "0035_newsletter_module",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788622898280,
+      "tag": "0036_newsletter_custom_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1790093013515,
+      "tag": "0037_canonicalize_inbox_addresses",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1790095791018,
+      "tag": "0038_sequence_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1790095896925,
+      "tag": "0039_backfill_sequence_provenance",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1790103305138,
+      "tag": "0040_message_state_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1790103490979,
+      "tag": "0041_message_state_constraints",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1790108525741,
+      "tag": "0042_conversation_snooze",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1790122426243,
+      "tag": "0043_tiresome_warlock",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1790130000000,
+      "tag": "0044_agent_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1790144903481,
+      "tag": "0045_organic_luckman",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1790158258699,
+      "tag": "0046_suggested_replies",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1790167463748,
+      "tag": "0047_rules_engine",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1790176697607,
+      "tag": "0048_auto_reply_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1790179814892,
+      "tag": "0049_identity_graph",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1790197000000,
+      "tag": "0050_jmap_changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1790263000000,
+      "tag": "0051_canonical_from_address",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1790269371861,
+      "tag": "0052_auto_reply_log_unique",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1790386837425,
+      "tag": "0053_outbox_bookkeeping_owner",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1790447666452,
+      "tag": "0054_jmap_blobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1790450016413,
+      "tag": "0055_jmap_drafts",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1790450369394,
+      "tag": "0056_jmap_draft_changes",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1790454017768,
+      "tag": "0057_jmap_submissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1790454026814,
+      "tag": "0058_jmap_submission_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1790456809064,
+      "tag": "0059_jmap_alias_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1790456932053,
+      "tag": "0060_jmap_alias_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1790546458185,
+      "tag": "0061_outbox_delivered_message_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1790549873834,
+      "tag": "0062_emails_threading_headers",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1790549880646,
+      "tag": "0063_backfill_emails_threading_headers",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1790579318479,
+      "tag": "0064_message_id_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1790580699572,
+      "tag": "0065_outbox_additional_to_bcc",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1790580747647,
+      "tag": "0066_sent_emails_additional_to_bcc",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1790582461491,
+      "tag": "0067_emails_dedupe_per_inbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1790584394814,
+      "tag": "0068_emails_raw_message",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1790589655508,
+      "tag": "0069_jmap_draft_folders",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1790589668819,
+      "tag": "0070_jmap_draft_folder_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1790593086362,
+      "tag": "0071_jmap_delayed_send",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1790593091444,
+      "tag": "0072_jmap_delayed_send_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1790597619742,
+      "tag": "0073_shared_drafts",
+      "breakpoints": true
     }
   ]
 }

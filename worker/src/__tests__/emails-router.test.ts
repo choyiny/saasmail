@@ -546,6 +546,33 @@ describe("send stores generated message-id", () => {
     expect(row?.messageId).toMatch(/^<[A-Za-z0-9_-]+@x\.com>$/);
   });
 
+  it("answers a JSON body on /send and /send/reply with 400, not 500", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "u-send-json",
+      role: "admin",
+      email: "admin@x.com",
+    });
+    await grantInbox(userId, "a@x.com");
+    const json = JSON.stringify({
+      to: "target@external.com",
+      fromAddress: "a@x.com",
+      subject: "hello",
+      bodyHtml: "<p>hi</p>",
+    });
+
+    for (const path of ["/api/send", "/api/send/reply/some-email"]) {
+      const res = await authFetch(path, {
+        apiKey,
+        method: "POST",
+        body: json,
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { error: string }).error).toContain(
+        "multipart/form-data",
+      );
+    }
+  });
+
   describe("reply to own sent email", () => {
     it("replies to a sent email id using its to_address and message_id", async () => {
       const { apiKey, userId } = await createTestUser({
