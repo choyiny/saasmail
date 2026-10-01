@@ -37,6 +37,6 @@ Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, 
 
 ## Cloudflare
 
-- Use the `cf` CLI, except in a folder with a Wrangler config (`wrangler.toml`/`wrangler.jsonc`), where `wrangler` and the package scripts stay until that folder is migrated with `cf migrate`.
+- Use the `cf` CLI. A folder with `cloudflare.config.ts` builds and deploys with cf (`cf build`, `cf deploy --mode <env>`), even while its old Wrangler config is still there; a folder with only a Wrangler config (`wrangler.toml`/`wrangler.jsonc`) keeps `wrangler` and its package scripts until it is migrated with `cf migrate`.
 - Find commands with `cf cli search "<task>"` and `cf schema <command>`; run every write with `--dry-run` first; cf takes resource IDs, not names.
 - Not in cf yet: live logs (`npx wrangler tail <worker>`) and single secrets (`npx wrangler secret put <NAME> --name <worker>`).
