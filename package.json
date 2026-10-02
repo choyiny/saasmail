@@ -70,7 +70,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.16",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
     "hono-rate-limiter": "^0.5.3",
