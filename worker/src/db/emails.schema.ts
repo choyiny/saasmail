@@ -44,6 +44,13 @@ export const emails = sqliteTable(
      */
     cc: text("cc"),
     /**
+     * JSON-encoded array of {"email","name"} objects from the inbound
+     * Reply-To header, the `cc` convention. NULL when the header is absent
+     * or empty, and for rows from before migration 0074, which readers
+     * resolve from `raw_headers` instead (see `replyToOf`).
+     */
+    replyTo: text("reply_to"),
+    /**
      * Group-thread identity. When 2+ external participants are in this
      * email's thread, this column is set to a deterministic hash of
      * (inbox, sorted-external-emails). NULL means a 1-on-1 thread — the

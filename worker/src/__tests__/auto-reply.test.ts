@@ -225,6 +225,17 @@ describe("auto-reply guards", () => {
     ]);
   });
 
+  it("answers the sender, not the message's Reply-To", async () => {
+    await seed({ "reply-to": "Elsewhere <elsewhere@attacker.test>" });
+    const { sender, sent } = fakeSender();
+
+    await run(sender);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0].to).toBe(CUSTOMER);
+    expect(sent[0].cc ?? []).toEqual([]);
+  });
+
   it("migration deduplicates legacy rows and keeps the latest sent_at", async () => {
     await seed();
 

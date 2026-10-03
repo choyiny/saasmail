@@ -218,8 +218,28 @@ export const ReplyEmailSchema = z
       description: "Override Reply-To header for this reply.",
       example: "submitter@example.com",
     }),
+    recipient: z.enum(["reply_to", "sender"]).optional().openapi({
+      description:
+        "Who a reply to a received message is addressed to. `reply_to` (the default) follows the message's Reply-To header: its first address becomes To and the others are added to Cc, skipping this instance's own inboxes; without a usable Reply-To the reply goes to the sender. `sender` always answers the From address. Ignored when replying to a sent message.",
+      example: "sender",
+    }),
   })
   .openapi("ReplyEmailSchema");
+
+const ReplyEmailResponseSchema = SentEmailResponseSchema.extend({
+  to: z.string().openapi({
+    description: "The address the reply was sent to.",
+    example: "support@acme.com",
+  }),
+  cc: z.array(z.string()).openapi({
+    description:
+      "Every address the reply was copied to: the Cc of the request plus, when the reply followed a Reply-To header with several addresses, the ones after the first.",
+  }),
+  repliedTo: z.enum(["reply_to", "sender"]).openapi({
+    description:
+      "`reply_to` when `to` came from the original's Reply-To header, `sender` when it is the original's sender (or, for a sent original, its recipient).",
+  }),
+});
 
 // Reply to an existing email
 const replyEmailRoute = createRoute({
@@ -228,7 +248,7 @@ const replyEmailRoute = createRoute({
   tags: ["Send"],
   security: bearerSecurity,
   description:
-    "Reply to a received email. multipart/form-data body with 'payload' JSON and optional 'files'.",
+    "Reply to a received or sent email. multipart/form-data body with 'payload' JSON and optional 'files'. A reply to a received message goes to its Reply-To address when it has one, unless the payload says `recipient: \"sender\"`; the response's `to` is the address used.",
   request: {
     params: z.object({ emailId: z.string() }),
     body: {
@@ -255,7 +275,7 @@ const replyEmailRoute = createRoute({
     },
   },
   responses: {
-    ...json201Response(SentEmailResponseSchema, "Reply sent"),
+    ...json201Response(ReplyEmailResponseSchema, "Reply sent"),
     ...replyValidationErrorResponse,
     413: multipartParseErrorResponses[413],
     ...inboxForbiddenResponse,
@@ -277,14 +297,16 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     return c.json(body, status);
   }
   const { payload, files } = parsed.value;
+  const { recipient, ...replyPayload } = payload;
 
   const result = await replyToEmail({
     db,
     env: c.env,
     emailId,
-    payload,
+    payload: replyPayload,
     files,
     allowed: c.get("allowedInboxes")!,
+    recipient,
   });
 
   if (!result.ok) {
@@ -313,6 +335,9 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
       resendId: result.resendId,
       status: result.status,
       attachmentIds: result.attachmentIds,
+      to: result.to,
+      cc: result.cc,
+      repliedTo: result.repliedTo,
     },
     201,
   );

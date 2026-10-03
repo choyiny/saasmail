@@ -167,6 +167,9 @@ export async function runAutoReply(
       },
       files: [],
       allowed: { isAdmin: false, inboxes: [inbox] },
+      // An automatic response answers the sender, never a Reply-To the
+      // sender chose (RFC 3834 points them at the envelope sender/From).
+      recipient: "sender",
       ...(input.subject ? { subjectOverride: input.subject } : {}),
       extraHeaders: { "Auto-Submitted": "auto-replied" },
       retryOnFailure: false,

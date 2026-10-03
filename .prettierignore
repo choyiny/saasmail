@@ -7,3 +7,6 @@ worker/src/db/auth.schema.ts
 migrations
 yarn.lock
 package-lock.json
+# Archived specs stay exactly as written (see docs/archive/README.md).
+docs/archive/*
+!docs/archive/README.md

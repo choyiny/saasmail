@@ -18,6 +18,8 @@ export interface ParsedEmail {
   to: string;
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
   cc: ParsedEmailAddress[];
+  /** Where the sender asked for replies (Reply-To); empty when absent. */
+  replyTo: ParsedEmailAddress[];
   subject: string;
   /** Quote-trimmed HTML body, with `cid:` refs left intact. For display/storage. */
   bodyHtml: string | null;
@@ -172,6 +174,25 @@ export function parseAddressHeader(value: string): ParsedEmailAddress[] {
   );
 }
 
+const MAX_REPLY_TO = 10;
+
+/** A Reply-To list: each address once, at most 10. */
+function uniqueReplyTo(list: ParsedEmailAddress[]): ParsedEmailAddress[] {
+  const seen = new Set<string>();
+  const unique: ParsedEmailAddress[] = [];
+  for (const entry of list) {
+    if (seen.has(entry.email)) continue;
+    seen.add(entry.email);
+    unique.push(entry);
+  }
+  return unique.slice(0, MAX_REPLY_TO);
+}
+
+/** The Reply-To list of a stored `reply-to` header value. */
+export function parseReplyToHeader(value: string): ParsedEmailAddress[] {
+  return uniqueReplyTo(parseAddressHeader(value));
+}
+
 export async function parseEmail(
   message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
@@ -202,6 +223,16 @@ export async function parseEmail(
     (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? [],
   );
 
+  // Reply-To gets the Cc clean-up, with groups flattened; replies are
+  // addressed from this list, so a duplicate would be mailed twice.
+  const replyTo = uniqueReplyTo(
+    cleanAddresses(
+      (parsed.replyTo ?? []).flatMap((entry) =>
+        "group" in entry && entry.group ? entry.group : [entry],
+      ),
+    ),
+  );
+
   return {
     raw: new Uint8Array(rawEmail),
     from: {
@@ -210,6 +241,7 @@ export async function parseEmail(
     },
     to: message.to,
     cc,
+    replyTo,
     subject: parsed.subject || "",
     bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
     bodyText: bodyText ? trimQuotedText(bodyText) : null,

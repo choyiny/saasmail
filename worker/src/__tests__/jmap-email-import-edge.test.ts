@@ -30,7 +30,7 @@ import {
   seedAccount,
 } from "./jmap-submission-fixtures";
 
-// Verifier edge cases for Email/import (SPEC-jmap-email-import.md): hostile
+// Verifier edge cases for Email/import (docs/archive/SPEC-jmap-email-import.md): hostile
 // MIME, header encodings, charsets, the send-limit boundary, the on-success
 // remap in less common shapes, the internal blob map's isolation, partial
 // failures, and what an imported draft actually delivers.

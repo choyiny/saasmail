@@ -53,6 +53,11 @@ export interface UnifiedMessage {
   cc: MailAddress[];
   /** Blind recipients of a sent message (JMAP). Only the sender sees these. */
   bcc?: MailAddress[];
+  /**
+   * Received mail's Reply-To list (`replyToOf`), `[]` for sent mail. Only set
+   * when the query asked for `withReplyTo`.
+   */
+  replyTo?: MailAddress[];
   subject: string | null;
   bodyText: string | null;
   bodyHtml: string | null;

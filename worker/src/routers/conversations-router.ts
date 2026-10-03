@@ -5,6 +5,7 @@ import { people } from "../db/people.schema";
 import { json200Response } from "../lib/helpers";
 import { inboxFilter, jsonList } from "../lib/inbox-permissions";
 import { queryMessages } from "../lib/messages/query";
+import { applyReplyGuard, replyTarget } from "../lib/reply-recipients";
 import { EmailSchema } from "./emails-router";
 import type { Variables } from "../variables";
 
@@ -60,7 +61,9 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     limit: null,
     withAttachmentCounts: true,
     withAttachments: true,
+    withReplyTo: true,
   });
+  await applyReplyGuard(db, page.messages);
   const messages = page.messages;
 
   if (messages.length === 0) {
@@ -103,6 +106,8 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     bodyText: message.bodyText,
     isRead: message.isRead === null ? null : message.isRead ? 1 : 0,
     cc: message.cc,
+    replyTo: replyTarget(message.replyTo ?? [], message.from?.email),
+    replyRecipients: message.replyTo ?? [],
     timestamp: message.occurredAt,
     attachmentCount: message.attachmentCount ?? 0,
     attachments: message.attachments ?? [],

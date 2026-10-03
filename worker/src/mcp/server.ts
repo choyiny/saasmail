@@ -636,7 +636,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     "reply_email",
     {
       description:
-        "Reply to a message, threading correctly via its Message-ID. Works for received and sent messages. Provide either bodyHtml or a templateSlug with its variables.",
+        "Reply to a message, threading correctly via its Message-ID. Works for received and sent messages. Provide either bodyHtml or a templateSlug with its variables. A reply to a received message follows its Reply-To header (first address in To, the others in Cc, never one of this instance's own inboxes) unless recipient is \"sender\"; the result's `to` and `cc` are the addresses the reply went to, and read_email's `replyRecipients` lists them beforehand.",
       annotations: { readOnlyHint: false, title: "Reply To Email" },
       inputSchema: {
         emailId: z
@@ -664,6 +664,12 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .email()
           .optional()
           .describe("Override the reply-to address."),
+        recipient: z
+          .enum(["reply_to", "sender"])
+          .optional()
+          .describe(
+            'Who the reply is addressed to: "reply_to" (default) follows the message\'s Reply-To header, "sender" answers its From address instead.',
+          ),
       },
     },
     guard(ctx, SCOPE_SEND, async (input) => {
@@ -690,6 +696,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           replyTo: input.replyTo,
         },
         allowed,
+        recipient: input.recipient,
       });
       if (!result.ok) {
         // Denials on the referenced message are reported as not-found, matching

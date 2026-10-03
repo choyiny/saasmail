@@ -317,6 +317,7 @@ export function createAgentTools({
           withState: true,
           withAttachments: true,
           withAttachmentCounts: true,
+          withReplyTo: true,
         });
         const message = page.messages[0];
         if (!message) throw new Error("Message not found");

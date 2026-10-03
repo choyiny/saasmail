@@ -40,6 +40,15 @@ function addressLabel(
   return address.name ? `${address.name} <${address.email}>` : address.email;
 }
 
+/**
+ * The addresses a reply to this message reaches when the sender asked for
+ * replies elsewhere. The server leaves the list empty when that is just the
+ * sender.
+ */
+function replyToAddresses(message: MailMessage): MailMessage["cc"] {
+  return message.direction === "inbound" ? (message.replyTo ?? []) : [];
+}
+
 function fullTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString([], {
     dateStyle: "medium",
@@ -409,6 +418,19 @@ export default function MailReadingPane({
                               Cc:
                             </span>{" "}
                             {selectedMessage.cc
+                              .map((entry) => addressLabel(entry))
+                              .join(", ")}
+                          </p>
+                        )}
+                        {replyToAddresses(selectedMessage).length > 0 && (
+                          <p
+                            className="mt-1 text-xs text-text-secondary"
+                            data-testid="mail-reading-reply-to"
+                          >
+                            <span className="font-medium text-text-primary">
+                              Reply-To:
+                            </span>{" "}
+                            {replyToAddresses(selectedMessage)
                               .map((entry) => addressLabel(entry))
                               .join(", ")}
                           </p>

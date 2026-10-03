@@ -99,6 +99,15 @@ export default function ThreadMessage({
         {recipient && (
           <span className="truncate text-text-tertiary">→ {recipient}</span>
         )}
+        {!isSent && (email.replyRecipients?.length ?? 0) > 0 && (
+          <span
+            className="truncate text-text-tertiary"
+            data-testid="thread-message-reply-to"
+          >
+            reply-to{" "}
+            {email.replyRecipients!.map((entry) => entry.email).join(", ")}
+          </span>
+        )}
         <span className="ml-auto shrink-0 text-text-tertiary">{fullStamp}</span>
       </div>
       {email.bodyHtml ? (

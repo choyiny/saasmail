@@ -259,6 +259,7 @@ export async function handleEmail(
     spamScore: parsed.spamScore,
     isRead: 0,
     cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
+    replyTo: parsed.replyTo.length ? JSON.stringify(parsed.replyTo) : null,
     conversationId,
     receivedAt: now,
     createdAt: now,

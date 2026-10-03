@@ -1,5 +1,5 @@
 // e2e/support/reset-db.ts
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -60,6 +60,20 @@ export function truncateAndReseed(): void {
     cwd: REPO_ROOT,
     stdio: "pipe",
   });
+}
+
+/**
+ * Run one SQL statement against the live local D1, for a spec that needs a
+ * seeded row in a state seeds/e2e.sql doesn't give it. The next
+ * truncateAndReseed() puts the seed back. No shell is involved, so the
+ * statement needs no quoting.
+ */
+export function execLocalSql(sql: string): void {
+  execFileSync(
+    "wrangler",
+    ["d1", "execute", getDbName(), "--local", "--command", sql],
+    { cwd: REPO_ROOT, stdio: "pipe" },
+  );
 }
 
 /**

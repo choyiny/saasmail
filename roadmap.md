@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Updated: 2026-09-26
+Updated: 2026-10-03
 
 This file tracks the stages built on top of saasmail's customer timeline, inbox
 permissions, newsletters, sequences, MCP/WebMCP and delivery infrastructure.
@@ -10,40 +10,54 @@ native agent, MCP, WebMCP and JMAP are further clients of the same services.
 
 ## Status
 
-Stages 1–7 are complete, including JMAP sending. Stage 8 is deferred.
+Stages 1–7 are complete, including JMAP sending and the JMAP v1 follow-ups (#45–#66).
+Stage 8 is deferred. Stages 9–11 are specified in [`docs/specs/`](docs/specs/) and
+sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md).
 
-| Stage | Scope                                                            | PR  | Merge commit |
-| ----- | ---------------------------------------------------------------- | --- | ------------ |
-| 1A    | Unified message read model (`queryMessages`, `UnifiedMessage`)   | #3  | `19f0418`    |
-| 1B-0  | Index-friendly inbox reads (canonical lowercase addresses)       | #4  | `2c3b4f4`    |
-| 1B-1  | Sequence provenance on sent messages                             | #5  | `32ea431`    |
-| 1B-2a | Message state schema and services                                | #6  | `5a18641`    |
-| 1B-2b | State reads, routes, and MCP/WebMCP tools                        | #8  | `d019e48`    |
-| 1C    | Conversation snooze                                              | #9  | `3960341`    |
-| 3a    | Mailbox view shell, list, and reading pane                       | #10 | `e1d9475`    |
-| 3b    | Bulk actions, folders, and keyboard shortcuts                    | #11 | `9ef403c`    |
-| 3c    | Drafts folder and per-inbox spam threshold                       | #12 | `5f392aa`    |
-| 2a    | Native agent runtime                                             | #13 | `482cde6`    |
-| 2b    | Native agent UI                                                  | #14 | `386900d`    |
-| 2c    | Suggested replies                                                | #15 | `098881a`    |
-| 4a    | Rules engine and conversation assignment                         | #16 | `fd9faf9`    |
-| 4b    | Automations page and assignment UI                               | #17 | `874bf03`    |
-| 4c    | Rule auto-replies                                                | #18 | `2b41377`    |
-| 5     | Customer identity graph                                          | #19 | `ed89a47`    |
-| 6     | Agent CRM actions with approval                                  | #21 | `258021a`    |
-| 7a    | Read-only JMAP                                                   | #24 | `8025e55`    |
-| 7b    | JMAP change log and `Email/set`                                  | #26 | `4042c01`    |
-| QA 1  | Data correctness fixes from the production QA pass               | #27 | `d04dfe2`    |
-| QA 2  | Agent fixes: reasoning models, signed approvals, teammate lookup | #28 | `da49cf0`    |
-| QA 3  | Automation guards and JMAP conformance                           | #29 | `5ee9ab2`    |
-| QA 4  | Real type checks, SQL logging off by default, upgrade docs       | #30 | —            |
-| 7c-1  | JMAP ids are RFC 8620-valid; account reset                       | #39 | `ad9c35b`    |
-| 7c-2  | Crash-safe sent attachments and outbox bookkeeping ownership     | #40 | `22fc601`    |
-| 7c-3  | JMAP upload, blob download and creation references               | —   | —            |
-| 7c-4  | JMAP drafts and stored message content                           | —   | —            |
-| 7c-5  | JMAP EmailSubmission                                             | —   | —            |
-| 7c-6  | JMAP on-success filing, crash recovery and frozen retries        | —   | —            |
-| 7c-7  | JMAP end-to-end script, docs and live QA                         | —   | —            |
+| Stage | Scope                                                                                                                                  | PR      | Merge commit     |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------------- |
+| 1A    | Unified message read model (`queryMessages`, `UnifiedMessage`)                                                                         | #3      | `19f0418`        |
+| 1B-0  | Index-friendly inbox reads (canonical lowercase addresses)                                                                             | #4      | `2c3b4f4`        |
+| 1B-1  | Sequence provenance on sent messages                                                                                                   | #5      | `32ea431`        |
+| 1B-2a | Message state schema and services                                                                                                      | #6      | `5a18641`        |
+| 1B-2b | State reads, routes, and MCP/WebMCP tools                                                                                              | #8      | `d019e48`        |
+| 1C    | Conversation snooze                                                                                                                    | #9      | `3960341`        |
+| 3a    | Mailbox view shell, list, and reading pane                                                                                             | #10     | `e1d9475`        |
+| 3b    | Bulk actions, folders, and keyboard shortcuts                                                                                          | #11     | `9ef403c`        |
+| 3c    | Drafts folder and per-inbox spam threshold                                                                                             | #12     | `5f392aa`        |
+| 2a    | Native agent runtime                                                                                                                   | #13     | `482cde6`        |
+| 2b    | Native agent UI                                                                                                                        | #14     | `386900d`        |
+| 2c    | Suggested replies                                                                                                                      | #15     | `098881a`        |
+| 4a    | Rules engine and conversation assignment                                                                                               | #16     | `fd9faf9`        |
+| 4b    | Automations page and assignment UI                                                                                                     | #17     | `874bf03`        |
+| 4c    | Rule auto-replies                                                                                                                      | #18     | `2b41377`        |
+| 5     | Customer identity graph                                                                                                                | #19     | `ed89a47`        |
+| 6     | Agent CRM actions with approval                                                                                                        | #21     | `258021a`        |
+| 7a    | Read-only JMAP                                                                                                                         | #24     | `8025e55`        |
+| 7b    | JMAP change log and `Email/set`                                                                                                        | #26     | `4042c01`        |
+| QA 1  | Data correctness fixes from the production QA pass                                                                                     | #27     | `d04dfe2`        |
+| QA 2  | Agent fixes: reasoning models, signed approvals, teammate lookup                                                                       | #28     | `da49cf0`        |
+| QA 3  | Automation guards and JMAP conformance                                                                                                 | #29     | `5ee9ab2`        |
+| QA 4  | Real type checks, SQL logging off by default, upgrade docs                                                                             | #30     | —                |
+| 7c-1  | JMAP ids are RFC 8620-valid; account reset                                                                                             | #39     | `ad9c35b`        |
+| 7c-2  | Crash-safe sent attachments and outbox bookkeeping ownership                                                                           | #40     | `22fc601`        |
+| 7c-3  | JMAP upload, blob download and creation references                                                                                     | #41     | `496d91a`        |
+| 7c-4  | JMAP drafts and stored message content                                                                                                 | #42     | `12ca097`        |
+| 7c-5  | JMAP EmailSubmission                                                                                                                   | #43     | `0a2f726`        |
+| 7c-6  | JMAP on-success filing, crash recovery, e2e script and docs                                                                            | #44     | `ac0276b`        |
+| 7d    | JMAP v1 follow-ups: several To/Bcc, delayed send, drafts in folders, raw blobs, shared drafts, live updates, `Email/import`, hardening | #45–#66 | `35c5dd1` (last) |
+| 9-1   | Replies follow the sender's Reply-To (`SPEC-reply-to.md`)                                                                              | —       | —                |
+| 9-2   | Audit log (`SPEC-audit-log.md`)                                                                                                        | —       | —                |
+| 9-3   | Idempotency keys for sends (`SPEC-send-idempotency.md`)                                                                                | —       | —                |
+| 9-4   | Pause switch, MCP kill switch, daily caps (`SPEC-send-controls.md`)                                                                    | —       | —                |
+| 9-5   | Two-factor sign-in, durable auth rate limits (`SPEC-two-factor.md`)                                                                    | —       | —                |
+| 10-1  | `reject` rule action, unknown-recipient rejection (`SPEC-reject-inbound.md`)                                                           | —       | —                |
+| 10-2  | AI filing into folders (`SPEC-ai-folders.md`)                                                                                          | —       | —                |
+| 10-3  | A spam filter that learns from junk marks (`SPEC-spam-learning.md`)                                                                    | —       | —                |
+| 11-1  | mbox export and `.eml` download (`SPEC-mail-export.md`)                                                                                | —       | —                |
+| 11-2  | mbox/eml import (`SPEC-mail-import.md`)                                                                                                | —       | —                |
+| 11-3  | Scheduled D1 backups to R2 and a restore script (`SPEC-backups.md`)                                                                    | —       | —                |
+| 10-4  | Header-based threading per inbox, last (`SPEC-header-threading.md`)                                                                    | —       | —                |
 
 A row with `—` is on a branch that hasn't merged yet; fill in the PR number and
 squash commit when it lands.
@@ -96,15 +110,27 @@ The stage order isn't numeric because Stage 3 (the mailbox view) needed Stage
     update, as transactional one-To messages through the shared outbox.
   - See [docs/jmap.md](docs/jmap.md).
 
+- **Stage 9: trust and safety** (specified, not built). Replies follow
+  Reply-To; an audit log fed by every channel; idempotency keys on sends; a
+  pause switch that holds the outbox, an `MCP_SEND_ENABLED` kill switch and
+  daily caps per channel; TOTP second factor with recovery codes and D1-backed
+  auth rate limits.
+- **Stage 10: triage** (specified, not built). A `reject` rule action evaluated
+  before storage and optional rejection of unknown recipients; folder colours
+  and descriptions with an `ai_file` rule action; a per-inbox Bayes spam
+  filter trained by the team's junk marks, exposed as a `spam_probability`
+  condition; last, header-based threading as a per-inbox option.
+- **Stage 11: data ownership** (specified, not built). mbox export and `.eml`
+  download; mbox/eml import through the shared inbound storage helper; daily
+  logical D1 backups to R2 with a CLI restore.
+
 ## Deferred
 
 - **Stage 8, portability (a non-Cloudflare runtime):** only on real demand.
-- **JMAP follow-ups:** multiple To and Bcc, delayed send and unsend, drafts in
-  custom folders, raw-message blobs for mail not created through JMAP, push,
-  search snippets and vacation response.
+- **JMAP follow-ups:** search snippets and vacation response.
 - **Snooze-expiry notifications:** there is no wake-up cron by design.
-- **A persistent audit table for agent CRM actions:** approved executions are
-  logged to the Workers console only.
+- **Calendar, invites and booking pages:** a second product; revisit booking
+  links on the customer timeline after stage 10.
 
 ## Principles
 

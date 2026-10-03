@@ -68,6 +68,11 @@ replies. An optional subject can be supplied, otherwise the normal reply subject
 original Message-ID where available, includes `Auto-Submitted: auto-replied`,
 and is recorded in Sent through the normal send/outbox path.
 
+An auto-reply always goes to the message's sender (its `From` address), never
+to its `Reply-To`. That header is written by whoever sent the message, and an
+automatic response should not be steered by it (RFC 3834). Replies a person
+sends do follow it: see [Replying](inboxes.md#replying).
+
 Before scheduling a send, saasmail skips automated/list/bounce mail, mail from
 any configured sender identity, blocked or suppressed senders, messages already
 in Junk, and a sender already auto-replied to by the same rule in the previous

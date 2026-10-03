@@ -31,8 +31,8 @@ export default function ReassignPersonModal({
 
   // On open, prefill the correspondent address. Prefer inbound Reply-To
   // (contact-form pattern) when it differs from the attributed sender;
-  // otherwise fall back to fromAddress. The thread list doesn't carry
-  // replyTo, so fetch the single email when needed.
+  // otherwise fall back to fromAddress. A row with neither is fetched in
+  // full.
   useEffect(() => {
     if (!open || !email) return;
     setName("");

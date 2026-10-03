@@ -25,6 +25,7 @@ import {
 import { listAssigneesForInbox } from "../lib/assignees";
 import { isInboxAllowed } from "../lib/inbox-permissions";
 import { bearerSecurity } from "../lib/openapi-auth";
+import { applyReplyGuard } from "../lib/reply-recipients";
 import type { Variables } from "../variables";
 
 export const messagesRouter = new OpenAPIHono<{
@@ -74,6 +75,15 @@ const MessageSchema = z.object({
   cc: z.array(
     z.object({ email: z.string(), name: z.string().nullable().optional() }),
   ),
+  replyTo: z
+    .array(
+      z.object({ email: z.string(), name: z.string().nullable().optional() }),
+    )
+    .optional()
+    .openapi({
+      description:
+        "Where a reply to this received message goes when it follows the sender's Reply-To: the header's addresses in order, without this instance's own inboxes. Empty when there is no usable Reply-To, and for sent messages.",
+    }),
   subject: z.string().nullable(),
   bodyText: z.string().nullable(),
   bodyHtml: z.string().nullable(),
@@ -232,9 +242,12 @@ messagesRouter.openapi(listMessagesRoute, async (c) => {
       viewer: { userId: user.id },
       withState: true,
       withAttachmentCounts: true,
+      // The reading pane renders rows of this list; it has no detail read.
+      withReplyTo: true,
       excludeCampaignSends,
       assignedTo: input.assignedTo === "me" ? user.id : input.assignedTo,
     });
+    await applyReplyGuard(db, page.messages);
 
     return c.json(
       {

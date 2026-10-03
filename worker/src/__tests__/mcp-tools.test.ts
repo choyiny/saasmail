@@ -629,6 +629,42 @@ describe("MCP tools", () => {
       expect(out.isError, out.text).toBe(false);
     });
 
+    it("follows the Reply-To unless asked for the sender, and reports where it went", async () => {
+      await getDb()
+        .update(emails)
+        .set({
+          replyTo: JSON.stringify([{ email: "desk@example.com", name: null }]),
+        })
+        .where(eq(emails.id, "e-mine"));
+
+      const followed = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+      });
+      expect(followed.isError, followed.text).toBe(false);
+      expect(followed.data.to).toBe("desk@example.com");
+      expect(followed.data.repliedTo).toBe("reply_to");
+
+      const toSender = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+        recipient: "sender",
+      });
+      expect(toSender.isError, toSender.text).toBe(false);
+      expect(toSender.data.repliedTo).toBe("sender");
+      expect(toSender.data.to).toBe("alice@example.com");
+
+      const invalid = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+        recipient: "everyone",
+      });
+      expect(invalid.isError).toBe(true);
+    });
+
     it("reports a reply target in another inbox as not found", async () => {
       const out = await callTool(memberToken, "reply_email", {
         emailId: "e-other",

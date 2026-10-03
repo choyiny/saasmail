@@ -10,6 +10,7 @@ import {
 import { dispatchEmailSent } from "@/lib/email-events";
 import AttachmentPicker from "@/components/AttachmentPicker";
 import AttachmentChips from "@/components/AttachmentChips";
+import ReplyToHint from "@/components/ReplyToHint";
 
 const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
 
@@ -24,6 +25,12 @@ interface ChatQuickReplyProps {
    * section's own inbox address. Ignored when there's no reply target.
    */
   replyCc?: CcEntry[];
+  /**
+   * Every address a reply to the target reaches when it follows its Reply-To
+   * (the first is To, the others are copied); empty when replies simply go to
+   * the sender. The reply follows it unless the user chooses the sender.
+   */
+  replyRecipients?: CcEntry[];
   onSent: () => void; // Refetch + scroll
   /**
    * Optional handoff to the global compose drawer. When provided, the
@@ -67,10 +74,16 @@ export default function ChatQuickReply({
   latestReceivedEmailId,
   personEmail,
   replyCc,
+  replyRecipients = [],
   onSent,
   onOpenCompose,
 }: ChatQuickReplyProps) {
   const [text, setText] = useState("");
+  const [replyToSender, setReplyToSender] = useState(false);
+  // The choice belongs to one reply target; a new message starts over.
+  useEffect(() => {
+    setReplyToSender(false);
+  }, [latestReceivedEmailId]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
@@ -116,6 +129,7 @@ export default function ChatQuickReply({
   }, [text]);
 
   const canSend = text.trim().length > 0 && !sending && !overCap;
+  const followsReplyTo = replyRecipients.length > 0 && !replyToSender;
 
   async function handleSend() {
     if (!canSend) return;
@@ -135,6 +149,9 @@ export default function ChatQuickReply({
           ...(files.length > 0
             ? { files: files.map((file) => ({ file })) }
             : {}),
+          // Always the target this box showed: with no hint on screen the
+          // reply goes to the sender, never to a Reply-To the user didn't see.
+          recipient: followsReplyTo ? "reply_to" : "sender",
         });
       } else {
         await sendEmail({
@@ -180,6 +197,14 @@ export default function ChatQuickReply({
 
   return (
     <div className="border-t border-border bg-card px-4 py-3 sm:px-6">
+      {latestReceivedEmailId && replyRecipients.length > 0 && (
+        <ReplyToHint
+          recipients={replyRecipients}
+          toSender={replyToSender}
+          onToggle={setReplyToSender}
+          className="mb-2"
+        />
+      )}
       {files.length > 0 && (
         <div className="mb-2">
           <AttachmentChips

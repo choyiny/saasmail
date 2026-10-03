@@ -1,0 +1,1 @@
+ALTER TABLE `emails` ADD `reply_to` text;

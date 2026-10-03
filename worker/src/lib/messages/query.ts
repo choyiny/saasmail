@@ -91,6 +91,11 @@ export interface MessageQuery {
    * no second flag: every JMAP read needs the content columns anyway.
    */
   withJmap?: boolean;
+  /**
+   * Set `replyTo` on each message. Off by default: for a row without a stored
+   * list the select has to look the header up in `raw_headers`.
+   */
+  withReplyTo?: boolean;
   /** Unix seconds used for snooze evaluation. Defaults to the current time. */
   now?: number;
 }
@@ -119,6 +124,8 @@ type RawMessageRow = {
   additional_to: string | null;
   to_header: string | null;
   bcc: string | null;
+  reply_to: string | null;
+  reply_to_header: string | null;
   subject: string | null;
   body_text: string | null;
   body_html: string | null;
@@ -561,6 +568,19 @@ function jmapSentColumns(query: MessageQuery): SQL {
     : sql`NULL AS jmap_content_id, NULL AS jmap_thread_key, NULL AS jmap_email_id, NULL AS jmap_received_at`;
 }
 
+/**
+ * Received mail's Reply-To, when asked for: the stored list, and only for a
+ * row without one the `reply-to` value of `raw_headers`. The headers object
+ * itself is never selected, so a list page can carry this.
+ */
+function replyToColumns(query: MessageQuery): SQL {
+  return query.withReplyTo
+    ? sql`e.reply_to AS reply_to,
+      CASE WHEN e.reply_to IS NULL AND json_valid(e.raw_headers)
+        THEN json_extract(e.raw_headers, '$."reply-to"') END AS reply_to_header`
+    : sql`NULL AS reply_to, NULL AS reply_to_header`;
+}
+
 function jmapSentJoin(query: MessageQuery): SQL {
   return query.withJmap
     ? sql`LEFT JOIN jmap_message_content jmc ON jmc.id = se.jmap_content_id`
@@ -698,6 +718,7 @@ function receivedArm(
       CASE WHEN json_valid(e.raw_headers)
         THEN json_extract(e.raw_headers, '$.to') END AS to_header,
       NULL AS bcc,
+      ${replyToColumns(query)},
       e.subject AS subject,
       e.body_text AS body_text,
       e.body_html AS body_html,
@@ -807,6 +828,8 @@ function sentArm(
       se.additional_to AS additional_to,
       NULL AS to_header,
       se.bcc AS bcc,
+      NULL AS reply_to,
+      NULL AS reply_to_header,
       se.subject AS subject,
       se.body_text AS body_text,
       se.body_html AS body_html,
@@ -913,6 +936,7 @@ function toUnified(
   row: RawMessageRow,
   withState: boolean,
   hasViewer: boolean,
+  withReplyTo: boolean,
 ): UnifiedMessage {
   let message: UnifiedMessage;
   if (row.kind === "received") {
@@ -930,6 +954,9 @@ function toUnified(
       isRead: row.is_read ?? 0,
       cc: row.cc,
       toHeader: row.to_header,
+      ...(withReplyTo
+        ? { replyTo: row.reply_to, replyToHeader: row.reply_to_header }
+        : {}),
       conversationId: row.conversation_id,
       receivedAt: row.occurred_at,
       personEmail: row.from_email,
@@ -960,6 +987,7 @@ function toUnified(
       fromName: row.from_name,
     };
     message = adaptSent(selected);
+    if (withReplyTo) message.replyTo = [];
   }
 
   if (row.jmap_content_id && row.jmap_thread_key) {
@@ -1289,7 +1317,12 @@ export async function queryMessages(
   const hasMore = limit !== null && rows.length > limit;
   const visibleRows = limit === null ? rows : rows.slice(0, limit);
   const messages = visibleRows.map((row) =>
-    toUnified(row, query.withState ?? false, query.viewer !== undefined),
+    toUnified(
+      row,
+      query.withState ?? false,
+      query.viewer !== undefined,
+      query.withReplyTo ?? false,
+    ),
   );
 
   await enrichAttachments(

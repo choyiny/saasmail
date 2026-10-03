@@ -196,6 +196,28 @@ describe("agent tools", () => {
     ).toEqual([]);
   });
 
+  it("read_message returns the message's Reply-To list", async () => {
+    const { tools, allowedPerson } = await fixture();
+    await createTestEmail({
+      id: "agent-email-reply-to",
+      personId: allowedPerson.id,
+      recipient: ALLOWED,
+      messageId: "agent-reply-to@example.net",
+      replyTo: JSON.stringify([{ email: "desk@example.net", name: "Desk" }]),
+    });
+
+    const read = JSON.stringify(
+      await execute(tools, "read_message", {
+        ref: "received:agent-email-reply-to",
+      }),
+    );
+    expect(read).toContain('"replyTo":[{"email":"desk@example.net"');
+
+    // A list read does not carry it.
+    const listed = JSON.stringify(await execute(tools, "list_messages"));
+    expect(listed).not.toContain("replyTo");
+  });
+
   it("only mentions tools that exist in the agent playbook", async () => {
     await fixture();
     const text = [AGENT_PLAYBOOK_INTRO, ...Object.values(AGENT_PLAYBOOKS)].join(

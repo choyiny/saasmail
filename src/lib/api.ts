@@ -78,8 +78,18 @@ export interface Email {
   status?: string | null;
   attachmentCount?: number;
   attachments?: Attachment[];
-  /** Inbound Reply-To address, surfaced by the single-email endpoint. */
+  /**
+   * Where a reply to this received message goes when that is not its sender:
+   * the first Reply-To address that isn't one of our own inboxes. Null when
+   * replies go to the sender.
+   */
   replyTo?: string | null;
+  /**
+   * Every address a reply to this received message reaches when it follows
+   * Reply-To: the first is To, the others are copied. Empty when the reply
+   * simply goes to the sender.
+   */
+  replyRecipients?: CcEntry[];
   /** Set when this was a campaign send rather than mail someone wrote. */
   campaignId?: string | null;
 }
@@ -494,6 +504,13 @@ export interface MailMessage {
   additionalTo?: MailAddress[];
   cc: MailAddress[];
   bcc?: MailAddress[];
+  /**
+   * The addresses a reply to this received message would use, from its
+   * Reply-To header without our own inboxes: the first is To, the others are
+   * copied. Empty when the reply simply goes to the sender, and for sent
+   * messages.
+   */
+  replyTo?: MailAddress[];
   subject: string | null;
   bodyText: string | null;
   bodyHtml: string | null;
@@ -798,6 +815,8 @@ export async function sendEmail(data: {
   });
 }
 
+export type ReplyRecipient = "reply_to" | "sender";
+
 export async function replyToEmail(
   emailId: string,
   data: {
@@ -808,8 +827,22 @@ export async function replyToEmail(
     templateSlug?: string;
     variables?: Record<string, string>;
     files?: AttachedFile[];
+    /**
+     * "sender" answers the message's From even when it has a Reply-To. The
+     * default follows the Reply-To.
+     */
+    recipient?: ReplyRecipient;
   },
-): Promise<{ id: string; attachmentIds: string[]; status: string }> {
+): Promise<{
+  id: string;
+  attachmentIds: string[];
+  status: string;
+  /** The address the reply was sent to. */
+  to: string;
+  /** Every address it was copied to. */
+  cc: string[];
+  repliedTo: ReplyRecipient;
+}> {
   const { files = [], ...payload } = data;
   const fd = new FormData();
   fd.append("payload", JSON.stringify(payload));
