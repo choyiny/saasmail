@@ -27,6 +27,7 @@ Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, 
 - When I correct you, re-read my message and say in one line what changes, then do it. Ask first only if the correction is ambiguous.
 - When the same approach fails twice (a command, a fix that doesn't hold), change approach instead of retrying it. If a second approach also fails, stop and tell me what you tried, what failed and what you'd try next.
 - Before you report back, re-read my original message and check off every part of it; finish what's missing or say which parts are left and why. In a long session, also re-read it before starting each new part.
+- When a turn ends because you need something from me, end it with a short "What I need from you" list: numbered, one concrete action per item (what to do, where, what to send back), the quickest or most blocking first, and what you'll get on with meanwhile. Nothing needed: say so in one line. Never bury a request for me in the middle of a long update.
 
 ## Specs and tasks
 
