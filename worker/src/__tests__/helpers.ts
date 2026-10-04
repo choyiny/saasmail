@@ -118,6 +118,8 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS spam_models (inbox TEXT PRIMARY KEY NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, spam_messages INTEGER NOT NULL DEFAULT 0, ham_messages INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS spam_tokens (inbox TEXT NOT NULL, token TEXT NOT NULL, spam_count INTEGER NOT NULL DEFAULT 0, ham_count INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, PRIMARY KEY(inbox, token))`,
     `CREATE TABLE IF NOT EXISTS spam_training (inbox TEXT NOT NULL, email_id TEXT NOT NULL, label TEXT NOT NULL, trained_by TEXT, trained_at INTEGER NOT NULL, PRIMARY KEY(inbox, email_id))`,
+    `CREATE TABLE IF NOT EXISTS backup_runs (id TEXT PRIMARY KEY NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, status TEXT NOT NULL, prefix TEXT NOT NULL, progress TEXT NOT NULL, bytes INTEGER NOT NULL DEFAULT 0, error TEXT, requested_by TEXT, pruned_at INTEGER, updated_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS backup_runs_started_idx ON backup_runs(started_at)`,
     `CREATE INDEX IF NOT EXISTS spam_training_email_idx ON spam_training (email_id)`,
     `CREATE TABLE IF NOT EXISTS jmap_blobs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS jmap_blobs_user_idx ON jmap_blobs(user_id)`,
@@ -490,6 +492,7 @@ export async function cleanDb() {
   await db.exec(`
     DELETE FROM send_counters;
     DELETE FROM auth_rate_limits;
+    DELETE FROM backup_runs;
     DELETE FROM spam_training;
     DELETE FROM spam_tokens;
     DELETE FROM spam_models;

@@ -13,6 +13,7 @@ import {
 import { onExportReady } from "@/lib/export-events";
 import { formatBytes } from "@/lib/format-bytes";
 import DataImports from "@/components/DataImports";
+import DataBackups from "@/components/DataBackups";
 
 export { formatBytes };
 
@@ -57,7 +58,7 @@ function statusLine(item: MailExport): string {
 export default function DataExports({
   showImports = false,
 }: {
-  /** Admins: the Import mail card too. */
+  /** Admins: the Import mail and Backups cards too. */
   showImports?: boolean;
 }) {
   const [searchParams] = useSearchParams();
@@ -322,6 +323,7 @@ export default function DataExports({
         )}
       </div>
       {showImports && <DataImports inboxes={inboxes} />}
+      {showImports && <DataBackups />}
     </section>
   );
 }

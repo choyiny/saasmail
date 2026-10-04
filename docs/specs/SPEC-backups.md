@@ -134,3 +134,46 @@ object get` or `rclone`) needs no dependency. Pin any new dependency exactly and
   schedule, restore step by step, the R2 copy note, Time Travel), `docs/configuration.md`
   (`BACKUPS` binding, `BACKUP_ENCRYPTION_KEY`), `docs/setup.md` (optional step), `docs/updating.md`.
 - CHANGELOG `### Added`: **Scheduled backups to R2 and a restore script.** …
+
+## Spec changes (made while building it)
+
+The six decisions stand. What the code does differently from the sections above, and why:
+
+1. **The table list comes from `worker/src/db/index.ts`**, which exports every table; `schema.ts` leaves
+   out the four JMAP tables (`jmap_blobs`, `jmap_message_content`, `jmap_drafts`, `jmap_submissions`).
+   The order (parents first) is computed from the foreign keys, so nothing has to keep it by hand.
+2. **`backup_runs`** also has `updated_at` (to find a stuck run) and `pruned_at` (retention deleted its
+   files; the row stays), and is itself left out of backups.
+3. **The settings have their own route**, `PATCH /api/admin/backups/settings`, beside the runs, rather
+   than joining `/api/admin/settings`.
+4. **Hashes are per part, not per file.** WebCrypto hashes in one shot and a step cannot carry a hash's
+   state to the next, so each 5 MiB part's SHA-256 is taken as it is uploaded and the manifest lists the
+   parts; the restore checks each byte range. `manifest.sha256` still checks the manifest.
+5. **A file is several gzip members** (and, encrypted, several frames each with its own IV): a gzip or
+   cipher stream cannot be paused between invocations. `gunzip` reads concatenated members as one.
+6. **The manifest records the last applied migration but not `package.json`'s version**: the Worker
+   has no access to it at run time, and the migration is what a restore checks.
+7. **The restore reads a local directory only.** `s3://` would need the AWS SDK; the docs show `rclone
+copy` and `wrangler r2 object get` instead, so the script has no dependency. It adds `--local` and
+   `--persist-to` to rehearse a restore.
+8. **Loading:** a full restore empties the tables (children first) and loads them with plain `INSERT`
+   (parents first); `INSERT OR REPLACE` would delete conflicting rows and cascade. **`--tables` never
+   deletes**: emptying one table cascades into others, and D1 cannot turn foreign keys off (deferring
+   them does not stop cascades), so a partial restore writes rows over the current ones by primary key
+   (`ON CONFLICT … DO UPDATE`). Values over 30 KB are inserted empty and appended in pieces, since D1
+   refuses statements over 100 KB; a piece never splits a surrogate pair.
+9. **Steps** start at 100 rows a page (500 at most, halved for wide rows such as message bodies) and
+   also stop at 16 MiB written; one backup step runs per queue batch. A failed backup's files are
+   deleted. "Back up now" refuses a malformed `BACKUP_ENCRYPTION_KEY` (`400 INVALID_KEY`).
+10. **The hourly work** is one `runBackupSchedule` (start when due, queue a stuck run again once, fail
+    it after a day, prune) rather than three functions.
+11. **Found by review, before the PR:** statements are measured in UTF-8 bytes (CJK bodies passed D1's
+    100 KB limit) and a row's largest values move to appends until it fits; the restore streams each
+    table and writes its SQL as it goes; rows are upserted (the last copy of a key wins, a clash on
+    another unique key is skipped) and rows whose parent is not restored are left out, using the
+    foreign keys the manifest now lists — a backup taken over minutes is not a snapshot; the newest
+    completed backup is never pruned; pages are bounded by bytes read ahead (`LENGTH` of each column),
+    not by a page size halved after the fact; the manifest records the key's HMAC id, every step checks
+    it, and frames are bound to `<file>:<index>` with their count in the manifest; text with NUL goes
+    in as `CAST(X'…' AS TEXT)`; a run remembers its bucket; the restore names a failing file and
+    resumes with `--from-file`, and exits non-zero when it cannot ask for confirmation.

@@ -38,6 +38,10 @@ declare namespace Cloudflare {
 		DB_LOG_QUERIES?: string;
 		/** Optional kill switch: "false" makes the MCP tools that send mail (send_email, reply_email, send_template, enroll_sequence) refuse. Default on. Not emitted by `wrangler types`; added manually. */
 		MCP_SEND_ENABLED?: string;
+		/** Optional dedicated bucket for scheduled database backups; without it they go to `R2` under `backups/`. Not emitted by `wrangler types`; added manually. */
+		BACKUPS?: R2Bucket;
+		/** Optional secret: 64 hex characters (AES-256). When set, backup files are encrypted. Not emitted by `wrangler types`; added manually. */
+		BACKUP_ENCRYPTION_KEY?: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
 	}
 }

@@ -5,7 +5,8 @@
 Your mail is yours to take elsewhere, and to bring with you. saasmail exports
 an inbox as one mbox file, the format Thunderbird, Apple Mail, Gmail and most
 mail servers import, and any single message as an `.eml` file; admins can
-[import](#import-mail) an mbox or `.eml` file into an inbox.
+[import](#import-mail) an mbox or `.eml` file into an inbox, and keep daily
+[backups](#backups) of the whole database that a script restores.
 
 ## Export a mailbox
 
@@ -188,3 +189,138 @@ one and read on its own. A retried slice is safe: a message it already stored
 is found, counted once and labelled again. It records
 `import.completed` with the counts. The hourly cron queues again an import
 that has stopped moving, as for exports.
+
+## Backups
+
+**Settings → Data → Backups** (admins). A daily logical dump of the whole
+database into an R2 bucket, and a script that loads it into a fresh
+instance. [D1 Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/)
+(`wrangler d1 time-travel`) restores the database to any minute of the last
+30 days, which covers "we deleted the wrong inbox"; a backup is the copy you
+can move to another account or runtime. Both buckets live in the same
+Cloudflare account as the database, so a backup only survives losing that
+account if you also copy it elsewhere (replicate the `BACKUPS` bucket, or
+`rclone` it on a schedule).
+
+### What is in a backup
+
+One file per table, `<table>.ndjson.gz`: each row a JSON line with the
+table's column names (blobs as `{"$blob": "<base64>"}`), gzip-compressed (a
+file written in steps is several gzip members one after another, which `gunzip`
+and every gzip library read as one stream). Every table is in it except
+sessions and tokens (`sessions`, `verifications`, `oauth_access_tokens`,
+`oauth_refresh_tokens`), the OAuth signing keys (`jwkss`, made again on first
+use) and short-lived counters (`auth_rate_limits`, `jmap_changes`,
+`send_idempotency`, `send_counters`, `subscribe_attempts`, `backup_runs`).
+Password hashes, API key hashes and passkeys' public keys are included.
+
+`manifest.json` lists the files in the order a restore loads them (parents
+before the tables that reference them), with each table's rows, columns,
+primary key, foreign keys and the SHA-256 of each part of its file, the last
+applied migration, and whether the files are encrypted (and with which key);
+`manifest.sha256` checks the manifest itself. The hashes catch corruption, not
+tampering: anyone who can write to the bucket can rewrite the manifest too, so
+protect the bucket (a retention lock, write access for nobody else).
+
+**Not an instant snapshot.** A backup is written table by table over minutes
+while mail keeps arriving, so it can hold a row twice (one that was deleted
+and written again between pages) or a row whose parent was deleted before its
+own table was written. The restore keeps the last copy of a row and leaves
+orphans out, with a count. For an exact copy of one instant, use
+`wrangler d1 export` (or Time Travel) instead.
+
+**R2 objects are not copied:** attachments, raw messages, newsletter assets,
+exports and import files are already in your R2 bucket (the manifest lists
+their prefixes). Moving to another account means copying the bucket too, with
+[rclone](https://rclone.org/s3/#cloudflare-r2) or the S3 API.
+
+### Where, when and how long
+
+- **Where:** the `BACKUPS` bucket when you bind one (recommended: a bucket of
+  its own, ideally with a retention lock or replicated elsewhere), else the
+  attachments bucket under `backups/`. Each backup is a prefix:
+  `backups/<date>T<time>Z-<id>/`; a run remembers its bucket, so binding
+  `BACKUPS` later still prunes the older runs where they are.
+- **When:** off until an admin turns it on. Then every day at the first hourly
+  tick at or after the chosen hour (UTC, default 3), and whenever you press
+  **Back up now**. One runs at a time.
+- **How long:** files older than the chosen number of days (default 14) are
+  deleted by the hourly cron; the run stays in the list, marked deleted. The
+  newest backup that completed is never deleted, however old, so a run of
+  failures cannot leave you with none.
+- **Encryption:** set `BACKUP_ENCRYPTION_KEY` (64 hex characters) and every
+  file is encrypted with AES-256-GCM: a series of frames, each a 4-byte length,
+  a fresh 12-byte IV and the ciphertext with its tag, bound to its file and
+  position (a frame moved elsewhere does not decrypt). The manifest records
+  which key (an HMAC of it, not the key), so the restore says "wrong key"
+  rather than failing halfway; a key changed while a backup runs fails that
+  backup. Keep the key outside Cloudflare; without it an encrypted backup
+  cannot be read.
+
+A backup runs in steps on the queue (about 50,000 rows, 16 MB or 20 seconds
+each), reading pages of at most 500 rows or about 4 MB of stored data (the
+sizes are read ahead, so a run of message bodies cannot fill a Worker's
+memory) and streaming each table into an R2 multipart upload, so a large
+database finishes without any one invocation nearing its limits. A failed step is
+retried; after three failures the backup is marked failed and its files are
+deleted. A run that stops moving is queued again once after two hours and
+failed after a day. Starting, finishing and failing are in the
+[audit log](audit-log.md) (`backup.started`, `backup.completed`,
+`backup.failed`), and turning the schedule on or off as `settings.changed`.
+
+### Restoring
+
+Restoring is a script you run, never a button: loading a dump over a live
+database replaces it.
+
+1. Create and migrate the target database (a new instance, or the same one
+   after `wrangler d1 time-travel` was not enough):
+   `yarn db:migrate:prod`. The target must have at least the backup's last
+   migration (`manifest.json` → `lastMigration`); a newer one is fine, and
+   columns added since get their defaults.
+2. Copy the backup out of the bucket into a local directory, for example
+   `rclone copy r2:saasmail-backups/backups/2026-10-04T0300Z-xyz/ ./backup/`,
+   or `wrangler r2 object get <bucket>/<prefix><file> --remote --file ./backup/<file>`
+   for `manifest.json`, `manifest.sha256` and each table's file.
+3. Check the plan without loading anything:
+
+   ```bash
+   node scripts/restore-backup.mjs --from ./backup --database saasmail-db --dry-run
+   ```
+
+   It verifies the manifest and every file's parts against their hashes,
+   decrypts with `--key <hex>` when the backup is encrypted (and refuses
+   another key), checks the target's migrations, and prints the tables, row
+   counts and warnings (orphans left out, columns the target lacks); the SQL it
+   would run is left in a temporary directory. It streams each table, so a
+   large backup needs little memory.
+
+4. Load it: the same command without `--dry-run`, then type `yes` (or pass
+   `--yes`; without a terminal it refuses rather than guess). Every table in
+   the backup is emptied (children first) and loaded (parents first), in files
+   of a few megabytes run with `wrangler d1 execute --remote --file`; values
+   longer than D1's statement limit are appended in pieces, and a row that
+   clashes with another on a unique key other than its primary key is
+   skipped. Emptying `users` also deletes sessions and OAuth tokens, so
+   everyone signs in again; JMAP clients resync. If a file fails, the script
+   names it: fix the cause and run the same command with `--from-file <n>` to
+   go on from there.
+5. Copy the R2 bucket if you moved accounts, and deploy.
+
+`--tables people,emails` restores only those tables, and differently: their
+rows are written over the current ones by primary key, and nothing is
+deleted, since emptying one table would cascade into others (D1 cannot turn
+foreign keys off). Rows added since the backup stay. `--local` targets the
+local development database (`--persist-to <dir>` a scratch one), which is how
+to rehearse a restore.
+
+### API
+
+Admin only.
+
+| Route                                  | What it does                                                                                                                      |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/admin/backups`               | The schedule (`enabled`, `hourUtc`, `keepDays`, `nextDue`), `destination` (`BACKUPS` or `R2`), `encryption` and the last 30 runs. |
+| `PATCH /api/admin/backups/settings`    | `{ enabled?, hourUtc?, keepDays? }`.                                                                                              |
+| `POST /api/admin/backups/run`          | Back up now (`202`); `409 BACKUP_RUNNING`, `400 INVALID_KEY` for a malformed `BACKUP_ENCRYPTION_KEY`.                             |
+| `GET /api/admin/backups/{id}/manifest` | A finished backup's manifest. The files themselves are fetched from the bucket, not through the Worker.                           |

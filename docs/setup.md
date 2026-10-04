@@ -130,6 +130,19 @@ yarn deploy
 
 Visit your deployed URL to create your first admin account. Once signed in, go to **Inboxes** to name your inbound addresses and **Users** to invite additional team members.
 
+### 9. Turn on backups (optional, recommended)
+
+Create a bucket for backups and bind it as `BACKUPS` in `wrangler.jsonc` (see
+the commented example), optionally set `BACKUP_ENCRYPTION_KEY`, deploy, then
+turn on **Settings → Data → Backups**. A daily dump of the database goes to
+the bucket and can be loaded into a new instance with
+`scripts/restore-backup.mjs`. See [Export, import and backups](data.md#backups).
+
+```bash
+wrangler r2 bucket create saasmail-backups
+openssl rand -hex 32 | wrangler secret put BACKUP_ENCRYPTION_KEY   # optional
+```
+
 ---
 
 **Next:** [Email providers](email-providers.md) · [Configuration](configuration.md) · [Local development](development.md) · [Updating](updating.md)

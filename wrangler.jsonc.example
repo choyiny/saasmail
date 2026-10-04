@@ -28,6 +28,12 @@
       "binding": "R2",
       "bucket_name": "saasmail-attachments"
     }
+    // Optional: a dedicated bucket for database backups (Settings → Data →
+    // Backups). Without it backups go to the R2 bucket above, under backups/.
+    // ,{
+    //   "binding": "BACKUPS",
+    //   "bucket_name": "saasmail-backups"
+    // }
   ],
   // Optional: enable Cloudflare Email Sending as the outbound provider.
   // If Bavimail (BAVIMAIL_API_KEY + BAVIMAIL_ALIAS_ID), POSTMARK_API_KEY, or

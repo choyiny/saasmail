@@ -10,7 +10,11 @@ ships with your deployment's values — each deployer maintains their own.
 Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. This file is gitignored so each deployer maintains their own config. Key sections:
 
 - `d1_databases` — D1 database binding
-- `r2_buckets` — R2 bucket for attachments
+- `r2_buckets` — R2 bucket for attachments (`R2`), and optionally a dedicated
+  bucket for [database backups](data.md#backups) (`BACKUPS`). Without
+  `BACKUPS`, backups go to the attachments bucket under `backups/`; a separate
+  bucket, ideally with a retention lock or replicated elsewhere, keeps them
+  apart from the data they protect.
 - `queues` — Queue for sequence email processing
 - `triggers.crons` — Hourly cron to check for due sequence emails
 - `send_email` (optional) — Binding for Cloudflare Email Sending
@@ -51,6 +55,11 @@ Local development secrets. Created from `.dev.vars.example`. This file is gitign
 - `BETTER_AUTH_SECRET` — Secret for session signing. The native agent also derives a stable 32-byte HKDF-SHA256 tool-approval signing key from it (info: `saasmail/agent-tool-approval/v1`), so pending approval cards remain verifiable across Durable Object reloads and hibernation.
 - `AGENT_APPROVAL_SECRET` — Optional dedicated secret for native-agent approval signatures. When set, it overrides the key derived from `BETTER_AUTH_SECRET`. Set in production with `wrangler secret put AGENT_APPROVAL_SECRET`. Rotating either effective secret invalidates approval cards that were still pending.
 - `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the [suppressions/unsubscribe](suppressions.md) feature.
+- `BACKUP_ENCRYPTION_KEY` — Optional. 64 hex characters (`openssl rand -hex 32`).
+  When set, [database backups](data.md#backups) are encrypted with AES-256-GCM
+  and the restore script needs the key (`--key`). Keep a copy somewhere other
+  than Cloudflare: without it an encrypted backup cannot be read. Set in prod
+  via `wrangler secret put BACKUP_ENCRYPTION_KEY`.
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. It also turns off the sign-in rate limits ([Signing in](users-and-api-keys.md#signing-in)), as `DEMO_MODE` does. **Never set this in production.**
 
 In production these are Cloudflare secrets (`wrangler secret put …`), not

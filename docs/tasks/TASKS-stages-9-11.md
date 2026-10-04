@@ -46,8 +46,8 @@ Updated by whoever works a spec (the loop prompt in `LOOP-stages-9-11.md` does i
 | 7   | `SPEC-ai-folders.md`       | archived    |
 | 8   | `SPEC-spam-learning.md`    | archived    |
 | 9   | `SPEC-mail-export.md`      | archived    |
-| 10  | `SPEC-mail-import.md`      | PR #76 open |
-| 11  | `SPEC-backups.md`          | todo        |
+| 10  | `SPEC-mail-import.md`      | archived    |
+| 11  | `SPEC-backups.md`          | PR #77 open |
 | 12  | `SPEC-header-threading.md` | todo        |
 
 ## Shared conventions the specs rely on

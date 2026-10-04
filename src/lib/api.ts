@@ -2529,3 +2529,70 @@ export async function deleteImport(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+export interface BackupRun {
+  id: string;
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  finishedAt: number | null;
+  prefix: string;
+  bytes: number;
+  tablesDone: number;
+  tablesTotal: number;
+  rows: number;
+  encrypted: boolean;
+  error: string | null;
+  manual: boolean;
+  prunedAt: number | null;
+}
+
+export interface BackupSettings {
+  enabled: boolean;
+  hourUtc: number;
+  keepDays: number;
+  lastStarted: number | null;
+  nextDue: number | null;
+}
+
+export interface BackupsOverview {
+  settings: BackupSettings;
+  /** `BACKUPS`: a dedicated bucket; `R2`: the attachments bucket, under backups/. */
+  destination: "BACKUPS" | "R2";
+  encryption: "configured" | "not_configured" | "invalid";
+  runs: BackupRun[];
+}
+
+export interface BackupManifestTable {
+  name: string;
+  file: string;
+  rows: number;
+  bytes: number;
+}
+
+export interface BackupManifest {
+  lastMigration: string | null;
+  encryption: string | null;
+  tables: BackupManifestTable[];
+}
+
+export async function fetchBackups(): Promise<BackupsOverview> {
+  return apiFetch("/api/admin/backups");
+}
+
+export async function updateBackupSettings(
+  changes: Partial<Pick<BackupSettings, "enabled" | "hourUtc" | "keepDays">>,
+): Promise<BackupSettings> {
+  return apiFetch("/api/admin/backups/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+}
+
+export async function startBackupNow(): Promise<BackupRun> {
+  return apiFetch("/api/admin/backups/run", { method: "POST" });
+}
+
+export async function fetchBackupManifest(id: string): Promise<BackupManifest> {
+  return apiFetch(`/api/admin/backups/${encodeURIComponent(id)}/manifest`);
+}

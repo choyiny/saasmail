@@ -54,6 +54,8 @@ import { pruneSpamTokens } from "./lib/spam/filter";
 import { reapMailExports } from "./lib/export/mail-export";
 import { reapMailImports } from "./lib/import/mail-import";
 import { importsRouter } from "./routers/imports-router";
+import { runBackupSchedule } from "./lib/backup/run";
+import { backupsRouter } from "./routers/backups-router";
 import { exportsRouter } from "./routers/exports-router";
 import { collectUnreferencedContent } from "./jmap/content";
 import { runJmapSubmissionMaintenance } from "./jmap/recovery";
@@ -333,6 +335,7 @@ app.route("/api/admin/inboxes", adminInboxesRouter);
 app.route("/api/admin/rules", adminRulesRouter);
 app.route("/api/admin/audit", adminAuditRouter);
 app.route("/api/admin/imports", importsRouter);
+app.route("/api/admin/backups", backupsRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a
@@ -531,6 +534,13 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
           env,
           Math.floor(Date.now() / 1000),
         ).catch((err) => console.error("[cron] import reaping failed:", err)),
+      )
+      .then(() =>
+        runBackupSchedule(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) => console.error("[cron] backups failed:", err)),
       )
       .then(() =>
         reapOrphanSentAttachments(

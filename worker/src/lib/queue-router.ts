@@ -22,6 +22,11 @@ import { drainHeldOutbox, type OutboxDrainMessage } from "./outbox";
 import { fileWithAi, type AiFileMessage } from "./triage/ai-file";
 import { SliceBusyError } from "./jobs/slices";
 import {
+  failBackup,
+  runBackupStep,
+  type BackupStepMessage,
+} from "./backup/run";
+import {
   runMailImportSlice,
   skipStuckMessage,
   type MailImportMessage,
@@ -57,7 +62,8 @@ export type QueueMessageBody =
   | OutboxDrainMessage
   | AiFileMessage
   | MailExportMessage
-  | MailImportMessage;
+  | MailImportMessage
+  | BackupStepMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
@@ -75,6 +81,7 @@ export type QueueMessageKind =
   | "ai_file"
   | "mail_export"
   | "mail_import"
+  | "backup_step"
   | "unknown";
 
 /**
@@ -125,6 +132,11 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
   if (b.type === "ai_file") {
     return typeof b.emailId === "string" && typeof b.inbox === "string"
       ? "ai_file"
+      : "unknown";
+  }
+  if (b.type === "backup_step") {
+    return typeof b.runId === "string" && typeof b.step === "number"
+      ? "backup_step"
       : "unknown";
   }
   if (b.type === "mail_export" || b.type === "mail_import") {
@@ -199,6 +211,18 @@ export async function handleQueueBatch(
       } else if (kind === "ai_file") {
         // A model error throws, and the message is retried.
         await fileWithAi(db, env, msg.body as AiFileMessage);
+      } else if (kind === "backup_step") {
+        const body = msg.body as BackupStepMessage;
+        if (sliceRan) {
+          await env.EMAIL_QUEUE.send(body);
+          msg.ack();
+          continue;
+        }
+        sliceRan = true;
+        const next = await runBackupStep(db, env, body.runId, body.step);
+        if (next !== null) {
+          await env.EMAIL_QUEUE.send({ ...body, step: next });
+        }
       } else if (kind === "mail_export" || kind === "mail_import") {
         const body = msg.body as MailExportMessage | MailImportMessage;
         if (sliceRan) {
@@ -239,7 +263,10 @@ export async function handleQueueBatch(
       }
       msg.ack();
     } catch (err) {
-      const sliced = kind === "mail_export" || kind === "mail_import";
+      const sliced =
+        kind === "mail_export" ||
+        kind === "mail_import" ||
+        kind === "backup_step";
       if (sliced && err instanceof SliceBusyError) {
         // Another run holds the slice; it queues the next one itself. Come
         // back once its claim has run out, in case it died (if this message
@@ -252,7 +279,16 @@ export async function handleQueueBatch(
         );
         const jobId = (msg.body as MailExportMessage | MailImportMessage).jobId;
         const reason = err instanceof Error ? err.message : `${kind} failed`;
-        if (kind === "mail_export") {
+        if (kind === "backup_step") {
+          await failBackup(
+            db,
+            env,
+            (msg.body as BackupStepMessage).runId,
+            reason,
+          ).catch((error) =>
+            console.error("[queue] backup not failed:", error),
+          );
+        } else if (kind === "mail_export") {
           await failMailExport(db, env, jobId, reason).catch((error) =>
             console.error("[queue] export not failed:", error),
           );

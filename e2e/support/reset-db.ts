@@ -12,7 +12,7 @@ const REPO_ROOT = process.cwd();
  * double-slash sequences inside string values such as URLs).
  * Falls back to "saasmail-db" when the file is absent or unparseable.
  */
-function getDbName(): string {
+export function getDbName(): string {
   try {
     const raw = readFileSync(resolve(REPO_ROOT, "wrangler.jsonc"), "utf-8");
     // Match: "database_name": "some-value"
@@ -106,4 +106,14 @@ export function wipeUsers(): void {
     `wrangler d1 execute ${dbName} --local --command="${sql.replace(/"/g, '\\"')}"`,
     { cwd: REPO_ROOT, stdio: "pipe" },
   );
+}
+
+/** One query against the live local D1, as rows. */
+export function queryLocalSql<T = Record<string, unknown>>(sql: string): T[] {
+  const out = execFileSync(
+    "wrangler",
+    ["d1", "execute", getDbName(), "--local", "--json", "--command", sql],
+    { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" },
+  );
+  return (JSON.parse(out) as { results: T[] }[])[0]?.results ?? [];
 }

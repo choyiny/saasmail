@@ -61,7 +61,11 @@ Review the diff and add any new bindings, migrations, or variables that apply to
 - the Workers AI binding: `"ai": { "binding": "AI" }`;
 - the `MAIL_AGENT` Durable Object binding for class `MailAgent`;
 - the Durable Object migration `{ "tag": "v2", "new_sqlite_classes": ["MailAgent"] }`;
-- optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables.
+- optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables;
+- an optional `BACKUPS` R2 bucket for [database backups](data.md#backups)
+  (without it they go to the attachments bucket under `backups/`), and the
+  optional `BACKUP_ENCRYPTION_KEY` secret. Scheduled backups stay off until an
+  admin turns them on.
 
 The worker fails at runtime without the `MailAgent` binding and its `v2` Durable Object migration. Do not replace a customized `wrangler.jsonc` wholesale; merge the missing entries intentionally.
 

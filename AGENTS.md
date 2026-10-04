@@ -103,6 +103,12 @@ Inbound storage lives in `worker/src/lib/inbound/`: the live handler
 and the importer stores mail the inbox sent with `storeSentMessage()`. Change
 how a received message is stored there, not in either caller.
 
+Database backups dump every table exported from `worker/src/db/index.ts`. A
+new table is backed up automatically; one that must not be (sessions, tokens,
+counters that mean nothing in another instance) goes in `EXCLUDED_TABLES` in
+`worker/src/lib/backup/tables.ts`. `backups.test.ts` fails until every table is
+one or the other.
+
 ## Native agent runtime dependencies
 
 The native agent stack is intentionally **exact-pinned** in `package.json`:

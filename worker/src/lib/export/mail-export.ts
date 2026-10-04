@@ -7,6 +7,7 @@ import { AUDIT_ACTIONS } from "../audit/events";
 import { recordAudit } from "../audit/record";
 import { jsonList } from "../inbox-permissions";
 import { isDemoMode } from "../is-dev";
+import { PART_BYTES, PartWriter } from "../jobs/part-writer";
 import { encodeCursor } from "../messages/cursor";
 import { queryMessages } from "../messages/query";
 import type { UnifiedMessage } from "../messages/types";
@@ -30,6 +31,8 @@ import {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
+
+export { PART_BYTES };
 
 /** A queued slice of a mailbox export: the slice the job is waiting for. */
 export type MailExportMessage = {
@@ -71,8 +74,6 @@ const SLICE_MESSAGES = 200;
 const SLICE_BYTES = 8 * 1024 * 1024;
 const SLICE_MS = 20_000;
 const PAGE_SIZE = 50;
-/** Every part but the last is this size; R2 wants at least 5 MiB. */
-export const PART_BYTES = 5 * 1024 * 1024;
 /** How long a finished export can be downloaded. */
 export const EXPORT_TTL_SECONDS = 7 * 24 * 60 * 60;
 
@@ -192,43 +193,6 @@ export async function startMailExport(
     },
   });
   return job;
-}
-
-/**
- * Fills parts of exactly PART_BYTES and uploads each as soon as it is full,
- * so a slice holds one part and one message at a time.
- */
-class PartWriter {
-  private buffer = new Uint8Array(PART_BYTES);
-  private length = 0;
-
-  constructor(
-    private upload: R2MultipartUpload,
-    readonly parts: { partNumber: number; etag: string }[],
-  ) {}
-
-  async write(bytes: Uint8Array): Promise<void> {
-    let offset = 0;
-    while (offset < bytes.length) {
-      const take = Math.min(PART_BYTES - this.length, bytes.length - offset);
-      this.buffer.set(bytes.subarray(offset, offset + take), this.length);
-      this.length += take;
-      offset += take;
-      if (this.length === PART_BYTES) {
-        const part = await this.upload.uploadPart(
-          this.parts.length + 1,
-          this.buffer,
-        );
-        this.parts.push({ partNumber: part.partNumber, etag: part.etag });
-        this.length = 0;
-      }
-    }
-  }
-
-  /** What did not fill a part. */
-  rest(): Uint8Array {
-    return this.buffer.subarray(0, this.length);
-  }
 }
 
 const encoder = new TextEncoder();

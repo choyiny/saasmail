@@ -51,3 +51,4 @@ export * from "./send-idempotency.schema";
 export * from "./send-counters.schema";
 export * from "./auth-rate-limits.schema";
 export * from "./spam-filter.schema";
+export * from "./backup-runs.schema";
