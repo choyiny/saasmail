@@ -1,7 +1,7 @@
 # SPEC: Scheduled database backups to R2, and a restore script
 
 Stage 11 (data ownership), slice 3 of 3. Depends on `docs/archive/SPEC-audit-log.md` and shares the Data UI with
-`SPEC-mail-export.md`. Label `minor`.
+`docs/archive/SPEC-mail-export.md`. Label `minor`.
 
 ## Why
 

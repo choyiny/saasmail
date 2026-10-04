@@ -36,6 +36,8 @@ export const sentEmails = sqliteTable(
      * migration 0022 for the algorithm + rationale.
      */
     conversationId: text("conversation_id"),
+    /** The mail import that stored this message; null for mail sent here. */
+    importJobId: text("import_job_id"),
     /**
      * FK campaigns.id — null for every non-campaign send. Lets a campaign send
      * appear in the recipient's timeline without any new query logic.

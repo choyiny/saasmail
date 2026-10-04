@@ -1,9 +1,10 @@
-// docs/specs/SPEC-mail-export.md: export a mailbox as mbox, and any message
+// docs/archive/SPEC-mail-export.md: export a mailbox as mbox, and any message
 // as .eml.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { eq, sql } from "drizzle-orm";
 import { asyncJobs } from "../db/async-jobs.schema";
+import { SliceBusyError } from "../lib/jobs/slices";
 import { emails } from "../db/emails.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { queryMessages } from "../lib/messages/query";
@@ -15,7 +16,6 @@ import {
 } from "../lib/export/render-message";
 import {
   ExportRunningError,
-  ExportSliceBusyError,
   PART_BYTES,
   deleteMailExport,
   exportParams,
@@ -405,7 +405,7 @@ describe("the export job", () => {
       .where(eq(asyncJobs.id, job.id));
     await expect(
       runMailExportSlice(getDb(), env, job.id, 0),
-    ).rejects.toBeInstanceOf(ExportSliceBusyError);
+    ).rejects.toBeInstanceOf(SliceBusyError);
 
     // Once the claim has run out, the slice runs.
     expect(

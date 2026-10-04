@@ -55,6 +55,8 @@ export class NotificationsHub implements DurableObject {
       inbox?: string;
       emailId?: string;
       jobId?: string;
+      imported?: number;
+      skipped?: number;
     };
     let frame: string;
     if (
@@ -84,6 +86,17 @@ export class NotificationsHub implements DurableObject {
         inbox: payload.inbox,
         jobId: payload.jobId,
       });
+    } else if (
+      // A mail import this admin started has finished.
+      payload.type === "import_done" &&
+      typeof payload.inbox === "string" &&
+      typeof payload.jobId === "string"
+    ) {
+      frame = JSON.stringify({
+        type: "import_done",
+        inbox: payload.inbox,
+        jobId: payload.jobId,
+      });
     } else {
       return new Response("invalid realtime event", { status: 400 });
     }
@@ -100,6 +113,22 @@ export class NotificationsHub implements DurableObject {
           title: "Your export is ready",
           body: `Your export of ${payload.inbox} is ready to download.`,
           tag: `export:${payload.jobId}`,
+          icon: "/saasmail-logo.png",
+          badge: "/saasmail-logo.png",
+          data: { url: "/settings#data" },
+        },
+        sockets.length,
+        payload.inbox!,
+      );
+    }
+    if (payload.type === "import_done") {
+      const imported = Number(payload.imported ?? 0);
+      const skipped = Number(payload.skipped ?? 0);
+      return this.push(
+        {
+          title: "Your import is done",
+          body: `${imported} ${imported === 1 ? "message" : "messages"} imported into ${payload.inbox}${skipped > 0 ? `, ${skipped} skipped` : ""}.`,
+          tag: `import:${payload.jobId}`,
           icon: "/saasmail-logo.png",
           badge: "/saasmail-logo.png",
           data: { url: "/settings#data" },

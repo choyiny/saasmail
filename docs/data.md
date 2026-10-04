@@ -2,9 +2,10 @@
 
 # Export, import and backups
 
-Your mail is yours to take elsewhere. saasmail exports an inbox as one mbox
-file, the format Thunderbird, Apple Mail, Gmail and most mail servers import,
-and any single message as an `.eml` file.
+Your mail is yours to take elsewhere, and to bring with you. saasmail exports
+an inbox as one mbox file, the format Thunderbird, Apple Mail, Gmail and most
+mail servers import, and any single message as an `.eml` file; admins can
+[import](#import-mail) an mbox or `.eml` file into an inbox.
 
 ## Export a mailbox
 
@@ -97,3 +98,93 @@ export writes for it, without the `X-Saasmail-*` state headers.
 `GET /api/messages/{received|sent}/{id}/raw.eml` does the same over the API;
 a rebuilt message also answers with an `X-Saasmail-Reconstructed: yes`
 response header.
+
+## Import mail
+
+**Settings → Data → Import mail** (admins). Bring years of mail into an inbox
+from an mbox file — Gmail Takeout, Thunderbird (ImportExportTools), Apple
+Mail, Fastmail and most providers export one — or a single `.eml`, up to 5 GB.
+Pick the file, the inbox it goes into, and which messages to take:
+
+- **Only mail to or from this inbox** (the default): a message whose From is
+  the inbox becomes a Sent message; one whose To, Cc, Bcc, `Delivered-To` or
+  `X-Original-To` names the inbox becomes received mail; anything else is
+  skipped and counted ("not addressed to this inbox").
+- **Everything as received**: every message not from the inbox is stored as
+  received by it, whoever it was addressed to — for mail exported from an
+  address that no longer exists.
+
+The inbox must already exist (a sender identity, or mail). The browser uploads
+the file in 32 MiB parts (a part that fails is retried three times; **Cancel
+upload** stops it), then the import runs in the background. Progress, the counts and
+the first 50 notes (skipped messages, dropped attachments) show in the list;
+you get a notice when it is done.
+
+**Imported mail is history.** It is stored the way live mail is (the same code:
+threading, conversations, attachments, the original bytes for JMAP and
+exports), but it arrives read, counts only in its sender's total (not unread,
+and their last activity never moves back in time), and fires no rules,
+notifications, webhooks, forwards or suggested replies — an import never
+auto-replies to a thousand old messages. It never trains the learning spam
+filter. A message's date is its `Date` header, else the mbox separator's date.
+
+**Labels become state.** Gmail's `X-Gmail-Labels` and saasmail's own
+`X-Saasmail-Labels` (from an [export](#export-a-mailbox)) are read, but only
+from the block of `X-GM-*`, `X-Gmail-*` and `X-Saasmail-*` lines the exporter
+puts above a message's own headers: a labels header the original sender wrote
+is ignored, so a message cannot file or star itself. `Spam` or
+`Junk` → Junk, `Trash` → Trash, no `Inbox` label (and not `Sent`) → archived,
+`Starred` → starred for you, and other labels → custom folders of the inbox,
+created on first use (untick **Create folders from labels** to skip that).
+Gmail's own `Important`, `Opened`, `Unread` and `Category …` labels are
+ignored. A message without a labels header lands in the Inbox. Gmail drafts
+(the `Draft` label) are skipped: they were never sent. Folder names match
+whatever their case. The state changes are recorded in the audit log as yours,
+on the `import` channel.
+
+**Duplicates are skipped.** A received message already in the inbox (same
+Message-ID) and a sent one already sent from it are counted as skipped, so
+importing the same file twice imports nothing new. A message without a
+Message-ID is given `<import-<sha-256 of its bytes>@saasmail.local>`, and a
+message sent through JMAP (whose row keeps the provider's Message-ID) is found
+by its own. Every imported row records its import (`import_job_id`).
+
+**Limits.** Attachments follow live mail's limits (50 per message, 25 MB in
+all); the rest are dropped with a note. A message larger than 32 MB is
+skipped with a note (Email Routing caps live mail at 25 MB), and so is one
+that fails three times in a row: the import goes on with the rest of the file
+(after ten such messages it stops as failed). Bodies longer than 250,000 characters are cut in the
+database (D1 rows are at most 2 MB); the whole message stays in R2, so its
+`.eml` and an export carry it in full. The uploaded file is deleted 24 hours
+after the import ends; an upload nobody finished is given up after 24 hours.
+Messages already imported stay when you cancel or delete an import.
+
+### Reading an mbox
+
+A message starts at a `From ` line at the start of the file or after an
+empty line, followed by a time (`From sender Sat Oct  3 14:02:00 2026`), so an
+unquoted body line such as "From here on…" after a blank line does not split a
+message. `mboxrd` quoting is undone (`>From ` loses one `>`); CRLF and LF files
+both work. A file that does not start with such a line is read as one message
+(`.eml`).
+
+### API
+
+Admin only, with a session or an admin's `sk_…` key.
+
+| Route                                                   | What it does                                                                                                                                                          |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/admin/imports`                               | `{ inbox, filename, size, direction?: "strict" \| "all_received", createFoldersFromLabels?: true }` → `201` with the import (`status: "uploading"`, `partsExpected`). |
+| `PUT /api/admin/imports/{id}/parts/{n}`                 | The raw bytes of part `n`: exactly 32 MiB, the last part what is left. `400 INVALID_PART_SIZE` otherwise; sending a part again replaces it.                           |
+| `POST /api/admin/imports/{id}/complete`                 | Starts the import (`202`); `400 PARTS_MISSING` names parts not uploaded yet. Records `import.started`.                                                                |
+| `GET /api/admin/imports`, `GET /api/admin/imports/{id}` | Imports newest first, with `bytesRead`, `processedMessages`, `importedMessages`, `skippedMessages` and `notes`.                                                       |
+| `DELETE /api/admin/imports/{id}`                        | Cancels an import or deletes a finished one's record and file.                                                                                                        |
+
+The import runs as an `async_jobs` row (`job_type = 'mail_import'`) in slices
+on `EMAIL_QUEUE` (one slice per queue batch, each stopping at 200 messages,
+about 450 D1 and R2 calls, or 20 seconds), reading the file from R2 8 MiB at a
+time from a byte cursor; a larger message is found by scanning for the next
+one and read on its own. A retried slice is safe: a message it already stored
+is found, counted once and labelled again. It records
+`import.completed` with the counts. The hourly cron queues again an import
+that has stopped moving, as for exports.

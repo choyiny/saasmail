@@ -63,6 +63,8 @@ export const AUDIT_ACTIONS = {
   exportStarted: "export.started",
   exportCompleted: "export.completed",
   exportDownloaded: "export.downloaded",
+  importStarted: "import.started",
+  importCompleted: "import.completed",
   campaignStarted: "campaign.started",
   campaignCancelled: "campaign.cancelled",
   agentActionExecuted: "agent.action_executed",

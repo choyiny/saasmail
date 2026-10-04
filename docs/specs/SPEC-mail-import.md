@@ -1,6 +1,6 @@
 # SPEC: Import mail from mbox and .eml
 
-Stage 11 (data ownership), slice 2 of 3. Depends on `SPEC-mail-export.md` (shares the Data UI, the
+Stage 11 (data ownership), slice 2 of 3. Depends on `docs/archive/SPEC-mail-export.md` (shares the Data UI, the
 `async_jobs` columns and `docs/data.md`) and `docs/archive/SPEC-audit-log.md`. Label `minor`.
 
 ## Why
@@ -120,3 +120,60 @@ new `src/components/data/ImportDialog.tsx`.
   label mapping, limits), `docs/architecture.md` (the storage helper), `AGENTS.md` ("inbound storage
   lives in `lib/inbound/`; the handler and the importer both call it").
 - CHANGELOG `### Added`: **Import mail from mbox and .eml.** …
+
+## Spec changes (made while building it)
+
+The six decisions stand. What the code does differently from the sections above, and why:
+
+1. **Migration 0082 adds `import_job_id`** to `emails` and `sent_emails`: the import that stored the
+   row. A slice that dies before saving its progress leaves stored rows behind; the retry finds them
+   by this id, counts them as imported and applies their labels (a timestamp could not tell two imports
+   in the same second apart). `job_type` and `status` are TypeScript enums with no CHECK constraint, so
+   `mail_import` and `uploading` need no SQL.
+2. **The helpers' signatures.** `storeReceivedMessage(db, env, { parsed, inbox, fromAddress,
+receivedAt, now, source, ourDomains, spamProbability? })` returns the stored and dropped attachments
+   too; `storeSentMessage(db, env, { parsed, inbox, sentAt, now, ourDomains })` returns null for a
+   message with no recipient at all. The handler still describes the first 50 attachments to webhooks
+   and forwards, as before. An import fills a person's missing name only (an old message must not rename
+   them) and never moves their last activity back in time.
+3. **`parseRawEmail(bytes, envelope?)`** is the raw-bytes entry point; `ParsedEmail` gains `toList`,
+   `bcc` and `date` for it.
+4. **Bodies are cut to 250,000 characters** for imported rows: D1 takes at most 2 MB per row, and a
+   9 MB text body failed the whole import. The original bytes stay in R2. A message still too large
+   for a row is skipped with a note instead of failing the import.
+5. **The reader** takes `(window, offset, final)` and returns `{ messages, nextOffset }`; a separator
+   must carry a time (so an unquoted "From here on" after a blank line does not split a message), only
+   whole lines count (a cut-off candidate is decided by the next window), and `mboxStart` skips a byte
+   order mark and blank lines and tells an mbox from a single message. A message that does not end in
+   the 8 MiB window is found by scanning for the next separator a window at a time, then read alone, so
+   a slice never holds more than one window or one message; **the largest message is 32 MiB**, not 64
+   (a 40 MB message and its parse would not fit the Worker's 128 MB); data that is not a message is
+   skipped to the next separator with a note.
+6. **Labels are applied once per slice**, grouped (a few audit rows per slice instead of one per
+   message), as the importing admin in an audit context `{ actorType: "user", channel: "import" }`;
+   `setMailboxState` already skipped training on that channel. Gmail's `Important`, `Opened`, `Unread`,
+   `Chat`, `Draft(s)` and `Category …` labels are not folders. Starred is the importer's; labels on
+   sent mail only set Trash and Starred.
+7. **Slices are claimed** with the export's lease (moved to `lib/jobs/slices.ts`, shared). A message
+   that throws saves the slice's progress up to it and keeps the slice number, so the retry starts at
+   that message and counts nothing twice. One export or import slice runs per queue batch. The hourly
+   reaper queues again an import idle for 15 minutes (three times, then fails it), deletes the file a
+   day after the import ends and fails an upload unfinished for a day.
+8. **Notes** number messages from 1, as people count them.
+9. **UI:** an Import mail card in Settings → Data (`src/components/DataImports.tsx`), admins only,
+   inline rather than a dialog; parts upload one after another, each retried three times.
+10. **Notice:** a new `import_done` realtime event on the notifications hub, with a push naming the
+    counts.
+11. **Lists** are newest first with `rowid` breaking a tie: two imports (or exports) started in the
+    same second came back in either order. The exports list had the same bug and is fixed here too.
+12. **Found by review:** labels are read only from the leading `X-GM-*` / `X-Gmail-*` / `X-Saasmail-*`
+    block an exporter writes (a header the sender wrote lower down is ignored, so a message cannot file
+    or star itself); Gmail drafts are skipped; a slice also stops on a budget of about 450 D1 and R2
+    calls (a slice of 200 messages with images could pass an invocation's limit); a message whose last
+    attempt fails is skipped with a note and the import goes on (ten such, and it fails); an import's
+    row and its person's count are written in one batch, and a failed store removes the files it wrote;
+    D1's `SQLITE_TOOBIG` is found through Drizzle's `cause`; the strict rule matches `Delivered-To` and
+    `X-Original-To` exactly, in every occurrence; folder names match whatever their case; a JMAP send is
+    found by its own Message-ID; only an existing inbox (a sender identity, or mail) can be imported
+    into; the upload does not resend a part the server refused, waits between tries, and can be
+    cancelled.

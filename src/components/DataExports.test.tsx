@@ -1,4 +1,4 @@
-// docs/specs/SPEC-mail-export.md: Settings → Data, exporting a mailbox.
+// docs/archive/SPEC-mail-export.md: Settings → Data, exporting a mailbox.
 import {
   act,
   fireEvent,

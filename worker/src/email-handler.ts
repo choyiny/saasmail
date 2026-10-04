@@ -1,15 +1,16 @@
-import { and, eq, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
+import { and, eq } from "drizzle-orm";
 import { createDb } from "./db/client";
-import { people } from "./db/people.schema";
 import { emails } from "./db/emails.schema";
-import { attachments } from "./db/attachments.schema";
 import { inboxPermissions } from "./db/inbox-permissions.schema";
 import { senderIdentities } from "./db/sender-identities.schema";
 import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
+import {
+  MAX_ATTACHMENTS,
+  domainsOf,
+  storeReceivedMessage,
+} from "./lib/inbound/store-received";
 import { isBlocked } from "./lib/blocklist";
-import { computeConversationId, externalsOnly } from "./lib/conversation-id";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 import {
   MAX_ADMIN_FANOUT,
@@ -41,9 +42,6 @@ import {
 } from "./lib/inbound-rejection";
 
 export { isAutomatedInbound } from "./lib/automated-inbound";
-
-const MAX_ATTACHMENTS = 50;
-const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
 
 export function shouldEnqueueSuggestedReply(options: {
   agentAutodraft: number | null | undefined;
@@ -199,171 +197,26 @@ export async function handleEmail(
     return;
   }
 
-  const senderAuthenticated =
-    parsed.auth.spf === "pass" ||
-    parsed.auth.dkim === "pass" ||
-    parsed.auth.dmarc === "pass";
-
-  // Upsert person — only update name if sender passes authentication
-  const personId = nanoid();
-  await db
-    .insert(people)
-    .values({
-      id: personId,
-      email: fromAddressCanonical,
-      name: parsed.from.name || null,
-      lastEmailAt: now,
-      unreadCount: 1,
-      totalCount: 1,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: people.email,
-      set: {
-        ...(senderAuthenticated
-          ? { name: sql`COALESCE(${parsed.from.name || null}, ${people.name})` }
-          : {}),
-        lastEmailAt: now,
-        unreadCount: sql`${people.unreadCount} + 1`,
-        totalCount: sql`${people.totalCount} + 1`,
-        updatedAt: now,
-      },
-    });
-
-  // Get the actual person ID (could be existing). Lookup by the
-  // canonical (lowercased) email so legacy mixed-case rows still
-  // resolve to the same person.
-  const personRow = await db
-    .select({ id: people.id })
-    .from(people)
-    .where(eq(people.email, fromAddressCanonical))
-    .limit(1);
-  const actualPersonId = personRow[0]!.id;
-
-  // Process attachments first (need IDs for CID rewriting)
-  const cidMap: Record<string, string> = {};
-  const emailId = nanoid();
-
-  // Enforce attachment limits
-  const cappedAttachments = parsed.attachments.slice(0, MAX_ATTACHMENTS);
-  let totalAttachmentBytes = 0;
-
-  for (const att of cappedAttachments) {
-    totalAttachmentBytes += att.content.byteLength;
-    if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
-      console.log(
-        `Attachment size limit exceeded for email from ${parsed.from.address}, skipping remaining attachments`,
-      );
-      break;
-    }
-
-    const safeFilename = sanitizeFilename(att.filename);
-    const attachmentId = nanoid();
-    const r2Key = `attachments/${emailId}/${attachmentId}/${safeFilename}`;
-
-    await env.R2.put(r2Key, att.content, {
-      httpMetadata: { contentType: att.contentType },
-    });
-
-    const isInline = att.disposition === "inline" && !!att.contentId;
-
-    await db.insert(attachments).values({
-      id: attachmentId,
-      emailId,
-      kind: "inbound",
-      filename: safeFilename,
-      contentType: att.contentType,
-      size: att.content.byteLength,
-      r2Key,
-      contentId: isInline ? att.contentId : null,
-      createdAt: now,
-    });
-
-    if (isInline && att.contentId) {
-      const cleanCid = att.contentId.replace(/^<|>$/g, "");
-      cidMap[cleanCid] = attachmentId;
-    }
-  }
-
-  // Rewrite CID references in HTML body
-  let bodyHtml = parsed.bodyHtml;
-  if (bodyHtml && Object.keys(cidMap).length > 0) {
-    for (const [cid, attachmentId] of Object.entries(cidMap)) {
-      bodyHtml = bodyHtml.replace(
-        new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi"),
-        `/api/attachments/${attachmentId}/inline`,
-      );
-    }
-  }
-
-  // Compute the conversation_id, if this is a multi-participant thread.
-  // External participants = the sender + everyone on the Cc line, minus
-  // any addresses that match one of our sender_identities (those are
-  // "internal" team members and don't change the group identity).
-  const ourDomains = Array.from(
-    new Set(
-      identityRows
-        .map((r) => {
-          const at = r.email.lastIndexOf("@");
-          return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-        })
-        .filter(Boolean),
-    ),
-  );
-  const allParticipants = [
-    fromAddressCanonical,
-    ...parsed.cc.map((c) => c.email),
-  ];
-  const externals = externalsOnly(allParticipants, ourDomains);
-  const conversationId = await computeConversationId(
-    recipientCanonical,
-    externals,
-  );
-
-  // Insert email (with rewritten HTML and auth results). Store the
-  // canonical (lowercased) recipient so it matches the conversation
-  // group key.
-  // The message exactly as received, for JMAP's blobId. Written before the row
-  // so a new Email never gains a blobId after a client has seen it; a failed
-  // write stores the mail without one rather than losing it.
-  let rawR2Key: string | null = `inbound-raw/${emailId}.eml`;
-  try {
-    await env.R2.put(rawR2Key, parsed.raw, {
-      httpMetadata: { contentType: "message/rfc822" },
-    });
-  } catch (err) {
-    console.error(`[inbound] raw message not stored for ${emailId}:`, err);
-    rawR2Key = null;
-  }
-
-  await db.insert(emails).values({
-    id: emailId,
+  // Stored exactly as the importer stores history, but as live mail: unread,
+  // counted as unread for its person, with the filter's score.
+  const {
+    emailId,
     personId: actualPersonId,
-    recipient: recipientCanonical,
-    subject: parsed.subject,
-    bodyHtml,
-    bodyText: parsed.bodyText,
-    rawHeaders: JSON.stringify(parsed.headers),
-    messageId: parsed.messageId,
-    // postal-mime keys headers in lowercase; JMAP exposes these as
-    // inReplyTo/references.
-    inReplyTo: parsed.headers["in-reply-to"]?.trim() || null,
-    referencesHeader: parsed.headers["references"]?.trim() || null,
-    rawR2Key,
-    rawSize: rawR2Key ? parsed.raw.byteLength : null,
-    spf: parsed.auth.spf,
-    dkim: parsed.auth.dkim,
-    dmarc: parsed.auth.dmarc,
-    spamScore: parsed.spamScore,
-    spamProbability,
-    isRead: 0,
-    cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
-    replyTo: parsed.replyTo.length ? JSON.stringify(parsed.replyTo) : null,
     conversationId,
+    bodyHtml,
+  } = await storeReceivedMessage(db, env, {
+    parsed,
+    inbox: recipientCanonical,
+    fromAddress: fromAddressCanonical,
     receivedAt: now,
-    createdAt: now,
+    now,
+    source: "inbound",
+    ourDomains: domainsOf(identityRows.map((r) => r.email)),
+    spamProbability,
   });
+  // The webhook and the forward describe the first 50 attachments, as they
+  // always have.
+  const cappedAttachments = parsed.attachments.slice(0, MAX_ATTACHMENTS);
 
   let autoFiledSpam = false;
   if (

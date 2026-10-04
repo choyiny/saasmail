@@ -98,6 +98,11 @@ before deleting the message rows so personal state, shared state, folder
 memberships, suggested replies and learning-filter training rows
 (`spam_training`) cannot become orphans.
 
+Inbound storage lives in `worker/src/lib/inbound/`: the live handler
+(`email-handler.ts`) and the mail importer both call `storeReceivedMessage()`,
+and the importer stores mail the inbox sent with `storeSentMessage()`. Change
+how a received message is stored there, not in either caller.
+
 ## Native agent runtime dependencies
 
 The native agent stack is intentionally **exact-pinned** in `package.json`:

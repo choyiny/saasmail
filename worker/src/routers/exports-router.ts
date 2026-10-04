@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { asyncJobs, type AsyncJob } from "../db/async-jobs.schema";
 import { AUDIT_ACTIONS } from "../lib/audit/events";
 import { recordAudit } from "../lib/audit/record";
@@ -229,7 +229,8 @@ exportsRouter.openapi(listExportsRoute, async (c) => {
             eq(asyncJobs.requestedBy, c.get("user").id),
           ),
     )
-    .orderBy(desc(asyncJobs.createdAt))
+    // Newest first; rowid orders two started in the same second.
+    .orderBy(desc(asyncJobs.createdAt), sql`rowid DESC`)
     .limit(50);
   return c.json(
     {

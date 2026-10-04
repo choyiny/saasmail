@@ -2,8 +2,8 @@
 -- Users are created via HTTP APIs in e2e/global-setup.ts.
 
 -- Clean tables (idempotent for repeated runs)
--- Mailbox exports (other async jobs belong to lists and campaigns below).
-DELETE FROM async_jobs WHERE job_type = 'mail_export';
+-- Mailbox exports and imports (other async jobs belong to lists and campaigns below).
+DELETE FROM async_jobs WHERE job_type IN ('mail_export', 'mail_import');
 DELETE FROM send_counters;
 DELETE FROM auth_rate_limits;
 DELETE FROM spam_training;

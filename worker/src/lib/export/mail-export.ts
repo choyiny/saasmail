@@ -11,6 +11,17 @@ import { encodeCursor } from "../messages/cursor";
 import { queryMessages } from "../messages/query";
 import type { UnifiedMessage } from "../messages/types";
 import {
+  IDLE_SECONDS,
+  SliceBusyError,
+  changesOf,
+  claimSlice,
+  paramsOf,
+  recoverIdleJob,
+  releaseClaim,
+  stillClaimed,
+  type SliceState,
+} from "../jobs/slices";
+import {
   loadRenderHints,
   mboxEntry,
   renderHintKey,
@@ -38,15 +49,13 @@ export interface MailExportRequest {
 }
 
 /** The job's `params`: the request, and where the upload is. */
-export interface ExportParams {
+export interface ExportParams extends SliceState {
   inbox: string;
   from: number | null;
   to: number | null;
   includeTrash: boolean;
   includeCampaignSends: boolean;
   uploadId: string;
-  /** The slice that runs next; a queued message for another is stale. */
-  slice: number;
   /** Uploaded parts, each exactly PART_BYTES. */
   parts: { partNumber: number; etag: string }[];
   /** Bytes carried to the next slice, less than a part. */
@@ -55,11 +64,6 @@ export interface ExportParams {
   bytes: number;
   /** Every message is rendered; only the last part and completion are left. */
   finishing: boolean;
-  /** The run holding the slice now, and until when (Unix ms). */
-  lease: string | null;
-  leaseUntil: number | null;
-  /** Times the hourly run queued an export that had stopped moving. */
-  recoveries?: number;
 }
 
 /** Limits of one slice, checked after each message. */
@@ -69,14 +73,8 @@ const SLICE_MS = 20_000;
 const PAGE_SIZE = 50;
 /** Every part but the last is this size; R2 wants at least 5 MiB. */
 export const PART_BYTES = 5 * 1024 * 1024;
-/** Long enough for a slice; a crashed run frees its claim after this. */
-const LEASE_MS = 120_000;
 /** How long a finished export can be downloaded. */
 export const EXPORT_TTL_SECONDS = 7 * 24 * 60 * 60;
-/** A running export not touched for this long has lost its queue message. */
-const IDLE_SECONDS = 15 * 60;
-/** Queued again at most this often before it counts as failed. */
-const MAX_RECOVERIES = 3;
 
 const objectKey = (jobId: string, inbox: string) =>
   `exports/${jobId}/${inbox}.mbox`;
@@ -89,20 +87,9 @@ export class ExportRunningError extends Error {
   }
 }
 
-/** Another delivery of this slice holds the claim; try again later. */
-export class ExportSliceBusyError extends Error {
-  constructor(jobId: string) {
-    super(`export ${jobId}: the slice is claimed by another run`);
-    this.name = "ExportSliceBusyError";
-  }
-}
-
 export function exportParams(job: AsyncJob): ExportParams {
-  return JSON.parse(job.params ?? "{}") as ExportParams;
+  return paramsOf<ExportParams>(job);
 }
-
-const changesOf = (result: unknown) =>
-  Number((result as D1Result).meta?.changes ?? 0);
 
 /** Deletes every object under an export's prefix but `keep`. Best-effort. */
 async function deleteExportObjects(
@@ -308,47 +295,6 @@ async function customFolderNames(
 }
 
 /**
- * Claims the slice for this run, or says why not: `stale` when the job has
- * moved past it (a duplicate or old delivery), `busy` while another run of
- * it holds the claim.
- */
-async function claimSlice(
-  db: Db,
-  job: AsyncJob,
-  slice: number,
-  nowMs: number,
-): Promise<{ params: ExportParams; raw: string } | "stale" | "busy"> {
-  const params = exportParams(job);
-  if (params.slice !== slice) return "stale";
-  if (params.lease && (params.leaseUntil ?? 0) > nowMs) return "busy";
-  const claimed: ExportParams = {
-    ...params,
-    lease: nanoid(),
-    leaseUntil: nowMs + LEASE_MS,
-  };
-  const raw = JSON.stringify(claimed);
-  const result = await db
-    .update(asyncJobs)
-    .set({ params: raw, updatedAt: Math.floor(nowMs / 1000) })
-    .where(
-      and(
-        eq(asyncJobs.id, job.id),
-        eq(asyncJobs.status, "running"),
-        eq(asyncJobs.params, job.params ?? ""),
-      ),
-    );
-  return changesOf(result) === 1 ? { params: claimed, raw } : "busy";
-}
-
-/** This run's claim on the job, still current and the job still running. */
-const stillClaimed = (jobId: string, claimedRaw: string) =>
-  and(
-    eq(asyncJobs.id, jobId),
-    eq(asyncJobs.status, "running"),
-    eq(asyncJobs.params, claimedRaw),
-  );
-
-/**
  * One slice of an export. Renders the next messages (at most 200, about
  * 8 MiB, or 20 seconds' worth) as mbox entries after what the last slice
  * carried over, uploads every whole part, and carries the rest. Returns the
@@ -374,9 +320,9 @@ export async function runMailExportSlice(
   if (!job || job.jobType !== "mail_export" || job.status !== "running") {
     return null;
   }
-  const claim = await claimSlice(db, job, slice, now());
+  const claim = await claimSlice<ExportParams>(db, job, slice, now());
   if (claim === "stale") return null;
-  if (claim === "busy") throw new ExportSliceBusyError(jobId);
+  if (claim === "busy") throw new SliceBusyError(jobId);
   const { params, raw } = claim;
 
   try {
@@ -386,14 +332,7 @@ export async function runMailExportSlice(
     }
     return await renderSlice(db, env, job, params, raw, now);
   } catch (error) {
-    // Free the claim so the retry can run at once.
-    await db
-      .update(asyncJobs)
-      .set({
-        params: JSON.stringify({ ...params, lease: null, leaseUntil: null }),
-      })
-      .where(stillClaimed(jobId, raw))
-      .catch(() => {});
+    await releaseClaim(db, jobId, params, raw);
     throw error;
   }
 }
@@ -714,35 +653,14 @@ export async function reapMailExports(
   let resumed = 0;
   let failed = 0;
   for (const job of idle) {
-    const params = exportParams(job);
-    if (params.lease && (params.leaseUntil ?? 0) > nowSeconds * 1000) continue;
-    const recoveries = params.recoveries ?? 0;
-    if (recoveries >= MAX_RECOVERIES) {
+    const recovery = await recoverIdleJob<ExportParams>(db, job, nowSeconds);
+    if (recovery.action === "fail") {
       await failMailExport(db, env, job.id, "stalled");
       failed++;
-      continue;
+    } else if (recovery.action === "resume") {
+      await resumeMailExport(db, env, job.id, recovery.params.slice);
+      resumed++;
     }
-    const result = await db
-      .update(asyncJobs)
-      .set({
-        params: JSON.stringify({
-          ...params,
-          lease: null,
-          leaseUntil: null,
-          recoveries: recoveries + 1,
-        }),
-        updatedAt: nowSeconds,
-      })
-      .where(
-        and(
-          eq(asyncJobs.id, job.id),
-          eq(asyncJobs.status, "running"),
-          eq(asyncJobs.params, job.params ?? ""),
-        ),
-      );
-    if (changesOf(result) !== 1) continue;
-    await resumeMailExport(db, env, job.id, params.slice);
-    resumed++;
   }
   return { expired: finished.length, resumed, failed };
 }

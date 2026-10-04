@@ -60,6 +60,8 @@ export const emails = sqliteTable(
      * See migration 0022.
      */
     conversationId: text("conversation_id"),
+    /** The mail import that stored this message; null for live mail. */
+    importJobId: text("import_job_id"),
     receivedAt: integer("received_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },

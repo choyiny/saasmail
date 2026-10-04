@@ -18,15 +18,22 @@ export const asyncJobs = sqliteTable(
   {
     id: text("id").primaryKey(),
     jobType: text("job_type", {
-      enum: ["campaign_fan_out", "list_import", "mail_export"],
+      enum: ["campaign_fan_out", "list_import", "mail_export", "mail_import"],
     }).notNull(),
     /**
      * FK lists.id for list_import, campaigns.id for campaign_fan_out; the
-     * inbox address for mail_export.
+     * inbox address for mail_export and mail_import.
      */
     refId: text("ref_id").notNull(),
     status: text("status", {
-      enum: ["running", "completed", "failed", "cancelled", "expired"],
+      enum: [
+        "uploading",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "expired",
+      ],
     })
       .notNull()
       .default("running"),
@@ -46,9 +53,12 @@ export const asyncJobs = sqliteTable(
     skippedCount: integer("skipped_count").notNull().default(0),
     /** JSON array of {row, reason}, capped at the first 50 entries. */
     errorSummary: text("error_summary"),
-    /** mail_export: the request and the upload's state, as JSON. */
+    /** mail_export, mail_import: the request and the upload's state, as JSON. */
     params: text("params"),
-    /** mail_export: who asked; only they (and admins) may download it. */
+    /**
+     * mail_export: who asked; only they (and admins) may download it.
+     * mail_import: the admin importing, whom the import acts as.
+     */
     requestedBy: text("requested_by"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),

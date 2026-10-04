@@ -11,21 +11,13 @@ import {
   type MailExport,
 } from "@/lib/api";
 import { onExportReady } from "@/lib/export-events";
+import { formatBytes } from "@/lib/format-bytes";
+import DataImports from "@/components/DataImports";
+
+export { formatBytes };
 
 /** How often the list refreshes while an export runs. */
 const POLL_MS = 3_000;
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value.toFixed(value < 100 ? 1 : 0)} ${units[unit]}`;
-}
 
 function formatDay(seconds: number): string {
   return new Date(seconds * 1000).toLocaleDateString([], {
@@ -62,7 +54,12 @@ function statusLine(item: MailExport): string {
  * Settings → Data: export a mailbox you can read as an mbox file, and the
  * exports you asked for (all of them for admins).
  */
-export default function DataExports() {
+export default function DataExports({
+  showImports = false,
+}: {
+  /** Admins: the Import mail card too. */
+  showImports?: boolean;
+}) {
   const [searchParams] = useSearchParams();
   const [inboxes, setInboxes] = useState<string[]>([]);
   const [inbox, setInbox] = useState(searchParams.get("export") ?? "");
@@ -324,6 +321,7 @@ export default function DataExports() {
           </div>
         )}
       </div>
+      {showImports && <DataImports inboxes={inboxes} />}
     </section>
   );
 }

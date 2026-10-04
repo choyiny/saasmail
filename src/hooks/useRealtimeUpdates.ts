@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { dispatchSuggestedReplyReady } from "@/lib/suggested-reply-events";
-import { dispatchExportReady } from "@/lib/export-events";
+import { dispatchExportReady, dispatchImportDone } from "@/lib/export-events";
 import { showToast } from "@/lib/toast";
 
 const INITIAL_RECONNECT_MS = 1_000;
@@ -86,6 +86,25 @@ export function useRealtimeUpdates(
             showToast({
               kind: "success",
               message: `Your export of ${data.inbox} is ready.`,
+              action: {
+                label: "Open",
+                onClick: (dismiss) => {
+                  dismiss();
+                  window.location.assign("/settings#data");
+                },
+              },
+            });
+          } else if (
+            data.type === "import_done" &&
+            typeof data.inbox === "string" &&
+            typeof data.jobId === "string"
+          ) {
+            // A mail import this admin started has finished.
+            dispatchImportDone({ inbox: data.inbox, jobId: data.jobId });
+            callbackRef.current({ inbox: data.inbox });
+            showToast({
+              kind: "success",
+              message: `Your import into ${data.inbox} is done.`,
               action: {
                 label: "Open",
                 onClick: (dismiss) => {

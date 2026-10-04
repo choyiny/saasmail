@@ -179,7 +179,7 @@ export async function fileWithAi(
  * Tells the open tabs of everyone who can see the inbox to reload its mail,
  * the way a new suggested reply is announced. Best-effort.
  */
-async function notifyMailRefresh(
+export async function notifyMailRefresh(
   db: Db,
   env: CloudflareBindings,
   inbox: string,

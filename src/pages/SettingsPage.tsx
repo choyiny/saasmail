@@ -37,13 +37,13 @@ export default function SettingsPage() {
     <PageContainer>
       <PageHeader
         title="Settings"
-        subtitle="Manage notifications, display preferences, mailbox exports, and (admin only) sending and app branding."
+        subtitle="Manage notifications, display preferences, mailbox exports, and (admin only) mail imports, sending and app branding."
       />
 
       <div className="max-w-3xl space-y-8">
         <NotificationsSection />
         <DisplayPreferencesSection />
-        <DataExports />
+        <DataExports showImports={isAdmin} />
         {isAdmin && <SendingSettings />}
         {isAdmin && <AppBrandingSection />}
       </div>

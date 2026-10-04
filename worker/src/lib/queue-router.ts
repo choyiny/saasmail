@@ -20,8 +20,13 @@ import {
 } from "../jmap/release";
 import { drainHeldOutbox, type OutboxDrainMessage } from "./outbox";
 import { fileWithAi, type AiFileMessage } from "./triage/ai-file";
+import { SliceBusyError } from "./jobs/slices";
 import {
-  ExportSliceBusyError,
+  runMailImportSlice,
+  skipStuckMessage,
+  type MailImportMessage,
+} from "./import/mail-import";
+import {
   failMailExport,
   runMailExportSlice,
   type MailExportMessage,
@@ -51,11 +56,12 @@ export type QueueMessageBody =
   | ReleaseMessage
   | OutboxDrainMessage
   | AiFileMessage
-  | MailExportMessage;
+  | MailExportMessage
+  | MailImportMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
-/** A slice that failed this often fails its export. */
+/** A slice that failed this often fails its export or import. */
 export const MAIL_EXPORT_MAX_ATTEMPTS = 3;
 
 export type QueueMessageKind =
@@ -68,6 +74,7 @@ export type QueueMessageKind =
   | "outbox_drain"
   | "ai_file"
   | "mail_export"
+  | "mail_import"
   | "unknown";
 
 /**
@@ -120,9 +127,9 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
       ? "ai_file"
       : "unknown";
   }
-  if (b.type === "mail_export") {
+  if (b.type === "mail_export" || b.type === "mail_import") {
     return typeof b.jobId === "string" && typeof b.slice === "number"
-      ? "mail_export"
+      ? b.type
       : "unknown";
   }
   return "unknown";
@@ -151,9 +158,9 @@ export async function handleQueueBatch(
   const db = createDb(env);
   const sender = createEmailSender(env);
   const suggestedReplyRunner = overrides.runSuggestedReply ?? runSuggestedReply;
-  // An export slice makes a few hundred reads; one per batch keeps the
-  // invocation well inside its subrequest budget.
-  let exportSliceRan = false;
+  // An export or import slice makes a few hundred reads and writes; one per
+  // batch keeps the invocation well inside its subrequest budget.
+  let sliceRan = false;
 
   for (const msg of batch.messages) {
     const kind = classifyQueueMessage(msg.body);
@@ -192,24 +199,22 @@ export async function handleQueueBatch(
       } else if (kind === "ai_file") {
         // A model error throws, and the message is retried.
         await fileWithAi(db, env, msg.body as AiFileMessage);
-      } else if (kind === "mail_export") {
-        const body = msg.body as MailExportMessage;
-        if (exportSliceRan) {
+      } else if (kind === "mail_export" || kind === "mail_import") {
+        const body = msg.body as MailExportMessage | MailImportMessage;
+        if (sliceRan) {
           // Back on the queue as a new message: no attempt is used up.
           await env.EMAIL_QUEUE.send(body);
           msg.ack();
           continue;
         }
-        exportSliceRan = true;
+        sliceRan = true;
         // One slice; it says which comes next.
-        const next = await runMailExportSlice(db, env, body.jobId, body.slice);
+        const next =
+          body.type === "mail_export"
+            ? await runMailExportSlice(db, env, body.jobId, body.slice)
+            : await runMailImportSlice(db, env, body.jobId, body.slice);
         if (next !== null) {
-          const message: MailExportMessage = {
-            type: "mail_export",
-            jobId: body.jobId,
-            slice: next,
-          };
-          await env.EMAIL_QUEUE.send(message);
+          await env.EMAIL_QUEUE.send({ ...body, slice: next });
         }
       } else if (kind === "outbox_drain") {
         // After a resume: a batch of held mail, then the next batch, then the
@@ -234,25 +239,41 @@ export async function handleQueueBatch(
       }
       msg.ack();
     } catch (err) {
-      if (kind === "mail_export" && err instanceof ExportSliceBusyError) {
+      const sliced = kind === "mail_export" || kind === "mail_import";
+      if (sliced && err instanceof SliceBusyError) {
         // Another run holds the slice; it queues the next one itself. Come
         // back once its claim has run out, in case it died (if this message
-        // runs out of attempts, the hourly run queues the export again).
+        // runs out of attempts, the hourly run queues the job again).
         msg.retry({ delaySeconds: 150 });
-      } else if (
-        kind === "mail_export" &&
-        msg.attempts >= MAIL_EXPORT_MAX_ATTEMPTS
-      ) {
+      } else if (sliced && msg.attempts >= MAIL_EXPORT_MAX_ATTEMPTS) {
         console.error(
-          `[queue] mail_export failed after ${msg.attempts} attempts:`,
+          `[queue] ${kind} failed after ${msg.attempts} attempts:`,
           err,
         );
-        await failMailExport(
-          db,
-          env,
-          (msg.body as MailExportMessage).jobId,
-          err instanceof Error ? err.message : "export failed",
-        ).catch((error) => console.error("[queue] export not failed:", error));
+        const jobId = (msg.body as MailExportMessage | MailImportMessage).jobId;
+        const reason = err instanceof Error ? err.message : `${kind} failed`;
+        if (kind === "mail_export") {
+          await failMailExport(db, env, jobId, reason).catch((error) =>
+            console.error("[queue] export not failed:", error),
+          );
+        } else {
+          // One message that can never be stored must not stop the rest of
+          // the file: skip it with a note and go on.
+          const next = await skipStuckMessage(db, env, jobId, reason).catch(
+            (error) => {
+              console.error("[queue] import message not skipped:", error);
+              return null;
+            },
+          );
+          if (next !== null) {
+            const message: MailImportMessage = {
+              type: "mail_import",
+              jobId,
+              slice: next,
+            };
+            await env.EMAIL_QUEUE.send(message);
+          }
+        }
         msg.ack();
       } else if (
         kind === "suggest_reply" &&

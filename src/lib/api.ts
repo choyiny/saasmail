@@ -2454,3 +2454,78 @@ export async function deleteExport(id: string): Promise<void> {
 export function exportDownloadUrl(id: string): string {
   return `/api/exports/${encodeURIComponent(id)}/download`;
 }
+
+export type MailImportStatus =
+  | "uploading"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+export interface MailImport {
+  id: string;
+  inbox: string;
+  filename: string;
+  status: MailImportStatus;
+  size: number;
+  bytesRead: number;
+  processedMessages: number;
+  importedMessages: number;
+  skippedMessages: number;
+  direction: "strict" | "all_received";
+  createFoldersFromLabels: boolean;
+  partSize: number;
+  partsExpected: number;
+  partsUploaded: number;
+  /** Skipped messages and dropped attachments, by message number (first 50). */
+  notes: { row: number; reason: string }[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchImports(): Promise<MailImport[]> {
+  const body = await apiFetch<{ imports: MailImport[] }>("/api/admin/imports");
+  return body.imports;
+}
+
+export async function startImport(input: {
+  inbox: string;
+  filename: string;
+  size: number;
+  direction: "strict" | "all_received";
+  createFoldersFromLabels: boolean;
+}): Promise<MailImport> {
+  return apiFetch("/api/admin/imports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function uploadImportPart(
+  id: string,
+  partNumber: number,
+  bytes: Blob,
+): Promise<void> {
+  await apiFetch(
+    `/api/admin/imports/${encodeURIComponent(id)}/parts/${partNumber}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: bytes,
+    },
+  );
+}
+
+export async function completeImport(id: string): Promise<MailImport> {
+  return apiFetch(`/api/admin/imports/${encodeURIComponent(id)}/complete`, {
+    method: "POST",
+  });
+}
+
+export async function deleteImport(id: string): Promise<void> {
+  await apiFetch(`/api/admin/imports/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
