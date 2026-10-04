@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -620,6 +622,15 @@ export async function beginCampaignSend(
     jobId,
   };
   await env.EMAIL_QUEUE.send(message);
+  // Started by a person, or by cron for a scheduled campaign.
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.campaignStarted,
+    targetType: "campaign",
+    targetId: campaignId,
+    inbox: campaign.fromAddress,
+    summary: `Started sending the campaign '${campaign.name}' to ${target} subscribers`,
+    details: { listId: campaign.listId, recipients: target },
+  });
   return null;
 }
 
@@ -754,6 +765,15 @@ campaignsRouter.openapi(scheduleRoute, async (c) => {
     .update(campaigns)
     .set({ status: "scheduled", scheduledAt, updatedAt: now() })
     .where(eq(campaigns.id, id));
+  // Cron starts it later as the system; this row says who decided it.
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.campaignScheduled,
+    targetType: "campaign",
+    targetId: id,
+    inbox: campaign.fromAddress,
+    summary: `Scheduled the campaign '${campaign.name}' for ${new Date(scheduledAt * 1000).toISOString()}`,
+    details: { scheduledAt },
+  });
   const updated = await db
     .select()
     .from(campaigns)
@@ -809,6 +829,14 @@ campaignsRouter.openapi(cancelRoute, async (c) => {
         eq(asyncJobs.status, "running"),
       ),
     );
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.campaignCancelled,
+    targetType: "campaign",
+    targetId: id,
+    inbox: campaign.fromAddress,
+    summary: `Cancelled the campaign '${campaign.name}' (it was ${campaign.status})`,
+    details: { previousStatus: campaign.status },
+  });
 
   const updated = await db
     .select()
@@ -1002,7 +1030,17 @@ campaignsRouter.openapi(testSendRoute, async (c) => {
   });
 
   // No campaign_recipients row, no stats change: a test must never look like
-  // delivery in the numbers.
+  // delivery in the numbers. It is still mail sent under the list's identity.
+  if (result.delivered.length > 0) {
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.mailSent,
+      targetType: "campaign",
+      targetId: campaign.id,
+      inbox: campaign.fromAddress,
+      summary: `Sent a test of the campaign '${campaign.name}' to ${to} from ${campaign.fromAddress}`,
+      details: { to, test: true },
+    });
+  }
   return c.json({ sent: result.delivered.length > 0 });
 });
 

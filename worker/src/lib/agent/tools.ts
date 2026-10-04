@@ -1,3 +1,8 @@
+import { agentActor } from "../audit/actors";
+import { runWithAudit } from "../audit/context";
+import { auditListMember, auditSequenceCancelled } from "../audit/crm-events";
+import { AUDIT_ACTIONS } from "../audit/events";
+import { recordAudit } from "../audit/record";
 import { and, eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -100,6 +105,8 @@ export type AgentToolContext = {
   env?: CloudflareBindings;
   user: AgentUser;
   gatedCallsAlready?: number;
+  /** The chat session the tools run in, for the audit log. */
+  sessionId?: string | null;
 };
 
 const MessageRefSchema = z.string().min(3);
@@ -151,6 +158,7 @@ export function createAgentTools({
   env,
   user,
   gatedCallsAlready = 0,
+  sessionId,
 }: AgentToolContext): ToolSet {
   let gatedCalls = gatedCallsAlready;
 
@@ -209,7 +217,7 @@ export function createAgentTools({
     return row;
   };
 
-  return {
+  const tools: ToolSet = {
     whoami: tool({
       description:
         "Identify the signed-in user and the inboxes this agent may act on.",
@@ -563,6 +571,7 @@ export function createAgentTools({
             personId,
             allowed,
           );
+          await auditSequenceCancelled(db, { personId, count: cancelled });
           return { success: true, cancelled };
         }),
     }),
@@ -649,6 +658,12 @@ export function createAgentTools({
             unsubscribedAt: null,
             unsubscribeReason: null,
             createdAt: now,
+          });
+          await auditListMember(db, "added", {
+            listId,
+            listName: list.name,
+            memberId,
+            email: contact.email,
           });
           return {
             success: true,
@@ -927,4 +942,28 @@ export function createAgentTools({
       },
     }),
   };
+
+  // Tools run while the response stream is read, after the turn's caller has
+  // returned, so each one names its own actor instead of inheriting one. An
+  // approval-gated tool that ran is itself an event.
+  const actor = agentActor(user, sessionId);
+  for (const [name, entry] of Object.entries(tools)) {
+    const execute = (entry as any).execute;
+    if (typeof execute !== "function") continue;
+    const gated = (entry as any).needsApproval === true;
+    (entry as any).execute = (input: unknown, options: unknown) =>
+      runWithAudit(actor, async () => {
+        const result = await execute(input, options);
+        // `success: false` is the per-turn limit refusing to run it.
+        if (gated && (result as any)?.success !== false) {
+          await recordAudit(db, {
+            action: AUDIT_ACTIONS.agentActionExecuted,
+            summary: `The agent ran ${name} after approval`,
+            details: { tool: name, args: input as Record<string, unknown> },
+          });
+        }
+        return result;
+      });
+  }
+  return tools;
 }

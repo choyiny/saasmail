@@ -4,6 +4,8 @@
 // while the submission is `scheduled`. After the release's claim a cancel gets
 // `cannotUnsend`; undoStatus stays `pending` until the provider accepted the
 // message or the outbox owns its retries, and only then becomes `final`.
+import { currentAuditActor, runWithAudit } from "../lib/audit/context";
+import { auditMailSent } from "../lib/audit/mail-events";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -388,6 +390,28 @@ export async function releaseScheduledSubmission(
     ];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await db.batch(statements as any);
+    // Released by the queue or the hourly sweep, but it is the send of the
+    // person who scheduled it.
+    await runWithAudit(
+      {
+        actorType: "jmap",
+        actorUserId: row.userId,
+        actorLabel: `JMAP (scheduled send${user?.email ? ` by ${user.email}` : ""})`,
+        channel: currentAuditActor().channel,
+      },
+      () =>
+        auditMailSent(db, {
+          id: row.sentEmailId,
+          from: message.fromAddress,
+          to: message.to,
+          otherRecipients:
+            message.additionalTo.length +
+            message.cc.length +
+            message.bcc.length,
+          subject: message.subject,
+          status: result.outcome,
+        }),
+    );
     if (sent.personId) {
       try {
         await cancelSequencesForPerson(db, sent.personId);

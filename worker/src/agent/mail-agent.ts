@@ -1,3 +1,8 @@
+import { mailAgentSessionIdForUser } from "./identity";
+import { agentActor } from "../lib/audit/actors";
+import { runWithAudit, type AuditActor } from "../lib/audit/context";
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import { eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -538,6 +543,43 @@ function terminalToolCallIdsFromStep(content: readonly unknown[]): string[] {
   return [...ids];
 }
 
+/**
+ * Records the approvals the user declined in the turn they are answered: a
+ * tool part still in `approval-responded` with `approved: false`. Once the
+ * turn has run the part is `output-denied`, so a later turn does not record
+ * it again. (A finished step never carries the denial: the SDK reports it
+ * before the step starts.) An expired approval is the system's doing and is
+ * not recorded here.
+ */
+export async function auditDeclinedApprovals(
+  audit: { db: DrizzleD1Database<any>; actor: AuditActor },
+  messages: UIMessage[],
+): Promise<void> {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant") return;
+  for (const part of last.parts) {
+    if (!isToolUIPart(part)) continue;
+    const approval = toolApproval(part);
+    if (
+      (part as { state?: string }).state !== "approval-responded" ||
+      approval?.approved !== false
+    ) {
+      continue;
+    }
+    const toolName = getToolName(part);
+    await runWithAudit(audit.actor, () =>
+      recordAudit(audit.db, {
+        action: AUDIT_ACTIONS.agentActionDenied,
+        summary: `The agent's request to run ${toolName} was declined`,
+        details: {
+          tool: toolName,
+          toolCallId: (part as { toolCallId?: string }).toolCallId,
+        },
+      }),
+    );
+  }
+}
+
 export async function streamMailAgentTurn({
   model,
   messages,
@@ -633,6 +675,13 @@ export async function runMailAgentChat({
   }
 
   const prepared = await prepareApprovalMessages(messages, approvalLedger);
+  await auditDeclinedApprovals(
+    {
+      db,
+      actor: agentActor(user, mailAgentSessionIdForUser(instanceName, user.id)),
+    },
+    messages,
+  );
   if (prepared.persistedRepair && persistMessages) {
     await persistMessages(prepared.persistedRepair);
   }
@@ -668,6 +717,7 @@ export async function runMailAgentChat({
       env: env as CloudflareBindings,
       user,
       gatedCallsAlready: countCompletedApprovalActions(prepared.messages),
+      sessionId: mailAgentSessionIdForUser(instanceName, user.id),
     }),
     instructions: await buildMailAgentInstructions({ db, user, body }),
     abortSignal,

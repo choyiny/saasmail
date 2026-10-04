@@ -46,3 +46,4 @@ export * from "./jmap-blobs.schema";
 export * from "./jmap-message-content.schema";
 export * from "./jmap-drafts.schema";
 export * from "./jmap-submissions.schema";
+export * from "./audit-events.schema";

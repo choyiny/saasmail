@@ -1,7 +1,7 @@
 # SPEC: Header-based threading as a per-inbox option
 
 Stage 10 follow-up, scheduled **last** (after every other Stage 9–11 spec). Depends on
-`SPEC-reply-to.md` (the JMAP `replyTo` exposure rides on this reset) and `SPEC-audit-log.md`. Label
+`docs/archive/SPEC-reply-to.md` (the JMAP `replyTo` exposure rides on this reset) and `SPEC-audit-log.md`. Label
 `minor`, or `major` if the team treats a JMAP account reset as breaking (as #39's `feat(jmap)!` did).
 
 ## Why

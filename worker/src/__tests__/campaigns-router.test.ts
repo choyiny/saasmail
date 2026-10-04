@@ -9,6 +9,7 @@ import {
   getDb,
 } from "./helpers";
 import { asyncJobs } from "../db/async-jobs.schema";
+import { auditEvents } from "../db/audit-events.schema";
 import { campaignEvents } from "../db/campaign-events.schema";
 import { campaignLinks } from "../db/campaign-links.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
@@ -439,6 +440,15 @@ describe("schedule and cancel", () => {
     });
     expect(ok.status).toBe(200);
     expect((await ok.json<any>()).status).toBe("scheduled");
+
+    // Cron will start it as the system: this is the row that names a person.
+    const audit = await getDb().select().from(auditEvents);
+    expect(audit.map((row) => row.action)).toEqual(["campaign.scheduled"]);
+    expect(audit[0]).toMatchObject({
+      actorType: "api_key",
+      targetId: body.id,
+      inbox: FROM,
+    });
   });
 
   it("cancels and stops the fan-out job", async () => {
@@ -459,6 +469,15 @@ describe("schedule and cancel", () => {
 
     const job = (await getDb().select().from(asyncJobs))[0];
     expect(job.status).toBe("cancelled");
+
+    // Both are in the audit log, against the campaign and its inbox.
+    const audit = await getDb().select().from(auditEvents);
+    expect(audit.map((row) => row.action).sort()).toEqual([
+      "campaign.cancelled",
+      "campaign.started",
+    ]);
+    expect(audit.every((row) => row.targetId === body.id)).toBe(true);
+    expect(audit.every((row) => row.inbox === FROM)).toBe(true);
   });
 
   it("refuses to cancel an already-sent campaign", async () => {

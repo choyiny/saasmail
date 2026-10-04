@@ -12,6 +12,7 @@ import {
 import { sequences } from "../db/sequences.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { users } from "../db/auth.schema";
+import { auditEvents } from "../db/audit-events.schema";
 import { emails } from "../db/emails.schema";
 import { customerPeople, customers } from "../db/customers.schema";
 import { people } from "../db/people.schema";
@@ -627,6 +628,18 @@ describe("MCP tools", () => {
         bodyHtml: "<p>replying</p>",
       });
       expect(out.isError, out.text).toBe(false);
+
+      // Recorded as the MCP client acting for the member.
+      const [sent] = (await getDb().select().from(auditEvents)).filter(
+        (event) => event.action === "mail.sent",
+      );
+      expect(sent).toMatchObject({
+        actorType: "mcp",
+        channel: "mcp",
+        inbox: MINE,
+      });
+      expect(sent.actorLabel).toMatch(/^MCP client /);
+      expect(sent.actorUserId).toBeTruthy();
     });
 
     it("follows the Reply-To unless asked for the sender, and reports where it went", async () => {

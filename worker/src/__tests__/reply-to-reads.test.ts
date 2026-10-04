@@ -1,4 +1,4 @@
-// SPEC-reply-to §2: Reply-To on the read side. The unified query carries the
+// docs/archive/SPEC-reply-to.md §2: Reply-To on the read side. The unified query carries the
 // list when asked, and the HTTP routes return where a reply would go: the list
 // minus our own inboxes.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";

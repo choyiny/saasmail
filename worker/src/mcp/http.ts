@@ -1,3 +1,5 @@
+import { mcpActor } from "../lib/audit/actors";
+import { runWithAudit } from "../lib/audit/context";
 import type { Context, Hono } from "hono";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import {
@@ -120,7 +122,7 @@ export function registerMcpRoutes(app: App) {
     const clientId = typeof jwt.azp === "string" ? jwt.azp : undefined;
     if (!clientId) return unauthorized(baseURL, "invalid token client");
     const client = await db
-      .select({ disabled: oauthClients.disabled })
+      .select({ disabled: oauthClients.disabled, name: oauthClients.name })
       .from(oauthClients)
       .where(eq(oauthClients.clientId, clientId))
       .limit(1);
@@ -181,8 +183,14 @@ export function registerMcpRoutes(app: App) {
       brandName: await readBrandName(db),
     });
     const transport = new StreamableHTTPTransport();
-    await server.connect(transport);
-    return transport.handleRequest(c);
+    // Whatever the tools do is audited as this client acting for this user.
+    return runWithAudit(
+      mcpActor(user, { id: clientId, name: client[0].name }, c.req.raw),
+      async () => {
+        await server.connect(transport);
+        return transport.handleRequest(c);
+      },
+    );
   });
 }
 

@@ -1,3 +1,4 @@
+import { auditMailSent } from "../lib/audit/mail-events";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { and, asc, desc, eq, inArray, lt, lte, or, sql } from "drizzle-orm";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
@@ -456,6 +457,18 @@ outboxRouter.openapi(retryRoute, async (c) => {
 
   const sender = createEmailSender(c.env);
   const outcome = await attemptOutboxRow(db, c.env, sender, id);
+  // A send that had failed for good was never recorded as sent: this retry
+  // is what put it on the wire, so it is recorded as this person's send.
+  if (row.status === "failed" && outcome === "sent") {
+    await auditMailSent(db, {
+      id: row.sentEmailId,
+      from: row.fromAddress,
+      to: row.toAddress,
+      subject: row.subject,
+      status: outcome,
+      retried: true,
+    });
+  }
   // null = a concurrent processor claimed it first; report it as pending.
   return c.json({ outcome: outcome ?? ("pending" as const) }, 200);
 });

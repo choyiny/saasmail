@@ -1,3 +1,4 @@
+import { auditAfterHook } from "./audit-hooks";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, openAPI, jwt } from "better-auth/plugins";
@@ -51,6 +52,9 @@ export function createAuth(env?: CloudflareBindings) {
       enabled: true,
       disableSignUp: true,
     },
+    // Sign-ins, passkey changes and OAuth consent never pass a route of ours:
+    // this hook is where the audit log sees them.
+    hooks: { after: auditAfterHook(db) },
     plugins: [
       admin(),
       openAPI(),

@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -116,6 +118,12 @@ apiKeysRouter.openapi(createKeyRoute, async (c) => {
     keyPrefix: prefix,
     createdAt: now,
   });
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.apiKeyCreated,
+    targetType: "api_key",
+    targetId: prefix,
+    summary: `Created the API key ${prefix}, replacing any earlier one`,
+  });
 
   return c.json({ key: rawKey, prefix, createdAt: now }, 201);
 });
@@ -135,6 +143,19 @@ const deleteKeyRoute = createRoute({
 apiKeysRouter.openapi(deleteKeyRoute, async (c) => {
   const db = c.get("db");
   const user = c.get("user");
+  const [existing] = await db
+    .select({ prefix: apiKeys.keyPrefix })
+    .from(apiKeys)
+    .where(eq(apiKeys.userId, user.id))
+    .limit(1);
   await db.delete(apiKeys).where(eq(apiKeys.userId, user.id));
+  if (existing) {
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.apiKeyRevoked,
+      targetType: "api_key",
+      targetId: existing.prefix,
+      summary: `Revoked the API key ${existing.prefix}`,
+    });
+  }
   return c.json({ success: true }, 200);
 });

@@ -1,17 +1,22 @@
 # Loop prompt: implement stages 9–11 one spec at a time
 
 Paste the block below as the prompt of a repeating run (Claude Code `/loop`, a `while` loop around
-`claude -p`, or a scheduled task) started at the repo root. Each run does one unit of work and ends with
-the "What I need from you" list from `CLAUDE.md`. It never merges: that stays with you.
+`claude -p`, or a scheduled task) started at the repo root. Each run works through the steps and ends with
+the "What I need from you" list from `CLAUDE.md`. Since 2026-10-03 it merges a pull request itself once
+every gate is green and carries on with the next spec (before that, merging stayed with you; #67 was
+merged on your word).
 
 ```text
 You are in the saasmail fork (repo root). Read CLAUDE.md and AGENTS.md first; they override this prompt.
 
 Goal: implement stages 9–11, one spec per PR, in the order of docs/tasks/TASKS-stages-9-11.md
-(§ Order), tracking state in its § Progress table. Never merge a PR yourself, never push to main,
-never force-push, never edit anything under docs/archive/, never loosen pinned dependencies.
+(§ Order), tracking state in its § Progress table. Never push to main, never force-push, never edit
+anything under docs/archive/ (moving a shipped spec in and adding its README line excepted), never
+loosen pinned dependencies. Merge a PR only as step 1 says: every local gate and every CI check
+green, nothing left to address.
 
-Each run, do exactly one of the steps below, then stop.
+Work through the steps below and keep going from one spec to the next. Stop only when something
+needs the user (a red gate you cannot fix, a decision that is theirs) or when step 4 is reached.
 
 0. Sync and orient.
    git fetch origin && git checkout main && git pull --ff-only
@@ -23,7 +28,9 @@ Each run, do exactly one of the steps below, then stop.
    - Checks failing → checkout its branch, reproduce locally (yarn format:check, yarn typecheck,
      yarn test, yarn test:e2e if the failure is e2e), fix, commit, push. Stop.
    - Unresolved review comments → address each on the branch, reply on the PR, push. Stop.
-   - Green with nothing to address → stop with "What I need from you: 1. Review and merge PR #N."
+   - Green with nothing to address → mark it ready (gh pr ready N) and squash-merge it with the PR
+     title as the subject (gh pr merge N --squash --subject "<PR title> (#N)"), then treat it as
+     Merged. If the merge is refused, stop with "What I need from you: 1. Merge PR #N."
 
 2. If the current spec is `merged <sha>` (housekeeping, done as the first commit of the next
    spec's branch, or as its own small docs PR when it is the last spec):
@@ -50,7 +57,7 @@ Each run, do exactly one of the steps below, then stop.
    - When the spec is fully implemented and green: push, open a DRAFT PR titled after the spec's
      first heading, body = Why (two lines) + a checklist of the spec's numbered sections + Tests
      run + Docs updated + Migrations + Spec changes (or "none"); add the label the spec names
-     (gh pr edit --add-label minor). Set Progress to `PR #N open`. Stop.
+     (gh pr edit --add-label minor). Set Progress to `PR #N open`, wait for CI, and go to step 1.
    - If the spec is too large for one run: commit what is green, push the branch, set Progress to
      `branch spec/<slug>`, and stop with a note of what is left. Never leave the tree red.
 

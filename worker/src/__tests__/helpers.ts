@@ -105,6 +105,11 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS jmap_changes_inbox_user_seq_idx ON jmap_changes(inbox, user_id, seq)`,
     `CREATE INDEX IF NOT EXISTS jmap_changes_user_seq_idx ON jmap_changes(user_id, seq)`,
     `CREATE INDEX IF NOT EXISTS jmap_changes_created_at_idx ON jmap_changes(created_at)`,
+    `CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY NOT NULL, at INTEGER NOT NULL, actor_type TEXT NOT NULL, actor_user_id TEXT, actor_label TEXT NOT NULL, channel TEXT NOT NULL, action TEXT NOT NULL, target_type TEXT, target_id TEXT, inbox TEXT, summary TEXT NOT NULL, details TEXT, ip TEXT, user_agent TEXT)`,
+    `CREATE INDEX IF NOT EXISTS audit_events_at_idx ON audit_events(at)`,
+    `CREATE INDEX IF NOT EXISTS audit_events_actor_at_idx ON audit_events(actor_user_id, at)`,
+    `CREATE INDEX IF NOT EXISTS audit_events_inbox_at_idx ON audit_events(inbox, at)`,
+    `CREATE INDEX IF NOT EXISTS audit_events_action_at_idx ON audit_events(action, at)`,
     `CREATE TABLE IF NOT EXISTS jmap_blobs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS jmap_blobs_user_idx ON jmap_blobs(user_id)`,
     `CREATE INDEX IF NOT EXISTS jmap_blobs_created_at_idx ON jmap_blobs(created_at)`,
@@ -474,6 +479,7 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM audit_events;
     DELETE FROM jmap_submissions;
     DELETE FROM jmap_drafts;
     DELETE FROM jmap_message_content;

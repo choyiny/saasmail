@@ -30,6 +30,7 @@ Everything that used to live in one very long README. Start at
 | [Newsletters](newsletters.md)                   | Lists, subscribe forms, campaigns, tracking, and retention                          |
 | [Suppressions and unsubscribe](suppressions.md) | The suppression list, RFC 8058 one-click, and the `transactional` flag              |
 | [Users and API keys](users-and-api-keys.md)     | Invites, roles, passkeys, and `sk_…` keys                                           |
+| [Audit log](audit-log.md)                       | Who did what: what is recorded, what is not, retention, and the admin API           |
 | [Native mail agent](agent.md)                   | In-app agent backend, providers, sessions, auth, tools, and safety boundary         |
 | [MCP server](mcp.md)                            | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation          |
 | [WebMCP](webmcp.md)                             | In-page agent access, the safety model, and the 26 tools                            |

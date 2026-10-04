@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { applyMigrations, authFetch, cleanDb, getDb } from "./helpers";
 import { acct, idn, sys } from "./jmap-ids";
+import { auditEvents } from "../db/audit-events.schema";
 import { jmapDrafts } from "../db/jmap-drafts.schema";
 import { jmapSubmissions } from "../db/jmap-submissions.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
@@ -308,6 +309,19 @@ describe("JMAP delayed send (RFC 4865 FUTURERELEASE)", () => {
     expect(after.attemptState).toBe("accepted");
     expect(after.undoStatus).toBe("final");
     expect(await sentStatus(row.sentEmailId)).toBe("sent");
+
+    // Nothing was sent when it was scheduled. The release is recorded once,
+    // as the send of the person who scheduled it, not of the queue.
+    const sends = (await getDb().select().from(auditEvents)).filter(
+      (event) => event.action === "mail.sent",
+    );
+    expect(sends).toHaveLength(1);
+    expect(sends[0]).toMatchObject({
+      actorType: "jmap",
+      actorUserId: authorId,
+      targetId: `sent:${row.sentEmailId}`,
+    });
+    expect(sends[0].actorLabel).toContain("scheduled send");
     expect(
       await getDb()
         .select()

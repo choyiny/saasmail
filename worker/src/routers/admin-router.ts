@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, sql } from "drizzle-orm";
 import { users, passkeys } from "../db/auth.schema";
@@ -89,6 +91,19 @@ adminRouter.openapi(createInviteRoute, async (c) => {
   };
 
   await db.insert(invitations).values(invite);
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.userInvited,
+    targetType: "user",
+    summary: invite.email
+      ? `Invited ${invite.email} as ${role}`
+      : `Created an open invitation for a ${role}`,
+    details: {
+      inviteId: invite.id,
+      role,
+      email: invite.email,
+      expiresAt: Math.floor(invite.expiresAt.getTime() / 1000),
+    },
+  });
 
   return c.json(
     {
@@ -256,6 +271,15 @@ adminRouter.openapi(updateRoleRoute, async (c) => {
   }
 
   await db.update(users).set({ role }).where(eq(users.id, id));
+  if (target.role !== role) {
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.userRoleChanged,
+      targetType: "user",
+      targetId: id,
+      summary: `Changed ${target.email} from ${target.role ?? "member"} to ${role}`,
+      details: { email: target.email, from: target.role ?? null, to: role },
+    });
+  }
   return c.json({ success: true as const }, 200);
 });
 
@@ -295,6 +319,13 @@ adminRouter.openapi(deleteUserRoute, async (c) => {
   }
 
   await db.delete(users).where(eq(users.id, id));
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.userRemoved,
+    targetType: "user",
+    targetId: id,
+    summary: `Removed ${target.email} (${target.role ?? "member"})`,
+    details: { email: target.email, role: target.role ?? null },
+  });
   return c.json({ success: true as const }, 200);
 });
 
@@ -353,6 +384,11 @@ adminRouter.openapi(updateSettingsRoute, async (c) => {
     }
 
     const now = Math.floor(Date.now() / 1000);
+    const [before] = await db
+      .select({ value: appSettings.value })
+      .from(appSettings)
+      .where(eq(appSettings.key, "brand_name"))
+      .limit(1);
     // INSERT OR REPLACE via drizzle's onConflictDoUpdate — works with the
     // primary-key uniqueness on `key`.
     await db
@@ -371,6 +407,19 @@ adminRouter.openapi(updateSettingsRoute, async (c) => {
           updatedBy: currentUser?.id ?? null,
         },
       });
+    const previous = before?.value ?? null;
+    if (previous !== storedValue) {
+      await recordAudit(db, {
+        action: AUDIT_ACTIONS.settingsChanged,
+        targetType: "setting",
+        targetId: "brand_name",
+        summary:
+          storedValue === null
+            ? "Reset the brand name to the default"
+            : `Changed the brand name to '${storedValue}'`,
+        details: { key: "brand_name", from: previous, to: storedValue },
+      });
+    }
   }
 
   // Always return the resolved value so the caller can update its UI.

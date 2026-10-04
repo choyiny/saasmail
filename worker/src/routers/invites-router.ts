@@ -1,3 +1,7 @@
+import { userActor } from "../lib/audit/actors";
+import { runWithAudit } from "../lib/audit/context";
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq } from "drizzle-orm";
 import { users } from "../db/auth.schema";
@@ -135,6 +139,18 @@ invitesRouter.openapi(acceptInviteRoute, async (c) => {
     .update(invitations)
     .set({ usedBy: newUser.user.id, usedAt: new Date() })
     .where(eq(invitations.token, token));
+  // This route is public; the person who just joined is the actor.
+  await runWithAudit(
+    userActor({ id: newUser.user.id, email, name }, c.req.raw),
+    () =>
+      recordAudit(db, {
+        action: AUDIT_ACTIONS.userJoined,
+        targetType: "user",
+        targetId: newUser.user.id,
+        summary: `${email} joined as ${invite.role}`,
+        details: { inviteId: invite.id, role: invite.role },
+      }),
+  );
 
   return c.json({ success: true, userId: newUser.user.id }, 200);
 });

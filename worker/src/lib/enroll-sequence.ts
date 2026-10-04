@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "./audit/events";
+import { recordAudit } from "./audit/record";
 import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -247,6 +249,19 @@ export async function enrollPersonInSequence(
     const message: SequenceEmailMessage = { sequenceEmailId: firstEmail.id };
     await env.EMAIL_QUEUE.send(message);
   }
+
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.sequenceEnrolled,
+    targetType: "sequence",
+    targetId: sequenceId,
+    inbox: fromAddress,
+    summary: `Enrolled a contact in a sequence from ${fromAddress}`,
+    details: {
+      enrollmentId,
+      personId,
+      steps: scheduledEmails.length,
+    },
+  });
 
   return {
     ok: true,

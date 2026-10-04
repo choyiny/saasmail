@@ -20,6 +20,7 @@ import {
   LogOut,
   Bot,
   Workflow,
+  ScrollText,
 } from "lucide-react";
 import { signOut, useSession } from "@/lib/auth-client";
 import { fetchOutboxCount, fetchStats } from "@/lib/api";
@@ -248,6 +249,13 @@ export default function TopNav({
                       Users
                     </DropdownMenuItem>
                     <DropdownMenuItem
+                      onClick={() => navigate("/admin/audit")}
+                      className="cursor-pointer"
+                    >
+                      <ScrollText className="h-4 w-4" />
+                      Audit log
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
                       onClick={() => navigate("/admin/suppressions")}
                       className="cursor-pointer"
                     >
@@ -396,6 +404,13 @@ export default function TopNav({
                   >
                     <Users className="h-4 w-4" />
                     Users
+                  </button>
+                  <button
+                    onClick={() => navigate("/admin/audit")}
+                    className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+                  >
+                    <ScrollText className="h-4 w-4" />
+                    Audit log
                   </button>
                   <button
                     onClick={() => navigate("/admin/suppressions")}

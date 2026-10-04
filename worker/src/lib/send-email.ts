@@ -1,3 +1,4 @@
+import { auditMailSent } from "./audit/mail-events";
 import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -284,6 +285,14 @@ export async function sendEmail(
   // failed send can always reload its attachment bytes on a later attempt.
 
   await cancelSequencesForPerson(db, personId);
+  await auditMailSent(db, {
+    id,
+    from: fromAddress,
+    to: recordedTo,
+    otherRecipients: sendResult.delivered.length - 1,
+    subject,
+    status: outcome,
+  });
 
   return {
     ok: true,
@@ -562,6 +571,16 @@ export async function replyToEmail(
 
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, origPersonId);
+  await auditMailSent(db, {
+    id,
+    from: fromAddress,
+    to: toAddress,
+    otherRecipients: cc?.length ?? 0,
+    subject: finalSubject,
+    status: outcome,
+    templateSlug,
+    repliedTo,
+  });
 
   if (replyToBackfill) {
     // Best effort: the next reply and every read then use the column instead

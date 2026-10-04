@@ -46,7 +46,7 @@ sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md
 | 7c-5  | JMAP EmailSubmission                                                                                                                   | #43     | `0a2f726`        |
 | 7c-6  | JMAP on-success filing, crash recovery, e2e script and docs                                                                            | #44     | `ac0276b`        |
 | 7d    | JMAP v1 follow-ups: several To/Bcc, delayed send, drafts in folders, raw blobs, shared drafts, live updates, `Email/import`, hardening | #45–#66 | `35c5dd1` (last) |
-| 9-1   | Replies follow the sender's Reply-To (`SPEC-reply-to.md`)                                                                              | —       | —                |
+| 9-1   | Replies follow the sender's Reply-To (`docs/archive/SPEC-reply-to.md`)                                                                 | #67     | `10f39e6`        |
 | 9-2   | Audit log (`SPEC-audit-log.md`)                                                                                                        | —       | —                |
 | 9-3   | Idempotency keys for sends (`SPEC-send-idempotency.md`)                                                                                | —       | —                |
 | 9-4   | Pause switch, MCP kill switch, daily caps (`SPEC-send-controls.md`)                                                                    | —       | —                |

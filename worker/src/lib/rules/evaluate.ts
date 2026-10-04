@@ -1,3 +1,5 @@
+import { ruleActor } from "../audit/actors";
+import { runWithAudit } from "../audit/context";
 import { and, asc, eq, isNull, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { mailboxes } from "../../db/mailboxes.schema";
@@ -143,24 +145,29 @@ export async function evaluateRules(
 
     if (!matchConditions(parsedConditions.data, input).matched) continue;
 
-    for (const action of parsedActions.data) {
-      try {
-        const actionResult = await runAction(
-          db,
-          input,
-          action,
-          rule.id,
-          runtime,
-        );
-        result.markedSpam ||= actionResult.markedSpam === true;
-        result.snoozed ||= actionResult.snoozed === true;
-      } catch (error) {
-        console.warn(
-          `[rules] action ${action.type} failed for rule ${rule.id}:`,
-          error,
-        );
+    // What the rule's actions do (a send, a junk mark) is audited as the
+    // rule, by name. An auto-reply started here keeps that actor even though
+    // it finishes later under waitUntil.
+    await runWithAudit(ruleActor(rule), async () => {
+      for (const action of parsedActions.data) {
+        try {
+          const actionResult = await runAction(
+            db,
+            input,
+            action,
+            rule.id,
+            runtime,
+          );
+          result.markedSpam ||= actionResult.markedSpam === true;
+          result.snoozed ||= actionResult.snoozed === true;
+        } catch (error) {
+          console.warn(
+            `[rules] action ${action.type} failed for rule ${rule.id}:`,
+            error,
+          );
+        }
       }
-    }
+    });
 
     const now = input.now ?? Math.floor(Date.now() / 1000);
     try {

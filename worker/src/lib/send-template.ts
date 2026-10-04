@@ -1,3 +1,4 @@
+import { auditMailSent } from "./audit/mail-events";
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -163,6 +164,14 @@ export async function sendTemplate(
     status: outcome,
     sentAt: now,
     createdAt: now,
+  });
+  await auditMailSent(db, {
+    id,
+    from: fromAddress,
+    to,
+    subject: renderedSubject,
+    status: outcome,
+    templateSlug: slug,
   });
 
   return {

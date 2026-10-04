@@ -21,6 +21,8 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
   default; set it to exactly `"true"` only while debugging. **Warning:** query
   logging includes bound SQL parameters, so Workers logs may contain email
   addresses, subjects, token hashes, or other sensitive values.
+- `vars.AUDIT_RETENTION_DAYS` — Optional. How many days the
+  [audit log](audit-log.md) is kept: 180 when unset, never less than 30.
 - `vars.VAPID_PUBLIC_KEY` / `vars.VAPID_SUBJECT` — public VAPID config for
   browser push notifications. Generate with `yarn vapid:generate` and store
   the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank

@@ -1,3 +1,4 @@
+import { auditListMember } from "../lib/audit/crm-events";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { and, asc, desc, eq, gt, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -632,6 +633,12 @@ listsRouter.openapi(addMemberRoute, async (c) => {
           unsubscribeReason: null,
         })
         .where(eq(listMembers.id, existing[0].id));
+      await auditListMember(db, "added", {
+        listId: id,
+        listName: row.name,
+        memberId: existing[0].id,
+        email: existing[0].email,
+      });
     }
     const refreshed = await db
       .select()
@@ -685,6 +692,12 @@ listsRouter.openapi(addMemberRoute, async (c) => {
     createdAt: ts,
   };
   await db.insert(listMembers).values(member);
+  await auditListMember(db, "added", {
+    listId: id,
+    listName: row.name,
+    memberId: member.id,
+    email: member.email,
+  });
 
   return c.json(
     {
@@ -733,7 +746,7 @@ listsRouter.openapi(removeMemberRoute, async (c) => {
   if (!row) return c.json({ error: "List not found" }, 404);
 
   const ts = now();
-  await db
+  const removal = await db
     .update(listMembers)
     .set({ status: "unsubscribed", unsubscribedAt: ts })
     .where(
@@ -743,6 +756,7 @@ listsRouter.openapi(removeMemberRoute, async (c) => {
         sql`${listMembers.status} != 'unsubscribed'`,
       ),
     );
+  const removed = ((removal as any)?.meta?.changes ?? 0) > 0;
 
   const rows = await db
     .select({ member: listMembers, name: contacts.name })
@@ -753,6 +767,14 @@ listsRouter.openapi(removeMemberRoute, async (c) => {
   const row2 = rows[0];
   if (!row2) return c.json({ error: "Member not found" }, 404);
   const m = row2.member;
+  if (removed) {
+    await auditListMember(db, "removed", {
+      listId: id,
+      listName: row.name,
+      memberId: m.id,
+      email: m.email,
+    });
+  }
 
   return c.json({
     id: m.id,

@@ -41,7 +41,7 @@ audit_events (
   at            INTEGER NOT NULL,          -- unix seconds
   actor_type    TEXT NOT NULL,             -- user | api_key | mcp | jmap | agent | rule | system
   actor_user_id TEXT NULL,                 -- users.id when a person is behind the actor (also for api_key/mcp/jmap/agent)
-  actor_label   TEXT NOT NULL,             -- "jane@acme.com", "API key sk_…abcd", "MCP client Claude", "rule Invoices → Archive", "system"
+  actor_label   TEXT NOT NULL,             -- "jane@acme.com", "API key sk_abcde...", "MCP client Claude", "rule Invoices", "system"
   channel       TEXT NOT NULL,             -- web | api | mcp | jmap | agent | rule | inbound | cron | queue | import
   action        TEXT NOT NULL,             -- dotted name from the catalogue below
   target_type   TEXT NULL,                 -- message | conversation | folder | inbox | user | api_key | rule | setting | list | campaign | sequence | customer | oauth_client | backup | import | export
@@ -59,28 +59,40 @@ Bulk operations write one row with `details.count` and the first 20 refs; `targe
 
 ## 2. Context and recorder
 
-**Files:** new `worker/src/lib/audit/context.ts`, `record.ts`, `events.ts`; `worker/src/index.ts`
-(HTTP middleware), `worker/src/mcp/http.ts`, `worker/src/jmap/http.ts`, `worker/src/agent/mail-agent.ts`,
-`worker/src/email-handler.ts`, `worker/src/lib/queue-router.ts`.
+**Files:** new `worker/src/lib/audit/context.ts`, `record.ts`, `events.ts`, `actors.ts` (one builder
+per kind of actor), `mail-events.ts` and `crm-events.ts` (the emitters services share), `prune.ts`;
+`worker/src/lib/request-auth.ts` (returns the API key's id and prefix), `worker/src/index.ts` (HTTP,
+inbound, queue and cron entry points), `worker/src/mcp/http.ts`, `worker/src/jmap/http.ts` and `auth.ts`,
+`worker/src/lib/agent/tools.ts` and `worker/src/agent/mail-agent.ts`, `worker/src/lib/rules/evaluate.ts`,
+`worker/src/auth/audit-hooks.ts` (better-auth `hooks.after`), `worker/src/node-async-hooks.d.ts`.
 
 - `context.ts`: an `AuditActor` type with `actorType`, `actorUserId`, `actorLabel`, `channel`, and the
   optional `ip`, `userAgent`, `apiKeyId`, `mcpClientId`, `agentSessionId`, `ruleId`;
   `runWithAudit(actor, fn)` and `currentAuditActor()` (returns the `system` actor when unset). One
   `AsyncLocalStorage` instance, module-level.
-- HTTP: a Hono middleware registered right after the auth middleware for `/api/*` builds the actor from
-  `c.get("user")`, the auth method (`session` → `user`/`web`; `apiKey` → `api_key`/`api`, label from the
-  key prefix) and the request headers, then `await runWithAudit(actor, next)`.
+- HTTP: every request starts as an anonymous `system`/`web` actor carrying the caller's IP and user
+  agent; the `/api/*` auth middleware then runs the rest of the request as the resolved actor
+  (`session` → `user`/`web`; `apiKey` → `api_key`/`api`, labelled with the key's stored prefix, which
+  `resolveRequestAuth` now returns with the key's id). Public routes that know who is acting (invite
+  accept) name that person themselves.
 - MCP: in the request handler, after the token is resolved: `mcp` with the OAuth client id/name.
 - JMAP: in `authenticateJmap`'s caller: `jmap`, label "JMAP (<bearer prefix or session>)".
-- Agent: each turn runs inside `runWithAudit({ actorType: "agent", actorUserId, agentSessionId, … })`
-  (identity from D1 per D22). Approved CRM tool executions emit `agent.action_executed` (this replaces
-  the console-only log the roadmap deferred).
+- Agent: each tool's `execute` runs inside `runWithAudit({ actorType: "agent", actorUserId,
+agentSessionId, … })` (identity from D1 per D22). The wrap is per tool, not per turn, because tools
+  execute while the response stream is read, after the turn's caller has returned. An approval-gated
+  tool that ran emits `agent.action_executed`; a `tool-output-denied` part in a finished step emits
+  `agent.action_denied`.
 - Inbound handler, queue consumer and cron: `system`; the rules evaluator wraps each rule's actions in
-  `runWithAudit({ actorType: "rule", ruleId, actorLabel: rule.name, channel: "rule" })` so rule-caused
-  sends and rejections name the rule.
+  `runWithAudit({ actorType: "rule", ruleId, actorLabel: "rule " + rule.name, channel: "rule" })` so
+  rule-caused sends and rejections name the rule. A delayed JMAP send released by the queue or cron is
+  recorded as the person who scheduled it.
+- Sign-ins, passkey changes and OAuth registration and consent are handled by better-auth and pass
+  none of our routes: a `hooks.after` on the auth configuration records them.
 - `record.ts`: `recordAudit(db, { action, targetType?, targetId?, inbox?, summary, details? })` reads
-  the actor, truncates `details` and `summary`, inserts, catches and `console.warn`s. It is `async` but
-  callers do not have to await it on hot paths (`ctx.waitUntil` in the handler/queue).
+  the actor, truncates `details` and `summary`, inserts, catches and `console.warn`s. Callers await it
+  (the queue consumer has no `ctx` to hand it to). `recordBulkAudit` writes the one-row-with-a-count
+  form, and `collectAudit(db, fn)` merges the rows of a loop that changes one message per service call
+  (a JMAP `Email/set`, the blocked-mail purge) into one per action and inbox.
 - `events.ts`: the action names as a `const` object with a TypeScript union, so a typo fails
   `yarn typecheck`.
 
@@ -88,7 +100,7 @@ Bulk operations write one row with `details.count` and the first 20 refs; `targe
 
 | Action                                                                                                                               | Emitted from                                                                                                                                                       | Summary example                                                                                                                  |
 | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `mail.sent`                                                                                                                          | `sendEmail`, `replyToEmail`, `send-template.ts`, `submit-message.ts` (JMAP), auto-reply                                                                            | "Sent 'Re: invoice' to jane@acme.com from support@…" (`details`: sentEmailId, to, cc count, channel, templateSlug, replyTo used) |
+| `mail.sent`                                                                                                                          | `sendEmail`, `replyToEmail`, `send-template.ts`, `jmap/submission.ts` and `jmap/release.ts` (JMAP, now and delayed), auto-reply                                    | "Sent 'Re: invoice' to jane@acme.com from support@…" (`details`: sentEmailId, to, cc count, channel, templateSlug, replyTo used) |
 | `mail.archived` / `mail.unarchived` / `mail.spam` / `mail.not_spam` / `mail.trashed` / `mail.restored`                               | `setMailboxState` when `userId` is non-null or the actor is a rule with `mark_spam`                                                                                | "Archived 3 messages in support@…"                                                                                               |
 | `mail.moved`                                                                                                                         | `setMailboxMembership` (add/remove)                                                                                                                                | "Filed 1 message into 'Invoices'"                                                                                                |
 | `mail.snoozed` / `mail.unsnoozed`                                                                                                    | `snoozeConversations`                                                                                                                                              |                                                                                                                                  |
@@ -117,20 +129,21 @@ Bulk operations write one row with `details.count` and the first 20 refs; `targe
 (`/admin/audit`), the admin navigation next to Users/Inboxes/Automations, `src/lib/api.ts`.
 
 - `GET /api/admin/audit?cursor&limit(≤100)&action&actionPrefix&actorUserId&inbox&targetType&targetId&from&to&q`
-  → `{ events, nextCursor }`, newest first, cursor = `at:id`. `q` is a `LIKE` on `summary` and
+  → `{ events, nextCursor }`, newest first, cursor = `at:rowid` (the row sequence breaks ties, so events
+  of the same second keep the order they happened in; ids are random). `q` is a `LIKE` on `summary` and
   `actor_label`. Admin only (the `/api/admin/*` role guard in `worker/src/index.ts`), passkey-gated like other admin
   routes.
 - `GET /api/admin/audit/export.csv` with the same filters, at most 10,000 rows, `Content-Disposition:
 attachment`.
-- `GET /api/admin/audit/actions` → the distinct action names (for the filter dropdown).
+- `GET /api/admin/audit/actions` → every action name in the catalogue (for the filter dropdown).
 - Page: filter bar (action group, actor, inbox, date range, text), table (time, actor, action, target,
   inbox, summary), "Load more", a row expands to pretty-printed `details`. A "Download CSV" button.
-  Mobile: cards instead of a table (the house pattern in MailPage).
+  Mobile: one card per event instead of the table. Behind `AdminGuard`, like `/automations`.
 
 ## 5. Retention
 
 `pruneAuditEvents(db, now)` deletes rows older than `AUDIT_RETENTION_DAYS` (default 180, min 30) in
-batches of 1,000 per cron pass, appended to the hourly chain in `worker/src/index.ts` right after
+batches of 1,000, up to ten per cron pass, appended to the hourly chain in `worker/src/index.ts` right after
 `pruneJmapChanges` (no new cron schedule: `scheduled()` runs every job on every tick).
 
 ## Tests
@@ -147,6 +160,68 @@ batches of 1,000 per cron pass, appended to the hourly chain in `worker/src/inde
 ## Docs and CHANGELOG
 
 - New page `docs/audit-log.md` (what is recorded, what is not, retention, the API) linked from
-  `docs/README.md`; `docs/configuration.md` gains `AUDIT_RETENTION_DAYS`; `docs/agent.md` replaces the
-  "console only" sentence; `roadmap.md` drops the deferred item.
+  `docs/README.md`; `docs/configuration.md` gains `AUDIT_RETENTION_DAYS`; `docs/agent.md` says where the
+  agent's actions are recorded.
 - CHANGELOG `### Added`: **Audit log.** …
+
+## Spec changes (2026-10-03, while implementing)
+
+The five decisions are unchanged. Where the code differed from what the sections assumed:
+
+1. There was no console-only log of agent CRM actions to replace, `docs/agent.md` had no "console
+   only" sentence and `roadmap.md` no longer lists the deferred item: the agent docs gain a sentence
+   instead, and nothing is dropped from the roadmap.
+2. The API key's id and prefix were not available at the boundary; `resolveRequestAuth` now returns
+   them. Only the prefix is stored (`sk_abcde...`), so that is the label, not a suffix.
+3. The MCP handler did not load the client's name; it does now.
+4. `queue()` has no `ctx`, so audit writes are awaited rather than handed to `waitUntil`.
+5. JMAP sends happen in `jmap/submission.ts` and `jmap/release.ts`, not `submit-message.ts`.
+6. Agent tools run while the stream is read, so the actor is set around each tool, not the turn.
+7. Users and invites live in `admin-router.ts`, inbox access in `admin-inboxes-router.ts`
+   (`PUT /{email}/assignments`), and invite accept is a public route that names its own actor.
+8. There is no toggle route for rules: a `PATCH` that only carries `enabled` is `rule.toggled`.
+9. Sign-in, passkey and OAuth events come from a better-auth `hooks.after`; no hooks existed. The
+   password sign-in our own pre-check refuses is recorded where it is refused.
+10. `cancelSequencesForPerson` runs after every send and every inbound message, so it is not
+    instrumented: `sequence.cancelled` is recorded where a person or the agent cancels on purpose.
+    List membership is recorded where a person or the agent changes it (the list routes, the agent
+    tool), not for public subscribe and unsubscribe links or imports. `campaign.started` is in
+    `beginCampaignSend`, which the route and cron both call; `campaign.cancelled` in the route.
+11. JMAP `Email/set` and the blocked-mail purge change one message per service call; `collectAudit`
+    merges those rows so a bulk operation is still one row.
+12. `setMailboxState` can clear several flags at once (a JMAP move to Inbox clears all three): a
+    cleared flag is recorded only for messages that had it, which needs one read before the write.
+13. The cursor is `at:rowid`, not `at:id`: ids are random, and events of the same second would
+    otherwise list in no particular order.
+14. No page had a filter bar, a table and mobile cards; MailPage has neither. The page uses a table
+    on wide screens and cards on narrow ones, and sits behind `AdminGuard`.
+15. `mail.sent` is recorded once the provider or the outbox has the message; a refused or fully
+    suppressed send sent nothing and is not recorded. Sequence and campaign messages are not recorded
+    one by one: `sequence.enrolled` and `campaign.started` cover them.
+16. `AsyncLocalStorage` gets a two-method type declaration instead of `@types/node`, whose globals
+    would clash with the Workers types.
+
+After an independent review of the first implementation (same day):
+
+17. better-auth's admin plugin serves `/api/auth/admin/*` (set role, remove, ban, set password, revoke
+    sessions, impersonate), which no route of ours sees. The auth hook records them: `user.role_changed`,
+    `user.removed`, `user.joined`, a new `user.updated` (ban, password, sessions; never a request
+    field) and a new `user.impersonated`. An impersonated session is recorded as the admin
+    ("admin@… as member@…"), not as the member.
+18. `agent.action_denied` is read from the incoming messages (a tool part in `approval-responded` with
+    `approved: false`); the SDK never puts the denial in a finished step, so the first version never
+    fired.
+19. A failed sign-in needs no authentication: it is recorded only against an existing account, never
+    with what was typed, and at most once a minute per account (per caller address for a passkey).
+20. Mail-state events count only what changed: the flags, folder membership and conversation state
+    are read before the write (one read each, for calls by a person), and a failed audit read is
+    logged instead of failing the request.
+21. `mail.sent` is also recorded for a failed send that goes out on a manual Outbox retry and for a
+    campaign test send.
+22. New `campaign.scheduled`: cron starts a scheduled campaign as the system, so the schedule is what
+    names the person.
+23. Deleting a contact records its mail as one `mail.deleted` row per inbox, like every other delete.
+24. A granted OAuth consent names its client; the webhook URL is logged without credentials or query.
+25. The prune takes up to ten batches of 1,000 per pass (one would fall behind a busy instance), and
+    `GET /api/admin/audit/actions` returns the catalogue instead of a `DISTINCT` over the table.
+26. The page drops a "Load more" page that arrives after the filters changed.

@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, sql } from "drizzle-orm";
 import { senderIdentities } from "../db/sender-identities.schema";
@@ -164,6 +166,14 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
     createdAt: now,
     updatedAt: now,
   });
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.inboxCreated,
+    targetType: "inbox",
+    targetId: email,
+    inbox: email,
+    summary: `Created the inbox ${email}`,
+    details: { displayName, displayMode },
+  });
 
   return c.json(
     {
@@ -325,6 +335,43 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     );
   }
 
+  // What this request changes, for the audit log. The signature and the
+  // agent instructions are named, not copied.
+  const changes: Record<string, unknown> = {};
+  const track = (field: string, from: unknown, to: unknown, show = true) => {
+    if (from === to) return;
+    changes[field] = show ? { from, to } : "changed";
+  };
+  track("displayName", currentRow?.displayName ?? null, nextDisplayName);
+  track("displayMode", currentRow?.displayMode ?? "chat", nextDisplayMode);
+  track(
+    "signatureHtml",
+    currentRow?.signatureHtml ?? null,
+    nextSignatureHtml,
+    false,
+  );
+  track("forwardTo", currentRow?.forwardTo ?? null, nextForwardTo);
+  track("spamThreshold", currentRow?.spamThreshold ?? null, nextSpamThreshold);
+  track(
+    "agentInstructions",
+    currentRow?.agentInstructions ?? null,
+    nextAgentInstructions,
+    false,
+  );
+  track("agentAutodraft", currentRow?.agentAutodraft ?? 0, nextAgentAutodraft);
+  const auditInboxUpdate = async () => {
+    const fields = Object.keys(changes);
+    if (fields.length === 0) return;
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.inboxUpdated,
+      targetType: "inbox",
+      targetId: email,
+      inbox: email,
+      summary: `Changed ${fields.join(", ")} of ${email}`,
+      details: changes,
+    });
+  };
+
   // All fields at defaults → delete the row to keep the table sparse.
   if (
     nextDisplayName === null &&
@@ -336,6 +383,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextAgentAutodraft === 0
   ) {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+    await auditInboxUpdate();
     return c.json(
       {
         email,
@@ -379,6 +427,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       },
     });
 
+  await auditInboxUpdate();
   return c.json(
     {
       email,
@@ -426,6 +475,10 @@ adminInboxesRouter.openapi(putAssignmentsRoute, async (c) => {
   const { userIds } = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
 
+  const before = await db
+    .select({ userId: inboxPermissions.userId })
+    .from(inboxPermissions)
+    .where(eq(inboxPermissions.email, email));
   await db.delete(inboxPermissions).where(eq(inboxPermissions.email, email));
   if (userIds.length > 0) {
     await db.insert(inboxPermissions).values(
@@ -436,6 +489,21 @@ adminInboxesRouter.openapi(putAssignmentsRoute, async (c) => {
         createdBy: currentUser.id,
       })),
     );
+  }
+
+  const had = new Set(before.map((row) => row.userId));
+  const has = new Set(userIds);
+  const added = userIds.filter((userId) => !had.has(userId));
+  const removed = [...had].filter((userId) => !has.has(userId));
+  if (added.length > 0 || removed.length > 0) {
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.userInboxAccessChanged,
+      targetType: "inbox",
+      targetId: email,
+      inbox: email,
+      summary: `Changed who can access ${email}: ${added.length} added, ${removed.length} removed`,
+      details: { added, removed },
+    });
   }
   return c.json({ email, assignedUserIds: userIds }, 200);
 });
@@ -478,6 +546,13 @@ adminInboxesRouter.openapi(deleteInboxRoute, async (c) => {
 
   await db.delete(inboxPermissions).where(eq(inboxPermissions.email, email));
   await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.inboxDeleted,
+    targetType: "inbox",
+    targetId: email,
+    inbox: email,
+    summary: `Deleted the inbox ${email}`,
+  });
 
   return c.json({ success: true as const }, 200);
 });

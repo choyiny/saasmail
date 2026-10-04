@@ -37,8 +37,8 @@ Updated by whoever works a spec (the loop prompt in `LOOP-stages-9-11.md` does i
 
 | #   | Spec                       | Status      |
 | --- | -------------------------- | ----------- |
-| 1   | `SPEC-reply-to.md`         | PR #67 open |
-| 2   | `SPEC-audit-log.md`        | todo        |
+| 1   | `SPEC-reply-to.md`         | archived    |
+| 2   | `SPEC-audit-log.md`        | PR #68 open |
 | 3   | `SPEC-send-idempotency.md` | todo        |
 | 4   | `SPEC-send-controls.md`    | todo        |
 | 5   | `SPEC-two-factor.md`       | todo        |

@@ -45,6 +45,7 @@ import CampaignsPage from "@/pages/CampaignsPage";
 import CampaignDetailPage from "@/pages/CampaignDetailPage";
 import ContactPrivacyPage from "@/pages/ContactPrivacyPage";
 import AutomationsPage from "@/pages/AutomationsPage";
+import AdminAuditPage from "@/pages/AdminAuditPage";
 
 const queryClient = new QueryClient();
 
@@ -210,6 +211,7 @@ function App() {
                 <Route path="/inboxes" element={<InboxesPage />} />
                 <Route element={<AdminGuard />}>
                   <Route path="/automations" element={<AutomationsPage />} />
+                  <Route path="/admin/audit" element={<AdminAuditPage />} />
                 </Route>
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/blocklist" element={<BlocklistPage />} />

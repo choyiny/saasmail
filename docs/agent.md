@@ -273,6 +273,10 @@ creating a broken new assistant message. At most five approved CRM actions
 execute in one user turn; further calls return a guard error instructing the
 model to ask the user before doing more.
 
+Everything the agent changes is in the [audit log](audit-log.md) under
+`agent for <your email>`: an approved action that ran is `agent.action_executed`
+next to the change itself, and one you declined is `agent.action_denied`.
+
 When the user presses **Deny**, the tool part ends as `output-denied` and the
 panel labels it **denied**; an `output-denied` part that carries a reason (an
 expired approval) keeps the **error** label and shows the reason. The agent's

@@ -40,6 +40,7 @@ import { rules } from "./rules.schema";
 import { autoReplyLog } from "./auto-reply-log.schema";
 import { customerPeople, customers } from "./customers.schema";
 import { jmapChanges } from "./jmap-changes.schema";
+import { auditEvents } from "./audit-events.schema";
 
 export const schema = {
   ...authSchema,
@@ -85,4 +86,5 @@ export const schema = {
   customers,
   customerPeople,
   jmapChanges,
+  auditEvents,
 } as const;

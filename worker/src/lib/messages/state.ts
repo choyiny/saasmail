@@ -1,3 +1,12 @@
+import { AUDIT_ACTIONS } from "../audit/events";
+import { recordAudit } from "../audit/record";
+import {
+  auditMailboxMembership,
+  auditMailboxState,
+  folderMembershipBefore,
+  mailboxFlagsBefore,
+  needsFlagsBefore,
+} from "../audit/mail-events";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -301,6 +310,11 @@ export async function setMailboxState(
     return;
   }
 
+  // Read before the write: the audit event counts only real changes.
+  const flagsBefore = needsFlagsBefore(userId, changes)
+    ? await mailboxFlagsBefore(db, resolved)
+    : null;
+
   const archivedAt = changes.archived === true ? now : null;
   const spamAt = changes.spam === true ? now : null;
   const trashedAt = changes.trashed === true ? now : null;
@@ -348,6 +362,7 @@ export async function setMailboxState(
     );
   }
   await runWriteBatches(db, statements);
+  await auditMailboxState(db, userId, resolved, changes, flagsBefore);
 }
 
 async function getMailboxForMutation(
@@ -406,6 +421,13 @@ export async function createMailbox(
   };
 
   await db.insert(mailboxes).values(row);
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.folderCreated,
+    targetType: "folder",
+    targetId: row.id,
+    inbox,
+    summary: `Created the folder '${row.name}' in ${inbox}`,
+  });
   return row;
 }
 
@@ -471,6 +493,17 @@ export async function updateMailbox(
   if (changes.sortOrder !== undefined) update.sortOrder = changes.sortOrder;
 
   await db.update(mailboxes).set(update).where(eq(mailboxes.id, mailboxId));
+  // Reordering folders is not recorded; a new name is.
+  if (update.name !== undefined && update.name !== mailbox.name) {
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.folderRenamed,
+      targetType: "folder",
+      targetId: mailboxId,
+      inbox: mailbox.inbox,
+      summary: `Renamed the folder '${mailbox.name}' to '${update.name}' in ${mailbox.inbox}`,
+      details: { from: mailbox.name, to: update.name },
+    });
+  }
   return { ...mailbox, ...update };
 }
 
@@ -499,8 +532,15 @@ export async function deleteMailbox(
   _userId: string,
   mailboxId: string,
 ): Promise<void> {
-  await getMailboxForMutation(db, allowed, mailboxId);
+  const mailbox = await getMailboxForMutation(db, allowed, mailboxId);
   await db.delete(mailboxes).where(eq(mailboxes.id, mailboxId));
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.folderDeleted,
+    targetType: "folder",
+    targetId: mailboxId,
+    inbox: mailbox.inbox,
+    summary: `Deleted the folder '${mailbox.name}' in ${mailbox.inbox}`,
+  });
 }
 
 export async function setMailboxMembership(
@@ -543,6 +583,14 @@ export async function setMailboxMembership(
       }
     }
   }
+
+  // Read before the write: the audit event counts only messages that move.
+  const membershipBefore = await folderMembershipBefore(
+    db,
+    userId,
+    resolved,
+    mailboxIds,
+  );
 
   const now = Math.floor(Date.now() / 1000);
   const statements: any[] = [];
@@ -605,6 +653,22 @@ export async function setMailboxMembership(
   }
 
   await runWriteBatches(db, statements);
+  await auditMailboxMembership(
+    db,
+    userId,
+    resolved,
+    add.map((mailboxId) => byId.get(mailboxId)!),
+    "added",
+    membershipBefore,
+  );
+  await auditMailboxMembership(
+    db,
+    userId,
+    resolved,
+    remove.map((mailboxId) => byId.get(mailboxId)!),
+    "removed",
+    membershipBefore,
+  );
 }
 
 const DELETE_BATCH_SIZE = 40;

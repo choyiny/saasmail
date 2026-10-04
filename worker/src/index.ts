@@ -1,3 +1,4 @@
+import { recordFailedSignIn } from "./auth/audit-hooks";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { routeAgentRequest } from "agents";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -28,6 +29,7 @@ import { emailTemplatesRouter } from "./routers/email-templates-router";
 import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
 import { adminRulesRouter } from "./routers/admin-rules-router";
+import { adminAuditRouter } from "./routers/admin-audit-router";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
@@ -39,6 +41,9 @@ import { processOutbox } from "./lib/outbox";
 import { reapOrphanSentAttachments } from "./lib/sent-attachments";
 import { runNewsletterMaintenance } from "./lib/newsletter-cron";
 import { pruneJmapChanges } from "./jmap/changes";
+import { anonymousHttpActor, httpActor } from "./lib/audit/actors";
+import { runWithAudit, systemActor } from "./lib/audit/context";
+import { auditRetentionDays, pruneAuditEvents } from "./lib/audit/prune";
 import { collectUnreferencedContent } from "./jmap/content";
 import { runJmapSubmissionMaintenance } from "./jmap/recovery";
 import { reapExpiredUploads } from "./jmap/upload";
@@ -98,6 +103,9 @@ app.openAPIRegistry.registerComponent(
 // Middleware
 app.use("*", injectDb);
 app.use("*", logger());
+// Every HTTP request starts as an anonymous audit actor; the authenticated
+// boundaries below (and MCP, JMAP) replace it with who is really acting.
+app.use("*", (c, next) => runWithAudit(anonymousHttpActor(c.req.raw), next));
 // `exposeHeaders` is required so browser-based MCP clients (e.g. Claude.ai
 // connectors) can read the `WWW-Authenticate` challenge on a 401 to discover
 // the OAuth protected-resource metadata URL, plus the `Mcp-Session-Id` header
@@ -163,6 +171,17 @@ app.post("/api/auth/sign-in/email", async (c, next) => {
     .where(eq(passkeys.userId, userRows[0].id))
     .limit(1);
   if (pkRows.length > 0) {
+    // Refused before better-auth sees it, so its hook cannot record it.
+    try {
+      await recordFailedSignIn(db, {
+        method: "password",
+        user: { id: userRows[0].id, email },
+        request: c.req.raw,
+        reason: "passkey_required",
+      });
+    } catch (error) {
+      console.warn("[audit] refused sign-in not recorded:", error);
+    }
     return c.json(
       {
         error:
@@ -194,7 +213,8 @@ app.use("/api/*", async (c, next) => {
 
   c.set("user", resolved.user);
   c.set("authMethod", resolved.authMethod);
-  return next();
+  // Everything downstream is audited as this person or API key.
+  return runWithAudit(httpActor(resolved, c.req.raw), next);
 });
 
 // Enforce passkey registration for session-cookie users. Runs before
@@ -268,6 +288,7 @@ app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
 app.route("/api/admin/rules", adminRulesRouter);
+app.route("/api/admin/audit", adminAuditRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a
@@ -381,64 +402,86 @@ app.all("*", async (c) => {
 
 export default {
   fetch: app.fetch,
-  email: handleEmail,
+  email: (
+    message: ForwardableEmailMessage,
+    env: CloudflareBindings,
+    ctx: ExecutionContext,
+  ) =>
+    runWithAudit(systemActor("inbound"), () => handleEmail(message, env, ctx)),
   async scheduled(
     event: ScheduledEvent,
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(
-      handleScheduled(env)
-        .catch((err) => console.error("[cron] sequence dispatch failed:", err))
-        .then(() => processOutbox(env))
-        // Newsletter retention sweep. Chained after the delivery work and
-        // separately caught so a cleanup failure can never stop mail going out.
-        .then(() => runNewsletterMaintenance(env))
-        .catch((err) =>
-          console.error("[cron] outbox/newsletter maintenance failed:", err),
-        )
-        .then(() =>
-          pruneJmapChanges(createDb(env), Math.floor(Date.now() / 1000)).catch(
-            (err) => console.error("[cron] JMAP pruning failed:", err),
-          ),
-        )
-        .then(() =>
-          reapOrphanSentAttachments(
-            createDb(env),
-            env,
-            Math.floor(Date.now() / 1000),
-          ).catch((err) =>
-            console.error("[cron] sent attachment reaping failed:", err),
-          ),
-        )
-        .then(() =>
-          reapExpiredUploads(
-            createDb(env),
-            env,
-            Math.floor(Date.now() / 1000),
-          ).catch((err) =>
-            console.error("[cron] JMAP upload reaping failed:", err),
-          ),
-        )
-        // JMAP submission recovery, before the content GC it depends on: an
-        // interrupted send's content must be settled before it can be collected.
-        .then(() =>
-          runJmapSubmissionMaintenance(env).catch((err) =>
-            console.error("[cron] JMAP submission maintenance failed:", err),
-          ),
-        )
-        .then(() =>
-          collectUnreferencedContent(
-            createDb(env),
-            env,
-            Math.floor(Date.now() / 1000),
-          ).catch((err) =>
-            console.error("[cron] JMAP content GC failed:", err),
-          ),
-        ),
-    );
+    ctx.waitUntil(runWithAudit(systemActor("cron"), () => scheduledChain(env)));
   },
   async queue(batch: MessageBatch<unknown>, env: CloudflareBindings) {
-    await handleQueueBatch(batch, env);
+    await runWithAudit(systemActor("queue"), () =>
+      handleQueueBatch(batch, env),
+    );
   },
 };
+
+/**
+ * Every scheduled job, in order, on every cron tick. Each step catches its
+ * own failure so a later one still runs.
+ */
+function scheduledChain(env: CloudflareBindings): Promise<unknown> {
+  return (
+    handleScheduled(env)
+      .catch((err) => console.error("[cron] sequence dispatch failed:", err))
+      .then(() => processOutbox(env))
+      // Newsletter retention sweep. Chained after the delivery work and
+      // separately caught so a cleanup failure can never stop mail going out.
+      .then(() => runNewsletterMaintenance(env))
+      .catch((err) =>
+        console.error("[cron] outbox/newsletter maintenance failed:", err),
+      )
+      .then(() =>
+        pruneJmapChanges(createDb(env), Math.floor(Date.now() / 1000)).catch(
+          (err) => console.error("[cron] JMAP pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneAuditEvents(
+          createDb(env),
+          Math.floor(Date.now() / 1000),
+          auditRetentionDays(env),
+        ).catch((err) =>
+          console.error("[cron] audit log pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        reapOrphanSentAttachments(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] sent attachment reaping failed:", err),
+        ),
+      )
+      .then(() =>
+        reapExpiredUploads(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] JMAP upload reaping failed:", err),
+        ),
+      )
+      // JMAP submission recovery, before the content GC it depends on: an
+      // interrupted send's content must be settled before it can be collected.
+      .then(() =>
+        runJmapSubmissionMaintenance(env).catch((err) =>
+          console.error("[cron] JMAP submission maintenance failed:", err),
+        ),
+      )
+      .then(() =>
+        collectUnreferencedContent(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) => console.error("[cron] JMAP content GC failed:", err)),
+      )
+  );
+}

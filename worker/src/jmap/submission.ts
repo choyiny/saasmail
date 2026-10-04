@@ -1,3 +1,4 @@
+import { auditMailSent } from "../lib/audit/mail-events";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -844,6 +845,15 @@ async function createSubmission(
         error,
       );
     }
+    await auditMailSent(db, {
+      id: sentEmailId,
+      from: message.fromAddress,
+      to: message.to,
+      otherRecipients:
+        message.additionalTo.length + message.cc.length + message.bcc.length,
+      subject: message.subject,
+      status: result.outcome,
+    });
     return {
       created: {
         id: publicSubmissionId(submissionId),

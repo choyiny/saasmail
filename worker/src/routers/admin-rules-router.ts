@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -297,6 +299,17 @@ adminRulesRouter.openapi(createRuleRoute, async (c) => {
     updatedAt: now,
   };
   await db.insert(rules).values(row);
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.ruleCreated,
+    targetType: "rule",
+    targetId: row.id,
+    inbox,
+    summary: `Created the rule '${row.name}'`,
+    details: {
+      enabled: row.enabled === 1,
+      actions: row.actions.map((action: { type: string }) => action.type),
+    },
+  });
   const [created] = await db
     .select()
     .from(rules)
@@ -379,6 +392,34 @@ adminRulesRouter.openapi(updateRuleRoute, async (c) => {
     .from(rules)
     .where(eq(rules.id, id))
     .limit(1);
+
+  // Switching a rule on or off, alone, is its own event; anything else is an
+  // update that lists the fields the request carried.
+  const fields = Object.keys(body).filter(
+    (key) => (body as Record<string, unknown>)[key] !== undefined,
+  );
+  const toggled = fields.length === 1 && fields[0] === "enabled";
+  if (toggled) {
+    if ((existing.enabled === 1) !== body.enabled) {
+      await recordAudit(db, {
+        action: AUDIT_ACTIONS.ruleToggled,
+        targetType: "rule",
+        targetId: id,
+        inbox: updated!.inbox,
+        summary: `Turned the rule '${updated!.name}' ${body.enabled ? "on" : "off"}`,
+        details: { enabled: body.enabled },
+      });
+    }
+  } else if (fields.length > 0) {
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.ruleUpdated,
+      targetType: "rule",
+      targetId: id,
+      inbox: updated!.inbox,
+      summary: `Changed ${fields.join(", ")} of the rule '${updated!.name}'`,
+      details: { fields },
+    });
+  }
   return c.json(apiRule(updated!), 200);
 });
 
@@ -406,12 +447,19 @@ adminRulesRouter.openapi(deleteRuleRoute, async (c) => {
   const db = c.get("db");
   const { id } = c.req.valid("param");
   const [existing] = await db
-    .select({ id: rules.id })
+    .select({ id: rules.id, name: rules.name, inbox: rules.inbox })
     .from(rules)
     .where(eq(rules.id, id))
     .limit(1);
   if (!existing) return c.json({ error: "Rule not found" }, 404);
   await db.delete(rules).where(eq(rules.id, id));
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.ruleDeleted,
+    targetType: "rule",
+    targetId: id,
+    inbox: existing.inbox,
+    summary: `Deleted the rule '${existing.name}'`,
+  });
   return c.json({ success: true as const }, 200);
 });
 

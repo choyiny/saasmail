@@ -1,3 +1,4 @@
+import { auditMailDeleted } from "./audit/mail-events";
 import { eq, sql } from "drizzle-orm";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -36,6 +37,7 @@ export async function deleteEmailWithAttachments(
       isRead: emails.isRead,
       recipient: emails.recipient,
       rawR2Key: emails.rawR2Key,
+      subject: emails.subject,
     })
     .from(emails)
     .where(eq(emails.id, emailId))
@@ -76,12 +78,23 @@ export async function deleteEmailWithAttachments(
       })
       .where(eq(people.id, email.personId));
 
+    await auditMailDeleted(db, [
+      {
+        ref: { kind: "received", id: emailId },
+        inbox: email.recipient,
+        subject: email.subject,
+      },
+    ]);
     return { success: true, attachmentsDeleted: atts.length };
   }
 
   // Try sent email
   const sent = await db
-    .select({ id: sentEmails.id, fromAddress: sentEmails.fromAddress })
+    .select({
+      id: sentEmails.id,
+      fromAddress: sentEmails.fromAddress,
+      subject: sentEmails.subject,
+    })
     .from(sentEmails)
     .where(eq(sentEmails.id, emailId))
     .limit(1);
@@ -106,6 +119,13 @@ export async function deleteEmailWithAttachments(
     await cancelScheduledSendsFor(db, sql`id = ${emailId}`);
     await db.delete(sentEmails).where(eq(sentEmails.id, emailId));
 
+    await auditMailDeleted(db, [
+      {
+        ref: { kind: "sent", id: emailId },
+        inbox: sent[0].fromAddress,
+        subject: sent[0].subject,
+      },
+    ]);
     return { success: true, attachmentsDeleted: atts.length };
   }
 

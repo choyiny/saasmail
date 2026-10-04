@@ -1414,6 +1414,69 @@ export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
 }
 
+// --- Audit log ---
+
+export interface AuditEvent {
+  id: string;
+  /** Unix seconds. */
+  at: number;
+  /** user, api_key, mcp, jmap, agent, rule or system. */
+  actorType: string;
+  actorUserId: string | null;
+  actorLabel: string;
+  /** web, api, mcp, jmap, agent, rule, inbound, cron, queue or import. */
+  channel: string;
+  /** A dotted name such as `mail.archived`. */
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  inbox: string | null;
+  summary: string;
+  details: Record<string, unknown> | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface AuditFilters {
+  action?: string;
+  /** Every action that starts with this, e.g. `mail.`. */
+  actionPrefix?: string;
+  actorUserId?: string;
+  inbox?: string;
+  /** Unix seconds, inclusive. */
+  from?: number;
+  to?: number;
+  q?: string;
+}
+
+function auditQuery(filters: AuditFilters): URLSearchParams {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") qs.set(key, String(value));
+  }
+  return qs;
+}
+
+export async function fetchAuditEvents(
+  filters: AuditFilters = {},
+  cursor?: string | null,
+): Promise<{ events: AuditEvent[]; nextCursor: string | null }> {
+  const qs = auditQuery(filters);
+  if (cursor) qs.set("cursor", cursor);
+  const query = qs.toString();
+  return apiFetch(`/api/admin/audit${query ? `?${query}` : ""}`);
+}
+
+export async function fetchAuditActions(): Promise<{ actions: string[] }> {
+  return apiFetch("/api/admin/audit/actions");
+}
+
+/** Where the browser downloads the filtered log as CSV (at most 10,000 rows). */
+export function auditExportUrl(filters: AuditFilters = {}): string {
+  const query = auditQuery(filters).toString();
+  return `/api/admin/audit/export.csv${query ? `?${query}` : ""}`;
+}
+
 // --- Automations ---
 
 export type RuleCondition =

@@ -1,4 +1,4 @@
-// SPEC-reply-to §3: a reply follows the original's Reply-To unless the caller
+// docs/archive/SPEC-reply-to.md §3: a reply follows the original's Reply-To unless the caller
 // asks for the sender, never mails one of our own inboxes, and stays on the
 // original sender's timeline.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";

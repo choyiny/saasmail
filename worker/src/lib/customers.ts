@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "./audit/events";
+import { recordAudit } from "./audit/record";
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { HTTPException } from "hono/http-exception";
@@ -169,6 +171,13 @@ async function linkPeopleDecision(
         linkedAt: now,
       }),
     ]);
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.customerLinked,
+      targetType: "customer",
+      targetId: customerId,
+      summary: "Linked two contacts as one customer",
+      details: { personIds: [a, b] },
+    });
     return resolveCustomerScope(db, a);
   }
 
@@ -187,6 +196,13 @@ async function linkPeopleDecision(
         .set({ updatedAt: now })
         .where(eq(customers.id, customerId)),
     ]);
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.customerLinked,
+      targetType: "customer",
+      targetId: customerId,
+      summary: "Linked a contact to an existing customer",
+      details: { personIds: [personId] },
+    });
     return resolveCustomerScope(db, a);
   }
 
@@ -211,6 +227,13 @@ async function linkPeopleDecision(
       .set({ updatedAt: now })
       .where(eq(customers.id, winner)),
   ]);
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.customerMerged,
+    targetType: "customer",
+    targetId: winner,
+    summary: "Merged two customers into one",
+    details: { kept: winner, merged: loser, personIds: [a, b] },
+  });
   return resolveCustomerScope(db, a);
 }
 
@@ -246,6 +269,13 @@ export async function unlinkPerson(
   if (!customerId) return { customerId: null, personIds: [personId] };
 
   await removeMembershipAndCleanup(db, customerId, personId);
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.customerUnlinked,
+    targetType: "customer",
+    targetId: customerId,
+    summary: "Unlinked a contact from its customer",
+    details: { personIds: [personId] },
+  });
   return { customerId: null, personIds: [personId] };
 }
 

@@ -70,6 +70,7 @@ function buildCrumbs(
   if (pathname === "/api-keys") return [{ label: "API Keys" }];
   if (pathname === "/inboxes") return [{ label: "Inboxes" }];
   if (pathname === "/admin/users") return [{ label: "Users" }];
+  if (pathname === "/admin/audit") return [{ label: "Audit log" }];
   if (pathname === "/settings") return [{ label: "Settings" }];
 
   return [];
