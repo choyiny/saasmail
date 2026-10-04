@@ -1,3 +1,4 @@
+import { currentJmapEpoch, readJmapEpoch } from "./epoch";
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
@@ -29,6 +30,7 @@ export async function sessionState(
   return opaqueState({
     kind: "session",
     v: JMAP_ID_FORMAT_VERSION,
+    epoch: currentJmapEpoch(),
     origin,
     user: user.id,
     username: user.email ?? user.id,
@@ -84,16 +86,23 @@ export function parseJmapState(value: unknown): ParsedJmapState | null {
 }
 
 /**
- * The part of the state that names who is asking and which inboxes they see.
- * A state issued under another fingerprint can't be diffed against.
+ * The part of the state that names who is asking, which inboxes they see,
+ * and the account epoch. A state issued under another fingerprint can't be
+ * diffed against: after an epoch bump every older state answers
+ * `cannotCalculateChanges`, and a push stream ends.
  */
 export async function stateFingerprint(
   db: DrizzleD1Database<any>,
   allowed: AllowedInboxes,
   userId: string,
 ): Promise<string> {
-  const inboxes = await listAllowedInboxAddresses(db, allowed);
-  const bytes = new TextEncoder().encode(`${userId}\n${inboxes.join(",")}`);
+  const [inboxes, epoch] = await Promise.all([
+    listAllowedInboxAddresses(db, allowed),
+    readJmapEpoch(db),
+  ]);
+  const bytes = new TextEncoder().encode(
+    `${epoch}\n${userId}\n${inboxes.join(",")}`,
+  );
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),

@@ -10,6 +10,7 @@ import { inboxConversationState } from "../../db/inbox-conversation-state.schema
 import { sentEmails } from "../../db/sent-emails.schema";
 import {
   isInboxAllowed,
+  jsonList,
   resolveAllowedInboxes,
   type AllowedInboxes,
 } from "../inbox-permissions";
@@ -32,20 +33,33 @@ type ResolvedConversation = {
 
 const refKey = (ref: MessageRef) => `${ref.kind}:${ref.id}`;
 
+/**
+ * The conversation key: a headers-mode inbox's thread (`thread_key`), else
+ * the group conversation (`conversation_id`), else the customer
+ * (`p:<person_id>`). Callers that only have the last two pass
+ * `COALESCE(thread_key, conversation_id)` as `conversationId`.
+ */
 export function conversationKeySql(alias: {
+  threadKey?: SQLWrapper;
   conversationId: SQLWrapper;
   personId: SQLWrapper;
 }): SQL<string | null> {
-  return sql<
-    string | null
-  >`COALESCE(${alias.conversationId}, 'p:' || ${alias.personId})`;
+  return alias.threadKey
+    ? sql<
+        string | null
+      >`COALESCE(${alias.threadKey}, ${alias.conversationId}, 'p:' || ${alias.personId})`
+    : sql<
+        string | null
+      >`COALESCE(${alias.conversationId}, 'p:' || ${alias.personId})`;
 }
 
 export function conversationKeyOf(
-  message:
+  message: (
     | Pick<UnifiedMessage, "conversationId" | "personId">
-    | ConversationSource,
+    | ConversationSource
+  ) & { threadKey?: string | null },
 ): string | null {
+  if (message.threadKey) return message.threadKey;
   if (message.conversationId) return message.conversationId;
   if (message.personId) return `p:${message.personId}`;
   return null;
@@ -78,7 +92,10 @@ async function resolveConversationRefs(
     .filter((ref) => ref.kind === "sent")
     .map((ref) => ref.id);
 
-  const byRef = new Map<string, ConversationSource & { inbox: string }>();
+  const byRef = new Map<
+    string,
+    ConversationSource & { inbox: string; threadKey: string | null }
+  >();
 
   for (let start = 0; start < receivedIds.length; start += LOOKUP_BATCH_SIZE) {
     const batch = receivedIds.slice(start, start + LOOKUP_BATCH_SIZE);
@@ -86,6 +103,7 @@ async function resolveConversationRefs(
       .select({
         id: emails.id,
         inbox: emails.recipient,
+        threadKey: emails.threadKey,
         conversationId: emails.conversationId,
         personId: emails.personId,
       })
@@ -100,6 +118,7 @@ async function resolveConversationRefs(
       .select({
         id: sentEmails.id,
         inbox: sentEmails.fromAddress,
+        threadKey: sentEmails.threadKey,
         conversationId: sentEmails.conversationId,
         personId: sentEmails.personId,
       })
@@ -260,6 +279,8 @@ export async function collectPersonGroupConversations(
   db: DrizzleD1Database<any>,
   personId: string,
 ): Promise<PersonGroupConversation[]> {
+  // Group conversations and, in headers-mode inboxes, threads: both are
+  // conversation keys that may hold snooze or assignment state.
   const rows = await db.all<{ inbox: string; conversation_id: string }>(sql`
     SELECT DISTINCT recipient AS inbox, conversation_id
     FROM ${emails}
@@ -268,6 +289,14 @@ export async function collectPersonGroupConversations(
     SELECT DISTINCT from_address AS inbox, conversation_id
     FROM ${sentEmails}
     WHERE person_id = ${personId} AND conversation_id IS NOT NULL
+    UNION
+    SELECT DISTINCT recipient AS inbox, thread_key
+    FROM ${emails}
+    WHERE person_id = ${personId} AND thread_key IS NOT NULL
+    UNION
+    SELECT DISTINCT from_address AS inbox, thread_key
+    FROM ${sentEmails}
+    WHERE person_id = ${personId} AND thread_key IS NOT NULL
   `);
   return rows.map((row) => ({
     inbox: row.inbox,
@@ -295,15 +324,20 @@ export async function deletePersonConversationState(
     const allIds = [...ids];
     for (let start = 0; start < allIds.length; start += LOOKUP_BATCH_SIZE) {
       const chunk = allIds.slice(start, start + LOOKUP_BATCH_SIZE);
-      // Each conversation id is bound once in each UNION arm, so 40 ids
-      // consume ~82 parameters including the two inbox binds — under D1's
-      // per-statement cap while checking received and sent mail together.
+      // The keys are bound once per arm as JSON (`jsonList`): eight
+      // parameters whatever the chunk.
       const remaining = await db.all<{ conversation_id: string }>(sql`
         SELECT conversation_id FROM ${emails}
-        WHERE recipient = ${inbox} AND conversation_id IN ${chunk}
+        WHERE recipient = ${inbox} AND conversation_id IN ${jsonList(chunk)}
         UNION
         SELECT conversation_id FROM ${sentEmails}
-        WHERE from_address = ${inbox} AND conversation_id IN ${chunk}
+        WHERE from_address = ${inbox} AND conversation_id IN ${jsonList(chunk)}
+        UNION
+        SELECT thread_key FROM ${emails}
+        WHERE recipient = ${inbox} AND thread_key IN ${jsonList(chunk)}
+        UNION
+        SELECT thread_key FROM ${sentEmails}
+        WHERE from_address = ${inbox} AND thread_key IN ${jsonList(chunk)}
       `);
       const live = new Set(remaining.map((row) => row.conversation_id));
       const orphaned = chunk.filter(

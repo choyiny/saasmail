@@ -128,6 +128,10 @@ and their last activity never moves back in time), and fires no rules,
 notifications, webhooks, forwards or suggested replies — an import never
 auto-replies to a thousand old messages. It never trains the learning spam
 filter. A message's date is its `Date` header, else the mbox separator's date.
+In an inbox that [groups by thread](inboxes.md#conversations-by-customer-or-by-thread),
+a reply met before the message it answers starts a thread of its own, so when
+the import finishes the inbox's mail is walked once more, oldest first, to join
+them; JMAP clients then resync once.
 
 **Labels become state.** Gmail's `X-Gmail-Labels` and saasmail's own
 `X-Saasmail-Labels` (from an [export](#export-a-mailbox)) are read, but only

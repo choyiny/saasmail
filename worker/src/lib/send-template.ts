@@ -1,3 +1,4 @@
+import { threadKeyForNewMessage } from "./messages/thread-key";
 import { auditMailSent } from "./audit/mail-events";
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -150,6 +151,7 @@ export async function sendTemplate(
 
   // Store sent email
   const now = Math.floor(Date.now() / 1000);
+  const storedMessageId = deliveredMessageId(messageId, result);
   await db.insert(sentEmails).values({
     id,
     personId,
@@ -161,7 +163,12 @@ export async function sendTemplate(
     // template render.
     bodyHtml: sendResult.renderedHtml ?? renderedHtml,
     bodyText: sendResult.renderedText ?? null,
-    messageId: deliveredMessageId(messageId, result),
+    messageId: storedMessageId,
+    // Its own thread in a headers-mode inbox.
+    threadKey: await threadKeyForNewMessage(db, {
+      inbox: fromAddress,
+      messageId: storedMessageId,
+    }),
     resendId: result.id,
     status: outcome,
     sentAt: now,

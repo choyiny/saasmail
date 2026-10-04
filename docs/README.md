@@ -20,7 +20,7 @@ Everything that used to live in one very long README. Start at
 
 | Page                                            | What's in it                                                                        |
 | ----------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [Inboxes and timelines](inboxes.md)             | One timeline per customer, team permissions, thread-vs-chat mode, forwarding        |
+| [Inboxes and timelines](inboxes.md)             | Timelines, team permissions, thread/chat view, threads by headers, forwarding       |
 | [Customers and linked addresses](customers.md)  | Link multiple email addresses to one customer without widening permissions          |
 | [Mailbox state](mailbox-state.md)               | Seen/starred state, archive/junk/trash, custom folders, APIs, and agent tools       |
 | [JMAP](jmap.md)                                 | RFC 8620/8621 mail access, drafts and sending for standard clients and integrations |

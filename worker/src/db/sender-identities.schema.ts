@@ -21,6 +21,14 @@ export const senderIdentities = sqliteTable("sender_identities", {
   spamThreshold: real("spam_threshold"),
   agentInstructions: text("agent_instructions"),
   agentAutodraft: integer("agent_autodraft").notNull().default(0),
+  /**
+   * How the inbox groups conversations: `relationship` (one per customer,
+   * the default) or `headers` (threads by In-Reply-To/References, like a mail
+   * client). See docs/inboxes.md.
+   */
+  threadingMode: text("threading_mode", { enum: ["relationship", "headers"] })
+    .notNull()
+    .default("relationship"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

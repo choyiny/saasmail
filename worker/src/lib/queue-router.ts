@@ -32,6 +32,11 @@ import {
   type MailImportMessage,
 } from "./import/mail-import";
 import {
+  failThreadBackfill,
+  runThreadBackfillSlice,
+  type ThreadBackfillMessage,
+} from "./messages/thread-backfill";
+import {
   failMailExport,
   runMailExportSlice,
   type MailExportMessage,
@@ -63,7 +68,8 @@ export type QueueMessageBody =
   | AiFileMessage
   | MailExportMessage
   | MailImportMessage
-  | BackupStepMessage;
+  | BackupStepMessage
+  | ThreadBackfillMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
@@ -82,6 +88,7 @@ export type QueueMessageKind =
   | "mail_export"
   | "mail_import"
   | "backup_step"
+  | "thread_backfill"
   | "unknown";
 
 /**
@@ -139,7 +146,11 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
       ? "backup_step"
       : "unknown";
   }
-  if (b.type === "mail_export" || b.type === "mail_import") {
+  if (
+    b.type === "mail_export" ||
+    b.type === "mail_import" ||
+    b.type === "thread_backfill"
+  ) {
     return typeof b.jobId === "string" && typeof b.slice === "number"
       ? b.type
       : "unknown";
@@ -223,8 +234,15 @@ export async function handleQueueBatch(
         if (next !== null) {
           await env.EMAIL_QUEUE.send({ ...body, step: next });
         }
-      } else if (kind === "mail_export" || kind === "mail_import") {
-        const body = msg.body as MailExportMessage | MailImportMessage;
+      } else if (
+        kind === "mail_export" ||
+        kind === "mail_import" ||
+        kind === "thread_backfill"
+      ) {
+        const body = msg.body as
+          | MailExportMessage
+          | MailImportMessage
+          | ThreadBackfillMessage;
         if (sliceRan) {
           // Back on the queue as a new message: no attempt is used up.
           await env.EMAIL_QUEUE.send(body);
@@ -236,7 +254,9 @@ export async function handleQueueBatch(
         const next =
           body.type === "mail_export"
             ? await runMailExportSlice(db, env, body.jobId, body.slice)
-            : await runMailImportSlice(db, env, body.jobId, body.slice);
+            : body.type === "thread_backfill"
+              ? await runThreadBackfillSlice(db, env, body.jobId, body.slice)
+              : await runMailImportSlice(db, env, body.jobId, body.slice);
         if (next !== null) {
           await env.EMAIL_QUEUE.send({ ...body, slice: next });
         }
@@ -266,6 +286,7 @@ export async function handleQueueBatch(
       const sliced =
         kind === "mail_export" ||
         kind === "mail_import" ||
+        kind === "thread_backfill" ||
         kind === "backup_step";
       if (sliced && err instanceof SliceBusyError) {
         // Another run holds the slice; it queues the next one itself. Come
@@ -291,6 +312,10 @@ export async function handleQueueBatch(
         } else if (kind === "mail_export") {
           await failMailExport(db, env, jobId, reason).catch((error) =>
             console.error("[queue] export not failed:", error),
+          );
+        } else if (kind === "thread_backfill") {
+          await failThreadBackfill(db, jobId, reason).catch((error) =>
+            console.error("[queue] thread backfill not failed:", error),
           );
         } else {
           // One message that can never be stored must not stop the rest of

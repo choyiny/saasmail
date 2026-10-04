@@ -5,6 +5,11 @@ import { computeConversationId, externalsOnly } from "../conversation-id";
 import type { ParsedAttachment, ParsedEmail } from "../email-parser";
 import { findOrCreatePersonId } from "../sent-bookkeeping";
 import {
+  citedIdsOf,
+  threadKeyForNewMessage,
+  type ThreadingMode,
+} from "../messages/thread-key";
+import {
   discardStoredFiles,
   keptAttachments,
   storeAttachments,
@@ -42,6 +47,8 @@ export async function storeSentMessage(
     ourDomains: string[];
     /** The import storing it; recorded on the row. */
     importJobId?: string | null;
+    /** The inbox's threading mode, when the caller read it. */
+    threadingMode?: ThreadingMode;
   },
 ): Promise<StoredSent | null> {
   const { parsed, inbox, sentAt, now } = input;
@@ -58,6 +65,13 @@ export async function storeSentMessage(
     input.ourDomains,
   );
   const conversationId = await computeConversationId(inbox, externals);
+  const inReplyTo = parsed.headers["in-reply-to"]?.trim() || null;
+  const threadKey = await threadKeyForNewMessage(db, {
+    inbox,
+    messageId: parsed.messageId,
+    citedIds: citedIdsOf(inReplyTo, parsed.headers["references"]),
+    mode: input.threadingMode,
+  });
 
   const sentId = nanoid();
   const { kept, dropped } = keptAttachments(parsed.attachments);
@@ -77,13 +91,14 @@ export async function storeSentMessage(
     subject: parsed.subject || "",
     bodyHtml: storedBody(bodyHtml),
     bodyText: storedBody(parsed.bodyText),
-    inReplyTo: parsed.headers["in-reply-to"]?.trim() || null,
+    inReplyTo,
     messageId: parsed.messageId,
     status: "sent" as const,
     cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
     additionalTo: additionalTo.length > 0 ? JSON.stringify(additionalTo) : null,
     bcc: parsed.bcc.length > 0 ? JSON.stringify(parsed.bcc) : null,
     conversationId,
+    threadKey,
     importJobId: input.importJobId ?? null,
     sentAt,
     createdAt: now,

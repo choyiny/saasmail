@@ -400,7 +400,12 @@ export function toJmapEmail(
       message.bcc && message.bcc.length > 0
         ? message.bcc.map((address) => emailAddress(address))
         : null,
-    replyTo: null,
+    // Received mail's Reply-To (SPEC-reply-to); exposed with the epoch reset
+    // that header threading brought, since `replyTo` is immutable.
+    replyTo:
+      message.replyTo && message.replyTo.length > 0
+        ? message.replyTo.map((address) => emailAddress(address))
+        : null,
     subject: message.subject ?? "",
     sentAt:
       message.direction === "outbound" ? utcDate(message.occurredAt) : null,
@@ -433,6 +438,7 @@ async function queryEmailObjects(
     withState: true,
     withAttachments: true,
     withJmap: true,
+    withReplyTo: true,
   });
   return page.messages;
 }

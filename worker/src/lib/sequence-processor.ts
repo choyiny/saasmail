@@ -1,3 +1,4 @@
+import { threadKeyForNewMessage } from "./messages/thread-key";
 import { eq, and, lte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createEmailSender, type EmailSender } from "./email-sender";
@@ -148,6 +149,9 @@ export async function processSequenceEmail(
   if (existingOutboxRows.length > 0) {
     const outboxRow = existingOutboxRows[0];
     const repairNow = Math.floor(Date.now() / 1000);
+    const repairMessageId: string | null = outboxRow.headers
+      ? (JSON.parse(outboxRow.headers)["Message-ID"] ?? null)
+      : null;
     await db
       .insert(sentEmails)
       .values({
@@ -158,9 +162,12 @@ export async function processSequenceEmail(
         subject: outboxRow.subject,
         bodyHtml: outboxRow.bodyHtml ?? null,
         bodyText: outboxRow.bodyText ?? null,
-        messageId: outboxRow.headers
-          ? (JSON.parse(outboxRow.headers)["Message-ID"] ?? null)
-          : null,
+        messageId: repairMessageId,
+        // Each sequence step is its own thread in a headers-mode inbox.
+        threadKey: await threadKeyForNewMessage(db, {
+          inbox: fromAddress,
+          messageId: repairMessageId,
+        }),
         status: "retrying" as const,
         sequenceId: enrollment.sequenceId,
         sequenceEnrollmentId: enrollment.id,
@@ -281,6 +288,7 @@ export async function processSequenceEmail(
     // Store sent email record. The helper may have mutated the body to
     // interpolate {{unsubscribe_url}} or auto-append a footer — record
     // exactly what was on the wire, not the pre-helper template render.
+    const storedMessageId = deliveredMessageId(messageId, result);
     await db.insert(sentEmails).values({
       id: sentId,
       personId: person.id,
@@ -289,7 +297,11 @@ export async function processSequenceEmail(
       subject: renderedSubject,
       bodyHtml: sendResult.renderedHtml ?? renderedHtml,
       bodyText: sendResult.renderedText ?? null,
-      messageId: deliveredMessageId(messageId, result),
+      messageId: storedMessageId,
+      threadKey: await threadKeyForNewMessage(db, {
+        inbox: fromAddress,
+        messageId: storedMessageId,
+      }),
       resendId: result.id,
       status: outcome,
       sequenceId: enrollment.sequenceId,

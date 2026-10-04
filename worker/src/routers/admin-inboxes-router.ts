@@ -1,7 +1,7 @@
 import { AUDIT_ACTIONS } from "../lib/audit/events";
 import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { emails } from "../db/emails.schema";
@@ -17,16 +17,48 @@ import {
   setSpamFilterEnabled,
 } from "../lib/spam/filter";
 import { modelReady } from "../lib/spam/score";
+import {
+  backfillStatus,
+  insertThreadBackfill,
+  latestThreadBackfills,
+  startThreadBackfill,
+} from "../lib/messages/thread-backfill";
 
 export const adminInboxesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
   Variables: Variables;
 }>();
 
+/** Whether a mail import into the inbox is storing mail. */
+async function importRunning(
+  db: Variables["db"],
+  inbox: string,
+): Promise<boolean> {
+  const [row] = await db.all<{ n: number }>(sql`
+    SELECT COUNT(*) AS n FROM async_jobs
+    WHERE job_type = 'mail_import' AND ref_id = ${inbox}
+      AND status = 'running'
+  `);
+  return (row?.n ?? 0) > 0;
+}
+
+/** The inbox's last conversation-mode backfill, if it ever had one. */
+const ThreadBackfillSchema = z
+  .object({
+    id: z.string(),
+    mode: z.enum(["relationship", "headers"]),
+    status: z.enum(["running", "completed", "failed"]),
+    processed: z.number().int(),
+    total: z.number().int(),
+  })
+  .nullable();
+
 const InboxRowSchema = z.object({
   email: z.string(),
   displayName: z.string().nullable(),
   displayMode: z.enum(["thread", "chat"]),
+  threadingMode: z.enum(["relationship", "headers"]),
+  threadBackfill: ThreadBackfillSchema,
   signatureHtml: z.string().nullable(),
   forwardTo: z.string().nullable(),
   spamThreshold: z.number().nullable(),
@@ -59,6 +91,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     email: string;
     displayName: string | null;
     displayMode: "thread" | "chat" | null;
+    threadingMode: "relationship" | "headers" | null;
     signatureHtml: string | null;
     forwardTo: string | null;
     spamThreshold: number | null;
@@ -76,6 +109,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       u.email AS email,
       s.display_name AS displayName,
       s.display_mode AS displayMode,
+      s.threading_mode AS threadingMode,
       s.signature_html AS signatureHtml,
       s.forward_to AS forwardTo,
       s.spam_threshold AS spamThreshold,
@@ -95,12 +129,18 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
   `);
 
   const models = await readSpamModels(db);
+  const backfills = await latestThreadBackfills(
+    db,
+    rows.map((r) => r.email),
+  );
   return c.json(
     rows.map((r) => ({
       spamFilter: spamFilterStatus(models.get(r.email.toLowerCase())),
       email: r.email,
       displayName: r.displayName,
       displayMode: r.displayMode ?? "chat",
+      threadingMode: r.threadingMode ?? "relationship",
+      threadBackfill: backfillStatus(backfills.get(r.email) ?? null),
       signatureHtml: r.signatureHtml,
       forwardTo: r.forwardTo,
       spamThreshold: r.spamThreshold,
@@ -137,6 +177,8 @@ const createInboxRoute = createRoute({
         email: z.string(),
         displayName: z.string().nullable(),
         displayMode: z.enum(["thread", "chat"]),
+        threadingMode: z.enum(["relationship", "headers"]),
+        threadBackfill: ThreadBackfillSchema,
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
         spamThreshold: z.number().nullable(),
@@ -201,6 +243,8 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
       email,
       displayName,
       displayMode,
+      threadingMode: "relationship" as const,
+      threadBackfill: null,
       signatureHtml: null,
       forwardTo: null,
       spamThreshold: null,
@@ -233,9 +277,16 @@ const PatchInboxBodySchema = z
     spamThreshold: z.number().min(0).max(100).nullable().optional(),
     agentInstructions: z.string().max(4000).optional(),
     agentAutodraft: z.boolean().optional(),
+    /**
+     * How mail groups into conversations. Changing it rekeys the inbox's mail
+     * in the background, clears its snoozes and assignments, and makes every
+     * JMAP client resync once the rekeying is done.
+     */
+    threadingMode: z.enum(["relationship", "headers"]).optional(),
   })
   .refine(
     (b) =>
+      b.threadingMode !== undefined ||
       b.displayName !== undefined ||
       b.displayMode !== undefined ||
       b.signatureHtml !== undefined ||
@@ -251,7 +302,7 @@ const patchInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Update display name, display mode, signature HTML, forward destination, spam threshold, agent instructions, and/or automatic suggested replies for an inbox. Row is deleted only when all fields are at defaults.",
+    "Update display name, display mode, conversation (threading) mode, signature HTML, forward destination, spam threshold, agent instructions, and/or automatic suggested replies for an inbox. Row is deleted only when all fields are at defaults. A new threading mode starts a background backfill (409 while one runs for the inbox), clears the inbox's snoozes and assignments, and resets JMAP clients when the backfill ends.",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -268,6 +319,8 @@ const patchInboxRoute = createRoute({
         email: z.string(),
         displayName: z.string().nullable(),
         displayMode: z.enum(["thread", "chat"]),
+        threadingMode: z.enum(["relationship", "headers"]),
+        threadBackfill: ThreadBackfillSchema,
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
         spamThreshold: z.number().nullable(),
@@ -278,6 +331,14 @@ const patchInboxRoute = createRoute({
     ),
     400: {
       description: "Invalid forward destination",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
+    409: {
+      description: "A conversation-mode backfill is running for this inbox",
       content: {
         "application/json": {
           schema: z.object({ error: z.string() }),
@@ -345,6 +406,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         ? 1
         : 0
       : (currentRow?.agentAutodraft ?? 0);
+  const currentThreadingMode = currentRow?.threadingMode ?? "relationship";
+  const nextThreadingMode = body.threadingMode ?? currentThreadingMode;
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
@@ -381,8 +444,74 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     false,
   );
   track("agentAutodraft", currentRow?.agentAutodraft ?? 0, nextAgentAutodraft);
+  track("threadingMode", currentThreadingMode, nextThreadingMode);
+
+  // A new conversation mode claims the inbox for its backfill before anything
+  // is saved, so a second switch while one runs changes nothing. Asking for
+  // the current mode again after its backfill failed runs it again.
+  const latestBackfill = backfillStatus(
+    (await latestThreadBackfills(db, [email])).get(email) ?? null,
+  );
+  const retryBackfill =
+    body.threadingMode !== undefined &&
+    nextThreadingMode === currentThreadingMode &&
+    latestBackfill?.status === "failed" &&
+    latestBackfill.mode === nextThreadingMode;
+  if (retryBackfill) {
+    changes.threadingMode = {
+      from: currentThreadingMode,
+      to: nextThreadingMode,
+      retry: true,
+    };
+  }
+  const wantsBackfill =
+    nextThreadingMode !== currentThreadingMode || retryBackfill;
+  if (wantsBackfill && (await importRunning(db, email))) {
+    // Its slices read the mode as they go: mail stored under the old one
+    // could land behind the backfill's cursor and never be regrouped.
+    return c.json(
+      {
+        error:
+          "Mail is being imported into this inbox; change its conversations when the import finishes",
+      },
+      409,
+    );
+  }
+  const backfill = wantsBackfill
+    ? await insertThreadBackfill(db, {
+        inbox: email,
+        mode: nextThreadingMode,
+        requestedBy: c.get("user")?.id ?? null,
+      })
+    : null;
+  if (wantsBackfill && !backfill) {
+    return c.json(
+      {
+        error:
+          "This inbox's conversations are still being regrouped; try again when that finishes",
+      },
+      409,
+    );
+  }
+  let threadBackfill = latestBackfill;
+  const startBackfill = async () => {
+    if (!backfill) return;
+    changes.clearedConversationStates = await startThreadBackfill(
+      db,
+      c.env,
+      backfill,
+      (promise) => c.executionCtx.waitUntil(promise),
+    );
+    // Read back: the job now has its total (and in demo mode, progress).
+    threadBackfill = backfillStatus(
+      (await latestThreadBackfills(db, [email])).get(email) ?? backfill,
+    );
+  };
+
   const auditInboxUpdate = async () => {
-    const fields = Object.keys(changes);
+    const fields = Object.keys(changes).filter(
+      (field) => field !== "clearedConversationStates",
+    );
     if (fields.length === 0) return;
     await recordAudit(db, {
       action: AUDIT_ACTIONS.inboxUpdated,
@@ -402,15 +531,28 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextForwardTo === null &&
     nextSpamThreshold === null &&
     nextAgentInstructions === null &&
-    nextAgentAutodraft === 0
+    nextAgentAutodraft === 0 &&
+    nextThreadingMode === "relationship"
   ) {
-    await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+    // Only while the mode is still the default: another admin may have just
+    // switched it (their backfill is running).
+    await db
+      .delete(senderIdentities)
+      .where(
+        and(
+          eq(senderIdentities.email, email),
+          eq(senderIdentities.threadingMode, "relationship"),
+        ),
+      );
+    await startBackfill();
     await auditInboxUpdate();
     return c.json(
       {
         email,
         displayName: null,
         displayMode: "chat",
+        threadingMode: "relationship",
+        threadBackfill,
         signatureHtml: null,
         forwardTo: null,
         spamThreshold: null,
@@ -432,12 +574,18 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       spamThreshold: nextSpamThreshold,
       agentInstructions: nextAgentInstructions,
       agentAutodraft: nextAgentAutodraft,
+      threadingMode: nextThreadingMode,
       createdAt: now,
       updatedAt: now,
     })
     .onConflictDoUpdate({
       target: senderIdentities.email,
       set: {
+        // Written only when asked for, so saving another field can't undo a
+        // switch another admin just made.
+        ...(body.threadingMode !== undefined
+          ? { threadingMode: nextThreadingMode }
+          : {}),
         displayName: nextDisplayName,
         displayMode: nextDisplayMode,
         signatureHtml: nextSignatureHtml,
@@ -449,12 +597,15 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       },
     });
 
+  await startBackfill();
   await auditInboxUpdate();
   return c.json(
     {
       email,
       displayName: nextDisplayName,
       displayMode: nextDisplayMode,
+      threadingMode: nextThreadingMode,
+      threadBackfill,
       signatureHtml: nextSignatureHtml,
       forwardTo: nextForwardTo,
       spamThreshold: nextSpamThreshold,
@@ -549,6 +700,15 @@ const deleteInboxRoute = createRoute({
         },
       },
     },
+    409: {
+      description:
+        "The inbox's conversations are being regrouped; try again when that finishes",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
   },
 });
 
@@ -558,7 +718,10 @@ adminInboxesRouter.openapi(deleteInboxRoute, async (c) => {
   const email = rawEmail.trim().toLowerCase();
 
   const existing = await db
-    .select({ email: senderIdentities.email })
+    .select({
+      email: senderIdentities.email,
+      threadingMode: senderIdentities.threadingMode,
+    })
     .from(senderIdentities)
     .where(eq(senderIdentities.email, email))
     .limit(1);
@@ -566,8 +729,33 @@ adminInboxesRouter.openapi(deleteInboxRoute, async (c) => {
     return c.json({ error: "Inbox not found" }, 404);
   }
 
+  // Its mail stays. Mail grouped by thread goes back to the default grouping
+  // with the inbox's mode, so its keys are cleared in the background.
+  const latest = (await latestThreadBackfills(db, [email])).get(email);
+  if (latest?.status === "running") {
+    return c.json(
+      {
+        error:
+          "This inbox's conversations are being regrouped; delete it when that finishes",
+      },
+      409,
+    );
+  }
+  const clear =
+    existing[0].threadingMode === "headers"
+      ? await insertThreadBackfill(db, {
+          inbox: email,
+          mode: "relationship",
+          requestedBy: c.get("user")?.id ?? null,
+        })
+      : null;
   await db.delete(inboxPermissions).where(eq(inboxPermissions.email, email));
   await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
+  if (clear) {
+    await startThreadBackfill(db, c.env, clear, (promise) =>
+      c.executionCtx.waitUntil(promise),
+    );
+  }
   await recordAudit(db, {
     action: AUDIT_ACTIONS.inboxDeleted,
     targetType: "inbox",

@@ -1,3 +1,4 @@
+import { readJmapEpoch, runWithJmapEpoch } from "./epoch";
 import { collectAudit } from "../lib/audit/record";
 import { jmapActor } from "../lib/audit/actors";
 import { runWithAudit } from "../lib/audit/context";
@@ -308,6 +309,14 @@ export function registerJmapRoutes(
     Variables: Variables;
   }>,
 ): void {
+  // Every JMAP request runs under the instance's account epoch (one read).
+  const withEpoch = async (
+    c: { get(key: "db"): Variables["db"] },
+    next: () => Promise<void>,
+  ) => runWithJmapEpoch(await readJmapEpoch(c.get("db")), next);
+  app.use("/.well-known/jmap", withEpoch);
+  app.use("/jmap/*", withEpoch);
+
   app.get("/.well-known/jmap", async (c) => {
     const auth = await authenticateJmap(c.req.raw, c.env, c.get("db"));
     if (auth instanceof Response) return auth;

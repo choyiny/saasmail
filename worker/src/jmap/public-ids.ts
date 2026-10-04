@@ -1,3 +1,4 @@
+import { currentJmapEpoch } from "./epoch";
 import { sha256 } from "@noble/hashes/sha2.js";
 import type { MessageRef } from "../lib/messages/types";
 import type { SystemMailboxRole } from "./constants";
@@ -74,8 +75,16 @@ function decodeReversible(
   return null;
 }
 
-export function publicAccountId(userId: string): string {
-  return `a${sha256Base64url(`jmap-account-v${JMAP_ID_FORMAT_VERSION}:${userId}`)}`;
+/**
+ * A user's JMAP account id. Salted with the id format version and the
+ * instance's account epoch (see epoch.ts): bumping either gives every user a
+ * new account, which clients answer by resyncing.
+ */
+export function publicAccountId(
+  userId: string,
+  epoch: number = currentJmapEpoch(),
+): string {
+  return `a${sha256Base64url(`jmap-account-v${JMAP_ID_FORMAT_VERSION}e${epoch}:${userId}`)}`;
 }
 
 export function publicEmailId(ref: MessageRef): string {

@@ -21,9 +21,15 @@ Shared inbox state is keyed by message:
 - **spam**
 - **trashed**
 
-Conversation snooze state is shared per inbox and conversation key. A group
-thread uses its `conversation_id`; a one-to-one thread uses `p:<person_id>`.
-Messages without either value have no conversation and cannot be snoozed.
+Conversation snooze state is shared per inbox and conversation key, which
+depends on the inbox's
+[conversation mode](inboxes.md#conversations-by-customer-or-by-thread). Grouped
+by customer (the default), a group thread uses its `conversation_id` and a
+one-to-one thread uses `p:<person_id>`. Grouped by thread, every message also
+carries a `thread_key` (`t:` and the SHA-256 of its thread's root Message-ID),
+which comes first: the key is `COALESCE(thread_key, conversation_id, 'p:' ||
+person_id)`, so reads never look the mode up. Messages without any of these
+have no conversation and cannot be snoozed.
 `snoozed_until` is evaluated at read time, so no scheduler or cron job is
 needed. A new received message clears the snooze for that conversation; outbound
 replies do not.

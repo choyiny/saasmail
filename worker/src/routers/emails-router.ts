@@ -16,6 +16,7 @@ import {
   setEmailRead,
 } from "../lib/queries/emails";
 import { searchEmails } from "../lib/queries/search";
+import { citedIdsOf, threadKeyForNewMessage } from "../lib/messages/thread-key";
 import type { Variables } from "../variables";
 
 export const emailsRouter = new OpenAPIHono<{
@@ -624,6 +625,8 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
       personId: sentEmails.personId,
       fromAddress: sentEmails.fromAddress,
       toAddress: sentEmails.toAddress,
+      messageId: sentEmails.messageId,
+      inReplyTo: sentEmails.inReplyTo,
     })
     .from(sentEmails)
     .where(eq(sentEmails.id, id))
@@ -650,6 +653,12 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
   }
   if (newFrom) {
     updates.fromAddress = newFrom;
+    // Its thread is the new inbox's: none there unless it groups by thread.
+    updates.threadKey = await threadKeyForNewMessage(db, {
+      inbox: newFrom,
+      messageId: sent.messageId,
+      citedIds: citedIdsOf(sent.inReplyTo, null),
+    });
   }
   if (Object.keys(updates).length > 0) {
     await db.update(sentEmails).set(updates).where(eq(sentEmails.id, sent.id));

@@ -18,11 +18,17 @@ export const asyncJobs = sqliteTable(
   {
     id: text("id").primaryKey(),
     jobType: text("job_type", {
-      enum: ["campaign_fan_out", "list_import", "mail_export", "mail_import"],
+      enum: [
+        "campaign_fan_out",
+        "list_import",
+        "mail_export",
+        "mail_import",
+        "thread_backfill",
+      ],
     }).notNull(),
     /**
      * FK lists.id for list_import, campaigns.id for campaign_fan_out; the
-     * inbox address for mail_export and mail_import.
+     * inbox address for mail_export, mail_import and thread_backfill.
      */
     refId: text("ref_id").notNull(),
     status: text("status", {

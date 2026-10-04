@@ -85,6 +85,7 @@ export async function handleEmail(
       forwardTo: senderIdentities.forwardTo,
       spamThreshold: senderIdentities.spamThreshold,
       agentAutodraft: senderIdentities.agentAutodraft,
+      threadingMode: senderIdentities.threadingMode,
     })
     .from(senderIdentities);
   const inboxIdentity = identityRows.find(
@@ -203,6 +204,7 @@ export async function handleEmail(
     emailId,
     personId: actualPersonId,
     conversationId,
+    threadKey,
     bodyHtml,
   } = await storeReceivedMessage(db, env, {
     parsed,
@@ -213,6 +215,7 @@ export async function handleEmail(
     source: "inbound",
     ourDomains: domainsOf(identityRows.map((r) => r.email)),
     spamProbability,
+    threadingMode: inboxIdentity?.threadingMode ?? "relationship",
   });
   // The webhook and the forward describe the first 50 attachments, as they
   // always have.
@@ -281,7 +284,7 @@ export async function handleEmail(
         await wakeConversation(
           db,
           recipientCanonical,
-          conversationId ?? `p:${actualPersonId}`,
+          threadKey ?? conversationId ?? `p:${actualPersonId}`,
         );
       } catch (error) {
         console.warn("Failed to wake snoozed conversation:", error);

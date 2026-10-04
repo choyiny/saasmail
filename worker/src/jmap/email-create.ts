@@ -1,3 +1,4 @@
+import { threadKeyOf, threadingModeOf } from "../lib/messages/thread-key";
 import { eq, sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -753,7 +754,9 @@ async function threadKeyForMessageId(
 /**
  * Master plan Decision 9. A reply joins the visible message it answers; any
  * other draft gets the key its Sent row will naturally get, so sending it
- * doesn't split the thread; failing that, a thread of its own.
+ * doesn't split the thread; failing that, a thread of its own. In an inbox
+ * that threads by headers, a draft that answers nothing known starts a
+ * thread rooted at its own Message-ID, as its Sent row would.
  */
 export async function draftThreadKey(
   db: Db,
@@ -766,6 +769,8 @@ export async function draftThreadKey(
     cc: ContentAddress[];
     inReplyTo: string[] | null;
     references: string[] | null;
+    /** Its Message-ID, without brackets. */
+    messageId: string;
   },
 ): Promise<string> {
   const candidates = [
@@ -775,6 +780,9 @@ export async function draftThreadKey(
   for (const messageId of candidates) {
     const key = await threadKeyForMessageId(db, allowed, userId, messageId);
     if (key) return key;
+  }
+  if ((await threadingModeOf(db, input.inbox)) === "headers") {
+    return threadKeyOf(input.messageId);
   }
 
   const externals = externalsOnly(
@@ -962,6 +970,9 @@ export async function createDraftEmail(
   const root = freeze(parsed.body);
   const lists = deriveBodyLists(root);
 
+  const messageId =
+    parsed.messageId ??
+    `${nanoid()}@${inbox.slice(inbox.lastIndexOf("@") + 1)}`;
   const threadKey = await draftThreadKey(ctx.db, ctx.allowed, ctx.userId, {
     inbox,
     draftId,
@@ -969,10 +980,8 @@ export async function createDraftEmail(
     cc: parsed.cc,
     inReplyTo: parsed.inReplyTo,
     references: parsed.references,
+    messageId,
   });
-  const messageId =
-    parsed.messageId ??
-    `${nanoid()}@${inbox.slice(inbox.lastIndexOf("@") + 1)}`;
   const sentAt = parsed.sentAt ?? rfc3339Utc(ctx.now);
   const receivedAt = parsed.receivedAt ?? ctx.now;
   const raw = buildRawMessage(

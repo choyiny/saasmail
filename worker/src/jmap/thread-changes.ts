@@ -108,6 +108,7 @@ async function changedThreadKeys(
 
   for (const chunk of chunks(received, IDS_PER_QUERY)) {
     const naturalKey = conversationKeySql({
+      threadKey: sql`e.thread_key`,
       conversationId: sql`e.conversation_id`,
       personId: sql`e.person_id`,
     });
@@ -122,10 +123,14 @@ async function changedThreadKeys(
     );
   }
 
-  const sentKey = sql`COALESCE(jmc.thread_key, ${conversationKeySql({
-    conversationId: sql`se.conversation_id`,
-    personId: sql`se.person_id`,
-  })}, 'sent:' || se.id)`;
+  // A headers-mode inbox's sent row carries its thread; JMAP content keeps
+  // the same key, and a relationship inbox's sent row has none.
+  const sentKey = sql`COALESCE(se.thread_key, jmc.thread_key, ${conversationKeySql(
+    {
+      conversationId: sql`se.conversation_id`,
+      personId: sql`se.person_id`,
+    },
+  )}, 'sent:' || se.id)`;
   for (const chunk of chunks(sent, IDS_PER_QUERY)) {
     keep(
       await db.all<KeyRow>(sql`

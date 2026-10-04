@@ -211,7 +211,7 @@ describe("the JMAP account resets (id format v3 and later)", () => {
     await cleanDb();
   });
 
-  function accountIdOfVersion(version: number, userId: string): string {
+  function accountIdOfVersion(version: string, userId: string): string {
     const bytes = sha256(
       new TextEncoder().encode(`jmap-account-v${version}:${userId}`),
     );
@@ -222,11 +222,12 @@ describe("the JMAP account resets (id format v3 and later)", () => {
 
   it("advertises the current account id, refuses every earlier one, and issues current states", async () => {
     const { userId, apiKey } = await createTestUser({ id: "reset-v3-user" });
-    const earlier = [2, 3].map((version) =>
+    // v4 without an epoch is the id before header threading.
+    const earlier = ["2", "3", "4"].map((version) =>
       accountIdOfVersion(version, userId),
     );
     expect(JMAP_ID_FORMAT_VERSION).toBe(4);
-    expect(acct(userId)).toBe(accountIdOfVersion(4, userId));
+    expect(acct(userId)).toBe(accountIdOfVersion("4e0", userId));
 
     const session = await (
       await authFetch("/.well-known/jmap", { apiKey })

@@ -39,7 +39,9 @@ Supported conditions:
 Supported actions are `archive`, `mark_spam`, `move_to_folder`,
 `snooze`, `assign`, `auto_reply`, `ai_file` ([AI filing](#ai-filing)) and
 `reject` ([below](#rejecting-mail)).
-Snooze accepts 1–720 hours. Folder
+Snooze accepts 1–720 hours. Snooze and assignment act on the message's
+conversation: the customer, or the thread in an inbox that
+[groups by thread](inboxes.md#conversations-by-customer-or-by-thread). Folder
 moves require an inbox-scoped rule and a folder in that same inbox. Assignment
 also requires an inbox-scoped rule, and the assignee must have access to that
 inbox; admins have access to every inbox. Auto-reply also requires a specific
@@ -142,7 +144,8 @@ without a rule: see [Unknown recipients](inboxes.md#unknown-recipients).
 
 ## Assignment
 
-Assignment is conversation state stored per inbox and conversation key. A new
+Assignment is conversation state stored per inbox and conversation key (the
+customer, or the thread in an inbox that groups by thread). A new
 inbound message preserves the current assignment. Assigning `null` unassigns
 the conversation.
 

@@ -2,6 +2,7 @@
 // (spec §3.4 step 3) and by recovery (spec §3.4 table row 1/2): the same person
 // row and conversation id the web composer computes, plus the content link and
 // the Message-ID the message was delivered with.
+import { threadingModeOf } from "../lib/messages/thread-key";
 import { and, eq } from "drizzle-orm";
 import { jmapMessageContent } from "../db/jmap-message-content.schema";
 import type { jmapSubmissions } from "../db/jmap-submissions.schema";
@@ -82,6 +83,12 @@ export async function buildJmapSentRow(
       [...message.additionalTo, ...message.cc].map((address) => address.email),
     ),
     jmapContentId: input.content.id,
+    // In an inbox that threads by headers, the Sent row carries the thread
+    // its content was given, so JMAP and the app agree.
+    threadKey:
+      (await threadingModeOf(db, message.fromAddress)) === "headers"
+        ? input.content.threadKey
+        : null,
     sentAt: now,
     createdAt: now,
   };

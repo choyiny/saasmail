@@ -56,7 +56,7 @@ sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md
 | 10-3  | A spam filter that learns from junk marks (`docs/archive/SPEC-spam-learning.md`)                                                       | #74     | `ea365b7`        |
 | 11-1  | mbox export and `.eml` download (`docs/archive/SPEC-mail-export.md`)                                                                   | #75     | `a6b9d6b`        |
 | 11-2  | mbox/eml import (`docs/archive/SPEC-mail-import.md`)                                                                                   | #76     | `9e1a87e`        |
-| 11-3  | Scheduled D1 backups to R2 and a restore script (`SPEC-backups.md`)                                                                    | —       | —                |
+| 11-3  | Scheduled D1 backups to R2 and a restore script (`docs/archive/SPEC-backups.md`)                                                       | #77     | `893e240`        |
 | 10-4  | Header-based threading per inbox, last (`SPEC-header-threading.md`)                                                                    | —       | —                |
 
 A row with `—` is on a branch that hasn't merged yet; fill in the PR number and

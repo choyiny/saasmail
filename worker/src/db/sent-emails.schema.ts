@@ -38,6 +38,8 @@ export const sentEmails = sqliteTable(
     conversationId: text("conversation_id"),
     /** The mail import that stored this message; null for mail sent here. */
     importJobId: text("import_job_id"),
+    /** As `emails.thread_key`: set only for inboxes that thread by headers. */
+    threadKey: text("thread_key"),
     /**
      * FK campaigns.id — null for every non-campaign send. Lets a campaign send
      * appear in the recipient's timeline without any new query logic.
@@ -74,6 +76,7 @@ export const sentEmails = sqliteTable(
   (table) => [
     index("sent_emails_person_sent_idx").on(table.personId, table.sentAt),
     index("sent_emails_conversation_idx").on(table.conversationId),
+    index("sent_emails_thread_key_idx").on(table.threadKey),
     index("sent_emails_from_sent_idx").on(table.fromAddress, table.sentAt),
     index("sent_emails_sequence_sent_idx").on(table.sequenceId, table.sentAt),
     index("sent_emails_jmap_content_idx").on(table.jmapContentId),

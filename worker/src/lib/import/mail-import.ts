@@ -31,6 +31,7 @@ import {
   setUserState,
 } from "../messages/state";
 import type { MessageRef } from "../messages/types";
+import { rethreadAfterImport } from "../messages/thread-backfill";
 import { notifyMailRefresh } from "../triage/ai-file";
 import { mboxStart, readMessages } from "./mbox-reader";
 
@@ -707,9 +708,15 @@ async function importSlice(
   }
 
   const identities = await db
-    .select({ email: senderIdentities.email })
+    .select({
+      email: senderIdentities.email,
+      threadingMode: senderIdentities.threadingMode,
+    })
     .from(senderIdentities);
   const ourDomains = domainsOf(identities.map((row) => row.email));
+  const threadingMode =
+    identities.find((row) => row.email.toLowerCase() === params.inbox)
+      ?.threadingMode ?? "relationship";
   let processed = 0;
   let imported = 0;
   let skipped = 0;
@@ -802,6 +809,7 @@ async function importSlice(
         now: nowSeconds,
         ourDomains,
         importJobId: job.id,
+        threadingMode,
       });
       if (!stored) {
         skipped++;
@@ -820,6 +828,7 @@ async function importSlice(
         source: "import",
         ourDomains,
         importJobId: job.id,
+        threadingMode,
       });
       ref = { kind: "received", id: stored.emailId };
       dropped = stored.droppedAttachments;
@@ -928,6 +937,12 @@ async function importSlice(
         importedCount,
         skippedCount,
       );
+      // Replies met before their parents get joined to them (headers inboxes).
+      if (importedCount > 0) {
+        await rethreadAfterImport(db, env, params.inbox, job.requestedBy).catch(
+          (error) => console.error("[import] re-threading not started:", error),
+        );
+      }
     }
     return true;
   }

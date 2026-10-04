@@ -1,3 +1,4 @@
+import ConversationModeControl from "@/components/ConversationModeControl";
 import SpamFilterControls from "@/components/SpamFilterControls";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -613,6 +614,18 @@ export default function AdminInboxTable() {
                             );
                           })}
                         </div>
+                        <ConversationModeControl
+                          inbox={inbox}
+                          onChange={(next) =>
+                            setInboxes((rows) =>
+                              rows.map((row) =>
+                                row.email === inbox.email
+                                  ? { ...row, ...next }
+                                  : row,
+                              ),
+                            )
+                          }
+                        />
                       </td>
 
                       {/* Forward to (inline editable, blur to save) */}
@@ -775,6 +788,18 @@ export default function AdminInboxTable() {
           Copies are sent from this inbox's address with the original sender in{" "}
           <span className="font-mono">Reply-To</span>, so they authenticate on
           your own domain.
+        </p>
+      )}
+      {inboxes.length > 0 && (
+        <p className="px-1 text-xs font-light leading-relaxed text-text-tertiary">
+          <span className="font-medium text-text-secondary">Conversations</span>{" "}
+          — <span className="font-medium">By customer</span> (the default) makes
+          all mail with a person one conversation; snooze and assignment apply
+          to the customer. <span className="font-medium">By thread</span> groups
+          replies into threads by their headers, like a mail client; snooze and
+          assignment apply to the thread, and JMAP clients see ordinary threads.
+          Changing it regroups the inbox's mail in the background and clears its
+          snoozes and assignments.
         </p>
       )}
       {inboxes.length > 0 && (

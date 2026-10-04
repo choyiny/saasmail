@@ -21,6 +21,31 @@ Different inboxes call for different UX. Set each inbox to render as **Thread** 
 
 One deployment, one person timeline, but the interaction model matches the channel.
 
+## Conversations: by customer or by thread
+
+Thread or chat is how an inbox's mail looks. **Conversations** (on the Inboxes page, under the Thread/Chat toggle) is how it is grouped, which decides what snooze and assignment apply to and what a JMAP mail client sees as a thread:
+
+- **By customer** (the default): all mail with a person is one conversation (a group conversation has its own). Snoozing or assigning a message snoozes or assigns the customer.
+- **By thread**: replies form threads by their `In-Reply-To` and `References` headers, like a mail client. Snooze and assignment apply to the thread, and JMAP clients see ordinary threads.
+
+In an inbox grouped by thread, a message joins the thread of the first message it cites (its `In-Reply-To`, then its `References` from the nearest back to the root, at most 20) that is in the same inbox: received mail, mail sent from the inbox, or a JMAP send by the Message-ID the client gave it. A message that cites nothing known starts a thread of its own. There is no subject matching: mail clients set these headers reliably, and subjects merge unrelated mail. Sequence, campaign and template sends start their own threads; replies from the composer join the thread they answer. The customer view and the person timeline are the same in both modes.
+
+Changing the mode asks for confirmation, then:
+
+1. **Regroups the inbox's mail in the background**, on the queue, oldest first. Going to threads walks the mail twice, so a reply that arrived before the message it answers ends up in its thread. The control shows how far it got; if it stops part-way, **Retry** runs it again. Mail that arrives meanwhile is grouped the new way at once.
+2. **Clears the inbox's snoozes and assignments.** They were keyed by conversations that no longer exist and can't be mapped one-to-one. The audit log records how many were cleared.
+3. **Makes every JMAP client resync once** the regrouping ends (or stops), since thread ids changed under the account it holds ([JMAP: the account epoch](jmap.md#ids-and-account-breaking-in-this-release)).
+
+Good to know:
+
+- Mail is walked in date order, so a reply chain whose dates run backwards over several generations (a sender with a clock far off) can stay split.
+- While an import into the inbox is running, the mode can't be changed (`409`): wait for it to finish. An import into an inbox grouped by thread ends with one more walk that joins replies imported before the messages they answer ([Import mail](data.md#import-mail)).
+- Deleting an inbox grouped by thread keeps its mail and clears its threads in the background; an inbox can't be deleted while its mail is being regrouped (`409`).
+- A JMAP draft saved before the switch keeps its thread until it is sent.
+- On a demo deployment (no queue), the regrouping runs after the request and in the hourly run, which suits demo-sized inboxes only.
+
+Over the API: `PATCH /api/admin/inboxes/{email}` with `{"threadingMode": "headers"}` (or `"relationship"`) starts the change, `409` while a regrouping of that inbox runs; sending the current mode again after a regrouping stopped runs it again. `GET /api/admin/inboxes` lists each inbox's `threadingMode` and its last regrouping (`threadBackfill`: mode, status, processed and total).
+
 ## Replying
 
 A reply goes where the sender asked for it. When a received message has a

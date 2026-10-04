@@ -16,6 +16,7 @@ export const TEST_IDS = {
   inboxAgentInstructions: "inbox-agent-instructions",
   inboxAgentInstructionsCount: "inbox-agent-instructions-count",
   inboxModeToggle: "inbox-mode-toggle",
+  inboxThreadingMode: "inbox-threading-mode",
   inboxDeleteButton: "inbox-delete-button",
   inboxMemberToggle: "inbox-member-toggle",
 

@@ -1391,10 +1391,27 @@ export async function fetchSequenceEnrollments(
 
 // --- Admin Inboxes ---
 
+/**
+ * How an inbox groups mail into conversations: by customer (`relationship`,
+ * the default) or by In-Reply-To/References threads (`headers`).
+ */
+export type ThreadingMode = "relationship" | "headers";
+
+/** The inbox's last regrouping after a conversation-mode change. */
+export interface ThreadBackfillStatus {
+  id: string;
+  mode: ThreadingMode;
+  status: "running" | "completed" | "failed";
+  processed: number;
+  total: number;
+}
+
 export interface AdminInbox {
   email: string;
   displayName: string | null;
   displayMode: InboxDisplayMode;
+  threadingMode: ThreadingMode;
+  threadBackfill: ThreadBackfillStatus | null;
   signatureHtml: string | null;
   /** Destination address for per-inbox forwarding; null = forwarding off. */
   forwardTo: string | null;
@@ -1466,11 +1483,14 @@ export async function updateInboxSettings(
     spamThreshold?: number | null;
     agentInstructions?: string;
     agentAutodraft?: boolean;
+    threadingMode?: ThreadingMode;
   },
 ): Promise<{
   email: string;
   displayName: string | null;
   displayMode: InboxDisplayMode;
+  threadingMode: ThreadingMode;
+  threadBackfill: ThreadBackfillStatus | null;
   signatureHtml: string | null;
   forwardTo: string | null;
   spamThreshold: number | null;

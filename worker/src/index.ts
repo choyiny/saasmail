@@ -53,6 +53,7 @@ import {
 import { pruneSpamTokens } from "./lib/spam/filter";
 import { reapMailExports } from "./lib/export/mail-export";
 import { reapMailImports } from "./lib/import/mail-import";
+import { reapThreadBackfills } from "./lib/messages/thread-backfill";
 import { importsRouter } from "./routers/imports-router";
 import { runBackupSchedule } from "./lib/backup/run";
 import { backupsRouter } from "./routers/backups-router";
@@ -534,6 +535,15 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
           env,
           Math.floor(Date.now() / 1000),
         ).catch((err) => console.error("[cron] import reaping failed:", err)),
+      )
+      .then(() =>
+        reapThreadBackfills(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] thread backfill recovery failed:", err),
+        ),
       )
       .then(() =>
         runBackupSchedule(

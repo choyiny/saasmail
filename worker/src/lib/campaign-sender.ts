@@ -1,3 +1,4 @@
+import { threadKeyForNewMessage } from "./messages/thread-key";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -550,14 +551,21 @@ export async function completeCampaignBookkeeping(
       );
   }
 
+  const campaignFrom = (campaign.fromAddressSnapshot ?? campaign.fromAddress)
+    .trim()
+    .toLowerCase();
+  // A blast is never spliced into a conversation; in a headers-mode inbox
+  // each recipient's copy is a thread of its own.
+  const campaignThreadKey = await threadKeyForNewMessage(db, {
+    inbox: campaignFrom,
+    messageId: opts.messageId,
+  });
   await db
     .insert(sentEmails)
     .values({
       id: sentEmailId,
       personId,
-      fromAddress: (campaign.fromAddressSnapshot ?? campaign.fromAddress)
-        .trim()
-        .toLowerCase(),
+      fromAddress: campaignFrom,
       toAddress: recipient.email,
       subject: opts.subject,
       bodyHtml: opts.html,
@@ -570,6 +578,7 @@ export async function completeCampaignBookkeeping(
       // A blast is not correspondence: threading it would splice it into a real
       // conversation, and at list scale would manufacture thousands of them.
       conversationId: null,
+      threadKey: campaignThreadKey,
       campaignId: campaign.id,
       sentAt: now,
       createdAt: now,

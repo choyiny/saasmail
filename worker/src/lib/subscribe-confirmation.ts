@@ -1,3 +1,4 @@
+import { threadKeyForNewMessage } from "./messages/thread-key";
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -169,6 +170,7 @@ export async function sendConfirmationEmail(opts: {
   });
   if (outcome === "suppressed") return { sent: false };
 
+  const storedMessageId = deliveredMessageId(messageId, result.result);
   await db.insert(sentEmails).values({
     id: sentEmailId,
     // Never a people row for a subscriber — see the note above.
@@ -179,7 +181,12 @@ export async function sendConfirmationEmail(opts: {
     bodyHtml: result.renderedHtml ?? renderedHtml,
     bodyText: result.renderedText ?? null,
     inReplyTo: null,
-    messageId: deliveredMessageId(messageId, result.result),
+    messageId: storedMessageId,
+    // Never in a conversation; in a headers-mode inbox, a thread of its own.
+    threadKey: await threadKeyForNewMessage(db, {
+      inbox: fromAddress,
+      messageId: storedMessageId,
+    }),
     resendId: result.result?.id ?? null,
     // "retrying" while the outbox holds it; the outbox marks it sent later.
     status: outcome,

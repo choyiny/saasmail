@@ -5,6 +5,11 @@ import { attachments } from "../../db/attachments.schema";
 import { emails } from "../../db/emails.schema";
 import { people } from "../../db/people.schema";
 import { computeConversationId, externalsOnly } from "../conversation-id";
+import {
+  citedIdsOf,
+  threadKeyForNewMessage,
+  type ThreadingMode,
+} from "../messages/thread-key";
 import type { ParsedAttachment, ParsedEmail } from "../email-parser";
 import { sanitizeFilename } from "../sanitize-filename";
 
@@ -162,12 +167,16 @@ export interface StoreReceivedInput {
   spamProbability?: number | null;
   /** The import storing it; recorded on the row. */
   importJobId?: string | null;
+  /** The inbox's threading mode, when the caller read it (else read here). */
+  threadingMode?: ThreadingMode;
 }
 
 export interface StoredReceived {
   emailId: string;
   personId: string;
   conversationId: string | null;
+  /** Its thread, in a headers-mode inbox; null otherwise. */
+  threadKey: string | null;
   /** The HTML body as stored, `cid:` references rewritten. */
   bodyHtml: string | null;
   /** The attachments stored; the rest went over the limits. */
@@ -284,6 +293,15 @@ export async function storeReceivedMessage(
     input.ourDomains,
   );
   const conversationId = await computeConversationId(inbox, externals);
+  // In a headers-mode inbox, the thread of the first message it cites.
+  const inReplyTo = parsed.headers["in-reply-to"]?.trim() || null;
+  const referencesHeader = parsed.headers["references"]?.trim() || null;
+  const threadKey = await threadKeyForNewMessage(db, {
+    inbox,
+    messageId: parsed.messageId,
+    citedIds: citedIdsOf(inReplyTo, referencesHeader),
+    mode: input.threadingMode,
+  });
 
   // The message exactly as received, for JMAP's blobId. Written before the row
   // so a new Email never gains a blobId after a client has seen it; a failed
@@ -312,8 +330,8 @@ export async function storeReceivedMessage(
     messageId: parsed.messageId,
     // postal-mime keys headers in lowercase; JMAP exposes these as
     // inReplyTo/references.
-    inReplyTo: parsed.headers["in-reply-to"]?.trim() || null,
-    referencesHeader: parsed.headers["references"]?.trim() || null,
+    inReplyTo,
+    referencesHeader,
     rawR2Key,
     rawSize: rawR2Key ? parsed.raw.byteLength : null,
     spf: parsed.auth.spf,
@@ -325,6 +343,7 @@ export async function storeReceivedMessage(
     cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
     replyTo: parsed.replyTo.length ? JSON.stringify(parsed.replyTo) : null,
     conversationId,
+    threadKey,
     importJobId: imported ? (input.importJobId ?? null) : null,
     receivedAt,
     createdAt: now,
@@ -355,6 +374,7 @@ export async function storeReceivedMessage(
     emailId,
     personId,
     conversationId,
+    threadKey,
     bodyHtml,
     storedAttachments: kept,
     droppedAttachments: dropped,

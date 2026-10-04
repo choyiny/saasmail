@@ -738,7 +738,7 @@ function receivedArm(
       mms.archived_at AS archived_at,
       mms.spam_at AS spam_at,
       mms.trashed_at AS trashed_at,
-      ${snoozeStateSelect(query, sql`e.conversation_id`, sql`e.person_id`)}
+      ${snoozeStateSelect(query, sql`COALESCE(e.thread_key, e.conversation_id)`, sql`e.person_id`)}
     FROM emails e
     ${search.join}
     LEFT JOIN people p ON p.id = e.person_id
@@ -748,7 +748,7 @@ function receivedArm(
     ${snoozeStateJoin(
       query,
       sql`e.recipient`,
-      sql`e.conversation_id`,
+      sql`COALESCE(e.thread_key, e.conversation_id)`,
       sql`e.person_id`,
     )}
     WHERE 1 = 1
@@ -762,7 +762,7 @@ function receivedArm(
       ${threadKeysScope(
         "received",
         sql`e.id`,
-        sql`e.conversation_id`,
+        sql`COALESCE(e.thread_key, e.conversation_id)`,
         sql`e.person_id`,
         query.threadKeys,
       )}
@@ -780,13 +780,13 @@ function receivedArm(
       ${snoozeScope(
         query,
         sql`e.recipient`,
-        sql`e.conversation_id`,
+        sql`COALESCE(e.thread_key, e.conversation_id)`,
         sql`e.person_id`,
       )}
       ${assignmentScope(
         query,
         sql`e.recipient`,
-        sql`e.conversation_id`,
+        sql`COALESCE(e.thread_key, e.conversation_id)`,
         sql`e.person_id`,
       )}
       ${sourceCursorScope(
@@ -847,7 +847,7 @@ function sentArm(
       mms.archived_at AS archived_at,
       mms.spam_at AS spam_at,
       mms.trashed_at AS trashed_at,
-      ${snoozeStateSelect(query, sql`se.conversation_id`, sql`se.person_id`)}
+      ${snoozeStateSelect(query, sql`COALESCE(se.thread_key, se.conversation_id)`, sql`se.person_id`)}
     FROM sent_emails se
     LEFT JOIN people p ON p.id = se.person_id
     ${jmapSentJoin(query)}
@@ -857,7 +857,7 @@ function sentArm(
     ${snoozeStateJoin(
       query,
       sql`se.from_address`,
-      sql`se.conversation_id`,
+      sql`COALESCE(se.thread_key, se.conversation_id)`,
       sql`se.person_id`,
     )}
     WHERE 1 = 1
@@ -871,7 +871,7 @@ function sentArm(
       ${threadKeysScope(
         "sent",
         sql`se.id`,
-        sql`se.conversation_id`,
+        sql`COALESCE(se.thread_key, se.conversation_id)`,
         sql`se.person_id`,
         query.threadKeys,
       )}
@@ -883,13 +883,13 @@ function sentArm(
       ${snoozeScope(
         query,
         sql`se.from_address`,
-        sql`se.conversation_id`,
+        sql`COALESCE(se.thread_key, se.conversation_id)`,
         sql`se.person_id`,
       )}
       ${assignmentScope(
         query,
         sql`se.from_address`,
-        sql`se.conversation_id`,
+        sql`COALESCE(se.thread_key, se.conversation_id)`,
         sql`se.person_id`,
       )}
       ${campaignScope(query)}
