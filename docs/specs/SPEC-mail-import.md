@@ -80,7 +80,7 @@ running`, enqueue, `import.started` · `DELETE /api/admin/imports/{jobId}` → a
   note); for each message: postal-mime parse (reuse `parseEmail`'s normalisation by giving it a
   raw-bytes entry point `parseRawEmail(bytes)`), direction rule → `storeReceivedMessage` /
   `storeSentMessage` / skip, labels → state via `setMailboxState`/`setUserState`/`setMailboxMembership`
-  as the importing admin (user id recorded, so SPEC-spam-learning's "human" rule must exclude actor
+  as the importing admin (user id recorded, so docs/archive/SPEC-spam-learning.md's "human" rule must exclude actor
   channel `import`: the import runs in an audit context `{ channel: "import", actorType: "user" }` and
   `trainMessage` ignores that channel); update `processed_rows`, `imported_count`, `skipped_count`,
   `cursor` (byte offset), `error_summary`; stop the slice at 200 messages or 20 s; re-enqueue while

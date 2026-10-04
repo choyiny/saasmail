@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
+  messageEmlUrl: (ref: string) => `/api/messages/${ref}/raw.eml`,
   fetchSuggestedReply: vi.fn(),
   fetchDraft: vi.fn(),
   saveDraft: vi.fn(),

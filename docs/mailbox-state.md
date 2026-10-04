@@ -88,6 +88,12 @@ with `seen`, `starredAt`, `archivedAt`, `spamAt`, `trashedAt`,
 When `folder=sent`, campaign sends are excluded unless
 `excludeCampaignSends=false` is supplied.
 
+`GET /api/messages/{received|sent}/{id}/raw.eml` downloads one message as an
+RFC 5322 `.eml` file: its original bytes when they were kept, otherwise a
+rebuild marked `X-Saasmail-Reconstructed: yes`. The reading pane's
+**Download (.eml)** uses it. See [Export, import and backups](data.md), which
+also exports a whole inbox as mbox.
+
 ### Mutate state
 
 - `POST /api/messages/user-state` — `{ refs, seen?, starred? }`

@@ -3,6 +3,7 @@ import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import {
   AlertTriangle,
   Clock,
+  Download,
   Link2,
   Maximize2,
   Paperclip,
@@ -10,7 +11,7 @@ import {
   UserPen,
 } from "lucide-react";
 import CcChips from "@/components/CcChips";
-import type { Email } from "@/lib/api";
+import { messageEmlUrl, type Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import DeliveryBadge from "@/components/mail/DeliveryBadge";
 
@@ -267,6 +268,16 @@ export default function MessageBubble({
         >
           Reply
         </button>
+        <a
+          href={messageEmlUrl(`${email.type}:${email.id}`)}
+          download
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 text-[11px] text-text-tertiary hover:text-text-secondary"
+          title="Download (.eml)"
+        >
+          <Download size={12} />
+          .eml
+        </a>
         {onReassign && (
           <button
             onClick={(e) => {

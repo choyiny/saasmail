@@ -51,6 +51,8 @@ import {
   pruneAuthRateLimits,
 } from "./auth/rate-limit-storage";
 import { pruneSpamTokens } from "./lib/spam/filter";
+import { reapMailExports } from "./lib/export/mail-export";
+import { exportsRouter } from "./routers/exports-router";
 import { collectUnreferencedContent } from "./jmap/content";
 import { runJmapSubmissionMaintenance } from "./jmap/recovery";
 import { reapExpiredUploads } from "./jmap/upload";
@@ -287,6 +289,7 @@ app.route("/api/customers", customersRouter);
 app.route("/api/emails", emailsRouter);
 app.route("/api/conversations", conversationsRouter);
 app.route("/api/messages", messagesRouter);
+app.route("/api/exports", exportsRouter);
 app.route("/api/mailboxes", mailboxesRouter);
 app.route("/api/send", sendRouter);
 app.route("/api/attachments", attachmentsRouter);
@@ -511,6 +514,13 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
         pruneSpamTokens(createDb(env)).catch((err) =>
           console.error("[cron] spam token pruning failed:", err),
         ),
+      )
+      .then(() =>
+        reapMailExports(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) => console.error("[cron] export reaping failed:", err)),
       )
       .then(() =>
         reapOrphanSentAttachments(

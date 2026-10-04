@@ -2390,3 +2390,67 @@ export async function uploadNewsletterAsset(
   }
   return res.json();
 }
+
+/** The `.eml` download of one message, from its `kind:id` ref. */
+export function messageEmlUrl(ref: string): string {
+  const separator = ref.indexOf(":");
+  const kind = ref.slice(0, separator);
+  const id = ref.slice(separator + 1);
+  return `/api/messages/${kind}/${encodeURIComponent(id)}/raw.eml`;
+}
+
+export type MailExportStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+export interface MailExport {
+  id: string;
+  inbox: string;
+  status: MailExportStatus;
+  processedMessages: number;
+  totalMessages: number | null;
+  /** Written so far; the file's size once completed. */
+  bytes: number;
+  from: number | null;
+  to: number | null;
+  includeTrash: boolean;
+  includeCampaignSends: boolean;
+  requestedBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+  /** Completed exports: when the file is deleted. */
+  expiresAt: number | null;
+  error: string | null;
+}
+
+export async function fetchExports(): Promise<MailExport[]> {
+  const body = await apiFetch<{ exports: MailExport[] }>("/api/exports");
+  return body.exports;
+}
+
+export async function startExport(input: {
+  inbox: string;
+  from?: number | null;
+  to?: number | null;
+  includeTrash?: boolean;
+  includeCampaignSends?: boolean;
+}): Promise<MailExport> {
+  return apiFetch("/api/exports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteExport(id: string): Promise<void> {
+  await apiFetch(`/api/exports/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export function exportDownloadUrl(id: string): string {
+  return `/api/exports/${encodeURIComponent(id)}/download`;
+}

@@ -1,6 +1,8 @@
 import SpamFilterControls from "@/components/SpamFilterControls";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import {
+  Download,
   Plus,
   Inbox as InboxIcon,
   MessageSquare,
@@ -733,7 +735,16 @@ export default function AdminInboxTable() {
                       </td>
 
                       {/* Actions */}
-                      <td className="px-3 py-2.5 text-right">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right">
+                        <Link
+                          to={`/settings?export=${encodeURIComponent(inbox.email)}#data`}
+                          data-testid="inbox-export-link"
+                          aria-label={`Export ${inbox.email}`}
+                          title="Export mailbox…"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-[5px] text-text-tertiary opacity-60 transition-all hover:bg-bg-muted hover:text-text-primary hover:opacity-100"
+                        >
+                          <Download size={13} />
+                        </Link>
                         <button
                           type="button"
                           data-testid="inbox-delete-button"

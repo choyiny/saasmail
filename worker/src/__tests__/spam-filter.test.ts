@@ -1,4 +1,4 @@
-// docs/specs/SPEC-spam-learning.md: a spam filter that learns from the
+// docs/archive/SPEC-spam-learning.md: a spam filter that learns from the
 // team's marks.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";

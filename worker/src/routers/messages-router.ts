@@ -32,6 +32,7 @@ import { AUDIT_ACTIONS } from "../lib/audit/events";
 import { recordBulkAudit } from "../lib/audit/record";
 import { triageModel, type AiFileMessage } from "../lib/triage/ai-file";
 import { describedFolders } from "../lib/triage/folders";
+import { renderMessageBytes } from "../lib/export/render-message";
 import type { Variables } from "../variables";
 
 export const messagesRouter = new OpenAPIHono<{
@@ -680,4 +681,64 @@ messagesRouter.openapi(aiFileRoute, async (c) => {
     { queued: jobs.length, skipped: visible.length - jobs.length },
     202,
   );
+});
+
+const rawMessageRoute = createRoute({
+  method: "get",
+  path: "/{kind}/{id}/raw.eml",
+  tags: ["Messages"],
+  security: bearerSecurity,
+  description:
+    "Download one message as an RFC 5322 .eml file: the bytes as received or sent when they were kept, otherwise a rebuild from the stored headers, bodies and attachments, marked `X-Saasmail-Reconstructed: yes` (also sent as a response header).",
+  request: {
+    params: z.object({
+      kind: z.enum(["received", "sent"]),
+      id: z.string().min(1).max(128),
+    }),
+  },
+  responses: {
+    500: { description: "Internal server error" },
+    200: {
+      description: "The message",
+      content: {
+        "message/rfc822": { schema: z.string().openapi({ format: "binary" }) },
+      },
+    },
+    404: errorResponse("Not found, or not in an allowed inbox"),
+  },
+});
+
+/** A download name from the subject: ASCII-safe, short. */
+function emlFilename(subject: string | null): string {
+  const base = (subject ?? "")
+    .replace(/[^A-Za-z0-9 ._-]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
+  return `${base || "message"}.eml`;
+}
+
+messagesRouter.openapi(rawMessageRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  const { kind, id } = c.req.valid("param");
+  const page = await queryMessages(db, allowed, {
+    messageRef: { kind, id },
+    limit: 1,
+    withAttachments: true,
+    withReplyTo: true,
+    ignoreSnooze: true,
+  });
+  const message = page.messages[0];
+  if (!message) return c.json({ error: "Message not found" }, 404);
+  const rendered = await renderMessageBytes(db, c.env, message);
+  return new Response(rendered.bytes, {
+    headers: {
+      "Content-Type": "message/rfc822",
+      "Content-Disposition": `attachment; filename="${emlFilename(message.subject)}"`,
+      "Content-Length": String(rendered.bytes.length),
+      "Cache-Control": "private, no-store",
+      ...(rendered.exact ? {} : { "X-Saasmail-Reconstructed": "yes" }),
+    },
+  });
 });

@@ -20,6 +20,12 @@ import {
 } from "../jmap/release";
 import { drainHeldOutbox, type OutboxDrainMessage } from "./outbox";
 import { fileWithAi, type AiFileMessage } from "./triage/ai-file";
+import {
+  ExportSliceBusyError,
+  failMailExport,
+  runMailExportSlice,
+  type MailExportMessage,
+} from "./export/mail-export";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -44,10 +50,13 @@ export type QueueMessageBody =
   | SuggestReplyMessage
   | ReleaseMessage
   | OutboxDrainMessage
-  | AiFileMessage;
+  | AiFileMessage
+  | MailExportMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
+/** A slice that failed this often fails its export. */
+export const MAIL_EXPORT_MAX_ATTEMPTS = 3;
 
 export type QueueMessageKind =
   | "sequence_email"
@@ -58,6 +67,7 @@ export type QueueMessageKind =
   | "jmap_submission_release"
   | "outbox_drain"
   | "ai_file"
+  | "mail_export"
   | "unknown";
 
 /**
@@ -110,6 +120,11 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
       ? "ai_file"
       : "unknown";
   }
+  if (b.type === "mail_export") {
+    return typeof b.jobId === "string" && typeof b.slice === "number"
+      ? "mail_export"
+      : "unknown";
+  }
   return "unknown";
 }
 
@@ -136,6 +151,9 @@ export async function handleQueueBatch(
   const db = createDb(env);
   const sender = createEmailSender(env);
   const suggestedReplyRunner = overrides.runSuggestedReply ?? runSuggestedReply;
+  // An export slice makes a few hundred reads; one per batch keeps the
+  // invocation well inside its subrequest budget.
+  let exportSliceRan = false;
 
   for (const msg of batch.messages) {
     const kind = classifyQueueMessage(msg.body);
@@ -174,6 +192,25 @@ export async function handleQueueBatch(
       } else if (kind === "ai_file") {
         // A model error throws, and the message is retried.
         await fileWithAi(db, env, msg.body as AiFileMessage);
+      } else if (kind === "mail_export") {
+        const body = msg.body as MailExportMessage;
+        if (exportSliceRan) {
+          // Back on the queue as a new message: no attempt is used up.
+          await env.EMAIL_QUEUE.send(body);
+          msg.ack();
+          continue;
+        }
+        exportSliceRan = true;
+        // One slice; it says which comes next.
+        const next = await runMailExportSlice(db, env, body.jobId, body.slice);
+        if (next !== null) {
+          const message: MailExportMessage = {
+            type: "mail_export",
+            jobId: body.jobId,
+            slice: next,
+          };
+          await env.EMAIL_QUEUE.send(message);
+        }
       } else if (kind === "outbox_drain") {
         // After a resume: a batch of held mail, then the next batch, then the
         // delayed JMAP sends that came due while paused.
@@ -197,7 +234,27 @@ export async function handleQueueBatch(
       }
       msg.ack();
     } catch (err) {
-      if (
+      if (kind === "mail_export" && err instanceof ExportSliceBusyError) {
+        // Another run holds the slice; it queues the next one itself. Come
+        // back once its claim has run out, in case it died (if this message
+        // runs out of attempts, the hourly run queues the export again).
+        msg.retry({ delaySeconds: 150 });
+      } else if (
+        kind === "mail_export" &&
+        msg.attempts >= MAIL_EXPORT_MAX_ATTEMPTS
+      ) {
+        console.error(
+          `[queue] mail_export failed after ${msg.attempts} attempts:`,
+          err,
+        );
+        await failMailExport(
+          db,
+          env,
+          (msg.body as MailExportMessage).jobId,
+          err instanceof Error ? err.message : "export failed",
+        ).catch((error) => console.error("[queue] export not failed:", error));
+        msg.ack();
+      } else if (
         kind === "suggest_reply" &&
         msg.attempts >= SUGGEST_REPLY_MAX_ATTEMPTS
       ) {

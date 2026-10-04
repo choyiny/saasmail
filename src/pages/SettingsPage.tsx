@@ -20,6 +20,7 @@ import {
   type DefaultView,
 } from "@/lib/default-view";
 import SendingSettings from "@/components/SendingSettings";
+import DataExports from "@/components/DataExports";
 
 interface Subscription {
   id: string;
@@ -36,12 +37,13 @@ export default function SettingsPage() {
     <PageContainer>
       <PageHeader
         title="Settings"
-        subtitle="Manage notifications, display preferences, and (admin only) sending and app branding."
+        subtitle="Manage notifications, display preferences, mailbox exports, and (admin only) sending and app branding."
       />
 
       <div className="max-w-3xl space-y-8">
         <NotificationsSection />
         <DisplayPreferencesSection />
+        <DataExports />
         {isAdmin && <SendingSettings />}
         {isAdmin && <AppBrandingSection />}
       </div>

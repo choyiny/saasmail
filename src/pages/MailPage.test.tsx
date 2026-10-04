@@ -10,6 +10,7 @@ import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
 import { AgentContextProvider, useAgentContext } from "@/agent/AgentContext";
 
 const api = vi.hoisted(() => ({
+  messageEmlUrl: (ref: string) => `/api/messages/${ref}/raw.eml`,
   assignMessages: vi.fn(),
   createMailbox: vi.fn(),
   deleteDraft: vi.fn(),

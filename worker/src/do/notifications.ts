@@ -54,6 +54,7 @@ export class NotificationsHub implements DurableObject {
       type?: string;
       inbox?: string;
       emailId?: string;
+      jobId?: string;
     };
     let frame: string;
     if (
@@ -72,6 +73,17 @@ export class NotificationsHub implements DurableObject {
       typeof payload.inbox === "string"
     ) {
       frame = JSON.stringify({ type: "mail_refresh", inbox: payload.inbox });
+    } else if (
+      // A mailbox export this person asked for can be downloaded.
+      payload.type === "export_ready" &&
+      typeof payload.inbox === "string" &&
+      typeof payload.jobId === "string"
+    ) {
+      frame = JSON.stringify({
+        type: "export_ready",
+        inbox: payload.inbox,
+        jobId: payload.jobId,
+      });
     } else {
       return new Response("invalid realtime event", { status: 400 });
     }
@@ -80,6 +92,21 @@ export class NotificationsHub implements DurableObject {
       try {
         ws.send(frame);
       } catch {}
+    }
+    if (payload.type === "export_ready") {
+      // The export may take a while: the tab may be closed by now.
+      return this.push(
+        {
+          title: "Your export is ready",
+          body: `Your export of ${payload.inbox} is ready to download.`,
+          tag: `export:${payload.jobId}`,
+          icon: "/saasmail-logo.png",
+          badge: "/saasmail-logo.png",
+          data: { url: "/settings#data" },
+        },
+        sockets.length,
+        payload.inbox!,
+      );
     }
     return Response.json({
       via: sockets.length > 0 ? "ws" : "none",
@@ -115,6 +142,26 @@ export class NotificationsHub implements DurableObject {
 
     // Always attempt Web Push as well — a connected WS tab may be backgrounded,
     // the user may have other devices, or the socket may be a stale hibernated one.
+    const pushPayload: PushPayload = {
+      title: payload.senderName || "New email",
+      body: payload.subject || payload.bodyPreview || "",
+      tag: `thread:${payload.threadId}`,
+      icon: "/saasmail-logo.png",
+      badge: "/saasmail-logo.png",
+      data: {
+        url: `/inbox/${encodeURIComponent(payload.inbox)}/${payload.personId}`,
+        threadId: payload.threadId,
+      },
+    };
+    return this.push(pushPayload, wsCount, payload.inbox);
+  }
+
+  /** Web Push to every subscription of this hub's user. */
+  private async push(
+    pushPayload: PushPayload,
+    wsCount: number,
+    inbox: string,
+  ): Promise<Response> {
     const userId = this.ctx.id.name; // DO id is idFromName(userId)
     if (!userId) {
       console.warn("[push] deliver: missing DO name (userId); skipping push");
@@ -154,24 +201,13 @@ export class NotificationsHub implements DurableObject {
       return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
     }
     console.log(
-      `[push] deliver: user=${userId} subs=${subs.length} wsCount=${wsCount} inbox=${payload.inbox}`,
+      `[push] deliver: user=${userId} subs=${subs.length} wsCount=${wsCount} inbox=${inbox}`,
     );
 
     const vapid: VapidConfig = {
       publicKey: vapidPublic,
       privateKey: vapidPrivate,
       subject: vapidSubject,
-    };
-    const pushPayload: PushPayload = {
-      title: payload.senderName || "New email",
-      body: payload.subject || payload.bodyPreview || "",
-      tag: `thread:${payload.threadId}`,
-      icon: "/saasmail-logo.png",
-      badge: "/saasmail-logo.png",
-      data: {
-        url: `/inbox/${encodeURIComponent(payload.inbox)}/${payload.personId}`,
-        threadId: payload.threadId,
-      },
     };
 
     const results = await Promise.allSettled(

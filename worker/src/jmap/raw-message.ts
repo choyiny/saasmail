@@ -66,7 +66,7 @@ function encodedWords(value: string): string {
     .join(FOLD);
 }
 
-function headerText(value: string): string {
+export function headerText(value: string): string {
   return PRINTABLE_ASCII.test(value) ? value : encodedWords(value);
 }
 
@@ -78,7 +78,7 @@ function mailbox(address: ContentAddress): string {
   return `${name} <${address.email}>`;
 }
 
-function addressList(addresses: ContentAddress[]): string {
+export function addressList(addresses: ContentAddress[]): string {
   return addresses.map(mailbox).join(`,${FOLD}`);
 }
 
@@ -119,7 +119,7 @@ function encodeRfc5987(value: string): string {
   );
 }
 
-function parameter(key: string, value: string): string {
+export function parameter(key: string, value: string): string {
   if (PRINTABLE_ASCII.test(value)) {
     return `${key}="${value.replace(/[\\"]/g, "\\$&")}"`;
   }

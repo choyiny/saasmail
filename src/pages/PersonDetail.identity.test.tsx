@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 import { AgentContextProvider } from "@/agent/AgentContext";
 
 const api = vi.hoisted(() => ({
+  messageEmlUrl: (ref: string) => `/api/messages/${ref}/raw.eml`,
   fetchPersonEmails: vi.fn(),
   markEmailRead: vi.fn(),
   markPeopleRead: vi.fn(),

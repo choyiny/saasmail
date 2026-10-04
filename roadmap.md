@@ -53,7 +53,7 @@ sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md
 | 9-5   | Sign-in rate limits and passkey-only sessions; two-factor sign-in dropped (`docs/archive/SPEC-two-factor.md`)                          | #71     | `f4b0625`        |
 | 10-1  | `reject` rule action, unknown-recipient rejection (`docs/archive/SPEC-reject-inbound.md`)                                              | #72     | `35d68d6`        |
 | 10-2  | AI filing into folders (`docs/archive/SPEC-ai-folders.md`)                                                                             | #73     | `ee7fc98`        |
-| 10-3  | A spam filter that learns from junk marks (`SPEC-spam-learning.md`)                                                                    | —       | —                |
+| 10-3  | A spam filter that learns from junk marks (`docs/archive/SPEC-spam-learning.md`)                                                       | #74     | `ea365b7`        |
 | 11-1  | mbox export and `.eml` download (`SPEC-mail-export.md`)                                                                                | —       | —                |
 | 11-2  | mbox/eml import (`SPEC-mail-import.md`)                                                                                                | —       | —                |
 | 11-3  | Scheduled D1 backups to R2 and a restore script (`SPEC-backups.md`)                                                                    | —       | —                |

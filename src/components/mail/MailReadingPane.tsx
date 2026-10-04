@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   ArrowLeft,
+  Download,
   ExternalLink,
   Folder,
   MailOpen,
@@ -29,7 +30,13 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { InboxAssignee, MailMessage, Mailbox, Stats } from "@/lib/api";
+import {
+  messageEmlUrl,
+  type InboxAssignee,
+  type MailMessage,
+  type Mailbox,
+  type Stats,
+} from "@/lib/api";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { showToast } from "@/lib/toast";
 import DeliveryBadge from "./DeliveryBadge";
@@ -366,6 +373,16 @@ export default function MailReadingPane({
                       </DropdownMenuContent>
                     </DropdownMenu>
                   )}
+
+                  <a
+                    href={messageEmlUrl(selectedMessage.ref)}
+                    download
+                    data-testid="mail-download-eml"
+                    className="inline-flex items-center gap-1 rounded-[6px] px-2 py-1.5 text-xs text-text-secondary hover:bg-bg-muted hover:text-text-primary"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Download (.eml)
+                  </a>
 
                   {selectedMessage.personId && (
                     <button

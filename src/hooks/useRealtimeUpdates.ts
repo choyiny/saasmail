@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
 import { dispatchSuggestedReplyReady } from "@/lib/suggested-reply-events";
+import { dispatchExportReady } from "@/lib/export-events";
+import { showToast } from "@/lib/toast";
 
 const INITIAL_RECONNECT_MS = 1_000;
 /** A burst of AI filings reloads the list once. */
@@ -74,6 +76,24 @@ export function useRealtimeUpdates(
               refreshTimer = null;
               callbackRef.current({ inbox });
             }, MAIL_REFRESH_DEBOUNCE_MS);
+          } else if (
+            data.type === "export_ready" &&
+            typeof data.inbox === "string" &&
+            typeof data.jobId === "string"
+          ) {
+            // A mailbox export this person asked for can be downloaded.
+            dispatchExportReady({ inbox: data.inbox, jobId: data.jobId });
+            showToast({
+              kind: "success",
+              message: `Your export of ${data.inbox} is ready.`,
+              action: {
+                label: "Open",
+                onClick: (dismiss) => {
+                  dismiss();
+                  window.location.assign("/settings#data");
+                },
+              },
+            });
           } else if (
             data.type === "suggested_reply" &&
             typeof data.inbox === "string" &&

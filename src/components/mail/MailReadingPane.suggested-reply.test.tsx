@@ -17,6 +17,7 @@ const draftStore = vi.hoisted(() => ({
 }));
 
 const api = vi.hoisted(() => ({
+  messageEmlUrl: (ref: string) => `/api/messages/${ref}/raw.eml`,
   fetchSuggestedReply: vi.fn(),
   fetchDraft: vi.fn(),
   saveDraft: vi.fn(),
