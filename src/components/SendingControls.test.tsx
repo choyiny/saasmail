@@ -1,4 +1,4 @@
-// docs/specs/SPEC-send-controls.md: the admin banner, the composer notice and
+// docs/archive/SPEC-send-controls.md: the admin banner, the composer notice and
 // Settings → Sending.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";

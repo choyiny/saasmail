@@ -8,7 +8,7 @@ import {
 } from "@better-auth/oauth-provider";
 import { verifyJwsAccessToken } from "better-auth/oauth2";
 import type { JSONWebKeySet, JWTPayload } from "jose";
-import { eq } from "drizzle-orm";
+import { count, eq, min } from "drizzle-orm";
 import { createAuth } from "../auth";
 import { OAUTH_SCOPES } from "../auth";
 import { parseScopes } from "../auth/scopes";
@@ -159,13 +159,29 @@ export function registerMcpRoutes(app: App) {
     // delete), so exempting it would make "passkey registration is required to
     // access data" false for the most powerful surface.
     if (!isDevEnvironment(c.env)) {
-      const pk = await db
-        .select({ id: passkeys.id })
+      const [pk] = await db
+        .select({ n: count(), first: min(passkeys.createdAt) })
         .from(passkeys)
-        .where(eq(passkeys.userId, user.id))
-        .limit(1);
-      if (pk.length === 0) {
+        .where(eq(passkeys.userId, user.id));
+      if (!pk || Number(pk.n) === 0) {
         return unauthorized(baseURL, "passkey registration required");
+      }
+      // A token minted before the account had a passkey was granted by a
+      // password session alone; registering the first passkey revokes its
+      // grant, and this stops the access token it already holds. (A passkey
+      // stored without its creation time cannot be compared.)
+      const first =
+        pk.first instanceof Date
+          ? pk.first.getTime()
+          : pk.first
+            ? Number(pk.first)
+            : null;
+      if (
+        first !== null &&
+        typeof jwt.iat === "number" &&
+        jwt.iat * 1000 < first
+      ) {
+        return unauthorized(baseURL, "token predates passkey registration");
       }
     }
 

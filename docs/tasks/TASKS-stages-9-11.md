@@ -40,8 +40,8 @@ Updated by whoever works a spec (the loop prompt in `LOOP-stages-9-11.md` does i
 | 1   | `SPEC-reply-to.md`         | archived    |
 | 2   | `SPEC-audit-log.md`        | archived    |
 | 3   | `SPEC-send-idempotency.md` | archived    |
-| 4   | `SPEC-send-controls.md`    | PR #70 open |
-| 5   | `SPEC-two-factor.md`       | todo        |
+| 4   | `SPEC-send-controls.md`    | archived    |
+| 5   | `SPEC-two-factor.md`       | PR #71 open |
 | 6   | `SPEC-reject-inbound.md`   | todo        |
 | 7   | `SPEC-ai-folders.md`       | todo        |
 | 8   | `SPEC-spam-learning.md`    | todo        |

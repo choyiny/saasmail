@@ -1,4 +1,4 @@
-// docs/specs/SPEC-send-controls.md §1 (pause), §3 (daily caps), §4 (settings).
+// docs/archive/SPEC-send-controls.md §1 (pause), §3 (daily caps), §4 (settings).
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { eq, sql } from "drizzle-orm";

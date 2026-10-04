@@ -46,6 +46,10 @@ import { runWithAudit, systemActor } from "./lib/audit/context";
 import { auditRetentionDays, pruneAuditEvents } from "./lib/audit/prune";
 import { pruneSendIdempotency } from "./lib/send-idempotency";
 import { pruneSendCounters } from "./lib/sending-controls";
+import {
+  d1RateLimitStorage,
+  pruneAuthRateLimits,
+} from "./auth/rate-limit-storage";
 import { collectUnreferencedContent } from "./jmap/content";
 import { runJmapSubmissionMaintenance } from "./jmap/recovery";
 import { reapExpiredUploads } from "./jmap/upload";
@@ -75,6 +79,7 @@ import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
 import { requirePasskey } from "./middleware/require-passkey";
+import { authRoutePasskeyGate } from "./middleware/auth-route-passkey-gate";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
 import { registerMcpRoutes } from "./mcp/http";
@@ -124,6 +129,8 @@ app.use(
       // still-running request's wait.
       "Idempotency-Replayed",
       "Retry-After",
+      // better-auth's rate-limit answer.
+      "X-Retry-After",
     ],
   }),
 );
@@ -180,6 +187,23 @@ app.post("/api/auth/sign-in/email", async (c, next) => {
     .where(eq(passkeys.userId, userRows[0].id))
     .limit(1);
   if (pkRows.length > 0) {
+    // Counted like an attempt, or this answer could be used without limit to
+    // find which addresses have an account with a passkey.
+    const address =
+      c.req.header("cf-connecting-ipv6") ??
+      c.req.header("cf-connecting-ip") ??
+      "no-ip";
+    const limit = await d1RateLimitStorage(db, () => true).consume(
+      `${address}|/sign-in/email`,
+      { window: 10, max: 3 },
+    );
+    if (!limit.allowed) {
+      return c.json(
+        { message: "Too many requests. Please try again later." },
+        429,
+        { "X-Retry-After": String(limit.retryAfter ?? 10) },
+      );
+    }
     // Refused before better-auth sees it, so its hook cannot record it.
     try {
       await recordFailedSignIn(db, {
@@ -202,6 +226,10 @@ app.post("/api/auth/sign-in/email", async (c, next) => {
   }
   return next();
 });
+
+// A session whose account has no passkey yet may only register one, on
+// better-auth's endpoints as on ours.
+app.use("/api/auth/*", authRoutePasskeyGate);
 
 // BetterAuth handler
 app.all("/api/auth/*", (c) => {
@@ -471,6 +499,11 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
       .then(() =>
         pruneSendCounters(createDb(env), Math.floor(Date.now() / 1000)).catch(
           (err) => console.error("[cron] send counter pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneAuthRateLimits(createDb(env), Date.now()).catch((err) =>
+          console.error("[cron] auth rate limit pruning failed:", err),
         ),
       )
       .then(() =>

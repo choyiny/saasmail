@@ -43,6 +43,7 @@ import { jmapChanges } from "./jmap-changes.schema";
 import { auditEvents } from "./audit-events.schema";
 import { sendIdempotency } from "./send-idempotency.schema";
 import { sendCounters } from "./send-counters.schema";
+import { authRateLimits } from "./auth-rate-limits.schema";
 
 export const schema = {
   ...authSchema,
@@ -91,4 +92,5 @@ export const schema = {
   auditEvents,
   sendIdempotency,
   sendCounters,
+  authRateLimits,
 } as const;

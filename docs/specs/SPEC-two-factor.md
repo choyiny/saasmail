@@ -1,4 +1,12 @@
-# SPEC: Two-factor sign-in (TOTP + recovery codes) and durable auth rate limiting
+# SPEC: Sign-in rate limits and passkey-only sessions (two-factor sign-in dropped)
+
+> **Re-scoped during implementation (2026-10-04).** Decision 5, the durable auth rate limits,
+> shipped, with the controls that close what is left of the leaked-password risk: better-auth's own
+> endpoints refuse a session whose account has no passkey yet, and a first passkey ends the sessions
+> and grants opened before it. TOTP, recovery codes, the admin reset and the
+> `password_sign_in_with_passkey` setting were dropped: in production a password cannot sign in to an
+> account that has a passkey, so a second factor after the password would guard nothing. See "Spec
+> changes" at the end. The rest of this page is the spec as written.
 
 Stage 9 (trust and safety), slice 5 of 5. Depends on `docs/archive/SPEC-audit-log.md` (events). Label `minor`.
 
@@ -120,3 +128,72 @@ message: "Use your passkey to sign in." })`. Unknown emails fall through to the 
   codes, admin reset, the passkey-only setting). `docs/configuration.md`: `TWO_FACTOR_ISSUER`
   (optional). `docs/updating.md`: run `yarn db:migrate:prod` (new auth tables) before deploying.
 - CHANGELOG `### Added`: **Two-factor sign-in.** … and **Sign-in rate limits hold across Workers.** …
+
+## Spec changes (implementation)
+
+The spec was written believing that a leaked password is a full session. In production it is not:
+
+- Since the passkey gate shipped, `POST /api/auth/sign-in/email` is refused with
+  `403 PASSKEY_REQUIRED_FOR_SIGNIN` for every account that has a passkey, before better-auth sees the
+  request (`worker/src/index.ts`). Only `DISABLE_PASSKEY_GATE=true` (local development) and
+  `DEMO_MODE` skip that.
+- An account without a passkey does get a session, and every `/api` route refuses it
+  (`403 PASSKEY_REQUIRED`) except `/api/user/passkeys`. better-auth's own endpoints under `/api/auth`,
+  however, answered it, since they run before that middleware: an independent review found that such a
+  session could impersonate a member (admin accounts), manage users, change the account's email or
+  password, or grant an OAuth client. Change 5 closes that.
+
+What changed, and why:
+
+1. **Decisions 1 and 2 (TOTP with recovery codes, the admin reset) are dropped.** A code after the
+   password would only ever be asked of accounts with no passkey, whose session can do nothing but
+   register one, and such an account cannot have turned TOTP on (Settings is behind the same gate). It
+   would guard nothing while adding two sign-in flows, a table, a QR dependency and an admin action.
+   The exposure that is left is the window before an account's first passkey (changes 5 and 6 narrow
+   it): someone who learns an invited user's password then can still register a passkey of their own
+   first. Closing that needs a different control, such as binding the first passkey registration to the
+   invitation; that would be a new spec.
+2. **Decision 3 (`password_sign_in_with_passkey`, default `allowed`) is dropped.** What it offered as
+   an option is already unconditional in production, and its default would have loosened it.
+3. **Decision 5 shipped**, with these differences:
+   - Rate limiting was not on at all: better-auth enables it only when `NODE_ENV` is `"production"`,
+     which Workers do not set. It is now on everywhere but local development and demo deploys
+     (`isDevEnvironment`), counted in `auth_rate_limits` (migration 0078) through `customStorage`.
+   - better-auth's built-in rules are kept (3 attempts per 10 seconds per address on `/sign-in/*`,
+     `/sign-up/*`, `/change-password`, `/change-email`; 3 per minute on password-reset paths; 100 per
+     10 seconds elsewhere) instead of a global 60 per minute, which would have throttled ordinary
+     traffic from a shared office address. `/get-session` is not limited: it guards nothing and would
+     cost a D1 write on every page load. The `/two-factor/*` rule went with the plugin.
+   - The key is better-auth's (`<address>|<path>`), and the address is `cf-connecting-ip`
+     (`advanced.ipAddress.ipAddressHeaders`), which also makes the session records' addresses right.
+     Times are in milliseconds. `consume` is one upsert that resets a closed window and counts refused
+     requests too; a D1 error lets the request through and logs, rather than locking everybody out.
+   - better-auth counts a request before it looks its path up, so every made-up path under
+     `/api/auth` would have opened a row: paths it does not serve share one `<address>|other` row
+     (the served paths are read from the instance's endpoints), and the address part is capped at 64
+     characters. The prune runs up to 20 batches of 1,000 per hourly pass.
+   - The OAuth provider's own rules apply on its endpoints (a minute per address: 20 token, 30
+     authorize, 30 revoke, 60 userinfo, 100 introspect, 5 registrations); they are documented, not
+     changed. `cf-connecting-ipv6` is read before `cf-connecting-ip` (with Cloudflare's "Pseudo IPv4"
+     the latter is a hash), and `X-Retry-After` is exposed to cross-origin clients.
+   - A request refused by the limiter is answered before better-auth's hooks, so it is not recorded in
+     the audit log as a failed sign-in. The password pre-check for passkey accounts runs before the
+     limiter; its refusal now counts against the same 3-per-10-seconds rule, so it cannot be used to
+     find accounts with a passkey without limit.
+4. No `auth.sign_in` methods `totp`/`recovery_code`, no `user.two_factor_*` events, no
+   `TWO_FACTOR_ISSUER`, no web changes: the login page already shows the server's "Too many requests"
+   message.
+5. **Added: better-auth's endpoints refuse a session whose account has no passkey**
+   (`worker/src/middleware/auth-route-passkey-gate.ts`, production only), except signing in and out,
+   reading the session, the passkey endpoints, ending an impersonation and the OAuth endpoints a client
+   calls with its own credentials or that only redirect. This is what decision 1 was for: a password
+   alone now opens nothing but passkey setup.
+6. **Added: the first passkey ends what was opened before it.** Registering an account's first passkey
+   deletes its other sessions and its OAuth access tokens, refresh tokens and consents (the session that
+   registered stays), and `/mcp` refuses an access token whose `iat` is before the account's first
+   passkey (the JWTs are verified offline, so deleting their rows alone would leave them working until
+   they expire). Without it, a session or grant opened in the window would have become full access the
+   moment the real user registered.
+7. Known limit: a page on another site can spend a visitor's sign-in budget with no-cors requests
+   (they are counted before better-auth rejects them), locking that address out of password sign-in
+   for 10 seconds at a time; passkey sign-in has a budget of 100.

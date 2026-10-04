@@ -49,7 +49,7 @@ sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md
 | 9-1   | Replies follow the sender's Reply-To (`docs/archive/SPEC-reply-to.md`)                                                                 | #67     | `10f39e6`        |
 | 9-2   | Audit log (`docs/archive/SPEC-audit-log.md`)                                                                                           | #68     | `3b42c45`        |
 | 9-3   | Idempotency keys for sends (`docs/archive/SPEC-send-idempotency.md`)                                                                   | #69     | `ee8a135`        |
-| 9-4   | Pause switch, MCP kill switch, daily caps (`SPEC-send-controls.md`)                                                                    | —       | —                |
+| 9-4   | Pause switch, MCP kill switch, daily caps (`docs/archive/SPEC-send-controls.md`)                                                       | #70     | `c1ecdd2`        |
 | 9-5   | Two-factor sign-in, durable auth rate limits (`SPEC-two-factor.md`)                                                                    | —       | —                |
 | 10-1  | `reject` rule action, unknown-recipient rejection (`SPEC-reject-inbound.md`)                                                           | —       | —                |
 | 10-2  | AI filing into folders (`SPEC-ai-folders.md`)                                                                                          | —       | —                |

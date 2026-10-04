@@ -1,4 +1,4 @@
-// docs/specs/SPEC-send-controls.md §2 (MCP kill switch) and §3 (the MCP cap).
+// docs/archive/SPEC-send-controls.md §2 (MCP kill switch) and §3 (the MCP cap).
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { eq, sql } from "drizzle-orm";

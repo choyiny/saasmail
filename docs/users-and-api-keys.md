@@ -11,6 +11,37 @@ Inbox assignment is what a member's access actually derives from — see
 The same scoping is enforced for the HTTP API, the [MCP server](mcp.md), and
 [WebMCP](webmcp.md), by the same code.
 
+## Signing in
+
+In production every account must register a passkey before it can use the
+app or the API. After a new member's first password sign-in the web app takes
+them to passkey setup; until they have one, their session can sign out, read
+itself and register a passkey, and everything else answers
+`403 PASSKEY_REQUIRED`, on saasmail's routes and better-auth's alike. From then
+on the password no longer signs in, only the passkey does
+(`403 PASSKEY_REQUIRED_FOR_SIGNIN`).
+
+Registering an account's first passkey ends every other session it had and
+every OAuth grant (MCP clients), and an MCP access token minted before that
+passkey is refused: whatever someone opened with a leaked password in that
+window stops working. The client simply connects again. Local development
+(`DISABLE_PASSKEY_GATE=true`) and demo deploys skip these rules.
+
+Sign-in is rate-limited per client address, with the counts kept in D1 so the
+limits hold however many Workers serve the requests:
+
+| Requests                                   | Limit                  |
+| ------------------------------------------ | ---------------------- |
+| Password sign-in, change password or email | 3 per 10 seconds       |
+| Password reset                             | 3 a minute             |
+| OAuth token, authorize and revoke          | 20, 30 and 30 a minute |
+| OAuth userinfo; client registration        | 60; 5 a minute         |
+| Any other auth route                       | 100 per 10 seconds     |
+
+Past a limit the answer is `429` with an `X-Retry-After` header (seconds).
+Reading the session is not limited. Local development and demo deploys are not
+limited.
+
 ## API keys
 
 Issue scoped API keys for programmatic access to send email, manage templates, enroll contacts in sequences, and query inbox data. Keys are hashed at rest and follow the `sk_…` format.

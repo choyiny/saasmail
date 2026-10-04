@@ -113,6 +113,8 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS send_idempotency (user_id TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, status TEXT NOT NULL, response_status INTEGER, response_body TEXT, sent_email_id TEXT, created_at INTEGER NOT NULL, completed_at INTEGER, PRIMARY KEY(user_id, key))`,
     `CREATE INDEX IF NOT EXISTS send_idempotency_created_at_idx ON send_idempotency(created_at)`,
     `CREATE TABLE IF NOT EXISTS send_counters (user_id TEXT NOT NULL, channel TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, channel, day))`,
+    `CREATE TABLE IF NOT EXISTS auth_rate_limits (key TEXT PRIMARY KEY NOT NULL, count INTEGER NOT NULL, window_start INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS auth_rate_limits_expires_at_idx ON auth_rate_limits (expires_at)`,
     `CREATE TABLE IF NOT EXISTS jmap_blobs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS jmap_blobs_user_idx ON jmap_blobs(user_id)`,
     `CREATE INDEX IF NOT EXISTS jmap_blobs_created_at_idx ON jmap_blobs(created_at)`,
@@ -483,6 +485,7 @@ export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
     DELETE FROM send_counters;
+    DELETE FROM auth_rate_limits;
     DELETE FROM send_idempotency;
     DELETE FROM audit_events;
     DELETE FROM jmap_submissions;

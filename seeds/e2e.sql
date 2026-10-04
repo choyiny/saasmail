@@ -3,6 +3,7 @@
 
 -- Clean tables (idempotent for repeated runs)
 DELETE FROM send_counters;
+DELETE FROM auth_rate_limits;
 DELETE FROM send_idempotency;
 DELETE FROM audit_events;
 DELETE FROM agent_sessions;

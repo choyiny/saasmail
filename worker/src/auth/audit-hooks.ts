@@ -6,6 +6,10 @@ import { anonymousHttpActor, userActor } from "../lib/audit/actors";
 import { runWithAudit } from "../lib/audit/context";
 import { AUDIT_ACTIONS } from "../lib/audit/events";
 import { recordAudit } from "../lib/audit/record";
+import {
+  revokeOnFirstPasskey,
+  type FirstPasskeyContext,
+} from "./first-passkey";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -314,6 +318,13 @@ export async function auditAuthRequest(
 /** The `hooks.after` of the auth configuration. Never fails the request. */
 export function auditAfterHook(db: Db) {
   return createAuthMiddleware(async (ctx) => {
+    try {
+      await revokeOnFirstPasskey(db, ctx as unknown as FirstPasskeyContext);
+    } catch (error) {
+      // The passkey is registered either way; what was opened before it
+      // stays until it expires.
+      console.error("[auth] earlier sessions not ended:", error);
+    }
     try {
       await auditAuthRequest(db, ctx as unknown as AuthHookContext);
     } catch (error) {

@@ -547,6 +547,13 @@
       "when": 1791096231653,
       "tag": "0077_send_counters",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1791100382242,
+      "tag": "0078_auth_rate_limits",
+      "breakpoints": true
     }
   ]
 }
