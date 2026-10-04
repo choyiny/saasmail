@@ -52,6 +52,16 @@ Optional fields worth knowing:
 - `cc` — array of `{ email, name? }` objects, up to 50. The `name` becomes the `Name <addr>` display in the header.
 - `replyTo` — overrides where replies go. Useful for contact-form flows where mail is sent from `noreply@` but you want responses to reach the actual submitter.
 
+### Always send an idempotency key
+
+Generate one key per message you intend to send (a UUID) and pass it as the `Idempotency-Key` header on every attempt of that message. If a request times out and you retry with the same key, saasmail returns the first response (with the header `Idempotency-Replayed: true`) instead of sending a second copy. The same works on `/api/send/reply/{emailId}` and `/api/email-templates/{slug}/send`.
+
+- Same key, different message → `422` `IDEMPOTENCY_KEY_REUSED`: you reused a key by mistake; make a new one.
+- Same key while the first attempt is still running → `409` `IDEMPOTENCY_IN_PROGRESS` with `Retry-After: 2`: wait and retry with the same key.
+- A request refused before anything was sent (400, 403, 404) releases the key; fix it and retry with the same key.
+- After a 5xx, retry with the same key: if the provider already had the message, you get `{ id, status, incomplete: true }` back instead of a second copy.
+- Keys are per user and kept 24 hours. If you can't set headers, put `idempotencyKey` in the payload JSON.
+
 ### Examples
 
 **curl, no attachments:**
@@ -91,9 +101,14 @@ fd.append(
 // Optional attachment:
 // fd.append("files", new Blob([bytes], { type: "application/pdf" }), "receipt.pdf");
 
+// One key per message, created before the first attempt and reused on retry.
+const idempotencyKey = crypto.randomUUID();
 const res = await fetch(`${SAASMAIL_URL}/api/send`, {
   method: "POST",
-  headers: { Authorization: `Bearer ${SAASMAIL_KEY}` },
+  headers: {
+    Authorization: `Bearer ${SAASMAIL_KEY}`,
+    "Idempotency-Key": idempotencyKey,
+  },
   body: fd,
 });
 const { id, resendId, status, attachmentIds } = await res.json();
@@ -222,6 +237,7 @@ As noted above, calling `/api/send` (or `/api/send/reply/{emailId}`) for a perso
 - `400 "Missing required template variables"` — the response body includes `missingVariables` and `requiredVariables`. Use those to either supply the values or fail clearly back to the user.
 - `400 "Person is already in an active sequence"` on enroll — see above.
 - `404 "Template not found"` / `"Sequence not found"` — slug or id is wrong. List the resources to find the right one before retrying.
+- `409 IDEMPOTENCY_IN_PROGRESS` / `422 IDEMPOTENCY_KEY_REUSED` — see "Always send an idempotency key" above.
 
 ## Where to look in the code
 

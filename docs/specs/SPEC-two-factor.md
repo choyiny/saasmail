@@ -1,6 +1,6 @@
 # SPEC: Two-factor sign-in (TOTP + recovery codes) and durable auth rate limiting
 
-Stage 9 (trust and safety), slice 5 of 5. Depends on `SPEC-audit-log.md` (events). Label `minor`.
+Stage 9 (trust and safety), slice 5 of 5. Depends on `docs/archive/SPEC-audit-log.md` (events). Label `minor`.
 
 ## Why
 

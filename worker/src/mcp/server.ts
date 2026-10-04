@@ -1,3 +1,11 @@
+import {
+  IdempotencyInProgressError,
+  IdempotencyReusedError,
+  idempotencyKeyOf,
+  sendFingerprint,
+  sendRequestFields,
+  withIdempotency,
+} from "../lib/send-idempotency";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -536,6 +544,70 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     }),
   );
 
+  const idempotencyKeySchema = z
+    .string()
+    .optional()
+    .describe(
+      "A UUID you generate per intended send and reuse if you retry. A retry with the same key returns the first result (with replayed: true) instead of sending again; the same key with a different message is refused. Kept 24 hours.",
+    );
+
+  /**
+   * Runs a send tool at most once per idempotency key (none: just runs). A
+   * refusal releases the key, so a corrected retry runs.
+   */
+  const sendOnce = async (
+    key: string | undefined,
+    fields: Record<string, unknown>,
+    run: () => Promise<{ result?: unknown; error?: string }>,
+  ) => {
+    if (key === undefined) {
+      const outcome = await run();
+      return outcome.error !== undefined
+        ? fail(outcome.error)
+        : ok(outcome.result);
+    }
+    const checked = idempotencyKeyOf(undefined, key);
+    if (checked.error) return fail(checked.error);
+    try {
+      const outcome = await withIdempotency(
+        db,
+        {
+          userId: ctx.user.id,
+          key,
+          // A key used over HTTP answers there only: the two store
+          // different answers for the same send.
+          fingerprint: await sendFingerprint({ surface: "mcp", ...fields }),
+          // A send accepted before this call finished answers as a result.
+          acceptedStatus: 200,
+        },
+        async () => {
+          const attempt = await run();
+          if (attempt.error !== undefined) {
+            return { status: 400, body: { error: attempt.error } };
+          }
+          const result = attempt.result as { id?: string | null };
+          return { status: 200, body: attempt.result, sentEmailId: result?.id };
+        },
+      );
+      if (outcome.status >= 300) {
+        return fail((outcome.body as { error: string }).error);
+      }
+      return ok(
+        outcome.replayed
+          ? { ...(outcome.body as object), replayed: true }
+          : outcome.body,
+      );
+    } catch (error) {
+      if (
+        error instanceof IdempotencyReusedError ||
+        error instanceof IdempotencyInProgressError
+      ) {
+        return fail(error.message);
+      }
+      throw error;
+    }
+  };
+
   server.registerTool(
     "send_template",
     {
@@ -553,29 +625,43 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .describe(
             "Values for the template's {{placeholders}}. Missing ones are reported back with the full required list. Values may be nested arrays/objects for {{#section}} bodies.",
           ),
+        idempotencyKey: idempotencyKeySchema,
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
-      const result = await sendTemplate({
-        db,
-        env: ctx.env,
-        slug: input.slug,
-        to: input.to,
-        fromAddress: input.fromAddress,
-        variables: input.variables ?? {},
-        allowed,
-      });
-      if (!result.ok) {
-        // Hand the model the required-variable list so it can retry correctly
-        // rather than guessing at what was missing.
-        return result.code === "MISSING_VARIABLES"
-          ? fail(
-              `${result.message} Missing: ${result.missingVariables.join(", ")}. Required: ${result.requiredVariables.join(", ")}.`,
-            )
-          : fail(result.message);
-      }
-      return ok(result);
-    }),
+    guard(ctx, SCOPE_SEND, async (input) =>
+      sendOnce(
+        input.idempotencyKey,
+        {
+          kind: "template",
+          templateSlug: input.slug,
+          to: input.to.trim().toLowerCase(),
+          fromAddress: input.fromAddress.trim().toLowerCase(),
+          variables: input.variables ?? {},
+        },
+        async () => {
+          const result = await sendTemplate({
+            db,
+            env: ctx.env,
+            slug: input.slug,
+            to: input.to,
+            fromAddress: input.fromAddress,
+            variables: input.variables ?? {},
+            allowed,
+          });
+          if (!result.ok) {
+            // Hand the model the required-variable list so it can retry
+            // correctly rather than guessing at what was missing.
+            return {
+              error:
+                result.code === "MISSING_VARIABLES"
+                  ? `${result.message} Missing: ${result.missingVariables.join(", ")}. Required: ${result.requiredVariables.join(", ")}.`
+                  : result.message,
+            };
+          }
+          return { result };
+        },
+      ),
+    ),
   );
 
   const ccSchema = z
@@ -608,27 +694,34 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .email()
           .optional()
           .describe("Where replies should go, if not fromAddress."),
+        idempotencyKey: idempotencyKeySchema,
       },
     },
     guard(ctx, SCOPE_SEND, async (input) => {
-      const result = await sendEmail({
-        db,
-        env: ctx.env,
-        // Attachments would mean base64 in the tool payload; omitted until
-        // there is a staged-upload path like the one taxspace uses.
-        files: [],
-        payload: {
-          to: input.to,
-          fromAddress: input.fromAddress,
-          subject: input.subject,
-          bodyHtml: input.bodyHtml,
-          bodyText: input.bodyText,
-          cc: input.cc,
-          replyTo: input.replyTo,
-        },
-        allowed,
-      });
-      return ok(result);
+      const payload = {
+        to: input.to,
+        fromAddress: input.fromAddress,
+        subject: input.subject,
+        bodyHtml: input.bodyHtml,
+        bodyText: input.bodyText,
+        cc: input.cc,
+        replyTo: input.replyTo,
+      };
+      return sendOnce(
+        input.idempotencyKey,
+        { kind: "send", ...sendRequestFields(payload) },
+        async () => ({
+          result: await sendEmail({
+            db,
+            env: ctx.env,
+            // Attachments would mean base64 in the tool payload; omitted until
+            // there is a staged-upload path like the one taxspace uses.
+            files: [],
+            payload,
+            allowed,
+          }),
+        }),
+      );
     }),
   );
 
@@ -670,6 +763,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .describe(
             'Who the reply is addressed to: "reply_to" (default) follows the message\'s Reply-To header, "sender" answers its From address instead.',
           ),
+        idempotencyKey: idempotencyKeySchema,
       },
     },
     guard(ctx, SCOPE_SEND, async (input) => {
@@ -681,41 +775,57 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       const target = await getEmailById(db, input.emailId, allowed);
       if (!target) return fail(NOT_FOUND);
 
-      const result = await replyToEmail({
-        db,
-        env: ctx.env,
-        emailId: input.emailId,
-        files: [],
-        payload: {
-          fromAddress: input.fromAddress,
-          bodyHtml: input.bodyHtml,
-          bodyText: input.bodyText,
+      const payload = {
+        fromAddress: input.fromAddress,
+        bodyHtml: input.bodyHtml,
+        bodyText: input.bodyText,
+        templateSlug: input.templateSlug,
+        variables: input.variables,
+        cc: input.cc,
+        replyTo: input.replyTo,
+      };
+      return sendOnce(
+        input.idempotencyKey,
+        {
+          kind: "reply",
+          emailId: input.emailId,
+          recipient: input.recipient,
           templateSlug: input.templateSlug,
           variables: input.variables,
-          cc: input.cc,
-          replyTo: input.replyTo,
+          ...sendRequestFields(payload),
         },
-        allowed,
-        recipient: input.recipient,
-      });
-      if (!result.ok) {
-        // Denials on the referenced message are reported as not-found, matching
-        // read_email — the caller supplied an id, and confirming it exists in
-        // an inbox they cannot see would be a probe oracle.
-        if (
-          result.code === "EMAIL_NOT_FOUND" ||
-          result.code === "PERSON_NOT_FOUND" ||
-          result.code === "EMAIL_HAS_NO_PERSON"
-        ) {
-          return fail(NOT_FOUND);
-        }
-        return fail(
-          result.code === "MISSING_VARIABLES" && "missingVariables" in result
-            ? `${result.message} Missing: ${(result as { missingVariables: string[] }).missingVariables.join(", ")}.`
-            : result.message,
-        );
-      }
-      return ok(result);
+        async () => {
+          const result = await replyToEmail({
+            db,
+            env: ctx.env,
+            emailId: input.emailId,
+            files: [],
+            payload,
+            allowed,
+            recipient: input.recipient,
+          });
+          if (!result.ok) {
+            // Denials on the referenced message are reported as not-found,
+            // matching read_email: confirming it exists in an inbox the caller
+            // cannot see would be a probe oracle.
+            if (
+              result.code === "EMAIL_NOT_FOUND" ||
+              result.code === "PERSON_NOT_FOUND" ||
+              result.code === "EMAIL_HAS_NO_PERSON"
+            ) {
+              return { error: NOT_FOUND };
+            }
+            return {
+              error:
+                result.code === "MISSING_VARIABLES" &&
+                "missingVariables" in result
+                  ? `${result.message} Missing: ${(result as { missingVariables: string[] }).missingVariables.join(", ")}.`
+                  : result.message,
+            };
+          }
+          return { result };
+        },
+      );
     }),
   );
 

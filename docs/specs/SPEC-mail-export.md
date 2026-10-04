@@ -1,6 +1,6 @@
 # SPEC: Export a mailbox as mbox, and any message as .eml
 
-Stage 11 (data ownership), slice 1 of 3. Depends on `SPEC-audit-log.md`. Label `minor`.
+Stage 11 (data ownership), slice 1 of 3. Depends on `docs/archive/SPEC-audit-log.md`. Label `minor`.
 
 ## Why
 

@@ -1,6 +1,6 @@
 # SPEC: Idempotency keys for sends
 
-Stage 9 (trust and safety), slice 3 of 5. Depends on `SPEC-audit-log.md` (emits nothing new, but
+Stage 9 (trust and safety), slice 3 of 5. Depends on `docs/archive/SPEC-audit-log.md` (emits nothing new, but
 replays must not emit `mail.sent` twice). Label `minor`.
 
 ## Why
@@ -106,3 +106,54 @@ tool sends through `api.ts`, it inherits the header).
   (`.claude/skills/use-saasmail/SKILL.md`): the header, the semantics, an example. `docs/mcp.md`: the
   input on the three tools.
 - CHANGELOG `### Added`: **Idempotency keys for sends.** …
+
+## Spec changes (2026-10-04, while implementing)
+
+The five decisions are unchanged. Where the code differed from what the sections assumed, or a detail
+was left open:
+
+1. **The web keeps the key in `sessionStorage`, per compose context**, not "with the autosaved draft":
+   the `drafts` table has no column for it, the autosave is debounced (a key written with it could be
+   missing at the reload it is meant for), and a retry happens in one tab. `sessionStorage` is written
+   when the key is created and survives a reload of that tab. No schema change.
+2. **No WebMCP tool sends mail** (they save drafts and drive the UI), so none needs the header.
+3. **The chat view's quick reply sends a key too**: it is a web send path the section did not list.
+4. **"Success" is a 2xx answer.** A reply or template send that is refused (400 missing body or
+   variables, 404 not found) is answered, not stored, and releases the key, like a thrown error:
+   decision 4's "a request that fails releases the key".
+5. **One upsert claims the key**: a free key, an expired one (older than 24 hours, so a key is reusable
+   after its window even before the prune runs), or the same request's claim abandoned for 5 minutes.
+   The stale takeover therefore also requires the same fingerprint; another request on a stale key is
+   `IDEMPOTENCY_KEY_REUSED`. Release and completion touch only the claim they made.
+6. **The prune takes up to ten batches of 1,000 per hourly pass**, as the audit log's does: one batch an
+   hour would fall behind an instance that sends more than 24,000 keyed messages a day.
+7. **The web turns the two refusals into words**: a reused key means an earlier attempt from that window
+   went out without the window learning it, so the user is told to check Sent and the key is replaced;
+   an in-progress key asks them to wait. API errors now carry the server's `status` and `code`.
+8. **The fingerprint normalises addresses** (trimmed, lowercased) the way the send path does, and leaves
+   the key itself out. HTTP and MCP share the field builder (`sendRequestFields`).
+9. **CORS exposes `Idempotency-Replayed` and `Retry-After`**, so a browser client can read them.
+
+After an independent review of the first implementation (same day), the design changed where it could
+still send a message twice:
+
+10. **An accepted send never releases its key.** The outbox tells a keyed send the moment the provider
+    has the message (or its retries are the outbox's), before writing anything else
+    (`notifySendAccepted`), and the key is completed at once with `{ id, status, incomplete: true }`.
+    A failure after that point (a D1 error recording the send, a Worker that dies) leaves the key
+    answering with that send; a retry never sends a second copy. The request's full answer replaces
+    the provisional one when it finishes. Decision 4's "a request that fails releases the key" now
+    reads "a request refused before the provider has the message".
+11. **A running claim makes every request wait** (409), whatever it asks; the reuse error is only for a
+    completed key. An abandoned claim (pending after 5 minutes) never reached the provider, so any
+    request may take it over. A request still waiting on the provider after 5 minutes can still be
+    overtaken: a known limit.
+12. **The completion write is tried twice**, and the release after a refusal is guarded like the one
+    after a throw.
+13. **HTTP and MCP keys are separate** (the fingerprint names the surface): the two store differently
+    shaped answers for the same send.
+14. **The web forgets a key when the composer is closed** without sending, not only after a send: a
+    later, different message must not inherit it. A reload closes nothing and keeps it. The chat quick
+    reply shares the full reply composer's key for the same message. A reused key is worded as "this
+    message was not sent; an earlier attempt may already have gone out".
+15. **OpenAPI declares `Idempotency-Replayed` on the 201 and `Retry-After` on the 409.**

@@ -1,12 +1,16 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { createEmailSender } from "../lib/email-sender";
-import { json201Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { replyToEmail, sendEmail } from "../lib/send-email";
 import { bearerSecurity } from "../lib/openapi-auth";
 import { MAX_CC_ENTRIES } from "../lib/send-limits";
+import { respondIdempotently } from "../lib/idempotent-send-route";
+import { sendRequestFields } from "../lib/send-idempotency";
 import {
+  idempotencyConflictResponses,
+  idempotencyKeyHeader,
+  idempotent201Response,
   inboxForbiddenResponse,
   multipartParseErrorResponses,
   replyNotFoundResponse,
@@ -89,6 +93,10 @@ export const SendEmailSchema = z
       description:
         "When true, bypasses the suppression list and skips the List-Unsubscribe headers and unsubscribe footer. Use for transactional or 1:1 mail such as password resets, OTPs, receipts, and person-to-person messages. Defaults to false, which respects suppression and adds unsubscribe metadata.",
     }),
+    idempotencyKey: z.string().optional().openapi({
+      description:
+        "Same as the `Idempotency-Key` header, for clients that cannot set one; the header wins.",
+    }),
   })
   .openapi("SendEmailSchema");
 
@@ -111,8 +119,9 @@ const sendEmailRoute = createRoute({
   tags: ["Send"],
   security: bearerSecurity,
   description:
-    "Compose and send a new email. The request body is multipart/form-data with a JSON `payload` field containing a SendEmailSchema object, and zero or more `files` fields for attachments.",
+    "Compose and send a new email. The request body is multipart/form-data with a JSON `payload` field containing a SendEmailSchema object, and zero or more `files` fields for attachments. Send an `Idempotency-Key` so that a retry never sends twice.",
   request: {
+    headers: idempotencyKeyHeader,
     body: {
       content: {
         "multipart/form-data": {
@@ -143,9 +152,10 @@ const sendEmailRoute = createRoute({
     },
   },
   responses: {
-    ...json201Response(SentEmailResponseSchema, "Email sent"),
+    ...idempotent201Response(SentEmailResponseSchema, "Email sent"),
     ...multipartParseErrorResponses,
     ...inboxForbiddenResponse,
+    ...idempotencyConflictResponses,
   },
 });
 
@@ -162,26 +172,37 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
     const { status, body } = sendParseErrorResponse(parsed.err);
     return c.json(body, status);
   }
-  const { payload, files } = parsed.value;
+  const { idempotencyKey, ...payload } = parsed.value.payload;
+  const { files } = parsed.value;
 
-  const result = await sendEmail({
-    db,
-    env: c.env,
-    payload,
-    files,
-    allowed: c.get("allowedInboxes")!,
-  });
-
-  return c.json(
+  return respondIdempotently(
+    c,
     {
-      id: result.id,
-      resendId: result.resendId,
-      status: result.status,
-      attachmentIds: result.attachmentIds,
-      delivered: result.delivered,
-      suppressed: result.suppressed,
+      payloadKey: idempotencyKey,
+      fields: { kind: "send", ...sendRequestFields(payload) },
+      files,
     },
-    201,
+    async () => {
+      const result = await sendEmail({
+        db,
+        env: c.env,
+        payload,
+        files,
+        allowed: c.get("allowedInboxes")!,
+      });
+      return {
+        status: 201,
+        body: {
+          id: result.id,
+          resendId: result.resendId,
+          status: result.status,
+          attachmentIds: result.attachmentIds,
+          delivered: result.delivered,
+          suppressed: result.suppressed,
+        },
+        sentEmailId: result.id,
+      };
+    },
   );
 });
 
@@ -218,6 +239,10 @@ export const ReplyEmailSchema = z
       description: "Override Reply-To header for this reply.",
       example: "submitter@example.com",
     }),
+    idempotencyKey: z.string().optional().openapi({
+      description:
+        "Same as the `Idempotency-Key` header, for clients that cannot set one; the header wins.",
+    }),
     recipient: z.enum(["reply_to", "sender"]).optional().openapi({
       description:
         "Who a reply to a received message is addressed to. `reply_to` (the default) follows the message's Reply-To header: its first address becomes To and the others are added to Cc, skipping this instance's own inboxes; without a usable Reply-To the reply goes to the sender. `sender` always answers the From address. Ignored when replying to a sent message.",
@@ -251,6 +276,7 @@ const replyEmailRoute = createRoute({
     "Reply to a received or sent email. multipart/form-data body with 'payload' JSON and optional 'files'. A reply to a received message goes to its Reply-To address when it has one, unless the payload says `recipient: \"sender\"`; the response's `to` is the address used.",
   request: {
     params: z.object({ emailId: z.string() }),
+    headers: idempotencyKeyHeader,
     body: {
       content: {
         "multipart/form-data": {
@@ -275,11 +301,12 @@ const replyEmailRoute = createRoute({
     },
   },
   responses: {
-    ...json201Response(ReplyEmailResponseSchema, "Reply sent"),
+    ...idempotent201Response(ReplyEmailResponseSchema, "Reply sent"),
     ...replyValidationErrorResponse,
     413: multipartParseErrorResponses[413],
     ...inboxForbiddenResponse,
     ...replyNotFoundResponse,
+    ...idempotencyConflictResponses,
   },
 });
 
@@ -296,49 +323,68 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
     const { status, body } = sendParseErrorResponse(parsed.err);
     return c.json(body, status);
   }
-  const { payload, files } = parsed.value;
-  const { recipient, ...replyPayload } = payload;
+  const { files } = parsed.value;
+  const { recipient, idempotencyKey, ...replyPayload } = parsed.value.payload;
 
-  const result = await replyToEmail({
-    db,
-    env: c.env,
-    emailId,
-    payload: replyPayload,
-    files,
-    allowed: c.get("allowedInboxes")!,
-    recipient,
-  });
-
-  if (!result.ok) {
-    if (result.code === "MISSING_VARIABLES") {
-      return c.json(
-        {
-          error: result.message,
-          missingVariables: result.missingVariables,
-          requiredVariables: result.requiredVariables,
-        },
-        400,
-      );
-    }
-    if (
-      result.code === "MISSING_BODY" ||
-      result.code === "TEMPLATE_PARSE_ERROR"
-    ) {
-      return c.json({ error: result.message }, 400);
-    }
-    return c.json({ error: result.message }, 404);
-  }
-
-  return c.json(
+  return respondIdempotently(
+    c,
     {
-      id: result.id,
-      resendId: result.resendId,
-      status: result.status,
-      attachmentIds: result.attachmentIds,
-      to: result.to,
-      cc: result.cc,
-      repliedTo: result.repliedTo,
+      payloadKey: idempotencyKey,
+      fields: {
+        kind: "reply",
+        emailId,
+        recipient,
+        templateSlug: replyPayload.templateSlug,
+        variables: replyPayload.variables,
+        ...sendRequestFields(replyPayload),
+      },
+      files,
     },
-    201,
+    async () => {
+      const result = await replyToEmail({
+        db,
+        env: c.env,
+        emailId,
+        payload: replyPayload,
+        files,
+        allowed: c.get("allowedInboxes")!,
+        recipient,
+      });
+
+      // Refusals are answered, not remembered: a corrected retry may run.
+      if (!result.ok) {
+        if (result.code === "MISSING_VARIABLES") {
+          return {
+            status: 400,
+            body: {
+              error: result.message,
+              missingVariables: result.missingVariables,
+              requiredVariables: result.requiredVariables,
+            },
+          };
+        }
+        if (
+          result.code === "MISSING_BODY" ||
+          result.code === "TEMPLATE_PARSE_ERROR"
+        ) {
+          return { status: 400, body: { error: result.message } };
+        }
+        return { status: 404, body: { error: result.message } };
+      }
+
+      return {
+        status: 201,
+        body: {
+          id: result.id,
+          resendId: result.resendId,
+          status: result.status,
+          attachmentIds: result.attachmentIds,
+          to: result.to,
+          cc: result.cc,
+          repliedTo: result.repliedTo,
+        },
+        sentEmailId: result.id,
+      };
+    },
   );
 });

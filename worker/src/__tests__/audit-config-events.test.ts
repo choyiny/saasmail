@@ -1,4 +1,4 @@
-// docs/specs/SPEC-audit-log.md §3: events for configuration, people and
+// docs/archive/SPEC-audit-log.md §3: events for configuration, people and
 // credentials.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";

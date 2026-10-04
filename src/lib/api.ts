@@ -128,6 +128,18 @@ export interface Stats {
   }>;
 }
 
+/** A failed API call: the server's message, its HTTP status and its `code`. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
@@ -135,17 +147,24 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     let message = `API error: ${res.status}`;
+    let code: string | null = null;
     try {
-      const body = (await res.json()) as { error?: unknown };
+      const body = (await res.json()) as { error?: unknown; code?: unknown };
       if (typeof body.error === "string" && body.error.trim()) {
         message = body.error;
       }
+      if (typeof body.code === "string") code = body.code;
     } catch {
       // Keep the status fallback when the server did not return JSON.
     }
-    throw new Error(message);
+    throw new ApiError(message, res.status, code);
   }
   return res.json();
+}
+
+/** The header that makes a retry of the same send return the first answer. */
+function idempotencyHeaders(key: string | undefined): HeadersInit | undefined {
+  return key ? { "Idempotency-Key": key } : undefined;
 }
 
 export interface AgentStatus {
@@ -801,8 +820,10 @@ export async function sendEmail(data: {
   bodyHtml: string;
   bodyText?: string;
   files?: AttachedFile[];
+  /** The same on every attempt of one message (see `sendKeyFor`). */
+  idempotencyKey?: string;
 }): Promise<{ id: string; attachmentIds: string[]; status: string }> {
-  const { files = [], ...payload } = data;
+  const { files = [], idempotencyKey, ...payload } = data;
   const fd = new FormData();
   // Manually composed emails are 1:1 transactional messages: no unsubscribe
   // footer or List-Unsubscribe headers, and they bypass the suppression list
@@ -811,6 +832,7 @@ export async function sendEmail(data: {
   for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch("/api/send", {
     method: "POST",
+    headers: idempotencyHeaders(idempotencyKey),
     body: fd, // do not set Content-Type; the browser sets the multipart boundary
   });
 }
@@ -832,6 +854,8 @@ export async function replyToEmail(
      * default follows the Reply-To.
      */
     recipient?: ReplyRecipient;
+    /** The same on every attempt of one reply (see `sendKeyFor`). */
+    idempotencyKey?: string;
   },
 ): Promise<{
   id: string;
@@ -843,12 +867,13 @@ export async function replyToEmail(
   cc: string[];
   repliedTo: ReplyRecipient;
 }> {
-  const { files = [], ...payload } = data;
+  const { files = [], idempotencyKey, ...payload } = data;
   const fd = new FormData();
   fd.append("payload", JSON.stringify(payload));
   for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch(`/api/send/reply/${emailId}`, {
     method: "POST",
+    headers: idempotencyHeaders(idempotencyKey),
     body: fd,
   });
 }

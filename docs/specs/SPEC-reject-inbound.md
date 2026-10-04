@@ -1,6 +1,6 @@
 # SPEC: Reject mail at the door — a `reject` rule action and unknown-recipient rejection
 
-Stage 10 (triage), slice 1 of 3. Depends on `SPEC-audit-log.md`. Label `minor`. The evaluator split in
+Stage 10 (triage), slice 1 of 3. Depends on `docs/archive/SPEC-audit-log.md`. Label `minor`. The evaluator split in
 §1 is also what `SPEC-spam-learning.md` builds on, so this slice goes first.
 
 ## Why

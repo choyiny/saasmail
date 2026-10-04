@@ -1,3 +1,4 @@
+import { notifySendAccepted } from "./send-idempotency";
 import { nanoid } from "nanoid";
 import { and, eq, lte, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -236,6 +237,9 @@ export async function sendViaOutbox(
 
   const result = send.result!;
   if (!result.error) {
+    // Before any write that could fail: a keyed send must remember from now
+    // on that this message went out.
+    await notifySendAccepted({ sentEmailId, outcome: "sent" });
     if (owner) {
       // The provider has ACCEPTED this message and an owner still owes
       // bookkeeping. Deleting now would erase the only durable evidence of
@@ -263,6 +267,8 @@ export async function sendViaOutbox(
   }
 
   if (result.error.transient) {
+    // The outbox will deliver it: for a keyed send it is as good as sent.
+    await notifySendAccepted({ sentEmailId, outcome: "retrying" });
     // Stays pending; due at the next hourly run (after + 60: the 60-second cool-down
     // covers the caller's post-return bookkeeping — specifically the sent_emails insert
     // that happens after sendViaOutbox returns. Without this gap, a concurrent

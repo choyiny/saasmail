@@ -1,4 +1,4 @@
-// docs/specs/SPEC-audit-log.md §4: the admin API over the audit log.
+// docs/archive/SPEC-audit-log.md §4: the admin API over the audit log.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import { auditEvents } from "../db/audit-events.schema";

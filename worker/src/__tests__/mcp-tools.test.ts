@@ -678,6 +678,78 @@ describe("MCP tools", () => {
       expect(invalid.isError).toBe(true);
     });
 
+    it("sends once for a repeated idempotencyKey and replays the result", async () => {
+      const args = {
+        to: "alice@example.com",
+        fromAddress: MINE,
+        subject: "Once only",
+        bodyHtml: "<p>Hi</p>",
+        idempotencyKey: "agent-send-1",
+      };
+      const first = await callTool(memberToken, "send_email", args);
+      expect(first.isError, first.text).toBe(false);
+      expect(first.data.replayed).toBeUndefined();
+
+      const retry = await callTool(memberToken, "send_email", args);
+      expect(retry.isError, retry.text).toBe(false);
+      expect(retry.data.replayed).toBe(true);
+      expect(retry.data.id).toBe(first.data.id);
+
+      const sent = (await getDb().select().from(sentEmails)).filter(
+        (row) => row.subject === "Once only",
+      );
+      expect(sent).toHaveLength(1);
+      // One message handed to the provider: one audit row, not two.
+      const audited = (await getDb().select().from(auditEvents)).filter(
+        (event) =>
+          event.action === "mail.sent" && event.summary.includes("Once only"),
+      );
+      expect(audited).toHaveLength(1);
+
+      const reused = await callTool(memberToken, "send_email", {
+        ...args,
+        subject: "Something else",
+      });
+      expect(reused.isError).toBe(true);
+      expect(reused.text).toContain("agent-send-1");
+      expect(reused.text).toContain("different request");
+    });
+
+    it("refuses an invalid idempotencyKey without sending", async () => {
+      const before = (await getDb().select().from(sentEmails)).length;
+      const out = await callTool(memberToken, "send_email", {
+        to: "alice@example.com",
+        fromAddress: MINE,
+        subject: "Bad key",
+        bodyHtml: "<p>Hi</p>",
+        idempotencyKey: "has spaces in it",
+      });
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("printable ASCII");
+      expect((await getDb().select().from(sentEmails)).length).toBe(before);
+    });
+
+    it("keeps reply_email's key free after a refusal, then replays", async () => {
+      const refused = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        idempotencyKey: "agent-reply-1",
+      });
+      expect(refused.isError).toBe(true);
+
+      const args = {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying once</p>",
+        idempotencyKey: "agent-reply-1",
+      };
+      const first = await callTool(memberToken, "reply_email", args);
+      expect(first.isError, first.text).toBe(false);
+      const retry = await callTool(memberToken, "reply_email", args);
+      expect(retry.data.replayed).toBe(true);
+      expect(retry.data.id).toBe(first.data.id);
+    });
+
     it("reports a reply target in another inbox as not found", async () => {
       const out = await callTool(memberToken, "reply_email", {
         emailId: "e-other",

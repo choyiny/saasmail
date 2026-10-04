@@ -93,6 +93,15 @@ Three scopes gate what a connected client may do:
 | `email:send`   | `send_template`, `send_email`, `reply_email`, `enroll_sequence`    |
 | `email:manage` | `mark_read`, `delete_email`                                        |
 
+**Retrying a send.** `send_email`, `reply_email` and `send_template` take an
+optional `idempotencyKey`: a UUID the client generates for each message it
+intends to send and passes again if it retries. A retry returns the first
+result with `replayed: true` and sends nothing; the same key with a different
+message is a tool error naming the key. Once the provider has a message its key
+never sends again, even if the call failed afterwards. Keys belong to the
+connected user and are kept 24 hours. An assistant should always pass one: a transport error after
+the server sent the message is indistinguishable from one before it.
+
 **Where `reply_email` sends.** A reply to a received message follows that
 message's `Reply-To` header: its first address becomes To and any others are
 added to Cc, never one of this instance's own inboxes

@@ -1,3 +1,4 @@
+import { respondIdempotently } from "../lib/idempotent-send-route";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -14,6 +15,9 @@ import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
   ErrorSchema,
+  idempotencyConflictResponses,
+  idempotencyKeyHeader,
+  idempotent201Response,
   inboxForbiddenResponse,
   SendPathErrorSchema,
 } from "../lib/openapi-send-errors";
@@ -449,9 +453,11 @@ const sendTemplateRoute = createRoute({
   path: "/{slug}/send",
   tags: ["Email Templates"],
   security: bearerSecurity,
-  description: "Send an email using a template.",
+  description:
+    "Send an email using a template. Send an `Idempotency-Key` so that a retry never sends twice.",
   request: {
     params: z.object({ slug: z.string() }),
+    headers: idempotencyKeyHeader,
     body: {
       content: {
         "application/json": {
@@ -459,13 +465,17 @@ const sendTemplateRoute = createRoute({
             to: z.string().email(),
             fromAddress: z.string().email(),
             variables: templateVariablesSchema.optional().default({}),
+            idempotencyKey: z.string().optional().openapi({
+              description:
+                "Same as the `Idempotency-Key` header, for clients that cannot set one; the header wins.",
+            }),
           }),
         },
       },
     },
   },
   responses: {
-    ...json201Response(
+    ...idempotent201Response(
       z.object({
         id: z.string().nullable(),
         resendId: z.string().nullable(),
@@ -490,49 +500,67 @@ const sendTemplateRoute = createRoute({
       description: "Template slug not found",
       content: { "application/json": { schema: ErrorSchema } },
     },
+    ...idempotencyConflictResponses,
   },
 });
 
 emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   const db = c.get("db");
   const { slug } = c.req.valid("param");
-  const { to, fromAddress, variables } = c.req.valid("json");
+  const { to, fromAddress, variables, idempotencyKey } = c.req.valid("json");
 
-  const result = await sendTemplate({
-    db,
-    env: c.env,
-    slug,
-    to,
-    fromAddress,
-    variables,
-    allowed: c.get("allowedInboxes")!,
-  });
-
-  if (!result.ok) {
-    if (result.code === "TEMPLATE_NOT_FOUND") {
-      return c.json({ error: result.message }, 404);
-    }
-    if (result.code === "TEMPLATE_PARSE_ERROR") {
-      return c.json({ error: result.message }, 400);
-    }
-    return c.json(
-      {
-        error: result.message,
-        missingVariables: result.missingVariables,
-        requiredVariables: result.requiredVariables,
-      },
-      400,
-    );
-  }
-
-  return c.json(
+  return respondIdempotently(
+    c,
     {
-      id: result.id,
-      resendId: result.resendId,
-      status: result.status,
-      delivered: result.delivered,
-      suppressed: result.suppressed,
+      payloadKey: idempotencyKey,
+      fields: {
+        kind: "template",
+        templateSlug: slug,
+        to: to.trim().toLowerCase(),
+        fromAddress: fromAddress.trim().toLowerCase(),
+        variables,
+      },
     },
-    201,
+    async () => {
+      const result = await sendTemplate({
+        db,
+        env: c.env,
+        slug,
+        to,
+        fromAddress,
+        variables,
+        allowed: c.get("allowedInboxes")!,
+      });
+
+      // Refusals are answered, not remembered: a corrected retry may run.
+      if (!result.ok) {
+        if (result.code === "TEMPLATE_NOT_FOUND") {
+          return { status: 404, body: { error: result.message } };
+        }
+        if (result.code === "TEMPLATE_PARSE_ERROR") {
+          return { status: 400, body: { error: result.message } };
+        }
+        return {
+          status: 400,
+          body: {
+            error: result.message,
+            missingVariables: result.missingVariables,
+            requiredVariables: result.requiredVariables,
+          },
+        };
+      }
+
+      return {
+        status: 201,
+        body: {
+          id: result.id,
+          resendId: result.resendId,
+          status: result.status,
+          delivered: result.delivered,
+          suppressed: result.suppressed,
+        },
+        sentEmailId: result.id,
+      };
+    },
   );
 });

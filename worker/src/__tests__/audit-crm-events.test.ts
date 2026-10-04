@@ -1,4 +1,4 @@
-// docs/specs/SPEC-audit-log.md §3: events for customers, sequences, lists and
+// docs/archive/SPEC-audit-log.md §3: events for customers, sequences, lists and
 // the agent's actions.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";

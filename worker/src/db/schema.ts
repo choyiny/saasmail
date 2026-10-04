@@ -41,6 +41,7 @@ import { autoReplyLog } from "./auto-reply-log.schema";
 import { customerPeople, customers } from "./customers.schema";
 import { jmapChanges } from "./jmap-changes.schema";
 import { auditEvents } from "./audit-events.schema";
+import { sendIdempotency } from "./send-idempotency.schema";
 
 export const schema = {
   ...authSchema,
@@ -87,4 +88,5 @@ export const schema = {
   customerPeople,
   jmapChanges,
   auditEvents,
+  sendIdempotency,
 } as const;

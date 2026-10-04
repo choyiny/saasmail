@@ -44,6 +44,7 @@ import { pruneJmapChanges } from "./jmap/changes";
 import { anonymousHttpActor, httpActor } from "./lib/audit/actors";
 import { runWithAudit, systemActor } from "./lib/audit/context";
 import { auditRetentionDays, pruneAuditEvents } from "./lib/audit/prune";
+import { pruneSendIdempotency } from "./lib/send-idempotency";
 import { collectUnreferencedContent } from "./jmap/content";
 import { runJmapSubmissionMaintenance } from "./jmap/recovery";
 import { reapExpiredUploads } from "./jmap/upload";
@@ -115,7 +116,14 @@ app.use(
   "*",
   cors({
     origin: "*",
-    exposeHeaders: ["WWW-Authenticate", "Mcp-Session-Id"],
+    exposeHeaders: [
+      "WWW-Authenticate",
+      "Mcp-Session-Id",
+      // So a browser client of the send routes can tell a replay and a
+      // still-running request's wait.
+      "Idempotency-Replayed",
+      "Retry-After",
+    ],
   }),
 );
 
@@ -449,6 +457,14 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
           auditRetentionDays(env),
         ).catch((err) =>
           console.error("[cron] audit log pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneSendIdempotency(
+          createDb(env),
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] idempotency key pruning failed:", err),
         ),
       )
       .then(() =>

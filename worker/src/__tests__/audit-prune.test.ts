@@ -1,4 +1,4 @@
-// docs/specs/SPEC-audit-log.md §5: retention.
+// docs/archive/SPEC-audit-log.md §5: retention.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import {

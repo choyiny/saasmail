@@ -2,6 +2,7 @@
 -- Users are created via HTTP APIs in e2e/global-setup.ts.
 
 -- Clean tables (idempotent for repeated runs)
+DELETE FROM send_idempotency;
 DELETE FROM audit_events;
 DELETE FROM agent_sessions;
 DELETE FROM suggested_replies;
