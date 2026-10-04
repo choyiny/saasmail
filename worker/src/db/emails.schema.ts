@@ -36,6 +36,8 @@ export const emails = sqliteTable(
     dkim: text("dkim"),
     dmarc: text("dmarc"),
     spamScore: real("spam_score"),
+    /** The inbox's learning filter's score (0–1), when it had enough training. */
+    spamProbability: real("spam_probability"),
     isRead: integer("is_read").notNull().default(0),
     /**
      * JSON-encoded array of {"email","name"} objects for additional

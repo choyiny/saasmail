@@ -43,8 +43,8 @@ Updated by whoever works a spec (the loop prompt in `LOOP-stages-9-11.md` does i
 | 4   | `SPEC-send-controls.md`    | archived    |
 | 5   | `SPEC-two-factor.md`       | archived    |
 | 6   | `SPEC-reject-inbound.md`   | archived    |
-| 7   | `SPEC-ai-folders.md`       | PR #73 open |
-| 8   | `SPEC-spam-learning.md`    | todo        |
+| 7   | `SPEC-ai-folders.md`       | archived    |
+| 8   | `SPEC-spam-learning.md`    | PR #74 open |
 | 9   | `SPEC-mail-export.md`      | todo        |
 | 10  | `SPEC-mail-import.md`      | todo        |
 | 11  | `SPEC-backups.md`          | todo        |

@@ -8,6 +8,8 @@ export type RuleMessage = {
   bodyHtml: string | null;
   hasAttachments: boolean;
   spamScore: number | null;
+  /** The inbox's learning filter's score, when it scored the message. */
+  spamProbability?: number | null;
   headers: Record<string, string>;
 };
 
@@ -84,6 +86,13 @@ export function matchCondition(
       return condition.operator === "gte"
         ? message.spamScore >= condition.value
         : message.spamScore <= condition.value;
+    case "spam_probability": {
+      const probability = message.spamProbability ?? null;
+      if (probability === null) return false;
+      return condition.operator === "gte"
+        ? probability >= condition.value
+        : probability <= condition.value;
+    }
     case "header": {
       const value = headerValue(message.headers, condition.name);
       return (

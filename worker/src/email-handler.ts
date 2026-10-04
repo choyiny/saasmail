@@ -30,6 +30,7 @@ import {
   type MatchedRule,
 } from "./lib/rules/evaluate";
 import type { RuleMessage } from "./lib/rules/match";
+import { scoreInbound } from "./lib/spam/filter";
 import { ruleActor } from "./lib/audit/actors";
 import { runWithAudit } from "./lib/audit/context";
 import {
@@ -140,10 +141,26 @@ export async function handleEmail(
     }
   }
 
+  // The inbox's learning filter scores the message, when it is on and
+  // trained; a rule acts on the score. Never fatal.
+  let spamProbability: number | null = null;
+  try {
+    spamProbability = await scoreInbound(db, recipientCanonical, {
+      fromAddress: fromAddressCanonical,
+      subject: parsed.subject,
+      bodyText: parsed.bodyText,
+      bodyHtml: parsed.bodyHtml,
+      hasAttachments: parsed.attachments.length > 0,
+    });
+  } catch (error) {
+    console.warn("Failed to score inbound mail:", error);
+  }
+
   // Which rules match is decided before storage: every condition reads the
   // parsed message only. A matching `reject` rule refuses the message here;
   // the other rules' actions run once it is stored.
   const ruleMessage: RuleMessage = {
+    spamProbability,
     fromAddress: fromAddressCanonical,
     subject: parsed.subject,
     bodyText: parsed.bodyText,
@@ -339,6 +356,7 @@ export async function handleEmail(
     dkim: parsed.auth.dkim,
     dmarc: parsed.auth.dmarc,
     spamScore: parsed.spamScore,
+    spamProbability,
     isRead: 0,
     cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
     replyTo: parsed.replyTo.length ? JSON.stringify(parsed.replyTo) : null,

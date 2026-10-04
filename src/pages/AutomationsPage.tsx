@@ -1,3 +1,4 @@
+import { useSearchParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowDown,
@@ -47,6 +48,7 @@ const CONDITION_FIELDS: Array<{
   { value: "body", label: "Body" },
   { value: "has_attachments", label: "Has attachments" },
   { value: "spam_score", label: "Spam score" },
+  { value: "spam_probability", label: "Spam probability (learned)" },
   { value: "header", label: "Header" },
 ];
 
@@ -68,6 +70,7 @@ const OPERATORS: Record<RuleCondition["field"], string[]> = {
   body: ["contains"],
   has_attachments: ["is"],
   spam_score: ["gte", "lte"],
+  spam_probability: ["gte", "lte"],
   header: ["equals", "contains"],
 };
 
@@ -85,6 +88,8 @@ function conditionFor(field: RuleCondition["field"]): RuleCondition {
       return { field, operator: "is", value: true };
     case "spam_score":
       return { field, operator: "gte", value: 5 };
+    case "spam_probability":
+      return { field, operator: "gte", value: 0.9 };
     case "header":
       return { field, name: "", operator: "equals", value: "" };
   }
@@ -284,6 +289,24 @@ export default function AutomationsPage() {
     setTestResult(null);
     setDialogOpen(true);
   }
+
+  // The Inboxes page's "Create the junk rule": a prefilled, inbox-scoped rule.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (loading || searchParams.get("prefill") !== "junk") return;
+    const inbox = searchParams.get("inbox");
+    setSearchParams({}, { replace: true });
+    if (!inbox) return;
+    openCreate();
+    setDraft((current) => ({
+      ...current,
+      name: "Junk (learned filter)",
+      inbox,
+      conditions: [{ field: "spam_probability", operator: "gte", value: 0.9 }],
+      actions: [{ type: "mark_spam" }],
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, searchParams]);
 
   function openEdit(rule: AutomationRule) {
     setEditingId(rule.id);
@@ -792,6 +815,37 @@ export default function AutomationsPage() {
                           />
                           Has attachments
                         </label>
+                      ) : condition.field === "spam_probability" ? (
+                        <span className="flex min-w-0 flex-1 flex-col gap-1">
+                          <input
+                            aria-label={
+                              "Condition " + String(index + 1) + " value"
+                            }
+                            type="number"
+                            min={0}
+                            max={1}
+                            step={0.01}
+                            value={condition.value}
+                            onChange={(event) =>
+                              updateCondition(index, (current) =>
+                                current.field === "spam_probability"
+                                  ? {
+                                      ...current,
+                                      value: Math.min(
+                                        1,
+                                        Math.max(0, Number(event.target.value)),
+                                      ),
+                                    }
+                                  : current,
+                              )
+                            }
+                            className="rounded-[6px] border border-border bg-card px-2 py-1.5 text-xs text-text-primary"
+                          />
+                          <span className="text-[11px] text-text-tertiary">
+                            0 to 1. Requires the inbox&apos;s learning filter
+                            (Inboxes page); unscored mail never matches.
+                          </span>
+                        </span>
                       ) : condition.field === "spam_score" ? (
                         <input
                           aria-label={
@@ -820,7 +874,8 @@ export default function AutomationsPage() {
                           onChange={(event) =>
                             updateCondition(index, (current) =>
                               current.field === "has_attachments" ||
-                              current.field === "spam_score"
+                              current.field === "spam_score" ||
+                              current.field === "spam_probability"
                                 ? current
                                 : { ...current, value: event.target.value },
                             )

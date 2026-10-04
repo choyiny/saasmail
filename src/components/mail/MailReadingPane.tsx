@@ -473,6 +473,17 @@ export default function MailReadingPane({
                               .join(", ")}
                           </p>
                         )}
+                        {typeof selectedMessage.spamProbability ===
+                          "number" && (
+                          <p
+                            className="mt-1 text-xs text-text-tertiary"
+                            data-testid="mail-reading-spam-probability"
+                          >
+                            Spam probability{" "}
+                            {selectedMessage.spamProbability.toFixed(2)}{" "}
+                            (learned filter)
+                          </p>
+                        )}
                       </div>
                       <time className="shrink-0 text-xs text-text-tertiary">
                         {fullTime(selectedMessage.occurredAt)}

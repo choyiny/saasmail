@@ -116,6 +116,7 @@ type RawMessageRow = {
   in_reply_to: string | null;
   references_header: string | null;
   raw_size: number | null;
+  spam_probability: number | null;
   from_email: string | null;
   from_name: string | null;
   to_email: string;
@@ -709,6 +710,7 @@ function receivedArm(
       e.in_reply_to AS in_reply_to,
       e.references_header AS references_header,
       e.raw_size AS raw_size,
+      e.spam_probability AS spam_probability,
       p.email AS from_email,
       p.name AS from_name,
       e.recipient AS to_email,
@@ -817,6 +819,7 @@ function sentArm(
       se.in_reply_to AS in_reply_to,
       NULL AS references_header,
       NULL AS raw_size,
+      NULL AS spam_probability,
       se.from_address AS from_email,
       -- The inbox identity's current display name: the sent row doesn't keep
       -- the name the message went out with.
@@ -1019,6 +1022,10 @@ function toUnified(
       snoozedUntil: row.snoozed_until,
       assignedUserId: row.assigned_user_id,
     };
+  }
+  if (row.kind === "received") {
+    message.spamProbability =
+      row.spam_probability === null ? null : Number(row.spam_probability);
   }
 
   return message;

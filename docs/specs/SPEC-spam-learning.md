@@ -126,3 +126,57 @@ access), tests.
   `docs/automations.md` (the condition), `docs/mailbox-state.md` (the probability field),
   `AGENTS.md` (the `spam_training` cascade line next to `deleteMessageState()`).
 - CHANGELOG `### Added`: **A spam filter that learns from your junk marks.** …
+
+## Spec changes (implementation)
+
+The five decisions are unchanged. What the code does differently, and why:
+
+1. **Token lists are bound as one JSON value** (`json_each`), as the house rules allow, so a lookup, a
+   decrement and an increment are one statement each whatever the token count, instead of four
+   40-token statements.
+2. **The filter is turned on and off by `PUT /api/admin/inboxes/{email}/spam-filter` `{ enabled }`**,
+   not by `PATCH /api/admin/inboxes/{email}`: that route manages the sender identity row (and deletes it
+   when every field is back to its default), while the filter lives in `spam_models`. The reset is
+   `POST …/spam-filter/reset` as specified; both record `inbox.updated` (`spamFilterEnabled`,
+   `spamFilterReset`).
+3. **A message's label is claimed before its counts change**: a conditional update (relabel) or an
+   insert that does nothing on conflict (first label) decides who trains, so two concurrent identical
+   marks count once. The counts then change in one D1 batch through the client (Drizzle's batch does
+   not take raw statements), so a message's training is all or nothing.
+4. Training inside `setMailboxState` is inline (the service has no execution context), runs only when
+   some inbox has its filter on, and is bounded to the first 50 received messages of a call. It reads
+   the stored messages through `queryMessages`, loaded lazily to avoid an import cycle with the state
+   services.
+5. A reply trains not-junk when it goes through `replyToEmail` (the web, the API, MCP's
+   `reply_email`); a JMAP client's reply is an `EmailSubmission` of a new draft, not linked to the
+   original by id, so it does not train.
+6. The tokenizer keeps a leading currency sign (`$500` is a token) and drops a word's trailing
+   punctuation; it reads up to 12,000 characters before trimming the quoted tail, then keeps 3,000.
+   The scorer caps each token's junk and not-junk frequencies at 1 (Graham's `min`).
+7. **Create the junk rule** shows "Junk rule in place" instead when any rule scoped to the inbox already
+   has a `spam_probability` condition. The rule opens prefilled in Automations
+   (`/automations?prefill=junk&inbox=…`), named "Junk (learned filter)".
+8. The prune deletes up to 10 batches of 1,000 per inbox per hourly pass, rarest then oldest tokens
+   first, and takes the cap as a parameter.
+9. `/api/messages` declares `spamProbability`; `UnifiedMessage` carries it for the read tools where they
+   pass messages through.
+10. Files: one schema file (`spam-filter.schema.ts`) for the three tables; `filter.ts` holds what the
+    spec called `train.ts` plus scoring, reset and pruning.
+11. **Only human actors train** (`user`, `api_key`, `mcp`, `jmap`): the agent's `set_spam` tool passes
+    the user's id, and a message in Junk could talk the agent into "not spam", which would teach the
+    filter the attacker's tokens. Found by the review; tested.
+12. **Robinson's smoothing is applied** (the spec's "Why" names it; its bullet gave plain Graham):
+    each token's probability is `(0.5 + n·p) / (1 + n)` with `n` its count, and tokens within 0.1 of
+    0.5 are left out. Without it a word seen once in junk scored 0.99, scores were nearly all 0.01 or
+    0.99, and the 0.9 rule would junk a new customer's first message.
+13. **A reply trains not-junk only when nobody labelled the message yet**: an explicit junk mark wins
+    over a reply ("please stop emailing me").
+14. Reply training is inline and awaited in `replyToEmail`, like the mark training.
+15. The 50-message cap counts messages in inboxes whose filter is on. A JMAP client moves messages one
+    `setMailboxState` call at a time, so a JMAP bulk move trains each message; documented.
+16. Indexes: `spam_training (email_id)` (a delete finds its row by id; the primary key starts with the
+    inbox), and no `(inbox, updated_at)` index on `spam_tokens` (nothing used it). The prune only counts
+    inboxes trained on enough messages to reach the cap and deletes at most 10,000 rows per inbox per
+    pass. HTML is cut to 32,000 characters before it is converted to text for tokenizing.
+17. **Reset** is offered whenever the filter has learned something, on or off; "Junk rule in place"
+    counts only enabled rules with a `spam_probability ≥` condition.

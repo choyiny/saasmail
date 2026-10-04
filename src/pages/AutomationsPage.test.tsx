@@ -21,7 +21,17 @@ const api = vi.hoisted(() => ({
 
 vi.mock("@/lib/api", () => api);
 
+import { MemoryRouter } from "react-router-dom";
 import AutomationsPage from "@/pages/AutomationsPage";
+
+/** The page reads its URL (a prefilled rule from the Inboxes page). */
+function renderPage(url = "/automations") {
+  return render(
+    <MemoryRouter initialEntries={[url]}>
+      <AutomationsPage />
+    </MemoryRouter>,
+  );
+}
 
 function rule(id: string, name: string, position: number) {
   return {
@@ -120,7 +130,7 @@ describe("AutomationsPage", () => {
   });
 
   async function openNew() {
-    render(<AutomationsPage />);
+    renderPage();
     await waitFor(() => expect(api.fetchRules).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("automation-new"));
     await screen.findByRole("dialog");
@@ -333,6 +343,29 @@ describe("AutomationsPage", () => {
     );
   });
 
+  it("opens a prefilled junk rule from the Inboxes page", async () => {
+    renderPage("/automations?prefill=junk&inbox=support%40e2e.test");
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      (within(dialog).getByLabelText("Rule name") as HTMLInputElement).value,
+    ).toBe("Junk (learned filter)");
+    expect(
+      (within(dialog).getByLabelText("Condition 1 field") as HTMLSelectElement)
+        .value,
+    ).toBe("spam_probability");
+    expect(
+      (within(dialog).getByLabelText("Condition 1 value") as HTMLInputElement)
+        .value,
+    ).toBe("0.9");
+    expect(
+      within(dialog).getByText(/Requires the inbox's learning filter/),
+    ).toBeTruthy();
+    expect(
+      (within(dialog).getByLabelText("Action 1 type") as HTMLSelectElement)
+        .value,
+    ).toBe("mark_spam");
+  });
+
   it("does not offer reject next to another action", async () => {
     await openNew();
     fireEvent.click(screen.getByRole("button", { name: "Add action" }));
@@ -356,7 +389,7 @@ describe("AutomationsPage", () => {
         warnings: [{ actionIndex: 0, code: "missing_folder" as const }],
       },
     ]);
-    render(<AutomationsPage />);
+    renderPage();
 
     const badge = await screen.findByTestId("automation-warning-badge");
     expect(badge.textContent).toContain("1 warning");
@@ -395,7 +428,7 @@ describe("AutomationsPage", () => {
       rule("rule-1", "First", 0),
       rule("rule-2", "Second", 1),
     ]);
-    render(<AutomationsPage />);
+    renderPage();
 
     const rows = await screen.findAllByTestId("automation-rule-row");
     fireEvent.click(within(rows[0]).getByTestId("rule-move-down"));

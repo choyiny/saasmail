@@ -1,3 +1,6 @@
+import { spamTraining } from "../../db/spam-filter.schema";
+import { currentAuditActor } from "../audit/context";
+import { HUMAN_ACTORS, trainMessages } from "../spam/filter";
 import {
   assertAiFolderRoom,
   normalizeAiDescription,
@@ -368,6 +371,39 @@ export async function setMailboxState(
   }
   await runWriteBatches(db, statements);
   await auditMailboxState(db, userId, resolved, changes, flagsBefore);
+  await trainSpamFilter(userId, resolved, changes.spam, flagsBefore);
+
+  /**
+   * A person's junk mark trains the inbox's learning filter; so does taking
+   * a message out of Junk. A rule, the system, the agent or an import never
+   * does: the filter must not learn from its own output, from a model a
+   * message could talk into it, or replay old state.
+   */
+  async function trainSpamFilter(
+    personId: string | null,
+    messages: typeof resolved,
+    spam: boolean | undefined,
+    before: typeof flagsBefore,
+  ) {
+    if (personId === null || spam === undefined) return;
+    const actor = currentAuditActor();
+    if (actor.channel === "import" || !HUMAN_ACTORS.has(actor.actorType)) {
+      return;
+    }
+    const refs = messages
+      .filter(
+        (message) =>
+          message.ref.kind === "received" &&
+          // Only mail that was junk is a not-junk judgement.
+          (spam || before?.get(`received:${message.ref.id}`)?.spam === true),
+      )
+      .map((message) => message.ref);
+    await trainMessages(db, {
+      refs,
+      label: spam ? "spam" : "ham",
+      userId: personId,
+    });
+  }
 }
 
 async function getMailboxForMutation(
@@ -774,6 +810,10 @@ export async function deleteMessageState(
         await db
           .delete(suggestedReplies)
           .where(inArray(suggestedReplies.emailId, batch));
+        // What the learning filter was taught by it; its counts stay.
+        await db
+          .delete(spamTraining)
+          .where(inArray(spamTraining.emailId, batch));
       }
     }
   }

@@ -50,6 +50,7 @@ import {
   d1RateLimitStorage,
   pruneAuthRateLimits,
 } from "./auth/rate-limit-storage";
+import { pruneSpamTokens } from "./lib/spam/filter";
 import { collectUnreferencedContent } from "./jmap/content";
 import { runJmapSubmissionMaintenance } from "./jmap/recovery";
 import { reapExpiredUploads } from "./jmap/upload";
@@ -504,6 +505,11 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
       .then(() =>
         pruneAuthRateLimits(createDb(env), Date.now()).catch((err) =>
           console.error("[cron] auth rate limit pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneSpamTokens(createDb(env)).catch((err) =>
+          console.error("[cron] spam token pruning failed:", err),
         ),
       )
       .then(() =>

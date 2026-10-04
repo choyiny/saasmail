@@ -44,6 +44,7 @@ import { auditEvents } from "./audit-events.schema";
 import { sendIdempotency } from "./send-idempotency.schema";
 import { sendCounters } from "./send-counters.schema";
 import { authRateLimits } from "./auth-rate-limits.schema";
+import { spamModels, spamTokens, spamTraining } from "./spam-filter.schema";
 
 export const schema = {
   ...authSchema,
@@ -93,4 +94,7 @@ export const schema = {
   sendIdempotency,
   sendCounters,
   authRateLimits,
+  spamModels,
+  spamTokens,
+  spamTraining,
 } as const;

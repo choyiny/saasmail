@@ -1,4 +1,4 @@
-// docs/specs/SPEC-ai-folders.md: AI filing into described folders.
+// docs/archive/SPEC-ai-folders.md: AI filing into described folders.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { MockLanguageModelV4 } from "ai/test";

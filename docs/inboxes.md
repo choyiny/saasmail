@@ -82,6 +82,43 @@ one, give it a sender identity or assign members. Also:
 - Each refusal writes one audit row (kept 180 days by default), so a
   dictionary attack shows up there in volume.
 
+## Learning spam filter
+
+Each inbox can have a spam filter that learns from your team: **Learn from junk
+marks** under Spam threshold on the **Inboxes** page (off by default). It is a
+naive-Bayes filter in the style of SpamAssassin's and Thunderbird's, one per
+inbox, kept in D1.
+
+- **What trains it**: a person marking a message as junk (spam) or taking it
+  out of Junk (not spam), from the web app, the API, MCP or JMAP, and a person
+  replying to a received message nobody has labelled yet (not spam; through
+  the web app, the API or MCP's `reply_email`). Rules, the spam threshold, the
+  agent, auto-replies and imports never train it, so it cannot learn from its
+  own output or from a model a message talked into something. A message counts
+  once, even if two people mark it at the same moment; changing its label
+  moves it, and a reply never undoes an explicit junk mark. One web or API mark
+  trains at most 50 messages; a JMAP client moves messages one by one, so each
+  one it moves trains. An API key or MCP client that replies to everything
+  automatically would teach the filter that everything is fine: give such
+  integrations their own inbox.
+- **When it scores**: once it has seen 20 junk and 20 not-junk messages, each
+  new message gets a spam probability from 0 to 1 (Graham's method with
+  Robinson's smoothing: a word seen once or twice weighs little) (shown in the reading pane
+  as "Spam probability 0.97 (learned filter)" and on the message as
+  `spamProbability`). A message with too little evidence gets none.
+- **Acting on it is a rule**: the condition `spam_probability ≥ 0.9` with Mark
+  as spam. **Create the junk rule** opens Automations with that rule
+  prefilled for the inbox. The filter itself never files anything.
+- **Reset** forgets everything it learned (it stays on or off). Each inbox keeps
+  about 100,000 tokens: the hourly pass removes the rarest, oldest ones beyond
+  that, at most 10,000 at a time.
+
+The API: `GET /api/admin/inboxes` returns `spamFilter: { enabled,
+spamMessages, hamMessages, ready }`, `PUT /api/admin/inboxes/{email}/spam-filter`
+with `{ enabled }` turns it on or off, and
+`POST /api/admin/inboxes/{email}/spam-filter/reset` empties it; both are
+recorded as `inbox.updated`.
+
 ## Per-inbox forwarding
 
 Give any inbox a **Forward to** address and every message it receives is re-sent to

@@ -11,6 +11,12 @@ import {
   sanitizeSignatureHtml,
 } from "../lib/sanitize-signature";
 import type { Variables } from "../variables";
+import {
+  readSpamModels,
+  resetSpamFilter,
+  setSpamFilterEnabled,
+} from "../lib/spam/filter";
+import { modelReady } from "../lib/spam/score";
 
 export const adminInboxesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -27,6 +33,13 @@ const InboxRowSchema = z.object({
   agentInstructions: z.string().nullable(),
   agentAutodraft: z.boolean(),
   assignedUserIds: z.array(z.string()),
+  spamFilter: z.object({
+    enabled: z.boolean(),
+    spamMessages: z.number().int(),
+    hamMessages: z.number().int(),
+    /** Trained on 20 junk and 20 not-junk messages: it scores new mail. */
+    ready: z.boolean(),
+  }),
 });
 
 const listInboxesRoute = createRoute({
@@ -81,8 +94,10 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     ORDER BY u.email
   `);
 
+  const models = await readSpamModels(db);
   return c.json(
     rows.map((r) => ({
+      spamFilter: spamFilterStatus(models.get(r.email.toLowerCase())),
       email: r.email,
       displayName: r.displayName,
       displayMode: r.displayMode ?? "chat",
@@ -128,6 +143,12 @@ const createInboxRoute = createRoute({
         agentInstructions: z.string().nullable(),
         agentAutodraft: z.boolean(),
         assignedUserIds: z.array(z.string()),
+        spamFilter: z.object({
+          enabled: z.boolean(),
+          spamMessages: z.number().int(),
+          hamMessages: z.number().int(),
+          ready: z.boolean(),
+        }),
       }),
       "Created inbox",
     ),
@@ -183,6 +204,7 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
       signatureHtml: null,
       forwardTo: null,
       spamThreshold: null,
+      spamFilter: spamFilterStatus(undefined),
       agentInstructions: null,
       agentAutodraft: false,
       assignedUserIds: [],
@@ -581,4 +603,100 @@ adminInboxesRouter.openapi(listUserInboxesRoute, async (c) => {
     rows.map((r) => r.email),
     200,
   );
+});
+
+function spamFilterStatus(
+  model:
+    | { enabled: boolean; spamMessages: number; hamMessages: number }
+    | undefined,
+) {
+  const counts = {
+    spamMessages: model?.spamMessages ?? 0,
+    hamMessages: model?.hamMessages ?? 0,
+  };
+  return {
+    enabled: model?.enabled ?? false,
+    ...counts,
+    ready: modelReady(counts),
+  };
+}
+
+const SpamFilterSchema = z.object({
+  enabled: z.boolean(),
+  spamMessages: z.number().int(),
+  hamMessages: z.number().int(),
+  ready: z.boolean(),
+});
+
+const spamFilterRoute = createRoute({
+  method: "put",
+  path: "/{email}/spam-filter",
+  tags: ["Admin Inboxes"],
+  description:
+    "Turn the inbox's learning spam filter on or off. On, it learns from people's junk and not-junk marks and replies, and once trained on 20 messages of each kind it scores new mail (`spamProbability`) for a `spam_probability` rule to act on. Its training is kept when it is off.",
+  request: {
+    params: z.object({ email: z.string() }),
+    body: {
+      content: {
+        "application/json": { schema: z.object({ enabled: z.boolean() }) },
+      },
+    },
+  },
+  responses: {
+    500: { description: "Internal server error" },
+    200: {
+      description: "The filter",
+      content: { "application/json": { schema: SpamFilterSchema } },
+    },
+  },
+});
+
+adminInboxesRouter.openapi(spamFilterRoute, async (c) => {
+  const db = c.get("db");
+  // Hono already decoded the parameter.
+  const inbox = c.req.valid("param").email.trim().toLowerCase();
+  const { enabled } = c.req.valid("json");
+  await setSpamFilterEnabled(db, inbox, enabled);
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.inboxUpdated,
+    targetType: "inbox",
+    targetId: inbox,
+    inbox,
+    summary: `${enabled ? "Turned on" : "Turned off"} the learning spam filter of ${inbox}`,
+    details: { spamFilterEnabled: enabled },
+  });
+  const models = await readSpamModels(db);
+  return c.json(spamFilterStatus(models.get(inbox)), 200);
+});
+
+const spamFilterResetRoute = createRoute({
+  method: "post",
+  path: "/{email}/spam-filter/reset",
+  tags: ["Admin Inboxes"],
+  description:
+    "Forget everything the inbox's learning spam filter learned (tokens, training, counters). It stays on or off.",
+  request: { params: z.object({ email: z.string() }) },
+  responses: {
+    500: { description: "Internal server error" },
+    200: {
+      description: "The filter, emptied",
+      content: { "application/json": { schema: SpamFilterSchema } },
+    },
+  },
+});
+
+adminInboxesRouter.openapi(spamFilterResetRoute, async (c) => {
+  const db = c.get("db");
+  const inbox = c.req.valid("param").email.trim().toLowerCase();
+  await resetSpamFilter(db, inbox);
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.inboxUpdated,
+    targetType: "inbox",
+    targetId: inbox,
+    inbox,
+    summary: `Reset the learning spam filter of ${inbox}`,
+    details: { spamFilterReset: true },
+  });
+  const models = await readSpamModels(db);
+  return c.json(spamFilterStatus(models.get(inbox)), 200);
 });

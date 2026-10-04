@@ -38,6 +38,11 @@ export interface UnifiedMessage {
   references?: string | null;
   /** Octets of received mail's stored raw message (JMAP blobId and size). */
   rawSize?: number;
+  /**
+   * Received mail's score from its inbox's learning filter (0–1), or null
+   * when it was not scored. Absent for sent mail.
+   */
+  spamProbability?: number | null;
   from: MailAddress | null;
   to: MailAddress;
   /**

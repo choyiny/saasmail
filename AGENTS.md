@@ -94,8 +94,9 @@ direct `emails ∪ sent_emails` merge in a router or tool.
 
 Message state mutations go through `worker/src/lib/messages/state.ts`. Every
 hard-delete path for received or sent messages must call `deleteMessageState()`
-before deleting the message rows so personal state, shared state, and folder
-memberships cannot become orphans.
+before deleting the message rows so personal state, shared state, folder
+memberships, suggested replies and learning-filter training rows
+(`spam_training`) cannot become orphans.
 
 ## Native agent runtime dependencies
 

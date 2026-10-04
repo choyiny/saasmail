@@ -1,3 +1,5 @@
+import { currentAuditActor } from "./audit/context";
+import { HUMAN_ACTORS, trainMessages } from "./spam/filter";
 import { auditMailSent } from "./audit/mail-events";
 import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -605,6 +607,22 @@ export async function replyToEmail(
         );
     } catch (err) {
       console.warn(`[reply] Reply-To not stored for ${emailId}:`, err);
+    }
+  }
+
+  // A person answering a received message says it is not junk: that trains
+  // the inbox's learning filter, unless somebody already labelled it (an
+  // explicit junk mark wins over a reply). Never a rule, the agent or the
+  // system.
+  if (receivedRow.length > 0) {
+    const actor = currentAuditActor();
+    if (HUMAN_ACTORS.has(actor.actorType)) {
+      await trainMessages(db, {
+        refs: [{ kind: "received", id: emailId }],
+        label: "ham",
+        userId: actor.actorUserId,
+        onlyIfUntrained: true,
+      });
     }
   }
 

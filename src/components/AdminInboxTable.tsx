@@ -1,3 +1,4 @@
+import SpamFilterControls from "@/components/SpamFilterControls";
 import { useEffect, useMemo, useState } from "react";
 import {
   Plus,
@@ -14,6 +15,7 @@ import {
   createInbox,
   deleteInbox,
   fetchAdminInboxes,
+  fetchRules,
   fetchAdminUsers,
   updateInboxAssignments,
   updateInboxSettings,
@@ -46,6 +48,11 @@ export default function AdminInboxTable() {
     {},
   );
 
+  // Inboxes that already have a rule acting on the learning filter's score.
+  const [junkRuleInboxes, setJunkRuleInboxes] = useState<Set<string>>(
+    new Set(),
+  );
+
   useEffect(() => {
     Promise.all([fetchAdminInboxes(), fetchAdminUsers()])
       .then(([i, u]) => {
@@ -53,6 +60,26 @@ export default function AdminInboxTable() {
         setUsers(u);
       })
       .finally(() => setLoading(false));
+    fetchRules()
+      .then((rules) =>
+        setJunkRuleInboxes(
+          new Set(
+            rules
+              .filter(
+                (rule) =>
+                  rule.enabled &&
+                  rule.inbox &&
+                  rule.conditions.some(
+                    (condition) =>
+                      condition.field === "spam_probability" &&
+                      condition.operator === "gte",
+                  ),
+              )
+              .map((rule) => rule.inbox!.toLowerCase()),
+          ),
+        ),
+      )
+      .catch(() => setJunkRuleInboxes(new Set()));
   }, []);
 
   const members = useMemo(
@@ -601,6 +628,21 @@ export default function AdminInboxTable() {
                           inbox={inbox}
                           onCommit={(value) =>
                             commitSpamThreshold(inbox, value)
+                          }
+                        />
+                        <SpamFilterControls
+                          inbox={inbox}
+                          hasJunkRule={junkRuleInboxes.has(
+                            inbox.email.toLowerCase(),
+                          )}
+                          onChange={(spamFilter) =>
+                            setInboxes((rows) =>
+                              rows.map((row) =>
+                                row.email === inbox.email
+                                  ? { ...row, spamFilter }
+                                  : row,
+                              ),
+                            )
                           }
                         />
                       </td>

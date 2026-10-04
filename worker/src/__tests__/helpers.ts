@@ -53,7 +53,7 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, display_name TEXT, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS customer_people (customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE, person_id TEXT NOT NULL UNIQUE REFERENCES people(id) ON DELETE CASCADE, linked_by TEXT REFERENCES users(id) ON DELETE SET NULL, linked_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS customer_people_customer_idx ON customer_people(customer_id)`,
-    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT, in_reply_to TEXT, references_header TEXT, raw_r2_key TEXT, raw_size INTEGER, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, reply_to TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT, in_reply_to TEXT, references_header TEXT, raw_r2_key TEXT, raw_size INTEGER, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, spam_probability REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, reply_to TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS emails_message_id_recipient_unique ON emails(message_id, recipient)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
@@ -115,6 +115,10 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS send_counters (user_id TEXT NOT NULL, channel TEXT NOT NULL, day TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id, channel, day))`,
     `CREATE TABLE IF NOT EXISTS auth_rate_limits (key TEXT PRIMARY KEY NOT NULL, count INTEGER NOT NULL, window_start INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS auth_rate_limits_expires_at_idx ON auth_rate_limits (expires_at)`,
+    `CREATE TABLE IF NOT EXISTS spam_models (inbox TEXT PRIMARY KEY NOT NULL, enabled INTEGER NOT NULL DEFAULT 0, spam_messages INTEGER NOT NULL DEFAULT 0, ham_messages INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS spam_tokens (inbox TEXT NOT NULL, token TEXT NOT NULL, spam_count INTEGER NOT NULL DEFAULT 0, ham_count INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL, PRIMARY KEY(inbox, token))`,
+    `CREATE TABLE IF NOT EXISTS spam_training (inbox TEXT NOT NULL, email_id TEXT NOT NULL, label TEXT NOT NULL, trained_by TEXT, trained_at INTEGER NOT NULL, PRIMARY KEY(inbox, email_id))`,
+    `CREATE INDEX IF NOT EXISTS spam_training_email_idx ON spam_training (email_id)`,
     `CREATE TABLE IF NOT EXISTS jmap_blobs (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS jmap_blobs_user_idx ON jmap_blobs(user_id)`,
     `CREATE INDEX IF NOT EXISTS jmap_blobs_created_at_idx ON jmap_blobs(created_at)`,
@@ -486,6 +490,9 @@ export async function cleanDb() {
   await db.exec(`
     DELETE FROM send_counters;
     DELETE FROM auth_rate_limits;
+    DELETE FROM spam_training;
+    DELETE FROM spam_tokens;
+    DELETE FROM spam_models;
     DELETE FROM send_idempotency;
     DELETE FROM audit_events;
     DELETE FROM jmap_submissions;

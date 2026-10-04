@@ -650,6 +650,7 @@ adminRulesRouter.openapi(testRuleRoute, async (c) => {
     bodyHtml: email.bodyHtml,
     hasAttachments: attachment !== undefined,
     spamScore: email.spamScore,
+    spamProbability: email.spamProbability,
     headers,
   });
   return c.json(

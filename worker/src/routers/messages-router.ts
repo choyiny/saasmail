@@ -95,6 +95,10 @@ const MessageSchema = z.object({
   bodyHtml: z.string().nullable(),
   occurredAt: z.number(),
   isRead: z.boolean().nullable(),
+  spamProbability: z.number().nullable().optional().openapi({
+    description:
+      "Received mail: the inbox's learning spam filter's score (0–1), or null when it did not score it.",
+  }),
   source: z.object({
     campaignId: z.string().nullable(),
     sequenceId: z.string().nullable(),

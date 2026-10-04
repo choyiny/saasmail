@@ -232,6 +232,14 @@ The Mailbox **Drafts** folder uses three context namespaces:
 so all existing callers retain their prior behavior. Draft deletion uses the
 existing `DELETE /api/drafts?contextKey=...` route.
 
+## Learned spam probability
+
+Received messages carry `spamProbability` (0–1, or null) when their inbox's
+[learning spam filter](inboxes.md#learning-spam-filter) scored them on
+arrival. It is a score only: a rule with the `spam_probability` condition
+decides what to do with it. A person's junk and not-junk marks through the
+state APIs above, and replies, train the filter.
+
 ## Per-inbox spam threshold
 
 Each sender identity can optionally set a numeric spam threshold from 0 through 100. When a new inbound message carries an `X-Spam-Score` header and its

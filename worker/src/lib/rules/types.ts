@@ -34,6 +34,12 @@ export const RuleConditionSchema = z.discriminatedUnion("field", [
     value: z.number().finite(),
   }),
   z.object({
+    // The inbox's learning filter's score (0–1); null (no score) never matches.
+    field: z.literal("spam_probability"),
+    operator: z.enum(["gte", "lte"]),
+    value: z.number().min(0).max(1),
+  }),
+  z.object({
     field: z.literal("header"),
     name: textValue,
     operator: z.enum(["equals", "contains"]),

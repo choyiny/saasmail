@@ -535,6 +535,8 @@ export interface MailMessage {
   bodyHtml: string | null;
   occurredAt: number;
   isRead: boolean | null;
+  /** Received mail's score from its inbox's learning filter, when scored. */
+  spamProbability?: number | null;
   source: {
     campaignId: string | null;
     sequenceId: string | null;
@@ -1403,6 +1405,39 @@ export interface AdminInbox {
   /** Whether eligible inbound messages get AI-generated suggested replies. */
   agentAutodraft: boolean;
   assignedUserIds: string[];
+  /** The inbox's learning spam filter. */
+  spamFilter: SpamFilterStatus;
+}
+
+export interface SpamFilterStatus {
+  enabled: boolean;
+  spamMessages: number;
+  hamMessages: number;
+  /** Trained on 20 of each: it scores new mail. */
+  ready: boolean;
+}
+
+export async function setSpamFilter(
+  email: string,
+  enabled: boolean,
+): Promise<SpamFilterStatus> {
+  return apiFetch(
+    `/api/admin/inboxes/${encodeURIComponent(email)}/spam-filter`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+}
+
+export async function resetSpamFilter(
+  email: string,
+): Promise<SpamFilterStatus> {
+  return apiFetch(
+    `/api/admin/inboxes/${encodeURIComponent(email)}/spam-filter/reset`,
+    { method: "POST" },
+  );
 }
 
 export async function fetchAdminInboxes(): Promise<AdminInbox[]> {
@@ -1563,6 +1598,7 @@ export type RuleCondition =
   | { field: "body"; operator: "contains"; value: string }
   | { field: "has_attachments"; operator: "is"; value: boolean }
   | { field: "spam_score"; operator: "gte" | "lte"; value: number }
+  | { field: "spam_probability"; operator: "gte" | "lte"; value: number }
   | {
       field: "header";
       name: string;

@@ -87,7 +87,7 @@ running`, enqueue, `import.started` · `DELETE /api/admin/imports/{jobId}` → a
   `cursor < size`. Done → `completed`, `import.completed` (counts in `details`), realtime + push to the
   admin; the source object is reaped after 24 h by the hourly chain.
 - Realtime: imported mail must not trigger per-message fan-out; the slice sends one `mail_refresh`
-  event (introduced by SPEC-ai-folders) per inbox at its end.
+  event (introduced by docs/archive/SPEC-ai-folders.md) per inbox at its end.
 
 ## 3. UI
 

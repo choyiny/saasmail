@@ -31,6 +31,9 @@ Supported conditions:
   when plain text is absent or blank
 - `has_attachments`: `is`
 - `spam_score`: `gte`, `lte`; a missing score never matches
+- `spam_probability`: `gte`, `lte` with a value from 0 to 1: the inbox's
+  [learning spam filter](inboxes.md#learning-spam-filter) score; mail it did
+  not score never matches
 - `header`: a header `name` plus `equals` or `contains`
 
 Supported actions are `archive`, `mark_spam`, `move_to_folder`,
