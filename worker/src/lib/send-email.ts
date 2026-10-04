@@ -66,6 +66,8 @@ export type SendEmailSuccess = {
   attachmentIds: string[];
   delivered: string[];
   suppressed: string[];
+  /** Held in the outbox because outbound sending is paused. */
+  paused?: true;
 };
 
 // The compose path has no recoverable failure mode of its own: multipart
@@ -123,6 +125,8 @@ export type ReplyEmailSuccess = {
   cc: string[];
   /** Whether that address came from the original's Reply-To or is its sender. */
   repliedTo: ReplyRecipient;
+  /** Held in the outbox because outbound sending is paused. */
+  paused?: true;
 };
 
 export type ReplyEmailFailure =
@@ -302,6 +306,7 @@ export async function sendEmail(
     attachmentIds,
     delivered: sendResult.delivered,
     suppressed: sendResult.suppressed,
+    ...(sendResult.result?.error?.paused ? { paused: true as const } : {}),
   };
 }
 
@@ -612,6 +617,7 @@ export async function replyToEmail(
     to: toAddress,
     cc: (cc ?? []).map((entry) => entry.email),
     repliedTo,
+    ...(sendResult.result?.error?.paused ? { paused: true as const } : {}),
   };
 }
 

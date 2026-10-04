@@ -14,6 +14,7 @@ import TiptapEditor from "@/components/TiptapEditor";
 import CcInput from "@/components/CcInput";
 import ThreadMessage from "@/components/ThreadMessage";
 import AttachmentPicker from "@/components/AttachmentPicker";
+import SendingPausedNotice from "@/components/SendingPausedNotice";
 import AttachmentChips from "@/components/AttachmentChips";
 import ReplyToHint from "@/components/ReplyToHint";
 import {
@@ -587,6 +588,7 @@ export default function ReplyComposer({
             )}
           </div>
 
+          <SendingPausedNotice className="border-t border-border bg-card px-4 pt-2 sm:px-5" />
           {/* Slim footer — single row, send + cancel + hint. */}
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 sm:px-5">
             <div className="min-w-0 truncate text-[11px] font-light text-text-tertiary">

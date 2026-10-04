@@ -144,6 +144,8 @@ export interface IdempotentResponse<T = unknown> {
   status: number;
   body: T;
   sentEmailId?: string | null;
+  /** Response headers of a refusal (never stored: only 2xx answers are). */
+  headers?: Record<string, string>;
 }
 
 export interface IdempotentOutcome<T = unknown> extends IdempotentResponse<T> {

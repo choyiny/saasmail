@@ -1,7 +1,7 @@
 # SPEC: Sending controls — pause switch, agent kill switch, daily caps
 
 Stage 9 (trust and safety), slice 4 of 5. Depends on `docs/archive/SPEC-audit-log.md` (events) and
-`SPEC-send-idempotency.md` (shared boundary code in the send routes). Label `minor`.
+`docs/archive/SPEC-send-idempotency.md` (shared boundary code in the send routes). Label `minor`.
 
 ## Why
 
@@ -117,3 +117,65 @@ composers can render without an admin call.
   or a new `docs/sending.md` (pause, caps, what counts). `docs/mcp.md`: the kill switch and the cap
   error. `docs/jmap.md`: `forbiddenToSend` when over the cap.
 - CHANGELOG `### Added`: **Pause outbound sending, agent kill switch and daily send caps.** …
+
+## Spec changes (implementation)
+
+The four decisions are unchanged. What the code does differently, and why:
+
+1. **The pause sits at the provider call, not only in `sendViaOutbox`.** `sendWithSuppressionCheck`, which
+   every send path goes through, swaps in a sender that answers a temporary failure marked `paused`
+   (`pausedSender`). The outbox holds that like any temporary failure. The list subscription
+   confirmation, which called the provider directly and recorded "sent" even when the provider
+   refused, now goes through the outbox, so a pause (or an outage) holds it. The campaign test send
+   still has no outbox row: it answers `sent: false` (it answered `true` even when the provider
+   refused) and the web says the copy was not sent. A held row records no attempt (`attempts = 0`), and
+   a one-shot send (a rule auto-reply) is held instead of dropped; after the resume it is retried like
+   any message.
+2. **A held row keeps the outbox's one-minute cool-down** (`next_retry_at = now + 60`, not `now`): the
+   cool-down protects the caller's own write of the Sent row. The drain (change 4) waits for it, so a
+   message accepted in the last minute before a resume goes about a minute later. The outbox's cancel,
+   which refuses a row inside its cool-down as "in flight", accepts a held row in it.
+3. **A retry while paused gives its attempt back** (`attemptOutboxRow`), so pressing Retry, or a run
+   that started before the pause, can never use up a held message's 24 attempts and fail it. The pause
+   is re-read at most every 5 seconds per database handle, so a cron pass or queue batch already
+   running stops sending soon after a pause.
+4. **The resume drains through the queue, not `waitUntil`.** `processOutbox` takes 200 rows per hourly
+   run, and a `waitUntil` ends about 30 seconds after the response, so "deliver at once" from the route
+   could neither finish nor be relied on. The resume enqueues an `outbox_drain` message on
+   `EMAIL_QUEUE`; each one tries up to 50 rows still marked held (`last_error` is the pause message)
+   and enqueues the next, delayed until the next held row is due (at most 2 minutes; later is left to
+   the hourly run). A try replaces the marker, so the drain tries each held row once. When nothing held
+   is left it runs `releaseOverdueSubmissions`. **The delayed JMAP release does not start while
+   paused** (`releaseScheduledSubmission` answers `notDue` before its claim, and the overdue sweep
+   returns at once) instead of being held in the outbox: the submission stays `scheduled`, and can
+   still be canceled.
+5. **Inbox forwarding is skipped while paused** (logged): a forward is built from the raw inbound
+   message and has no outbox row to wait in. The message itself is in the inbox.
+6. `setSendingPaused(db, paused)` takes the actor from the audit context, like every other audit
+   writer. **An API key may pause but not resume or change a limit** (`403 SESSION_REQUIRED`): the
+   spec's "admin, passkey-gated" means a session, and API keys skip the passkey gate, so a leaked admin
+   key could otherwise undo the controls it is the reason for.
+7. **The toggle records only `sending.paused` / `sending.resumed`**, not also `settings.changed`; a
+   limit change records `settings.changed` per channel changed.
+8. **`GET /api/config` exposes `outboundPaused` only.** The route needs no sign-in, and nothing in the
+   app needs the limits before an admin opens Settings. Who paused and when, and the limits, are in a
+   new `GET /api/admin/settings` (there was no GET); `PATCH` answers the same shape.
+9. `GET /api/outbox/count` gains `paused` as well as `held` (`held` is the pending count while paused,
+   0 otherwise), so Settings → Sending needs one call.
+10. **`reserveDailySend(db, { userId, channel })` reads the limit itself.** The HTTP check lives once in
+    `respondIdempotently`, shared by the three send routes (inside the idempotency claim, so a replay
+    never counts and a 429 frees the key); MCP counts in `sendOnce` with channel `mcp`; JMAP counts in
+    `createSubmission` after every validation and before scheduling (a delayed send counts when it is
+    submitted). `enroll_sequence` is not counted (sequences are not). A send refused after the
+    reservation (no access, a missing template, a 4xx, a thrown error) gives its slot back; one that
+    failed after the provider accepted it gives it back too, so the count can run one short then.
+11. The MCP error is `DAILY_SEND_LIMIT_REACHED: <the HTTP error text>`, like `MCP_SEND_DISABLED: …`.
+    `0` reads "Sending through <channel> is turned off on this server by its administrator."
+12. `send.limit_reached` is deduplicated by its target id `<userId>:<channel>:<day>`.
+13. Limits are whole numbers from 0 to 1,000,000; `null` (stored as `"null"`) is an explicit
+    unlimited, an absent row the default.
+14. Settings → Sending lists the top 20 counts of the day for everyone, not "the signed-in admin's
+    team" (there are no teams).
+15. Known limits: `enroll_sequence` and the sequence steps it sends are not counted (sequences are
+    not), so a leaked key can still reach new addresses through a sequence; a limit of `0` answers `429`
+    with a `Retry-After` that will not help (the decision's wording).

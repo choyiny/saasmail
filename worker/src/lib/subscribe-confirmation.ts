@@ -7,7 +7,7 @@ import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { interpolate } from "./interpolate";
 import { deliveredMessageId, generateMessageId } from "./message-id";
-import { sendWithSuppressionCheck } from "./send";
+import { sendViaOutbox } from "./outbox";
 import { signPayload } from "./signed-token";
 
 /** Confirmation links expire after 48 hours. */
@@ -120,7 +120,10 @@ export async function buildConfirmationContent(
  * makes double opt-in necessary in the first place.
  *
  * A `sent_emails` row is written with `personId: null` so the send is auditable
- * without manufacturing a correspondent.
+ * without manufacturing a correspondent. It goes through the outbox like any
+ * other send, so a provider outage or a pause holds it and retries it instead
+ * of losing it. `sent` is false only when the recipient is suppressed or the
+ * provider refused it for good.
  */
 export async function sendConfirmationEmail(opts: {
   db: DrizzleD1Database<any>;
@@ -150,10 +153,13 @@ export async function sendConfirmationEmail(opts: {
   const messageId = generateMessageId(fromAddress);
   const now = Math.floor(Date.now() / 1000);
 
-  const result = await sendWithSuppressionCheck({
+  const sentEmailId = nanoid();
+  const { outcome, send: result } = await sendViaOutbox({
     db,
     env,
     sender,
+    sentEmailId,
+    fromAddress,
     from,
     to,
     subject: renderedSubject,
@@ -161,11 +167,10 @@ export async function sendConfirmationEmail(opts: {
     headers: { "Message-ID": messageId },
     transactional: false,
   });
-
-  if (result.delivered.length === 0) return { sent: false };
+  if (outcome === "suppressed") return { sent: false };
 
   await db.insert(sentEmails).values({
-    id: nanoid(),
+    id: sentEmailId,
     // Never a people row for a subscriber — see the note above.
     personId: null,
     fromAddress,
@@ -176,7 +181,8 @@ export async function sendConfirmationEmail(opts: {
     inReplyTo: null,
     messageId: deliveredMessageId(messageId, result.result),
     resendId: result.result?.id ?? null,
-    status: "sent",
+    // "retrying" while the outbox holds it; the outbox marks it sent later.
+    status: outcome,
     cc: null,
     // A confirmation is not correspondence; keeping it out of the conversation
     // view is the same call made for campaign sends.
@@ -185,5 +191,5 @@ export async function sendConfirmationEmail(opts: {
     createdAt: now,
   });
 
-  return { sent: true };
+  return { sent: outcome !== "failed" };
 }

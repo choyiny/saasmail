@@ -60,6 +60,7 @@ import {
   publicThreadId,
 } from "./public-ids";
 import { cancelScheduledSubmission, enqueueRelease } from "./release";
+import { reserveDailySend } from "../lib/sending-controls";
 import { buildJmapSentRow } from "./sent-row";
 import { currentJmapState, parseJmapState } from "./state";
 import {
@@ -552,6 +553,8 @@ async function createSubmission(
   onSuccess: ParsedOnSuccess,
   creationId: string,
   descriptors: () => Promise<Map<string, MailboxDescriptor>>,
+  /** Set to give back the daily-limit slot this create reserves. */
+  slot: { release: () => Promise<void> },
 ): Promise<CreateOutcome> {
   if (!isObject(input)) return rejected({ type: "invalidProperties" });
   const unknownProperties = Object.keys(input).filter(
@@ -670,6 +673,17 @@ async function createSubmission(
       description: `The message is ${content.size} octets; the provider accepts ${maxSize}`,
     });
   }
+
+  // Sending controls: a valid create counts against the user's daily JMAP
+  // limit. The caller gives the slot back when the create then fails.
+  const reservation = await reserveDailySend(db, { userId, channel: "jmap" });
+  if (!reservation.allowed) {
+    return rejected({
+      type: "forbiddenToSend",
+      description: reservation.message ?? undefined,
+    });
+  }
+  slot.release = reservation.release;
 
   // Spec §3.4 step 1: the intention records what its on-success step will do.
   // A patch naming another inbox's system mailboxes is remapped to the
@@ -999,6 +1013,7 @@ export async function emailSubmissionSet(
     // leaves its draft locked whenever a send may have happened (the claim is
     // only released when nothing was sent).
     let outcome: CreateOutcome;
+    const slot = { release: async () => {} };
     try {
       outcome = await createSubmission(
         db,
@@ -1011,8 +1026,10 @@ export async function emailSubmissionSet(
         onSuccess,
         creationId,
         descriptors,
+        slot,
       );
     } catch (error) {
+      await slot.release();
       console.error(
         `[jmap] EmailSubmission/set create ${creationId} failed:`,
         error,
@@ -1023,8 +1040,10 @@ export async function emailSubmissionSet(
       };
       continue;
     }
-    if (outcome.error) notCreated[creationId] = outcome.error;
-    else {
+    if (outcome.error) {
+      await slot.release();
+      notCreated[creationId] = outcome.error;
+    } else {
       created[creationId] = outcome.created!;
       if (outcome.acceptedId) acceptedIds.push(outcome.acceptedId);
     }

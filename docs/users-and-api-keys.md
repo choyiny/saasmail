@@ -43,6 +43,12 @@ every retry of that message.
   to 255 printable ASCII characters without spaces; anything else is `400`
   with `code: "INVALID_IDEMPOTENCY_KEY"`.
 
+A send over the key owner's daily API limit is `429` with
+`code: "DAILY_SEND_LIMIT_REACHED"` and `Retry-After` set to the seconds until
+midnight UTC; a replay with the same key never counts. While an admin has paused
+outbound sending, sends answer `201` with `status: "retrying"` and
+`paused: true`. See [Sending controls](sending.md).
+
 A client that cannot set headers can put `idempotencyKey` in the JSON payload;
 the header wins when both are present. The web app does this for you: every
 compose and reply window sends one key per message.

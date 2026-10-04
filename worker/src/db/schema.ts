@@ -42,6 +42,7 @@ import { customerPeople, customers } from "./customers.schema";
 import { jmapChanges } from "./jmap-changes.schema";
 import { auditEvents } from "./audit-events.schema";
 import { sendIdempotency } from "./send-idempotency.schema";
+import { sendCounters } from "./send-counters.schema";
 
 export const schema = {
   ...authSchema,
@@ -89,4 +90,5 @@ export const schema = {
   jmapChanges,
   auditEvents,
   sendIdempotency,
+  sendCounters,
 } as const;

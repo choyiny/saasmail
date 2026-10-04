@@ -8,6 +8,17 @@ import { appSettings } from "../db/app-settings.schema";
 import { resolveBrandName } from "../lib/brand-name";
 import { json200Response, json201Response } from "../lib/helpers";
 import type { Variables } from "../variables";
+import type { OutboxDrainMessage } from "../lib/outbox";
+import {
+  SEND_CHANNELS,
+  readDailySendLimits,
+  readSendUsage,
+  readSendingPause,
+  setDailySendLimits,
+  setSendingPaused,
+  utcDay,
+  type DailySendLimits,
+} from "../lib/sending-controls";
 
 export const adminRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -334,10 +345,42 @@ adminRouter.openapi(deleteUserRoute, async (c) => {
 const UpdateSettingsSchema = z.object({
   // null clears the row and reverts to the built-in default.
   brandName: z.string().nullable().optional(),
+  outboundPaused: z.boolean().optional().openapi({
+    description:
+      "Pause (`true`) or resume (`false`) outbound sending. While paused every send is recorded and held in the outbox; resuming delivers what was held at once.",
+  }),
+  dailySendLimits: z
+    .object({
+      web: z.number().int().min(0).max(1_000_000).nullable(),
+      api: z.number().int().min(0).max(1_000_000).nullable(),
+      mcp: z.number().int().min(0).max(1_000_000).nullable(),
+      jmap: z.number().int().min(0).max(1_000_000).nullable(),
+    })
+    .partial()
+    .optional()
+    .openapi({
+      description:
+        "Messages each user may send a UTC day through a channel. `null` is unlimited, `0` blocks the channel; channels left out keep their limit.",
+    }),
+});
+
+const DailySendLimitsSchema = z.object({
+  web: z.number().int().nullable(),
+  api: z.number().int().nullable(),
+  mcp: z.number().int().nullable(),
+  jmap: z.number().int().nullable(),
 });
 
 const SettingsResponseSchema = z.object({
   brandName: z.string(),
+  outboundPaused: z.boolean(),
+  outboundPause: z
+    .object({
+      since: z.number().int(),
+      byLabel: z.string(),
+    })
+    .nullable(),
+  dailySendLimits: DailySendLimitsSchema,
 });
 
 const updateSettingsRoute = createRoute({
@@ -345,7 +388,7 @@ const updateSettingsRoute = createRoute({
   path: "/settings",
   tags: ["Admin"],
   description:
-    "Update app-wide settings (currently: brand name). Pass `null` to reset to the default.",
+    "Update app-wide settings: the brand name (`null` resets it to the default), the outbound pause and the daily send limits. Fields left out are unchanged.",
   request: {
     body: {
       content: { "application/json": { schema: UpdateSettingsSchema } },
@@ -357,13 +400,131 @@ const updateSettingsRoute = createRoute({
       description: "Invalid request",
       content: { "application/json": { schema: ErrorSchema } },
     },
+    403: {
+      description:
+        "Resuming outbound sending or changing a daily send limit with an API key (`SESSION_REQUIRED`): sign in instead. An API key may pause.",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string(), code: z.string() }),
+        },
+      },
+    },
   },
+});
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readSettings(
+  db: any,
+): Promise<z.infer<typeof SettingsResponseSchema>> {
+  const [brand] = await db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, "brand_name"))
+    .limit(1);
+  const pause = await readSendingPause(db);
+  return {
+    brandName: resolveBrandName(brand?.value),
+    outboundPaused: pause !== null,
+    outboundPause: pause
+      ? { since: pause.since, byLabel: pause.byLabel }
+      : null,
+    dailySendLimits: await readDailySendLimits(db),
+  };
+}
+
+const getSettingsRoute = createRoute({
+  method: "get",
+  path: "/settings",
+  tags: ["Admin"],
+  description:
+    "App-wide settings: brand name, whether outbound sending is paused (and since when, by whom) and the daily send limits per channel.",
+  responses: {
+    500: { description: "Internal server error" },
+    200: {
+      description: "Settings",
+      content: { "application/json": { schema: SettingsResponseSchema } },
+    },
+  },
+});
+
+adminRouter.openapi(getSettingsRoute, async (c) => {
+  return c.json(await readSettings(c.get("db")), 200);
+});
+
+const SendUsageSchema = z.object({
+  day: z.string(),
+  limits: DailySendLimitsSchema,
+  usage: z.array(
+    z.object({
+      channel: z.string(),
+      userId: z.string(),
+      email: z.string().nullable(),
+      count: z.number().int(),
+    }),
+  ),
+});
+
+const sendUsageRoute = createRoute({
+  method: "get",
+  path: "/send-usage",
+  tags: ["Admin"],
+  description:
+    "Messages counted against the daily send limits on a UTC day (default today), per channel and user, busiest first, at most 20. Only limited channels are counted.",
+  request: {
+    query: z.object({
+      day: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional()
+        .openapi({
+          description: "UTC day, `YYYY-MM-DD`.",
+          example: "2026-10-04",
+        }),
+    }),
+  },
+  responses: {
+    500: { description: "Internal server error" },
+    200: {
+      description: "Send usage",
+      content: { "application/json": { schema: SendUsageSchema } },
+    },
+  },
+});
+
+adminRouter.openapi(sendUsageRoute, async (c) => {
+  const db = c.get("db");
+  const day = c.req.valid("query").day ?? utcDay(Math.floor(Date.now() / 1000));
+  return c.json(
+    {
+      day,
+      limits: await readDailySendLimits(db),
+      usage: await readSendUsage(db, day),
+    },
+    200,
+  );
 });
 
 adminRouter.openapi(updateSettingsRoute, async (c) => {
   const db = c.get("db");
   const currentUser = c.get("user");
   const body = c.req.valid("json");
+
+  // The incident controls must not be undone with a leaked key: an API key
+  // may pause, but resuming and changing a limit take a signed-in admin
+  // (whose session passed the passkey gate). Checked before any change.
+  if (
+    c.get("authMethod") === "apiKey" &&
+    (body.outboundPaused === false || body.dailySendLimits !== undefined)
+  ) {
+    return c.json(
+      {
+        error:
+          "Resuming outbound sending or changing a daily send limit needs a signed-in admin, not an API key.",
+        code: "SESSION_REQUIRED",
+      },
+      403,
+    );
+  }
 
   // Only act on brand_name if the field is present in the body. `undefined`
   // means "no change", `null` means "reset to default".
@@ -422,11 +583,30 @@ adminRouter.openapi(updateSettingsRoute, async (c) => {
     }
   }
 
-  // Always return the resolved value so the caller can update its UI.
-  const row = await db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, "brand_name"))
-    .limit(1);
-  return c.json({ brandName: resolveBrandName(row[0]?.value) }, 200);
+  if (body.dailySendLimits) {
+    const changes: Partial<DailySendLimits> = {};
+    for (const channel of SEND_CHANNELS) {
+      if (channel in body.dailySendLimits) {
+        changes[channel] = body.dailySendLimits[channel] ?? null;
+      }
+    }
+    await setDailySendLimits(db, changes);
+  }
+
+  if (body.outboundPaused !== undefined) {
+    const { changed } = await setSendingPaused(db, body.outboundPaused);
+    if (changed && !body.outboundPaused) {
+      // Held mail goes out through the queue, a batch per message, starting
+      // now rather than at the next hourly run (which is the fallback).
+      try {
+        const drain: OutboxDrainMessage = { type: "outbox_drain" };
+        await c.env.EMAIL_QUEUE.send(drain);
+      } catch (err) {
+        console.error("[sending] could not start delivering held mail:", err);
+      }
+    }
+  }
+
+  // Always return the resolved values so the caller can update its UI.
+  return c.json(await readSettings(db), 200);
 });

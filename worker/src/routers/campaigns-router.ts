@@ -1030,8 +1030,10 @@ campaignsRouter.openapi(testSendRoute, async (c) => {
   });
 
   // No campaign_recipients row, no stats change: a test must never look like
-  // delivery in the numbers. It is still mail sent under the list's identity.
-  if (result.delivered.length > 0) {
+  // delivery in the numbers. It is still mail sent under the list's identity,
+  // once the provider took it (not while sending is paused, say).
+  const sent = result.delivered.length > 0 && !result.result?.error;
+  if (sent) {
     await recordAudit(db, {
       action: AUDIT_ACTIONS.mailSent,
       targetType: "campaign",
@@ -1041,7 +1043,7 @@ campaignsRouter.openapi(testSendRoute, async (c) => {
       details: { to, test: true },
     });
   }
-  return c.json({ sent: result.delivered.length > 0 });
+  return c.json({ sent });
 });
 
 // --- GET /:id/stats/timeseries ---

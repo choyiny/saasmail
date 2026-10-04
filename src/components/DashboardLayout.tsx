@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import TopNav from "@/components/TopNav";
 import Breadcrumbs from "@/components/Breadcrumbs";
+import SendingPausedBanner from "@/components/SendingPausedBanner";
 import Footer from "@/components/Footer";
 import ComposeFab from "@/components/ComposeFab";
 import ComposeModal, { type ComposePrefill } from "@/pages/ComposeModal";
@@ -98,6 +99,7 @@ export default function DashboardLayout() {
 
           <div className="relative z-10 flex min-h-0 flex-1">
             <div className="flex min-w-0 flex-1 flex-col">
+              <SendingPausedBanner />
               <Breadcrumbs />
               <main className="flex min-h-0 flex-1 flex-col">
                 <Outlet context={{ onCompose: openCompose }} />

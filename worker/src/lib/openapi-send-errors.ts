@@ -51,6 +51,29 @@ export const idempotencyConflictResponses = {
   },
 };
 
+/** The answer of a send route over the caller's daily limit. */
+export const dailySendLimitResponses = {
+  429: {
+    description:
+      "The caller reached the daily send limit for this channel (`DAILY_SEND_LIMIT_REACHED`; web sessions and API keys are counted separately). Nothing was sent. The limit resets at midnight UTC: retry after the `Retry-After` seconds.",
+    headers: z.object({
+      "Retry-After": z.string().openapi({
+        description: "Seconds to the next UTC midnight.",
+        example: "3600",
+      }),
+    }),
+    content: {
+      "application/json": {
+        schema: z.object({
+          error: z.string(),
+          code: z.literal("DAILY_SEND_LIMIT_REACHED"),
+          retryAfter: z.number().int(),
+        }),
+      },
+    },
+  },
+};
+
 /**
  * The 201 of a send route that takes an `Idempotency-Key`, with the header
  * that marks a replayed answer.

@@ -121,7 +121,13 @@
     // entirely, so nobody is committed to configuring it. Set it to your
     // provider's actual daily quota and a blast that would blow through the
     // limit is refused up front rather than half-delivered.
-    "PROVIDER_DAILY_SEND_LIMIT": ""
+    "PROVIDER_DAILY_SEND_LIMIT": "",
+
+    /* agents */
+    // Set to "false" to stop every connected MCP agent from sending: the
+    // send_email, reply_email, send_template and enroll_sequence tools stay
+    // listed but refuse with MCP_SEND_DISABLED. On when unset.
+    "MCP_SEND_ENABLED": "true"
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

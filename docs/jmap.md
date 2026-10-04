@@ -188,6 +188,7 @@ Rules, each reported per submission as a SetError (nothing is sent when one fail
 | No outbound provider is configured                                              | `forbiddenToSend`                                       |
 | The stored message exceeds the whole-message limit                              | `tooLarge` with `maxSize`                               |
 | The draft is already being sent                                                 | `forbiddenToSend`: "This message is already being sent" |
+| You reached your daily JMAP send limit ([Sending controls](sending.md))         | `forbiddenToSend`: "Daily send limit reached: …"        |
 | The provider refused the message permanently                                    | `forbiddenToSend` with the provider's reason            |
 
 The message carries the draft's From name, every To and Cc with their display names (Bcc recipients receive it through the envelope and appear nowhere in it), subject, `Message-ID`, `In-Reply-To`, `References`, `Reply-To` and every stored part, inline or attached (inline parts keep their `cid`). Cloudflare assembles the MIME message from those parts itself, so the delivered message's structure can differ from the draft's `blobId`, and it sets its own `Message-ID` and `Date` (see below). It also appends a line break to text attachments and drops the filename of inline images ([Email providers](email-providers.md#per-message-limits)). The text body is the draft's `text/plain` body parts and the HTML body its `text/html` ones, so a text-only draft goes out without an HTML part and an HTML-only draft without a text part. If one create in a call fails unexpectedly, it gets `serverFail` and the call still reports the others.
@@ -290,6 +291,8 @@ A stream lasts at most 5 minutes, and less once it has used 40 D1 queries (the f
 ## Delivery, retries and failures
 
 A message the provider fails temporarily stays with the outbox, which retries it every hour for up to 24 attempts. A retry sends exactly the stored message: the same From display name, recipients and names, `Message-ID`, `References`, bodies and attachments, even if the identity's display name changed in between. Reply-chain ids are mapped to delivered ids again on each attempt, and the attempt that succeeds records its delivered Message-ID.
+
+While an admin has [paused outbound sending](sending.md), a submission is accepted and waits in the outbox like a temporary failure (without using up an attempt), and a delayed send stays `pending` until sending resumes.
 
 If a retried message finally fails, its Sent Email stays visible (the submission was already accepted) and the web UI marks it failed, as it does for web sends.
 

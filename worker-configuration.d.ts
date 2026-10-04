@@ -34,6 +34,8 @@ declare namespace Cloudflare {
 		AGENT_APPROVAL_SECRET?: string;
 		/** Optional query logging toggle. Set to "true" only while debugging; Drizzle logs SQL parameters. Not emitted by `wrangler types`; added manually. */
 		DB_LOG_QUERIES?: string;
+		/** Optional kill switch: "false" makes the MCP tools that send mail (send_email, reply_email, send_template, enroll_sequence) refuse. Default on. Not emitted by `wrangler types`; added manually. */
+		MCP_SEND_ENABLED?: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
 	}
 }

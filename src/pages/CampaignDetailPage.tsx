@@ -233,7 +233,12 @@ export default function CampaignDetailPage() {
           {canSend && (
             <button
               onClick={() =>
-                act(() => testSendCampaign(id), "Could not send the test copy.")
+                act(async () => {
+                  // Not sent (sending paused, the address suppressed, or the
+                  // provider refused it) is a failure here too.
+                  const { sent } = await testSendCampaign(id);
+                  if (!sent) throw new Error("not sent");
+                }, "The test copy was not sent. Outbound sending may be paused, or your address is suppressed.")
               }
               disabled={busy}
               className="rounded-[6px] px-3 py-2 text-xs font-medium text-text-secondary ring-1 ring-border hover:bg-bg-muted disabled:opacity-50"

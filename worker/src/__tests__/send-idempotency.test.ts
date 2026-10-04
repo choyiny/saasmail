@@ -1,4 +1,4 @@
-// docs/specs/SPEC-send-idempotency.md §2: the service.
+// docs/archive/SPEC-send-idempotency.md §2: the service.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import {

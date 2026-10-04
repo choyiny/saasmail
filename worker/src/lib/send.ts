@@ -1,3 +1,4 @@
+import { isSendingPaused, pausedSender } from "./sending-controls";
 import { isSuppressed, type Database } from "./suppressions";
 import { signToken } from "./unsubscribe-token";
 import { encodeDisplayName } from "./format-from-address";
@@ -137,7 +138,6 @@ export async function sendWithSuppressionCheck(
   const {
     db,
     env,
-    sender,
     from,
     to,
     toName,
@@ -161,6 +161,11 @@ export async function sendWithSuppressionCheck(
     // have no meaning there.
     throw new Error("additionalTo and bcc are for transactional sends only");
   }
+  // While outbound sending is paused nothing reaches a provider: the message
+  // fails transiently with the pause marker, and the outbox holds it.
+  const sender = (await isSendingPaused(db))
+    ? pausedSender(input.sender)
+    : input.sender;
 
   // Partition recipients into delivered vs suppressed. Transactional sends
   // bypass the suppression list entirely.

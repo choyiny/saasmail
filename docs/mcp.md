@@ -102,6 +102,17 @@ never sends again, even if the call failed afterwards. Keys belong to the
 connected user and are kept 24 hours. An assistant should always pass one: a transport error after
 the server sent the message is indistinguishable from one before it.
 
+**When sending is turned off or limited.** The deployer can turn agent sending
+off with `MCP_SEND_ENABLED=false`: the four `email:send` tools then refuse with
+`MCP_SEND_DISABLED: Sending through MCP is disabled on this server by its
+administrator.`, and `whoami` reports `sendEnabled: false`. Each user may also
+send at most 200 messages a UTC day through `send_email`, `reply_email` and
+`send_template` by default (an admin setting); past it the tool error starts
+with `DAILY_SEND_LIMIT_REACHED` and the count starts again at midnight UTC.
+While an admin has paused outbound sending, a send succeeds with
+`status: "retrying"` and `paused: true`: the message is queued and goes out on
+resume ([Sending controls](sending.md)).
+
 **Where `reply_email` sends.** A reply to a received message follows that
 message's `Reply-To` header: its first address becomes To and any others are
 added to Cc, never one of this instance's own inboxes

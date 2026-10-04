@@ -1,3 +1,5 @@
+import { createDb } from "../db/client";
+import { isSendingPaused } from "./sending-controls";
 import { createEmailSender } from "./email-sender";
 import { encodeDisplayName } from "./format-from-address";
 import { MAX_SEND_ATTACHMENTS } from "./send-limits";
@@ -288,6 +290,15 @@ export function forwardInbound(
   ctx.waitUntil(
     (async () => {
       try {
+        // A forward is outbound mail, and it has no outbox row to wait in:
+        // while sending is paused it is skipped, and the message is still in
+        // the inbox.
+        if (await isSendingPaused(createDb(env))) {
+          console.warn(
+            `Forward skipped for ${params.inbox} → ${params.forwardTo}: outbound sending is paused`,
+          );
+          return;
+        }
         const sender = createEmailSender(env);
         const built = buildForwardMessage({
           ...params,

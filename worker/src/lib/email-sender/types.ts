@@ -47,6 +47,11 @@ export interface SendEmailError {
    * false = terminal reject (bad recipient, auth failure).
    */
   transient: boolean;
+  /**
+   * Set when nothing was attempted because outbound sending is paused: the
+   * outbox holds the message until sending resumes (sending-controls.ts).
+   */
+  paused?: boolean;
 }
 
 export interface SendEmailResult {

@@ -1734,8 +1734,55 @@ export async function fetchOutbox(
   return apiFetch(`/api/outbox${qs}`);
 }
 
-export async function fetchOutboxCount(): Promise<{ pending: number }> {
+export async function fetchOutboxCount(): Promise<{
+  pending: number;
+  /** Pending sends held because outbound sending is paused. */
+  held: number;
+  paused: boolean;
+}> {
   return apiFetch("/api/outbox/count");
+}
+
+export type SendChannel = "web" | "api" | "mcp" | "jmap";
+/** Messages a user may send a UTC day per channel; `null` is unlimited. */
+export type DailySendLimits = Record<SendChannel, number | null>;
+
+export interface AdminSettings {
+  brandName: string;
+  outboundPaused: boolean;
+  /** Unix seconds and who, while paused. */
+  outboundPause: { since: number; byLabel: string } | null;
+  dailySendLimits: DailySendLimits;
+}
+
+export async function fetchAdminSettings(): Promise<AdminSettings> {
+  return apiFetch("/api/admin/settings");
+}
+
+export async function updateAdminSettings(changes: {
+  outboundPaused?: boolean;
+  dailySendLimits?: Partial<DailySendLimits>;
+}): Promise<AdminSettings> {
+  return apiFetch("/api/admin/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+}
+
+export interface SendUsage {
+  day: string;
+  limits: DailySendLimits;
+  usage: {
+    channel: string;
+    userId: string;
+    email: string | null;
+    count: number;
+  }[];
+}
+
+export async function fetchSendUsage(): Promise<SendUsage> {
+  return apiFetch("/api/admin/send-usage");
 }
 
 export async function retryOutboxItem(id: string): Promise<{

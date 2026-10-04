@@ -15,6 +15,7 @@ import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
   ErrorSchema,
+  dailySendLimitResponses,
   idempotencyConflictResponses,
   idempotencyKeyHeader,
   idempotent201Response,
@@ -485,6 +486,10 @@ const sendTemplateRoute = createRoute({
         }),
         delivered: z.array(z.string()),
         suppressed: z.array(z.string()),
+        paused: z.boolean().optional().openapi({
+          description:
+            "`true` when outbound sending is paused: the message is held and goes out when sending resumes.",
+        }),
       }),
       "Email sent",
     ),
@@ -501,6 +506,7 @@ const sendTemplateRoute = createRoute({
       content: { "application/json": { schema: ErrorSchema } },
     },
     ...idempotencyConflictResponses,
+    ...dailySendLimitResponses,
   },
 });
 
@@ -558,6 +564,7 @@ emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
           status: result.status,
           delivered: result.delivered,
           suppressed: result.suppressed,
+          ...(result.paused ? { paused: true } : {}),
         },
         sentEmailId: result.id,
       };

@@ -238,6 +238,8 @@ As noted above, calling `/api/send` (or `/api/send/reply/{emailId}`) for a perso
 - `400 "Person is already in an active sequence"` on enroll — see above.
 - `404 "Template not found"` / `"Sequence not found"` — slug or id is wrong. List the resources to find the right one before retrying.
 - `409 IDEMPOTENCY_IN_PROGRESS` / `422 IDEMPOTENCY_KEY_REUSED` — see "Always send an idempotency key" above.
+- `429 DAILY_SEND_LIMIT_REACHED` — the API key's owner reached the daily limit for API sends (an admin setting). Nothing was sent; wait the `Retry-After` seconds (until midnight UTC) or ask an admin to raise the limit. A replay with the same idempotency key never counts.
+- `201` with `"status": "retrying", "paused": true` — an admin paused outbound sending. The message is recorded and queued and goes out when sending resumes: do not send it again.
 
 ## Where to look in the code
 

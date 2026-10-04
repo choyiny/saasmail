@@ -48,7 +48,7 @@ sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md
 | 7d    | JMAP v1 follow-ups: several To/Bcc, delayed send, drafts in folders, raw blobs, shared drafts, live updates, `Email/import`, hardening | #45–#66 | `35c5dd1` (last) |
 | 9-1   | Replies follow the sender's Reply-To (`docs/archive/SPEC-reply-to.md`)                                                                 | #67     | `10f39e6`        |
 | 9-2   | Audit log (`docs/archive/SPEC-audit-log.md`)                                                                                           | #68     | `3b42c45`        |
-| 9-3   | Idempotency keys for sends (`SPEC-send-idempotency.md`)                                                                                | —       | —                |
+| 9-3   | Idempotency keys for sends (`docs/archive/SPEC-send-idempotency.md`)                                                                   | #69     | `ee8a135`        |
 | 9-4   | Pause switch, MCP kill switch, daily caps (`SPEC-send-controls.md`)                                                                    | —       | —                |
 | 9-5   | Two-factor sign-in, durable auth rate limits (`SPEC-two-factor.md`)                                                                    | —       | —                |
 | 10-1  | `reject` rule action, unknown-recipient rejection (`SPEC-reject-inbound.md`)                                                           | —       | —                |

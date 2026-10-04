@@ -23,6 +23,11 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
   addresses, subjects, token hashes, or other sensitive values.
 - `vars.AUDIT_RETENTION_DAYS` — Optional. How many days the
   [audit log](audit-log.md) is kept: 180 when unset, never less than 30.
+- `vars.MCP_SEND_ENABLED` — Optional kill switch for agents. Set it to
+  `"false"` and every connected MCP client loses the ability to send: the
+  `send_email`, `reply_email`, `send_template` and `enroll_sequence` tools
+  refuse with `MCP_SEND_DISABLED` ([Sending controls](sending.md)). On when
+  unset. The pause and the daily limits are admin settings, not variables.
 - `vars.VAPID_PUBLIC_KEY` / `vars.VAPID_SUBJECT` — public VAPID config for
   browser push notifications. Generate with `yarn vapid:generate` and store
   the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank

@@ -605,6 +605,36 @@ describe("preview and test-send", () => {
     expect(c.status).toBe("draft");
   });
 
+  it("does not report a test-send held by the pause as sent", async () => {
+    const apiKey = await adminKey();
+    await seedListAndTemplate();
+    const { body } = await createCampaign(apiKey);
+    const { setSendingPaused } = await import("../lib/sending-controls");
+    (env as any).DEMO_MODE = "1";
+    try {
+      const testSend = () =>
+        authFetch(`/api/campaigns/${body.id}/test-send`, {
+          apiKey,
+          method: "POST",
+          body: JSON.stringify({ to: "me@example.com" }),
+        });
+      const sentAudits = async () =>
+        (await getDb().select().from(auditEvents)).filter(
+          (event) => event.action === "mail.sent",
+        );
+
+      await setSendingPaused(getDb(), true);
+      expect(await (await testSend()).json()).toEqual({ sent: false });
+      expect(await sentAudits()).toHaveLength(0);
+
+      await setSendingPaused(getDb(), false);
+      expect(await (await testSend()).json()).toEqual({ sent: true });
+      expect(await sentAudits()).toHaveLength(1);
+    } finally {
+      (env as any).DEMO_MODE = "0";
+    }
+  });
+
   it("refuses a test-send once the campaign is sending", async () => {
     const apiKey = await adminKey();
     await seedListAndTemplate();

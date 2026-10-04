@@ -14,9 +14,11 @@ import {
 } from "./campaign-sender";
 import { runSuggestedReply } from "./agent/suggest-reply";
 import {
+  releaseOverdueSubmissions,
   releaseScheduledSubmission,
   type ReleaseMessage,
 } from "../jmap/release";
+import { drainHeldOutbox, type OutboxDrainMessage } from "./outbox";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -39,7 +41,8 @@ export type QueueMessageBody =
   | CampaignFanOutMessage
   | CampaignSendMessage
   | SuggestReplyMessage
-  | ReleaseMessage;
+  | ReleaseMessage
+  | OutboxDrainMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
@@ -51,6 +54,7 @@ export type QueueMessageKind =
   | "campaign_send"
   | "suggest_reply"
   | "jmap_submission_release"
+  | "outbox_drain"
   | "unknown";
 
 /**
@@ -97,6 +101,7 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
       ? "jmap_submission_release"
       : "unknown";
   }
+  if (b.type === "outbox_drain") return "outbox_drain";
   return "unknown";
 }
 
@@ -158,6 +163,23 @@ export async function handleQueueBatch(
         // recovery.
         const body = msg.body as ReleaseMessage;
         await releaseScheduledSubmission(env, body.submissionId, { sender });
+      } else if (kind === "outbox_drain") {
+        // After a resume: a batch of held mail, then the next batch, then the
+        // delayed JMAP sends that came due while paused.
+        const wait = await drainHeldOutbox(env, sender);
+        if (wait !== null) {
+          const next: OutboxDrainMessage = { type: "outbox_drain" };
+          await env.EMAIL_QUEUE.send(
+            next,
+            wait > 0 ? { delaySeconds: wait } : undefined,
+          );
+        } else {
+          await releaseOverdueSubmissions(
+            env,
+            Math.floor(Date.now() / 1000),
+            sender,
+          );
+        }
       } else {
         const body = msg.body as SuggestReplyMessage;
         await suggestedReplyRunner(db, env, body.emailId);

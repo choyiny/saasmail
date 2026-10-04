@@ -4,6 +4,7 @@
 // while the submission is `scheduled`. After the release's claim a cancel gets
 // `cannotUnsend`; undoStatus stays `pending` until the provider accepted the
 // message or the outbox owns its retries, and only then becomes `final`.
+import { isSendingPaused } from "../lib/sending-controls";
 import { currentAuditActor, runWithAudit } from "../lib/audit/context";
 import { auditMailSent } from "../lib/audit/mail-events";
 import { and, eq, lt, lte, sql } from "drizzle-orm";
@@ -166,6 +167,9 @@ export async function releaseScheduledSubmission(
   opts: { sender?: EmailSender; now?: number } = {},
 ): Promise<ReleaseOutcome> {
   const db = createDb(env) as unknown as Db;
+  // While outbound sending is paused a delayed send stays scheduled (and can
+  // still be canceled); the hourly sweep, or the resume, releases it later.
+  if (await isSendingPaused(db)) return "notDue";
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   const claimed = await db
     .update(jmapSubmissions)
@@ -453,6 +457,9 @@ export async function releaseOverdueSubmissions(
   sender?: EmailSender,
 ): Promise<number> {
   const db = createDb(env) as unknown as Db;
+  // Checked once here, not once per submission: nothing is released while
+  // sending is paused.
+  if (await isSendingPaused(db)) return 0;
   let released = 0;
   const tried = new Set<string>();
   for (let batch = 0; batch < SWEEP_MAX_BATCHES; batch++) {

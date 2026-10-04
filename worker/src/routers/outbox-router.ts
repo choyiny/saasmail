@@ -18,6 +18,10 @@ import {
   webRestoreTarget,
 } from "../jmap/release";
 import { json200Response } from "../lib/helpers";
+import {
+  SENDING_PAUSED_MESSAGE,
+  isSendingPaused,
+} from "../lib/sending-controls";
 import type { Variables } from "../variables";
 
 export const outboxRouter = new OpenAPIHono<{
@@ -55,9 +59,17 @@ const countRoute = createRoute({
   method: "get",
   path: "/count",
   tags: ["Outbox"],
-  description: "Count of sends still awaiting retry.",
+  description:
+    "Count of sends still awaiting retry. While outbound sending is paused every pending send is held: `held` counts them and `paused` is true.",
   responses: {
-    ...json200Response(z.object({ pending: z.number() }), "Pending count"),
+    ...json200Response(
+      z.object({
+        pending: z.number(),
+        held: z.number(),
+        paused: z.boolean(),
+      }),
+      "Pending count",
+    ),
   },
 });
 
@@ -73,7 +85,9 @@ outboxRouter.openapi(countRoute, async (c) => {
         ? and(eq(outboxEmails.status, "pending"), scope)
         : eq(outboxEmails.status, "pending"),
     );
-  return c.json({ pending: rows[0]?.n ?? 0 }, 200);
+  const pending = Number(rows[0]?.n ?? 0);
+  const paused = await isSendingPaused(db);
+  return c.json({ pending, held: paused ? pending : 0, paused }, 200);
 });
 
 // --- GET /api/outbox/scheduled ---
@@ -516,7 +530,9 @@ outboxRouter.openapi(cancelRoute, async (c) => {
   // Guard against cancelling while a send is in flight: the processor holds a
   // claim by pushing next_retry_at an hour into the future. Deleting mid-claim
   // would let the processor complete the send and flip sent_emails back to "sent"
-  // after the caller already saw { deleted: true }.
+  // after the caller already saw { deleted: true }. A message held by the
+  // pause is not in flight during its first minute's cool-down, and is often
+  // exactly what an admin paused sending to cancel.
   const deleted = await db
     .delete(outboxEmails)
     .where(
@@ -525,7 +541,13 @@ outboxRouter.openapi(cancelRoute, async (c) => {
         : and(
             eq(outboxEmails.id, id),
             eq(outboxEmails.status, "pending"),
-            lte(outboxEmails.nextRetryAt, now),
+            or(
+              lte(outboxEmails.nextRetryAt, now),
+              and(
+                eq(outboxEmails.lastError, SENDING_PAUSED_MESSAGE),
+                lte(outboxEmails.nextRetryAt, now + 60),
+              ),
+            ),
           ),
     )
     .returning({ id: outboxEmails.id });

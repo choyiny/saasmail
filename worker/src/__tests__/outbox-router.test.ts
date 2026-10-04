@@ -104,7 +104,7 @@ describe("outbox router", () => {
     await seedRow("ob-2", { status: "failed" });
     const res = await authFetch("/api/outbox/count", { apiKey });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ pending: 1 });
+    expect(await res.json()).toEqual({ pending: 1, held: 0, paused: false });
   });
 
   it("cancels a row: deletes it and fails the sent email", async () => {

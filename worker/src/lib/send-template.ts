@@ -29,6 +29,8 @@ export type SendTemplateSuccess = {
   status: OutboxOutcome;
   delivered: string[];
   suppressed: string[];
+  /** Held in the outbox because outbound sending is paused. */
+  paused?: true;
 };
 
 export type SendTemplateFailure =
@@ -181,5 +183,6 @@ export async function sendTemplate(
     status: outcome,
     delivered: sendResult.delivered,
     suppressed: sendResult.suppressed,
+    ...(result.error?.paused ? { paused: true as const } : {}),
   };
 }

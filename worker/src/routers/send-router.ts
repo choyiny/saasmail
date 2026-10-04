@@ -8,6 +8,7 @@ import { MAX_CC_ENTRIES } from "../lib/send-limits";
 import { respondIdempotently } from "../lib/idempotent-send-route";
 import { sendRequestFields } from "../lib/send-idempotency";
 import {
+  dailySendLimitResponses,
   idempotencyConflictResponses,
   idempotencyKeyHeader,
   idempotent201Response,
@@ -110,6 +111,10 @@ const SentEmailResponseSchema = z.object({
   attachmentIds: z.array(z.string()),
   delivered: z.array(z.string()).default([]),
   suppressed: z.array(z.string()).default([]),
+  paused: z.boolean().optional().openapi({
+    description:
+      "`true` when outbound sending is paused: the message is recorded and held (`status` is `retrying`) and goes out when sending resumes.",
+  }),
 });
 
 // Compose and send a new email
@@ -156,6 +161,7 @@ const sendEmailRoute = createRoute({
     ...multipartParseErrorResponses,
     ...inboxForbiddenResponse,
     ...idempotencyConflictResponses,
+    ...dailySendLimitResponses,
   },
 });
 
@@ -199,6 +205,7 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
           attachmentIds: result.attachmentIds,
           delivered: result.delivered,
           suppressed: result.suppressed,
+          ...(result.paused ? { paused: true } : {}),
         },
         sentEmailId: result.id,
       };
@@ -307,6 +314,7 @@ const replyEmailRoute = createRoute({
     ...inboxForbiddenResponse,
     ...replyNotFoundResponse,
     ...idempotencyConflictResponses,
+    ...dailySendLimitResponses,
   },
 });
 
@@ -382,6 +390,7 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
           to: result.to,
           cc: result.cc,
           repliedTo: result.repliedTo,
+          ...(result.paused ? { paused: true } : {}),
         },
         sentEmailId: result.id,
       };

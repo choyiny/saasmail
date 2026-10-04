@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
 import AttachmentPicker from "@/components/AttachmentPicker";
+import SendingPausedNotice from "@/components/SendingPausedNotice";
 import AttachmentChips from "@/components/AttachmentChips";
 import ReplyToHint from "@/components/ReplyToHint";
 
@@ -217,6 +218,7 @@ export default function ChatQuickReply({
           className="mb-2"
         />
       )}
+      <SendingPausedNotice className="mb-2" />
       {files.length > 0 && (
         <div className="mb-2">
           <AttachmentChips

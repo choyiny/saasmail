@@ -15,6 +15,10 @@ import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
 import { rules } from "../db/rules.schema";
 import { SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE, hasScope } from "../auth/scopes";
 import { sendTemplate } from "../lib/send-template";
+import {
+  DAILY_SEND_LIMIT_CODE,
+  reserveDailySend,
+} from "../lib/sending-controls";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
 import { sendEmail, replyToEmail } from "../lib/send-email";
 import { listPeople, getPersonScoped } from "../lib/queries/people";
@@ -131,6 +135,27 @@ function guard<Args extends unknown[]>(
   };
 }
 
+/** Whether this deployment lets agents send (`MCP_SEND_ENABLED`, default on). */
+export function mcpSendEnabled(env: CloudflareBindings): boolean {
+  return env.MCP_SEND_ENABLED !== "false";
+}
+
+export const MCP_SEND_DISABLED =
+  "MCP_SEND_DISABLED: Sending through MCP is disabled on this server by its administrator.";
+
+/**
+ * `guard` for the tools that cause mail: they need the send scope, and refuse
+ * while the deployment's kill switch is off. The scope error comes first.
+ */
+function sendGuard<Args extends unknown[]>(
+  ctx: McpContext,
+  run: (...args: Args) => Promise<ReturnType<typeof ok>>,
+) {
+  return guard(ctx, SCOPE_SEND, async (...args: Args) =>
+    mcpSendEnabled(ctx.env) ? run(...args) : fail(MCP_SEND_DISABLED),
+  );
+}
+
 /**
  * Denials are reported as not-found so a caller cannot use these tools to
  * probe for the existence of ids outside its inboxes. Mirrors the HTTP API.
@@ -189,6 +214,9 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         role: ctx.user.role,
         inboxes: allowed.isAdmin ? "all" : allowed.inboxes,
         scopes: ctx.scopes,
+        // False when the administrator turned agent sending off: the send
+        // tools then refuse with MCP_SEND_DISABLED.
+        sendEnabled: mcpSendEnabled(ctx.env),
       }),
     ),
   );
@@ -551,15 +579,43 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       "A UUID you generate per intended send and reuse if you retry. A retry with the same key returns the first result (with replayed: true) instead of sending again; the same key with a different message is refused. Kept 24 hours.",
     );
 
+  type SendAttempt = { result?: unknown; error?: string };
+
+  /**
+   * Runs one send against the user's daily MCP limit: refused over the
+   * limit, and the slot given back when the send is refused or fails.
+   */
+  const runCounted = async (
+    run: () => Promise<SendAttempt>,
+  ): Promise<SendAttempt> => {
+    const reservation = await reserveDailySend(db, {
+      userId: ctx.user.id,
+      channel: "mcp",
+    });
+    if (!reservation.allowed) {
+      return { error: `${DAILY_SEND_LIMIT_CODE}: ${reservation.message}` };
+    }
+    try {
+      const attempt = await run();
+      if (attempt.error !== undefined) await reservation.release();
+      return attempt;
+    } catch (error) {
+      await reservation.release();
+      throw error;
+    }
+  };
+
   /**
    * Runs a send tool at most once per idempotency key (none: just runs). A
-   * refusal releases the key, so a corrected retry runs.
+   * refusal releases the key, so a corrected retry runs. Each run counts
+   * against the daily limit; a replay does not run, so it does not count.
    */
   const sendOnce = async (
     key: string | undefined,
     fields: Record<string, unknown>,
-    run: () => Promise<{ result?: unknown; error?: string }>,
+    send: () => Promise<SendAttempt>,
   ) => {
+    const run = () => runCounted(send);
     if (key === undefined) {
       const outcome = await run();
       return outcome.error !== undefined
@@ -628,7 +684,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         idempotencyKey: idempotencyKeySchema,
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) =>
+    sendGuard(ctx, async (input) =>
       sendOnce(
         input.idempotencyKey,
         {
@@ -697,7 +753,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         idempotencyKey: idempotencyKeySchema,
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
+    sendGuard(ctx, async (input) => {
       const payload = {
         to: input.to,
         fromAddress: input.fromAddress,
@@ -766,7 +822,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         idempotencyKey: idempotencyKeySchema,
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
+    sendGuard(ctx, async (input) => {
       // Check visibility through the same masked path read_email uses, before
       // the send core asserts on the target's inbox. That assertion throws
       // "Inbox not allowed", which would confirm the message exists somewhere
@@ -865,7 +921,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           ),
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
+    sendGuard(ctx, async (input) => {
       // The HTTP route expresses this as a Zod .refine() on the whole object;
       // an MCP inputSchema is a bare shape with no cross-field validation, so
       // without this the lib would query `people.email = undefined` and then
