@@ -1,4 +1,4 @@
-// docs/specs/SPEC-two-factor.md, "Spec changes": what a password session can
+// docs/archive/SPEC-two-factor.md, "Spec changes": what a password session can
 // do before its account has a passkey, and what is left of it afterwards.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env, exports } from "cloudflare:workers";

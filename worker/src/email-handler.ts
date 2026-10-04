@@ -22,7 +22,22 @@ import { wakeConversation } from "./lib/messages/conversation-state";
 import { setSystemSpamState } from "./lib/messages/state";
 import { selectModel } from "./lib/agent/provider";
 import { isAutomatedInbound } from "./lib/automated-inbound";
-import { evaluateRules } from "./lib/rules/evaluate";
+import {
+  recordRuleMatch,
+  rejectionOf,
+  runMatchedRules,
+  selectMatchingRules,
+  type MatchedRule,
+} from "./lib/rules/evaluate";
+import type { RuleMessage } from "./lib/rules/match";
+import { ruleActor } from "./lib/audit/actors";
+import { runWithAudit } from "./lib/audit/context";
+import {
+  UNKNOWN_RECIPIENT_REASON,
+  hasInboxMembers,
+  recordInboundRejection,
+  rejectsUnknownRecipients,
+} from "./lib/inbound-rejection";
 
 export { isAutomatedInbound } from "./lib/automated-inbound";
 
@@ -61,6 +76,45 @@ export async function handleEmail(
   const recipientCanonical = parsed.to.trim().toLowerCase();
   const fromAddressCanonical = parsed.from.address.trim().toLowerCase();
 
+  // One scan of sender_identities serves four consumers: the unknown-recipient
+  // check below, the "our domains" set, the forward destination for this
+  // inbox, and the known-inbox loop guard in `forwardInbound`.
+  const identityRows = await db
+    .select({
+      email: senderIdentities.email,
+      displayName: senderIdentities.displayName,
+      forwardTo: senderIdentities.forwardTo,
+      spamThreshold: senderIdentities.spamThreshold,
+      agentAutodraft: senderIdentities.agentAutodraft,
+    })
+    .from(senderIdentities);
+  const inboxIdentity = identityRows.find(
+    (row) => row.email.trim().toLowerCase() === recipientCanonical,
+  );
+
+  // Mail to an address that is not an inbox (no sender identity, no members)
+  // is refused while the sender's server is still connected, when an admin
+  // turned that on. Off, the catch-all stores mail to any address under the
+  // routed domains.
+  if (
+    !inboxIdentity &&
+    (await rejectsUnknownRecipients(db)) &&
+    !(await hasInboxMembers(db, recipientCanonical))
+  ) {
+    message.setReject(UNKNOWN_RECIPIENT_REASON);
+    await recordInboundRejection(db, {
+      from: fromAddressCanonical,
+      recipient: recipientCanonical,
+      subject: parsed.subject,
+      messageId: parsed.messageId,
+      reason: "unknown_recipient",
+    });
+    console.log(
+      `Rejected email from ${fromAddressCanonical} to ${recipientCanonical}: not an inbox`,
+    );
+    return;
+  }
+
   // Drop mail from blocked senders/domains before any storage or side effects.
   if (await isBlocked(db, fromAddressCanonical)) {
     console.log(`Dropped blocked email from ${fromAddressCanonical}`);
@@ -84,6 +138,48 @@ export async function handleEmail(
       console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);
       return;
     }
+  }
+
+  // Which rules match is decided before storage: every condition reads the
+  // parsed message only. A matching `reject` rule refuses the message here;
+  // the other rules' actions run once it is stored.
+  const ruleMessage: RuleMessage = {
+    fromAddress: fromAddressCanonical,
+    subject: parsed.subject,
+    bodyText: parsed.bodyText,
+    bodyHtml: parsed.bodyHtml,
+    hasAttachments: parsed.attachments.length > 0,
+    spamScore: parsed.spamScore,
+    headers: parsed.headers,
+  };
+  let matchedRules: MatchedRule[] = [];
+  try {
+    matchedRules = await selectMatchingRules(db, {
+      inbox: recipientCanonical,
+      message: ruleMessage,
+    });
+  } catch (error) {
+    console.warn("Failed to select inbound rules:", error);
+  }
+  const rejection = rejectionOf(matchedRules);
+  if (rejection) {
+    message.setReject(rejection.reason);
+    await recordRuleMatch(db, rejection.rule.id, now);
+    await runWithAudit(ruleActor(rejection.rule), () =>
+      recordInboundRejection(db, {
+        from: fromAddressCanonical,
+        recipient: recipientCanonical,
+        subject: parsed.subject,
+        messageId: parsed.messageId,
+        reason: rejection.reason,
+        ruleId: rejection.rule.id,
+        ruleName: rejection.rule.name,
+      }),
+    );
+    console.log(
+      `Rejected email from ${fromAddressCanonical} to ${recipientCanonical} by rule ${rejection.rule.id}`,
+    );
+    return;
   }
 
   const senderAuthenticated =
@@ -188,20 +284,6 @@ export async function handleEmail(
   // External participants = the sender + everyone on the Cc line, minus
   // any addresses that match one of our sender_identities (those are
   // "internal" team members and don't change the group identity).
-  //
-  // One scan of sender_identities serves three consumers: the "our domains"
-  // set below, the forward destination for this inbox, and the known-inbox
-  // loop guard in `forwardInbound`.
-  const identityRows = await db
-    .select({
-      email: senderIdentities.email,
-      displayName: senderIdentities.displayName,
-      forwardTo: senderIdentities.forwardTo,
-      spamThreshold: senderIdentities.spamThreshold,
-      agentAutodraft: senderIdentities.agentAutodraft,
-    })
-    .from(senderIdentities);
-
   const ourDomains = Array.from(
     new Set(
       identityRows
@@ -265,9 +347,6 @@ export async function handleEmail(
     createdAt: now,
   });
 
-  const inboxIdentity = identityRows.find(
-    (row) => row.email.trim().toLowerCase() === recipientCanonical,
-  );
   let autoFiledSpam = false;
   if (
     inboxIdentity?.spamThreshold !== null &&
@@ -286,18 +365,14 @@ export async function handleEmail(
   let ruleSnoozed = false;
   if (!autoFiledSpam) {
     try {
-      const ruleResult = await evaluateRules(
+      const ruleResult = await runMatchedRules(
         db,
+        matchedRules,
         {
+          ...ruleMessage,
           emailId,
           inbox: recipientCanonical,
-          fromAddress: fromAddressCanonical,
-          subject: parsed.subject,
-          bodyText: parsed.bodyText,
           bodyHtml,
-          hasAttachments: cappedAttachments.length > 0,
-          spamScore: parsed.spamScore,
-          headers: parsed.headers,
           now,
         },
         { env, ctx },
@@ -305,7 +380,7 @@ export async function handleEmail(
       autoFiledSpam ||= ruleResult.markedSpam;
       ruleSnoozed = ruleResult.snoozed;
     } catch (error) {
-      console.warn("Failed to evaluate inbound rules:", error);
+      console.warn("Failed to run inbound rules:", error);
     }
   }
 

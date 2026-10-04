@@ -57,6 +57,7 @@ const ACTION_TYPES: Array<{ value: RuleAction["type"]; label: string }> = [
   { value: "snooze", label: "Snooze" },
   { value: "assign", label: "Assign" },
   { value: "auto_reply", label: "Auto-reply" },
+  { value: "reject", label: "Reject the message" },
 ];
 
 const OPERATORS: Record<RuleCondition["field"], string[]> = {
@@ -141,6 +142,7 @@ function actionSummary(action: RuleAction): string {
   if (action.type === "move_to_folder") return "move to folder";
   if (action.type === "snooze") return "snooze " + String(action.hours) + "h";
   if (action.type === "auto_reply") return "auto-reply";
+  if (action.type === "reject") return "reject";
   return action.type;
 }
 
@@ -160,6 +162,30 @@ function emptyDraft(position: number): AutomationRuleInput {
     stopProcessing: false,
     enabled: true,
   };
+}
+
+/**
+ * What a reject reason may hold (it travels in the SMTP reply): printable
+ * ASCII on one line. Curly quotes and dashes, which keyboards substitute
+ * silently, are turned into plain ones as the reason is typed.
+ */
+const REJECT_REASON_PATTERN = /^[\x20-\x7E]*$/;
+
+function plainReason(value: string): string {
+  return value
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-");
+}
+
+function rejectReasonProblem(actions: RuleAction[]): string | null {
+  for (const action of actions) {
+    if (action.type !== "reject" || action.reason === undefined) continue;
+    if (!REJECT_REASON_PATTERN.test(action.reason)) {
+      return "The reject reason can only use plain letters, digits and punctuation (no accents or emoji): the sender's server receives it as is.";
+    }
+  }
+  return null;
 }
 
 function messageIdFromInput(value: string): string {
@@ -315,6 +341,11 @@ export default function AutomationsPage() {
   }
 
   async function saveRule() {
+    const reasonProblem = rejectReasonProblem(draft.actions);
+    if (reasonProblem) {
+      setServerError(reasonProblem);
+      return;
+    }
     setSaving(true);
     setServerError(null);
     try {
@@ -418,7 +449,16 @@ export default function AutomationsPage() {
     setServerError(null);
     setTestResult(null);
     try {
-      setTestResult(await testRule(draft.conditions, emailId));
+      // Only whether the rule rejects matters to the test: an action still
+      // being filled in must not fail it.
+      const rejects = draft.actions.some((action) => action.type === "reject");
+      setTestResult(
+        await testRule(
+          draft.conditions,
+          emailId,
+          rejects ? [{ type: "reject" }] : undefined,
+        ),
+      );
     } catch (error) {
       setServerError(
         error instanceof Error ? error.message : "Couldn’t test automation",
@@ -812,7 +852,17 @@ export default function AutomationsPage() {
                 </div>
                 <button
                   type="button"
-                  disabled={draft.actions.length >= 5}
+                  // A reject rule has nothing else to run: the message is
+                  // never stored.
+                  disabled={
+                    draft.actions.length >= 5 ||
+                    draft.actions.some((action) => action.type === "reject")
+                  }
+                  title={
+                    draft.actions.some((action) => action.type === "reject")
+                      ? "A rule that rejects can have no other action"
+                      : undefined
+                  }
                   onClick={() =>
                     setDraft((current) => ({
                       ...current,
@@ -857,10 +907,12 @@ export default function AutomationsPage() {
                           key={type.value}
                           value={type.value}
                           disabled={
-                            !draft.inbox &&
-                            (type.value === "move_to_folder" ||
-                              type.value === "assign" ||
-                              type.value === "auto_reply")
+                            (!draft.inbox &&
+                              (type.value === "move_to_folder" ||
+                                type.value === "assign" ||
+                                type.value === "auto_reply")) ||
+                            (type.value === "reject" &&
+                              draft.actions.length > 1)
                           }
                         >
                           {type.label}
@@ -1003,6 +1055,49 @@ export default function AutomationsPage() {
                           </p>
                         </div>
                       )}
+                      {action.type === "reject" && (
+                        <div className="space-y-2">
+                          <input
+                            aria-label={
+                              "Action " + String(index + 1) + " reason"
+                            }
+                            maxLength={200}
+                            placeholder="Reason (optional): Rejected by mailbox policy"
+                            value={action.reason ?? ""}
+                            aria-describedby={"reject-warning-" + String(index)}
+                            onChange={(event) =>
+                              updateAction(index, (current) =>
+                                current.type === "reject"
+                                  ? {
+                                      ...current,
+                                      reason:
+                                        plainReason(event.target.value) ||
+                                        undefined,
+                                    }
+                                  : current,
+                              )
+                            }
+                            className="w-full rounded-[6px] border border-border bg-card px-2 py-1.5 text-xs text-text-primary"
+                          />
+                          {action.reason !== undefined &&
+                            !REJECT_REASON_PATTERN.test(action.reason) && (
+                              <p
+                                role="alert"
+                                className="text-[11px] leading-4 text-red-600"
+                              >
+                                Use plain letters, digits and punctuation only.
+                              </p>
+                            )}
+                          <p
+                            id={"reject-warning-" + String(index)}
+                            className="text-[11px] leading-4 text-amber-700"
+                          >
+                            The sender&apos;s server is told the message was
+                            refused. Nothing is stored. This must be the
+                            rule&apos;s only action.
+                          </p>
+                        </div>
+                      )}
                       {(action.type === "archive" ||
                         action.type === "mark_spam") && (
                         <span className="inline-flex h-8 items-center text-xs text-text-tertiary">
@@ -1075,6 +1170,8 @@ export default function AutomationsPage() {
                 <div className="mt-3 text-xs text-text-secondary">
                   <p className="font-medium text-text-primary">
                     {testResult.matched ? "Matched" : "Did not match"}
+                    {testResult.wouldReject &&
+                      " — this message would be rejected (nothing was rejected: testing never runs actions)"}
                   </p>
                   <ul className="mt-1 space-y-1">
                     {testResult.conditionResults.map((result, index) => (

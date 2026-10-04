@@ -108,3 +108,42 @@ message is refused at SMTP time with a 5xx and the reason.
   `docs/inboxes.md`: the unknown-recipient setting and the catch-all default. `docs/architecture.md`:
   the new inbound order (one diagram line).
 - CHANGELOG `### Added`: **Reject mail at the door.** …
+
+## Spec changes (implementation)
+
+The five decisions are unchanged. What the code does differently, and why:
+
+1. **Matching before storage reads the parsed HTML** (`parsed.bodyHtml`), not the copy with `cid:`
+   references rewritten to attachment URLs. The only condition that reads HTML, `body contains`, reads
+   the plain text when there is any and otherwise the HTML converted to text, which drops `src`
+   attributes. An HTML-only message whose links point at `cid:` URLs could match differently (link
+   targets are kept in the text); the rule test still reads the stored, rewritten HTML.
+2. **The `sender_identities` read moves to the top**, and the `reject_unknown_recipients` setting is
+   read only when the recipient is not an inbox, so the common path costs no extra query.
+3. If selecting the rules fails (a D1 error), the message is stored with no rule actions and the
+   failure logged, as a failed `evaluateRules` did before: a rule never makes delivery fail.
+4. `recordRuleMatch` is shared by the rejection and the action pass; `runMatchedRules` no longer checks
+   `stop_processing`, since the selection already stopped there.
+5. The audit row's target is the rule (`target_type: "rule"`, its id) for a rule rejection and the
+   address (`target_type: "inbox"`) for an unknown recipient; `details.reason` is the SMTP reason or
+   `"unknown_recipient"`.
+6. The dry run takes the rule's `actions` (optional, alongside `conditions`) to answer `wouldReject`.
+7. The unknown-recipient toggle sits at the bottom of the **Inboxes** page, read and written through
+   `GET`/`PATCH /api/admin/settings` (`rejectUnknownRecipients`).
+8. **An inbox is an address with a sender identity or assigned members**, not only a
+   `sender_identities` address (decision 4). The Inboxes page lists every address that ever received
+   mail, and members can be assigned to one with no identity; refusing those would bounce mail a team
+   is working. Turning the setting on first lists the addresses with mail in the last 30 days that
+   would be refused (`GET /api/admin/settings/unknown-recipients`) and asks to confirm.
+9. **A reject rule is decided before the inbox spam threshold** (D14), so it refuses mail the
+   threshold would have filed to Junk; the threshold still keeps the other rules' actions from running
+   (D21).
+10. Cloudflare runs the handler once per recipient, and does not document how one invocation's
+    `setReject` combines with another that accepts the same message (an SMTP refusal after the content
+    is for the whole message). Not tested live; documented as such in `docs/automations.md` and
+    `docs/inboxes.md`.
+11. A reject reason is trimmed; the builder turns curly quotes and dashes into plain ones and refuses
+    other non-ASCII before saving. The rule test sends only whether the rule rejects, so an action still
+    being filled in cannot fail it.
+12. Rules are created only through the admin HTTP API (and the web page on it), so that is the one
+    place `reject` is offered; MCP's `list_rules` shows it like any other action.

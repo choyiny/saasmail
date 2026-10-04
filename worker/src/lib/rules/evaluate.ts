@@ -12,10 +12,19 @@ import { setMailboxMembership, setMailboxState } from "../messages/state";
 import { runAutoReply } from "./auto-reply";
 import { matchConditions, type RuleMessage } from "./match";
 import {
+  DEFAULT_REJECT_REASON,
   RuleActionsSchema,
   RuleConditionsSchema,
   type RuleAction,
 } from "./types";
+
+type RuleRow = typeof rules.$inferSelect;
+
+/** A rule whose conditions matched a message, with its parsed actions. */
+export type MatchedRule = {
+  rule: RuleRow;
+  actions: RuleAction[];
+};
 
 export type RuleEvaluationInput = RuleMessage & {
   emailId: string;
@@ -84,6 +93,9 @@ async function runAction(
     case "assign":
       await assignConversations(db, allowed, null, refs, action.userId);
       return {};
+    case "reject":
+      // Acts before storage (see rejectionOf); a stored message is past it.
+      return {};
     case "auto_reply":
       if (!runtime) {
         console.log(
@@ -110,13 +122,18 @@ async function runAction(
   }
 }
 
-export async function evaluateRules(
+/**
+ * Which enabled rules match a message, in order, stopping after the first
+ * matching rule with "stop processing". Reads the parsed message only and
+ * writes nothing, so it can run before the message is stored. Malformed
+ * rules are skipped with a warning.
+ */
+export async function selectMatchingRules(
   db: DrizzleD1Database<any>,
-  input: RuleEvaluationInput,
-  runtime?: RuleEvaluationRuntime,
-): Promise<RuleEvaluationResult> {
+  input: { inbox: string; message: RuleMessage },
+): Promise<MatchedRule[]> {
   const inbox = input.inbox.trim().toLowerCase();
-  const matchingRules = await db
+  const candidates = await db
     .select()
     .from(rules)
     .where(
@@ -128,9 +145,8 @@ export async function evaluateRules(
     )
     .orderBy(asc(rules.position), asc(rules.id));
 
-  const result: RuleEvaluationResult = { markedSpam: false, snoozed: false };
-
-  for (const rule of matchingRules) {
+  const matched: MatchedRule[] = [];
+  for (const rule of candidates) {
     const parsedConditions = RuleConditionsSchema.safeParse(rule.conditions);
     const parsedActions = RuleActionsSchema.safeParse(rule.actions);
     if (!parsedConditions.success || !parsedActions.success) {
@@ -142,14 +158,68 @@ export async function evaluateRules(
       });
       continue;
     }
+    if (!matchConditions(parsedConditions.data, input.message).matched) {
+      continue;
+    }
+    matched.push({ rule, actions: parsedActions.data });
+    if (rule.stopProcessing === 1) break;
+  }
+  return matched;
+}
 
-    if (!matchConditions(parsedConditions.data, input).matched) continue;
+/** The first matched rule that rejects the message, with its reason. */
+export function rejectionOf(
+  matched: MatchedRule[],
+): { rule: RuleRow; reason: string } | null {
+  for (const entry of matched) {
+    const reject = entry.actions.find((action) => action.type === "reject");
+    if (reject && reject.type === "reject") {
+      return {
+        rule: entry.rule,
+        reason: reject.reason ?? DEFAULT_REJECT_REASON,
+      };
+    }
+  }
+  return null;
+}
 
+/** Counts a match on the rule; a failure is logged, never thrown. */
+export async function recordRuleMatch(
+  db: DrizzleD1Database<any>,
+  ruleId: string,
+  now: number,
+): Promise<void> {
+  try {
+    await db
+      .update(rules)
+      .set({
+        matchCount: sql`${rules.matchCount} + 1`,
+        lastMatchedAt: now,
+      })
+      .where(eq(rules.id, ruleId));
+  } catch (error) {
+    console.warn(`[rules] failed to update match stats for ${ruleId}:`, error);
+  }
+}
+
+/**
+ * Runs the actions of rules already selected for a stored message, each
+ * action on its own (one failing does not stop the others), as the rule.
+ */
+export async function runMatchedRules(
+  db: DrizzleD1Database<any>,
+  matched: MatchedRule[],
+  input: RuleEvaluationInput,
+  runtime?: RuleEvaluationRuntime,
+): Promise<RuleEvaluationResult> {
+  const result: RuleEvaluationResult = { markedSpam: false, snoozed: false };
+
+  for (const { rule, actions } of matched) {
     // What the rule's actions do (a send, a junk mark) is audited as the
     // rule, by name. An auto-reply started here keeps that actor even though
     // it finishes later under waitUntil.
     await runWithAudit(ruleActor(rule), async () => {
-      for (const action of parsedActions.data) {
+      for (const action of actions) {
         try {
           const actionResult = await runAction(
             db,
@@ -169,24 +239,25 @@ export async function evaluateRules(
       }
     });
 
-    const now = input.now ?? Math.floor(Date.now() / 1000);
-    try {
-      await db
-        .update(rules)
-        .set({
-          matchCount: sql`${rules.matchCount} + 1`,
-          lastMatchedAt: now,
-        })
-        .where(eq(rules.id, rule.id));
-    } catch (error) {
-      console.warn(
-        `[rules] failed to update match stats for ${rule.id}:`,
-        error,
-      );
-    }
-
-    if (rule.stopProcessing === 1) break;
+    await recordRuleMatch(
+      db,
+      rule.id,
+      input.now ?? Math.floor(Date.now() / 1000),
+    );
   }
 
   return result;
+}
+
+/** Selects and runs the rules for a stored message in one call. */
+export async function evaluateRules(
+  db: DrizzleD1Database<any>,
+  input: RuleEvaluationInput,
+  runtime?: RuleEvaluationRuntime,
+): Promise<RuleEvaluationResult> {
+  const matched = await selectMatchingRules(db, {
+    inbox: input.inbox,
+    message: input,
+  });
+  return runMatchedRules(db, matched, input, runtime);
 }

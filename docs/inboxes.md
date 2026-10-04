@@ -55,6 +55,33 @@ To see the addresses beforehand, read `replyRecipients` on the message
 (`GET /api/emails/{id}`, MCP `read_email`). The web composers always send
 `recipient`, so a reply never goes to an address they did not show.
 
+## Unknown recipients
+
+An Email Routing catch-all rule sends mail for any address under your domain to
+saasmail, and by default all of it is stored, including mail to addresses no
+inbox has. Turn on **Reject mail to addresses that aren't inboxes** at the
+bottom of the **Inboxes** page (or `PATCH /api/admin/settings` with
+`{"rejectUnknownRecipients": true}`) and such mail is refused while the sending
+server is connected, with `No such mailbox`. Nothing is stored, and the audit
+log records `inbound.rejected` with the address. The check runs first, before
+the blocklist and the [rules](automations.md#rejecting-mail).
+
+An address counts as an inbox when it has a sender identity (it was created or
+edited on the Inboxes page) or members assigned to it, whatever its case. The
+Inboxes page also lists addresses that only ever received mail through the
+catch-all; those are not inboxes, and turning the setting on first lists the
+ones that received mail in the last 30 days and asks you to confirm. To keep
+one, give it a sender identity or assign members. Also:
+
+- Plus addresses are separate addresses: `support+orders@` is refused unless
+  it is an inbox itself.
+- A **Forward to** address on your own domain that is not an inbox is refused
+  too, so forwarded copies to it bounce.
+- Refusing unknown addresses tells a sender which addresses exist, as any mail
+  server that rejects them does.
+- Each refusal writes one audit row (kept 180 days by default), so a
+  dictionary attack shows up there in volume.
+
 ## Per-inbox forwarding
 
 Give any inbox a **Forward to** address and every message it receives is re-sent to

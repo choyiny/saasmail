@@ -1,4 +1,4 @@
-// docs/specs/SPEC-two-factor.md §1: sign-in rate limits that hold across
+// docs/archive/SPEC-two-factor.md §1: sign-in rate limits that hold across
 // Worker isolates.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env, exports } from "cloudflare:workers";

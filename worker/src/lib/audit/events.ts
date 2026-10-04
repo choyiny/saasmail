@@ -57,6 +57,7 @@ export const AUDIT_ACTIONS = {
   sendingPaused: "sending.paused",
   sendingResumed: "sending.resumed",
   sendLimitReached: "send.limit_reached",
+  inboundRejected: "inbound.rejected",
   campaignStarted: "campaign.started",
   campaignCancelled: "campaign.cancelled",
   agentActionExecuted: "agent.action_executed",

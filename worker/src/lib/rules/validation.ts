@@ -17,6 +17,15 @@ export async function validateRuleActions(
   input: { inbox: string | null; actions: RuleAction[] },
 ): Promise<void> {
   const inbox = input.inbox?.trim().toLowerCase() ?? null;
+  // A rejected message is never stored, so no other action could run on it.
+  if (
+    input.actions.some((action) => action.type === "reject") &&
+    input.actions.length !== 1
+  ) {
+    throw new InvalidRuleError(
+      "A reject action must be the rule's only action",
+    );
+  }
   const autoReplies = input.actions.filter(
     (action) => action.type === "auto_reply",
   );

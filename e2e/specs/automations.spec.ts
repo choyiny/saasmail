@@ -37,4 +37,37 @@ test.describe.serial("automations", () => {
     await row.getByRole("button", { name: "Delete " + name }).click();
     await expect(row).toHaveCount(0);
   });
+
+  test("creates a reject rule, which a dry run says would reject", async ({
+    page,
+  }) => {
+    const name = "E2E reject automation";
+
+    await page.goto("/automations");
+    await page.getByTestId("automation-new").click();
+    await page.getByLabel("Rule name").fill(name);
+    await page.getByLabel("Action 1 type").selectOption("reject");
+    await page.getByLabel("Action 1 reason").fill("Not accepted here");
+    await expect(
+      page.getByRole("button", { name: "Add action" }),
+    ).toBeDisabled();
+
+    // No live SMTP here: the dry run against a seeded message reports it.
+    await page.getByLabel("Message ref or id").fill("received:e_m_a1");
+    await page.getByRole("button", { name: "Test" }).click();
+    await expect(
+      page.getByText(/this message would be rejected/),
+    ).toBeVisible();
+
+    await page.getByTestId("automation-save").click();
+    const row = page
+      .getByTestId("automation-rule-row")
+      .filter({ hasText: name });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("reject");
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await row.getByRole("button", { name: "Delete " + name }).click();
+    await expect(row).toHaveCount(0);
+  });
 });

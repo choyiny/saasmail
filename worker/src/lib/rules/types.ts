@@ -43,6 +43,9 @@ export const RuleConditionSchema = z.discriminatedUnion("field", [
 
 export const RuleConditionsSchema = z.array(RuleConditionSchema).max(10);
 
+/** What the sending server is told when a `reject` rule gives no reason. */
+export const DEFAULT_REJECT_REASON = "Rejected by mailbox policy";
+
 export const RuleActionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("archive") }),
   z.object({ type: z.literal("mark_spam") }),
@@ -62,6 +65,18 @@ export const RuleActionSchema = z.discriminatedUnion("type", [
     type: z.literal("auto_reply"),
     subject: z.string().min(1).max(200).optional(),
     bodyText: z.string().min(1).max(5000),
+  }),
+  z.object({
+    // Refuses the message at SMTP time, before anything is stored.
+    type: z.literal("reject"),
+    // It travels in the SMTP reply: printable ASCII on one line.
+    reason: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(/^[\x20-\x7E]+$/, "Use printable ASCII characters only")
+      .optional(),
   }),
 ]);
 

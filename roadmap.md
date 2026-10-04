@@ -50,7 +50,7 @@ sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md
 | 9-2   | Audit log (`docs/archive/SPEC-audit-log.md`)                                                                                           | #68     | `3b42c45`        |
 | 9-3   | Idempotency keys for sends (`docs/archive/SPEC-send-idempotency.md`)                                                                   | #69     | `ee8a135`        |
 | 9-4   | Pause switch, MCP kill switch, daily caps (`docs/archive/SPEC-send-controls.md`)                                                       | #70     | `c1ecdd2`        |
-| 9-5   | Two-factor sign-in, durable auth rate limits (`SPEC-two-factor.md`)                                                                    | —       | —                |
+| 9-5   | Sign-in rate limits and passkey-only sessions; two-factor sign-in dropped (`docs/archive/SPEC-two-factor.md`)                          | #71     | `f4b0625`        |
 | 10-1  | `reject` rule action, unknown-recipient rejection (`SPEC-reject-inbound.md`)                                                           | —       | —                |
 | 10-2  | AI filing into folders (`SPEC-ai-folders.md`)                                                                                          | —       | —                |
 | 10-3  | A spam filter that learns from junk marks (`SPEC-spam-learning.md`)                                                                    | —       | —                |

@@ -3,8 +3,10 @@
 # Automations
 
 Saasmail has one rules engine for inbound routing and future automation uses.
-Rules are evaluated inline after a received message and its mailbox state are
-stored, but before conversation wake-up and notification fan-out.
+Which rules match a received message is decided before it is stored (a
+[`reject`](#rejecting-mail) rule refuses it there); the other actions run once
+the message and its mailbox state are stored, before conversation wake-up and
+notification fan-out.
 
 ## Rules
 
@@ -32,7 +34,8 @@ Supported conditions:
 - `header`: a header `name` plus `equals` or `contains`
 
 Supported actions are `archive`, `mark_spam`, `move_to_folder`,
-`snooze`, `assign`, and `auto_reply`. Snooze accepts 1–720 hours. Folder
+`snooze`, `assign`, `auto_reply` and `reject` ([below](#rejecting-mail)).
+Snooze accepts 1–720 hours. Folder
 moves require an inbox-scoped rule and a folder in that same inbox. Assignment
 also requires an inbox-scoped rule, and the assignee must have access to that
 inbox; admins have access to every inbox. Auto-reply also requires a specific
@@ -42,10 +45,51 @@ Each action is best-effort. A failed action is logged and later actions still
 run, so a routing failure never rejects inbound delivery. Match counts and
 last-match timestamps are recorded per matched rule.
 
-Mail already auto-filed to Junk by the inbox spam threshold does not enter the
-rules engine. If a rule itself marks a message as spam, the message follows
+Mail auto-filed to Junk by the inbox spam threshold runs no rule actions. A
+`reject` rule still applies to it: rejection comes before storage, and so
+before the threshold. If a rule itself marks a message as spam, the message follows
 the same silent path: it does not wake a snoozed conversation and does not
 fan out realtime or push notifications.
+
+## Rejecting mail
+
+A `reject` action refuses the message while the sending server is still
+connected: Cloudflare answers it with a `5xx` and the rule's reason, so a
+legitimate sender learns their mail did not land. Nothing is stored: no
+message, no contact, no attachment, and no forward, auto-reply, webhook or
+notification follows.
+
+```json
+{ "type": "reject", "reason": "We do not accept mail from this address" }
+```
+
+- The reason is optional (1–200 printable ASCII characters, one line); without
+  one the reply is `Rejected by mailbox policy`.
+- `reject` must be the rule's only action, since none could run on a message
+  that is never stored. It may be inbox-scoped or apply to every inbox.
+- Which rules match is decided before the message is stored, in the same order
+  and with the same conditions as always; the other rules' actions run once it
+  is stored. A matching rule with `stop_processing` before a reject rule keeps
+  the message. The first matching reject rule wins.
+- Blocked senders are still dropped silently, never rejected by a rule: a
+  bounce would tell a spammer the address is live. So are redeliveries of a
+  message already stored. (The [unknown-recipient](inboxes.md#unknown-recipients)
+  check runs before the blocklist.)
+- A rejection is decided before the inbox spam threshold, so a matching reject
+  rule refuses mail the threshold would have filed to Junk.
+- A message sent to several of your addresses at once reaches saasmail once
+  per address. Cloudflare does not document how a rejection for one of them
+  combines with the others (SMTP refuses a message as a whole once its content
+  has been sent), so the sender may get a bounce even though another inbox
+  stored the message. Prefer global reject rules over rules scoped to one inbox
+  when a sender writes to several.
+- A rejection counts as a match of the rule (`match_count`,
+  `last_matched_at`) and is recorded in the [audit log](audit-log.md) as
+  `inbound.rejected`, by the rule, with the sender, recipient, subject and
+  Message-ID.
+
+Mail to an address that is not one of your inboxes can be refused the same way
+without a rule: see [Unknown recipients](inboxes.md#unknown-recipients).
 
 ## Assignment
 
@@ -114,7 +158,10 @@ right.
 **Screenshot (editor, described):** a rule dialog with name and scope at the top,
 stacked condition and action builders, a catch-all warning when conditions are
 empty, Stop processing, and a Test against a message panel that reports the
-overall match and each condition result.
+overall match and each condition result, and says when the message would be
+rejected (a test never rejects anything). Choosing **Reject the message**
+shows an optional reason and the warning that nothing is stored; it cannot sit
+next to another action.
 
 Assignment is also available directly in Mail. The reading pane and bulk
 selection bar expose an Assign menu containing only users who can access the
@@ -131,7 +178,10 @@ corresponding list row, and Assigned to me visible in the folder rail.
 Admins can list, create, partially update, delete, and reorder rules under
 `/api/admin/rules`. `POST /api/admin/rules/test` evaluates a supplied
 rule's conditions against an existing received email and returns the
-per-condition results without saving the rule or running any actions.
+per-condition results without saving the rule or running any actions. Pass the
+rule's `actions` too and the answer's `wouldReject` says whether it matched
+with a `reject` action. The test looks at that one rule: an earlier rule with
+Stop processing could keep a real message from reaching it.
 
 The remote MCP server exposes read-only `list_rules` under the
 `email:read` scope.

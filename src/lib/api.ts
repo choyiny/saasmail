@@ -1532,7 +1532,8 @@ export type RuleAction =
   | { type: "move_to_folder"; mailboxId: string }
   | { type: "snooze"; hours: number }
   | { type: "assign"; userId: string }
-  | { type: "auto_reply"; subject?: string; bodyText: string };
+  | { type: "auto_reply"; subject?: string; bodyText: string }
+  | { type: "reject"; reason?: string };
 
 export type RuleWarning = {
   actionIndex: number;
@@ -1570,6 +1571,8 @@ export interface AutomationRuleInput {
 
 export interface RuleTestResult {
   matched: boolean;
+  /** Matched with a reject action: the message would be refused. */
+  wouldReject: boolean;
   conditionResults: Array<{
     condition: RuleCondition;
     matched: boolean;
@@ -1618,11 +1621,12 @@ export async function reorderRules(ids: string[]): Promise<{ success: true }> {
 export async function testRule(
   conditions: RuleCondition[],
   emailId: string,
+  actions?: RuleAction[],
 ): Promise<RuleTestResult> {
   return apiFetch("/api/admin/rules/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rule: { conditions }, emailId }),
+    body: JSON.stringify({ rule: { conditions, actions }, emailId }),
   });
 }
 
@@ -1753,6 +1757,8 @@ export interface AdminSettings {
   /** Unix seconds and who, while paused. */
   outboundPause: { since: number; byLabel: string } | null;
   dailySendLimits: DailySendLimits;
+  /** Inbound mail to an address that is not an inbox is refused. */
+  rejectUnknownRecipients: boolean;
 }
 
 export async function fetchAdminSettings(): Promise<AdminSettings> {
@@ -1762,12 +1768,20 @@ export async function fetchAdminSettings(): Promise<AdminSettings> {
 export async function updateAdminSettings(changes: {
   outboundPaused?: boolean;
   dailySendLimits?: Partial<DailySendLimits>;
+  rejectUnknownRecipients?: boolean;
 }): Promise<AdminSettings> {
   return apiFetch("/api/admin/settings", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(changes),
   });
+}
+
+/** Addresses with recent mail that are not inboxes: what rejection would refuse. */
+export async function fetchUnknownRecipients(): Promise<{
+  addresses: { address: string; count: number; lastReceivedAt: number }[];
+}> {
+  return apiFetch("/api/admin/settings/unknown-recipients");
 }
 
 export interface SendUsage {

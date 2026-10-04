@@ -526,7 +526,13 @@ adminRulesRouter.openapi(reorderRoute, async (c) => {
 });
 
 const TestRuleSchema = z.object({
-  rule: z.object({ conditions: RuleConditionsSchema }).passthrough(),
+  rule: z
+    .object({
+      conditions: RuleConditionsSchema,
+      // Optional: given, the answer says whether the rule would reject.
+      actions: z.array(RuleActionSchema).optional(),
+    })
+    .passthrough(),
   emailId: z.string().min(1).max(500),
 });
 
@@ -545,6 +551,10 @@ const testRuleRoute = createRoute({
         "application/json": {
           schema: z.object({
             matched: z.boolean(),
+            wouldReject: z.boolean().openapi({
+              description:
+                "The rule matches and has a reject action: the message would be refused at SMTP time. A dry run never rejects anything.",
+            }),
             conditionResults: z.array(
               z.object({
                 condition: RuleConditionSchema,
@@ -601,16 +611,22 @@ adminRulesRouter.openapi(testRuleRoute, async (c) => {
     }
   }
 
+  const result = matchConditions(rule.conditions, {
+    fromAddress: person?.email ?? "",
+    subject: email.subject,
+    bodyText: email.bodyText,
+    bodyHtml: email.bodyHtml,
+    hasAttachments: attachment !== undefined,
+    spamScore: email.spamScore,
+    headers,
+  });
   return c.json(
-    matchConditions(rule.conditions, {
-      fromAddress: person?.email ?? "",
-      subject: email.subject,
-      bodyText: email.bodyText,
-      bodyHtml: email.bodyHtml,
-      hasAttachments: attachment !== undefined,
-      spamScore: email.spamScore,
-      headers,
-    }),
+    {
+      ...result,
+      wouldReject:
+        result.matched &&
+        (rule.actions ?? []).some((action) => action.type === "reject"),
+    },
     200,
   );
 });

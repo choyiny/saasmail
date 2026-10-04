@@ -84,6 +84,8 @@ flowchart LR
     DO --> D1
 ```
 
+Inbound mail goes through, in order: the unknown-recipient check (when turned on), the blocklist (a silent drop), the Message-ID dedupe, rule matching (a [`reject` rule](automations.md#rejecting-mail) refuses the message at SMTP time), storage, then the matched rules' actions and the fan-out. Everything before storage writes nothing but a rejection's audit row and the rejecting rule's match count.
+
 The `NotificationsHub` Durable Object is keyed per user (`idFromName(userId)`). On inbound mail the worker fans out to each recipient's hub, which pushes WebSocket frames to live tabs and sends encrypted Web Push to registered devices. The queue carries scheduled sequence emails — the cron trigger enqueues due steps and a queue consumer in the same worker sends them. It also releases JMAP delayed sends: each one is enqueued with its delay (at most 24 hours, the queue's limit), and the hourly cron sends any the queue missed.
 
 ---
