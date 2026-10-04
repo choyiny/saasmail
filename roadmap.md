@@ -129,6 +129,11 @@ The stage order isn't numeric because Stage 3 (the mailbox view) needed Stage
 
 - **Stage 8, portability (a non-Cloudflare runtime):** only on real demand.
 - **JMAP follow-ups:** search snippets and vacation response.
+- **A second sign-in factor (TOTP or similar):** deferred on 2026-10-04, not
+  dropped. Stage 9 shipped sign-in rate limits and passkey-only sessions
+  without it, because a password can't sign in to a passkey account
+  (`docs/archive/SPEC-two-factor.md`). It needs a new spec that says what a
+  second factor protects once sign-in is passkey-only.
 - **Snooze-expiry notifications:** there is no wake-up cron by design.
 - **Calendar, invites and booking pages:** a second product; revisit booking
   links on the customer timeline after stage 10.
