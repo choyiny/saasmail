@@ -1,6 +1,6 @@
 # Implementation Roadmap
 
-Updated: 2026-10-03
+Updated: 2026-10-04
 
 This file tracks the stages built on top of saasmail's customer timeline, inbox
 permissions, newsletters, sequences, MCP/WebMCP and delivery infrastructure.
@@ -11,8 +11,9 @@ native agent, MCP, WebMCP and JMAP are further clients of the same services.
 ## Status
 
 Stages 1–7 are complete, including JMAP sending and the JMAP v1 follow-ups (#45–#66).
-Stage 8 is deferred. Stages 9–11 are specified in [`docs/specs/`](docs/specs/) and
-sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md).
+Stage 8 is deferred. Stages 9–11 shipped one spec per PR (#67–#78), in the order of
+[`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md); their specs are in
+[`docs/archive/`](docs/archive/).
 
 | Stage | Scope                                                                                                                                  | PR      | Merge commit     |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------- | ------- | ---------------- |
@@ -57,7 +58,7 @@ sequenced in [`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md
 | 11-1  | mbox export and `.eml` download (`docs/archive/SPEC-mail-export.md`)                                                                   | #75     | `a6b9d6b`        |
 | 11-2  | mbox/eml import (`docs/archive/SPEC-mail-import.md`)                                                                                   | #76     | `9e1a87e`        |
 | 11-3  | Scheduled D1 backups to R2 and a restore script (`docs/archive/SPEC-backups.md`)                                                       | #77     | `893e240`        |
-| 10-4  | Header-based threading per inbox, last (`SPEC-header-threading.md`)                                                                    | —       | —                |
+| 10-4  | Header-based threading per inbox, last (`docs/archive/SPEC-header-threading.md`)                                                       | #78     | `4765891`        |
 
 A row with `—` is on a branch that hasn't merged yet; fill in the PR number and
 squash commit when it lands.
@@ -110,17 +111,17 @@ The stage order isn't numeric because Stage 3 (the mailbox view) needed Stage
     update, as transactional one-To messages through the shared outbox.
   - See [docs/jmap.md](docs/jmap.md).
 
-- **Stage 9: trust and safety** (specified, not built). Replies follow
-  Reply-To; an audit log fed by every channel; idempotency keys on sends; a
-  pause switch that holds the outbox, an `MCP_SEND_ENABLED` kill switch and
-  daily caps per channel; TOTP second factor with recovery codes and D1-backed
-  auth rate limits.
-- **Stage 10: triage** (specified, not built). A `reject` rule action evaluated
+- **Stage 9: trust and safety** (#67–#71). Replies follow Reply-To; an audit
+  log fed by every channel; idempotency keys on sends; a pause switch that
+  holds the outbox, an `MCP_SEND_ENABLED` kill switch and daily caps per
+  channel; D1-backed sign-in rate limits and passkey-only sessions. The TOTP
+  second factor was dropped: a password cannot sign in to a passkey account.
+- **Stage 10: triage** (#72–#74, #78). A `reject` rule action evaluated
   before storage and optional rejection of unknown recipients; folder colours
   and descriptions with an `ai_file` rule action; a per-inbox Bayes spam
   filter trained by the team's junk marks, exposed as a `spam_probability`
   condition; last, header-based threading as a per-inbox option.
-- **Stage 11: data ownership** (specified, not built). mbox export and `.eml`
+- **Stage 11: data ownership** (#75–#77). mbox export and `.eml`
   download; mbox/eml import through the shared inbound storage helper; daily
   logical D1 backups to R2 with a CLI restore.
 

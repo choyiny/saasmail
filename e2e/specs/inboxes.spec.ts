@@ -157,7 +157,7 @@ test.describe.serial("inboxes CRUD", () => {
   test("conversations by thread and back regroup the inbox's mail", async ({
     page,
   }) => {
-    // docs/specs/SPEC-header-threading.md. Alice's second message answers her
+    // docs/archive/SPEC-header-threading.md. Alice's second message answers her
     // first; Bob's mail answers nothing.
     execLocalSql(
       "UPDATE emails SET in_reply_to = 'mid_s_a1' WHERE id = 'e_s_a2'",

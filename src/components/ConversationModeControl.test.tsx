@@ -1,4 +1,4 @@
-// docs/specs/SPEC-header-threading.md: the Inboxes page's conversation mode.
+// docs/archive/SPEC-header-threading.md: the Inboxes page's conversation mode.
 import {
   act,
   fireEvent,

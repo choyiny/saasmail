@@ -1,4 +1,4 @@
-// docs/specs/SPEC-header-threading.md: an inbox can group its mail into
+// docs/archive/SPEC-header-threading.md: an inbox can group its mail into
 // threads by In-Reply-To/References instead of by customer.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";

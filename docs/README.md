@@ -9,7 +9,7 @@ Everything that used to live in one very long README. Start at
 
 | Page                                  | What's in it                                                                   |
 | ------------------------------------- | ------------------------------------------------------------------------------ |
-| [Setup](setup.md)                     | Full install — the Claude Code wizard, or the eight manual steps it automates  |
+| [Setup](setup.md)                     | Full install — the Claude Code wizard or the manual steps, and backups         |
 | [Email providers](email-providers.md) | Cloudflare Email Sending, Resend, Bavimail, Postmark — and which one wins      |
 | [Configuration](configuration.md)     | Every key in `wrangler.jsonc` and `.dev.vars`, and where secrets go in prod    |
 | [Updating](updating.md)               | Rebasing a fork on upstream, by skill or by hand                               |
