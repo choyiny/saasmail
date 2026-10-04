@@ -19,6 +19,7 @@ import {
   type ReleaseMessage,
 } from "../jmap/release";
 import { drainHeldOutbox, type OutboxDrainMessage } from "./outbox";
+import { fileWithAi, type AiFileMessage } from "./triage/ai-file";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -42,7 +43,8 @@ export type QueueMessageBody =
   | CampaignSendMessage
   | SuggestReplyMessage
   | ReleaseMessage
-  | OutboxDrainMessage;
+  | OutboxDrainMessage
+  | AiFileMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
@@ -55,6 +57,7 @@ export type QueueMessageKind =
   | "suggest_reply"
   | "jmap_submission_release"
   | "outbox_drain"
+  | "ai_file"
   | "unknown";
 
 /**
@@ -102,6 +105,11 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
       : "unknown";
   }
   if (b.type === "outbox_drain") return "outbox_drain";
+  if (b.type === "ai_file") {
+    return typeof b.emailId === "string" && typeof b.inbox === "string"
+      ? "ai_file"
+      : "unknown";
+  }
   return "unknown";
 }
 
@@ -163,6 +171,9 @@ export async function handleQueueBatch(
         // recovery.
         const body = msg.body as ReleaseMessage;
         await releaseScheduledSubmission(env, body.submissionId, { sender });
+      } else if (kind === "ai_file") {
+        // A model error throws, and the message is retried.
+        await fileWithAi(db, env, msg.body as AiFileMessage);
       } else if (kind === "outbox_drain") {
         // After a resume: a batch of held mail, then the next batch, then the
         // delayed JMAP sends that came due while paused.
@@ -197,7 +208,8 @@ export async function handleQueueBatch(
         msg.ack();
       } else {
         console.error(`[queue] ${kind} failed:`, err);
-        if (kind === "suggest_reply") {
+        if (kind === "suggest_reply" || kind === "ai_file") {
+          // A model call: give the provider time before asking again.
           msg.retry({ delaySeconds: SUGGEST_REPLY_RETRY_DELAY_SECONDS });
         } else {
           msg.retry();

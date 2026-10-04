@@ -19,6 +19,7 @@ import {
   RuleConditionsSchema,
 } from "../lib/rules/types";
 import { InvalidRuleError, validateRuleActions } from "../lib/rules/validation";
+import { describedFolders } from "../lib/triage/folders";
 import type { Variables } from "../variables";
 
 export const adminRulesRouter = new OpenAPIHono<{
@@ -26,10 +27,13 @@ export const adminRulesRouter = new OpenAPIHono<{
   Variables: Variables;
 }>();
 
-const ErrorSchema = z.object({ error: z.string() });
+const ErrorSchema = z.object({
+  error: z.string(),
+  code: z.string().optional(),
+});
 const RuleWarningSchema = z.object({
   actionIndex: z.number().int().nonnegative(),
-  code: z.enum(["missing_folder", "assignee_unavailable"]),
+  code: z.enum(["missing_folder", "assignee_unavailable", "no_ai_folders"]),
 });
 type RuleWarning = z.infer<typeof RuleWarningSchema>;
 
@@ -158,6 +162,18 @@ async function computeRuleWarnings(
     }
   }
 
+  // Inboxes with a described folder, for ai_file actions.
+  const aiInboxes = new Set<string>();
+  const aiRuleInboxes = new Set(
+    rows
+      .filter((row) => row.actions.some((action) => action.type === "ai_file"))
+      .map((row) => row.inbox?.trim().toLowerCase())
+      .filter((inbox): inbox is string => !!inbox),
+  );
+  for (const inbox of aiRuleInboxes) {
+    if ((await describedFolders(db, inbox)).length > 0) aiInboxes.add(inbox);
+  }
+
   const result = new Map<string, RuleWarning[]>();
   for (const row of rows) {
     const ruleInbox = row.inbox?.trim().toLowerCase() ?? null;
@@ -172,6 +188,12 @@ async function computeRuleWarnings(
         ) {
           warnings.push({ actionIndex, code: "missing_folder" });
         }
+      }
+      if (
+        action.type === "ai_file" &&
+        !(ruleInbox && aiInboxes.has(ruleInbox))
+      ) {
+        warnings.push({ actionIndex, code: "no_ai_folders" });
       }
       if (action.type === "assign") {
         const user = userById.get(action.userId);
@@ -189,8 +211,11 @@ async function computeRuleWarnings(
   return result;
 }
 
-function mapRuleError(error: unknown): { error: string } | null {
-  return error instanceof InvalidRuleError ? { error: error.message } : null;
+function mapRuleError(error: unknown): { error: string; code?: string } | null {
+  if (!(error instanceof InvalidRuleError)) return null;
+  return error.code
+    ? { error: error.message, code: error.code }
+    : { error: error.message };
 }
 
 const listRoute = createRoute({
@@ -363,7 +388,13 @@ adminRulesRouter.openapi(updateRuleRoute, async (c) => {
   const actions = body.actions ?? existing.actions;
 
   try {
-    await validateRuleActions(db, { inbox, actions });
+    await validateRuleActions(db, {
+      inbox,
+      actions,
+      // A rule whose inbox lost its folder descriptions can still be
+      // switched off or renamed; it says so in its warnings.
+      checkAiFolders: body.actions !== undefined || body.inbox !== undefined,
+    });
   } catch (error) {
     const mapped = mapRuleError(error);
     if (mapped) return c.json(mapped, 400);
@@ -420,7 +451,8 @@ adminRulesRouter.openapi(updateRuleRoute, async (c) => {
       details: { fields },
     });
   }
-  return c.json(apiRule(updated!), 200);
+  const warnings = await computeRuleWarnings(db, [updated!]);
+  return c.json(apiRule(updated!, warnings.get(id) ?? []), 200);
 });
 
 const deleteRuleRoute = createRoute({

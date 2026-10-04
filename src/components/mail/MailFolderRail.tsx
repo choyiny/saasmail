@@ -16,10 +16,11 @@ import {
 import {
   createMailbox,
   deleteMailbox,
-  renameMailbox,
   type Mailbox,
   type Stats,
 } from "@/lib/api";
+import FolderSettingsDialog from "./FolderSettingsDialog";
+import { FOLDER_COLOR_CLASSES } from "./folder-colors";
 import { showToast } from "@/lib/toast";
 import type { SystemFolder } from "@/hooks/useMailMessages";
 
@@ -117,6 +118,7 @@ export default function MailFolderRail({
   const [newFolderParentId, setNewFolderParentId] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [folderActionId, setFolderActionId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Mailbox | null>(null);
   const folderRows = orderedFolderRows(mailboxes);
 
   async function createCustomFolder() {
@@ -141,24 +143,6 @@ export default function MailFolderRail({
       });
     } finally {
       setCreatingFolder(false);
-    }
-  }
-
-  async function renameCustomFolder(mailbox: Mailbox) {
-    const nextName = window.prompt("Rename folder", mailbox.name)?.trim();
-    if (!nextName || nextName === mailbox.name) return;
-
-    setFolderActionId(mailbox.id);
-    try {
-      onMailboxUpdated(await renameMailbox(mailbox.id, nextName));
-    } catch (error) {
-      showToast({
-        kind: "error",
-        message: "Couldn’t rename folder",
-        description: error instanceof Error ? error.message : undefined,
-      });
-    } finally {
-      setFolderActionId(null);
     }
   }
 
@@ -308,16 +292,31 @@ export default function MailFolderRail({
                   mailbox.id === mailboxId ? "font-medium" : ""
                 }`}
               >
-                <Folder className="h-4 w-4 shrink-0" />
+                {mailbox.color ? (
+                  <span
+                    aria-hidden
+                    className={`ml-1 mr-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${FOLDER_COLOR_CLASSES[mailbox.color].dot}`}
+                  />
+                ) : (
+                  <Folder className="h-4 w-4 shrink-0" />
+                )}
                 <span className="truncate">{mailbox.name}</span>
+                {mailbox.aiDescription && (
+                  <span
+                    className="ml-auto text-[10px] font-medium text-text-tertiary"
+                    title={`AI files mail here: ${mailbox.aiDescription}`}
+                  >
+                    AI
+                  </span>
+                )}
               </button>
               <button
                 type="button"
-                aria-label={`Rename ${mailbox.name}`}
+                aria-label={`Edit ${mailbox.name}`}
                 data-testid="mail-rename-folder"
                 data-mailbox-id={mailbox.id}
                 disabled={folderActionId === mailbox.id}
-                onClick={() => void renameCustomFolder(mailbox)}
+                onClick={() => setEditing(mailbox)}
                 className="rounded p-1 text-text-tertiary opacity-70 hover:bg-bg-muted hover:text-text-primary disabled:opacity-40 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100"
               >
                 <Pencil className="h-3.5 w-3.5" />
@@ -337,6 +336,11 @@ export default function MailFolderRail({
           ))
         )}
       </nav>
+      <FolderSettingsDialog
+        mailbox={editing}
+        onClose={() => setEditing(null)}
+        onSaved={onMailboxUpdated}
+      />
     </aside>
   );
 }

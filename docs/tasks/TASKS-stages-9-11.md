@@ -42,8 +42,8 @@ Updated by whoever works a spec (the loop prompt in `LOOP-stages-9-11.md` does i
 | 3   | `SPEC-send-idempotency.md` | archived    |
 | 4   | `SPEC-send-controls.md`    | archived    |
 | 5   | `SPEC-two-factor.md`       | archived    |
-| 6   | `SPEC-reject-inbound.md`   | PR #72 open |
-| 7   | `SPEC-ai-folders.md`       | todo        |
+| 6   | `SPEC-reject-inbound.md`   | archived    |
+| 7   | `SPEC-ai-folders.md`       | PR #73 open |
 | 8   | `SPEC-spam-learning.md`    | todo        |
 | 9   | `SPEC-mail-export.md`      | todo        |
 | 10  | `SPEC-mail-import.md`      | todo        |

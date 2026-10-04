@@ -6,6 +6,7 @@ import {
   Folder,
   Loader2,
   ShieldAlert,
+  Sparkles,
   Star,
   Trash2,
   UserRoundCheck,
@@ -44,6 +45,8 @@ interface MailSelectionBarProps {
   onMove: (mailboxId: string) => void;
   onAssign: (userId: string | null) => void;
   onClear: () => void;
+  /** "File with AI": why it is unavailable (null when it is), and the action. */
+  aiFile?: { unavailable: string | null; onFile: () => void };
 }
 
 export default function MailSelectionBar({
@@ -66,6 +69,7 @@ export default function MailSelectionBar({
   onMove,
   onAssign,
   onClear,
+  aiFile,
 }: MailSelectionBarProps) {
   if (count === 0) return null;
 
@@ -203,6 +207,20 @@ export default function MailSelectionBar({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {aiFile && (
+        <button
+          type="button"
+          data-testid="mail-bulk-ai-file"
+          disabled={busy || aiFile.unavailable !== null}
+          title={aiFile.unavailable ?? "File the selected mail with AI"}
+          onClick={aiFile.onFile}
+          className={actionClass}
+        >
+          <Sparkles size={12} />
+          File with AI
+        </button>
+      )}
 
       <button
         type="button"

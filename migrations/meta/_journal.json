@@ -554,6 +554,13 @@
       "when": 1791100382242,
       "tag": "0078_auth_rate_limits",
       "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1791106627142,
+      "tag": "0079_mailbox_color_ai",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import {
 } from "../messages/conversation-state";
 import { setMailboxMembership, setMailboxState } from "../messages/state";
 import { runAutoReply } from "./auto-reply";
+import { triageModel, type AiFileMessage } from "../triage/ai-file";
 import { matchConditions, type RuleMessage } from "./match";
 import {
   DEFAULT_REJECT_REASON,
@@ -93,6 +94,37 @@ async function runAction(
     case "assign":
       await assignConversations(db, allowed, null, refs, action.userId);
       return {};
+    case "ai_file": {
+      // Filed later, from the queue: the handler never waits on a model.
+      if (!runtime) {
+        console.log(
+          `[ai-file] skipped rule ${ruleId} for ${input.emailId}: runtime unavailable`,
+        );
+        return {};
+      }
+      if (!triageModel(runtime.env).ok) {
+        console.log(
+          `[ai-file] skipped rule ${ruleId} for ${input.emailId}: no model configured`,
+        );
+        return {};
+      }
+      const job: AiFileMessage = {
+        type: "ai_file",
+        emailId: input.emailId,
+        inbox,
+        ruleId,
+        archiveWhenFiled: action.archiveWhenFiled === true,
+      };
+      runtime.ctx.waitUntil(
+        runtime.env.EMAIL_QUEUE.send(job).catch((error: unknown) => {
+          console.warn(
+            `[ai-file] could not queue rule ${ruleId} for ${input.emailId}:`,
+            error,
+          );
+        }),
+      );
+      return {};
+    }
     case "reject":
       // Acts before storage (see rejectionOf); a stored message is past it.
       return {};

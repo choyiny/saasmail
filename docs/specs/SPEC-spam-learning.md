@@ -1,6 +1,6 @@
 # SPEC: A spam filter that learns from the team's marks
 
-Stage 10 (triage), slice 3 of 3. Depends on `SPEC-reject-inbound.md` (the pre-storage matching pass:
+Stage 10 (triage), slice 3 of 3. Depends on `docs/archive/SPEC-reject-inbound.md` (the pre-storage matching pass:
 the new condition must be computable before storage) and `docs/archive/SPEC-audit-log.md`. Label `minor`.
 
 ## Why

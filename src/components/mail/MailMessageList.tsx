@@ -1,8 +1,9 @@
 import type { ReactNode, RefObject } from "react";
 import { ArrowLeft, MailOpen, Paperclip, Search, Star } from "lucide-react";
-import type { InboxAssignee, MailMessage } from "@/lib/api";
+import type { InboxAssignee, Mailbox, MailMessage } from "@/lib/api";
 import type { SystemFolder } from "@/hooks/useMailMessages";
 import DeliveryBadge from "./DeliveryBadge";
+import { FOLDER_COLOR_CLASSES, NEUTRAL_CHIP } from "./folder-colors";
 
 function counterparty(message: MailMessage): string {
   if (message.direction === "inbound") {
@@ -48,6 +49,9 @@ function snoozedLabel(timestamp: number): string {
   })}`;
 }
 
+/** Custom-folder chips shown on a row before "+N". */
+const MAX_FOLDER_CHIPS = 3;
+
 interface MailMessageRowProps {
   message: MailMessage;
   selected: boolean;
@@ -55,6 +59,8 @@ interface MailMessageRowProps {
   checked: boolean;
   busy: boolean;
   assignees?: InboxAssignee[];
+  /** The inbox's custom folders, for the chips of the ones the message is in. */
+  folders?: Mailbox[];
   onSelect: (ref: string) => void;
   onToggleSelected: (ref: string) => void;
   onToggleStar: (message: MailMessage) => void;
@@ -67,11 +73,15 @@ export function MailMessageRow({
   checked,
   busy,
   assignees = [],
+  folders = [],
   onSelect,
   onToggleSelected,
   onToggleStar,
 }: MailMessageRowProps) {
   const unseen = message.direction === "inbound" && !message.state.seen;
+  const memberOf = folders.filter((folder) =>
+    message.state.mailboxIds.includes(folder.id),
+  );
   const snippet = bodySnippet(message);
   const assignee = assignees.find(
     (user) => user.id === message.state.assignedUserId,
@@ -192,6 +202,30 @@ export function MailMessageRow({
               {snoozedLabel(message.state.snoozedUntil)}
             </span>
           )}
+        {memberOf.slice(0, MAX_FOLDER_CHIPS).map((folder) => (
+          <span
+            key={folder.id}
+            data-testid="mail-folder-chip"
+            className={`max-w-[8rem] truncate rounded px-1.5 py-0.5 text-[9px] font-medium ${
+              folder.color
+                ? FOLDER_COLOR_CLASSES[folder.color].chip
+                : NEUTRAL_CHIP
+            }`}
+          >
+            {folder.name}
+          </span>
+        ))}
+        {memberOf.length > MAX_FOLDER_CHIPS && (
+          <span
+            title={memberOf
+              .slice(MAX_FOLDER_CHIPS)
+              .map((folder) => folder.name)
+              .join(", ")}
+            className="rounded bg-bg-muted px-1.5 py-0.5 text-[9px] text-text-secondary"
+          >
+            +{memberOf.length - MAX_FOLDER_CHIPS}
+          </span>
+        )}
       </div>
     </div>
   );
@@ -210,6 +244,7 @@ interface MailMessageListProps {
   loadingMore: boolean;
   messages: MailMessage[];
   assignees?: InboxAssignee[];
+  folders?: Mailbox[];
   nextCursor: string | null;
   selectedRef: string | null;
   activeRef: string | null;
@@ -240,6 +275,7 @@ export default function MailMessageList({
   loadingMore,
   messages,
   assignees = [],
+  folders = [],
   nextCursor,
   selectedRef,
   activeRef,
@@ -350,6 +386,7 @@ export default function MailMessageList({
                 checked={selectedRefs.has(message.ref)}
                 busy={actionBusyRef === message.ref}
                 assignees={assignees}
+                folders={folders}
                 onSelect={onSelectMessage}
                 onToggleSelected={onToggleSelected}
                 onToggleStar={onToggleStar}

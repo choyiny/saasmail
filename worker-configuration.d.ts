@@ -17,6 +17,8 @@ declare namespace Cloudflare {
 		OPENAI_API_KEY?: string;
 		/** Optional native-agent model override. */
 		AGENT_MODEL?: string;
+		/** Optional model for AI filing (`ai_file`), on the agent's provider. Defaults to AGENT_MODEL. */
+		TRIAGE_MODEL?: string;
 		EMAIL_QUEUE: Queue;
 		ASSETS: Fetcher;
 		BASE_URL: "<your-deployed-url>";

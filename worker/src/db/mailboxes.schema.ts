@@ -18,6 +18,13 @@ export const mailboxes = sqliteTable(
       { onDelete: "cascade" },
     ),
     sortOrder: integer("sort_order").notNull().default(0),
+    /** A palette name (MAILBOX_COLORS) for a custom folder, or null. */
+    color: text("color"),
+    /**
+     * What belongs in this custom folder, in words: the AI filing action
+     * (`ai_file`) files mail into folders that have one.
+     */
+    aiDescription: text("ai_description"),
     createdBy: text("created_by"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),

@@ -2,9 +2,11 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { InvalidCursorError } from "../lib/messages/cursor";
 import {
   InvalidQueryError,
+  MESSAGE_REFS_PER_QUERY,
   queryMessages,
   type MessageFolder,
 } from "../lib/messages/query";
+import { d1RateLimitStorage } from "../auth/rate-limit-storage";
 import {
   parseMessageRef,
   serializeMessageRef,
@@ -26,6 +28,10 @@ import { listAssigneesForInbox } from "../lib/assignees";
 import { isInboxAllowed } from "../lib/inbox-permissions";
 import { bearerSecurity } from "../lib/openapi-auth";
 import { applyReplyGuard } from "../lib/reply-recipients";
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordBulkAudit } from "../lib/audit/record";
+import { triageModel, type AiFileMessage } from "../lib/triage/ai-file";
+import { describedFolders } from "../lib/triage/folders";
 import type { Variables } from "../variables";
 
 export const messagesRouter = new OpenAPIHono<{
@@ -515,4 +521,159 @@ messagesRouter.openapi(mailboxMembershipRoute, async (c) => {
     if (mapped) return c.json({ error: mapped.message }, mapped.status);
     throw error;
   }
+});
+
+const aiFileRoute = createRoute({
+  method: "post",
+  path: "/ai-file",
+  tags: ["Messages"],
+  security: bearerSecurity,
+  description:
+    "Asks the AI to file received messages (at most 50) into the described folders of their inbox, in the background. Folders appear a few seconds later; nothing is archived, and mail in Junk or Trash is skipped. At most 20 requests an hour per person.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({ refs: z.array(z.string()).min(1).max(50) }),
+        },
+      },
+    },
+  },
+  responses: {
+    500: { description: "Internal server error" },
+    202: {
+      description: "Queued (`skipped`: in Junk or Trash)",
+      content: {
+        "application/json": {
+          schema: z.object({
+            queued: z.number().int(),
+            skipped: z.number().int(),
+          }),
+        },
+      },
+    },
+    429: {
+      description:
+        "More than 20 requests in an hour (`AI_FILE_RATE_LIMITED`); retry after `Retry-After` seconds",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string(), code: z.string() }),
+        },
+      },
+    },
+    400: {
+      description:
+        "Invalid refs, a sent message, no model configured (`NO_MODEL`), or an inbox without a described folder (`NO_AI_FOLDERS`)",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string(), code: z.string().optional() }),
+        },
+      },
+    },
+    404: errorResponse("A message was not found or is not accessible"),
+  },
+});
+
+messagesRouter.openapi(aiFileRoute, async (c) => {
+  const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
+  let refs: MessageRef[];
+  try {
+    refs = parseRefs([...new Set(c.req.valid("json").refs)]);
+  } catch (error) {
+    const mapped = stateError(error);
+    if (mapped) return c.json({ error: mapped.message }, 400);
+    throw error;
+  }
+  if (refs.some((ref) => ref.kind !== "received")) {
+    return c.json({ error: "Only received messages can be filed" }, 400);
+  }
+  if (!triageModel(c.env).ok) {
+    return c.json(
+      { error: "No AI model is configured on this server", code: "NO_MODEL" },
+      400,
+    );
+  }
+
+  // Access per message: one the caller cannot see answers as not found.
+  // Then the ones to file: not in Junk or Trash. Both in statement-sized
+  // chunks.
+  const visible: typeof eligible = [];
+  const eligible: Awaited<ReturnType<typeof queryMessages>>["messages"] = [];
+  for (let start = 0; start < refs.length; start += MESSAGE_REFS_PER_QUERY) {
+    const chunk = refs.slice(start, start + MESSAGE_REFS_PER_QUERY);
+    const base = {
+      messageRefs: chunk,
+      limit: null,
+      includeArchived: true,
+      includeSnoozed: true,
+    };
+    visible.push(...(await queryMessages(db, allowed, base)).messages);
+    eligible.push(
+      ...(
+        await queryMessages(db, allowed, {
+          ...base,
+          includeSpam: false,
+          includeTrashed: false,
+        })
+      ).messages,
+    );
+  }
+  if (visible.length !== refs.length) {
+    return c.json({ error: "Message not found" }, 404);
+  }
+  const inboxes = [
+    ...new Set(eligible.map((message) => message.inbox.toLowerCase())),
+  ];
+  for (const inbox of inboxes) {
+    if ((await describedFolders(db, inbox)).length === 0) {
+      return c.json(
+        {
+          error: `${inbox} has no folder with a description to file into`,
+          code: "NO_AI_FOLDERS",
+        },
+        400,
+      );
+    }
+  }
+
+  // Each request is model calls: at most 20 an hour per person.
+  const limit = await d1RateLimitStorage(db, () => true).consume(
+    `${c.get("user").id}|ai-file`,
+    { window: 3600, max: 20 },
+  );
+  if (!limit.allowed) {
+    c.header("Retry-After", String(limit.retryAfter ?? 3600));
+    return c.json(
+      {
+        error: "Too many requests to file with AI; try again later",
+        code: "AI_FILE_RATE_LIMITED",
+      },
+      429,
+    );
+  }
+
+  const jobs: AiFileMessage[] = eligible.map((message) => ({
+    type: "ai_file",
+    emailId: message.ref.id,
+    inbox: message.inbox.toLowerCase(),
+    ruleId: null,
+    archiveWhenFiled: false,
+  }));
+  if (jobs.length === 0) {
+    return c.json({ queued: 0, skipped: visible.length }, 202);
+  }
+  await c.env.EMAIL_QUEUE.sendBatch(jobs.map((body) => ({ body })));
+  await recordBulkAudit(db, {
+    action: AUDIT_ACTIONS.mailAiFileRequested,
+    targetType: "message",
+    inbox: inboxes.length === 1 ? inboxes[0] : null,
+    refs: eligible.map((message) => serializeMessageRef(message.ref)),
+    summary: (count) =>
+      `Asked the AI to file ${count} ${count === 1 ? "message" : "messages"}`,
+  });
+  return c.json(
+    { queued: jobs.length, skipped: visible.length - jobs.length },
+    202,
+  );
 });

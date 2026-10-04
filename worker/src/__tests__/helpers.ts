@@ -84,7 +84,7 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_trashed_idx ON mailbox_message_state(inbox, trashed_at)`,
     `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_spam_idx ON mailbox_message_state(inbox, spam_at)`,
     `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_archived_idx ON mailbox_message_state(inbox, archived_at)`,
-    `CREATE TABLE IF NOT EXISTS mailboxes (id TEXT PRIMARY KEY NOT NULL, inbox TEXT NOT NULL, name TEXT NOT NULL, role TEXT, parent_id TEXT REFERENCES mailboxes(id) ON DELETE CASCADE, sort_order INTEGER NOT NULL DEFAULT 0, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS mailboxes (id TEXT PRIMARY KEY NOT NULL, inbox TEXT NOT NULL, name TEXT NOT NULL, role TEXT, parent_id TEXT REFERENCES mailboxes(id) ON DELETE CASCADE, sort_order INTEGER NOT NULL DEFAULT 0, color TEXT, ai_description TEXT, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS mailboxes_inbox_parent_name_unique ON mailboxes(inbox, parent_id, name)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS mailboxes_root_name_unique ON mailboxes(inbox, name) WHERE parent_id IS NULL`,
     `CREATE TABLE IF NOT EXISTS message_mailboxes (message_kind TEXT NOT NULL, message_id TEXT NOT NULL, mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE, added_by TEXT, added_at INTEGER NOT NULL, PRIMARY KEY(message_kind, message_id, mailbox_id))`,

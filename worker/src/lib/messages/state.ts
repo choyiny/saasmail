@@ -1,3 +1,8 @@
+import {
+  assertAiFolderRoom,
+  normalizeAiDescription,
+  type MailboxColor,
+} from "../triage/folders";
 import { AUDIT_ACTIONS } from "../audit/events";
 import { recordAudit } from "../audit/record";
 import {
@@ -396,10 +401,14 @@ export async function createMailbox(
     name: string;
     parentId?: string | null;
     sortOrder?: number;
+    color?: MailboxColor | null;
+    aiDescription?: string | null;
   },
 ) {
   const inbox = input.inbox.trim().toLowerCase();
   if (!isInboxAllowed(allowed, inbox)) throw new MessageStateAccessError();
+  const aiDescription = normalizeAiDescription(input.aiDescription);
+  if (aiDescription) await assertAiFolderRoom(db, inbox, null);
 
   const parentId = input.parentId ?? null;
   if (parentId) {
@@ -415,6 +424,8 @@ export async function createMailbox(
     role: null,
     parentId,
     sortOrder: input.sortOrder ?? 0,
+    color: input.color ?? null,
+    aiDescription,
     createdBy: userId,
     createdAt: now,
     updatedAt: now,
@@ -481,18 +492,77 @@ export async function updateMailbox(
   allowed: AllowedInboxes,
   _userId: string,
   mailboxId: string,
-  changes: { name?: string; sortOrder?: number },
+  changes: {
+    name?: string;
+    sortOrder?: number;
+    color?: MailboxColor | null;
+    aiDescription?: string | null;
+  },
 ) {
   const mailbox = await getMailboxForMutation(db, allowed, mailboxId);
   const updatedAt = Math.floor(Date.now() / 1000);
-  const update: { name?: string; sortOrder?: number; updatedAt: number } = {
+  const update: {
+    name?: string;
+    sortOrder?: number;
+    color?: MailboxColor | null;
+    aiDescription?: string | null;
+    updatedAt: number;
+  } = {
     updatedAt,
   };
   if (changes.name !== undefined)
     update.name = normalizeMailboxName(changes.name);
   if (changes.sortOrder !== undefined) update.sortOrder = changes.sortOrder;
+  if (
+    mailbox.role !== null &&
+    (changes.color !== undefined || changes.aiDescription !== undefined)
+  ) {
+    throw new InvalidMessageStateError(
+      "Only custom folders have a colour or an AI description",
+    );
+  }
+  if (changes.color !== undefined) update.color = changes.color;
+  if (changes.aiDescription !== undefined) {
+    update.aiDescription = normalizeAiDescription(changes.aiDescription);
+    if (update.aiDescription && !mailbox.aiDescription) {
+      await assertAiFolderRoom(db, mailbox.inbox, mailbox.id);
+    }
+  }
 
   await db.update(mailboxes).set(update).where(eq(mailboxes.id, mailboxId));
+  // A new description changes what the AI files here (and, with a rule that
+  // archives what it files, what skips the inbox): recorded, with the colour.
+  const describedChange =
+    update.aiDescription !== undefined &&
+    update.aiDescription !== mailbox.aiDescription;
+  const colorChange =
+    update.color !== undefined && update.color !== mailbox.color;
+  if (describedChange || colorChange) {
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.folderUpdated,
+      targetType: "folder",
+      targetId: mailboxId,
+      inbox: mailbox.inbox,
+      summary: describedChange
+        ? update.aiDescription
+          ? `Changed what the AI files into the folder '${mailbox.name}' in ${mailbox.inbox}`
+          : `Stopped the AI filing into the folder '${mailbox.name}' in ${mailbox.inbox}`
+        : `Changed the colour of the folder '${mailbox.name}' in ${mailbox.inbox}`,
+      details: {
+        ...(describedChange
+          ? {
+              aiDescription: {
+                from: mailbox.aiDescription,
+                to: update.aiDescription,
+              },
+            }
+          : {}),
+        ...(colorChange
+          ? { color: { from: mailbox.color, to: update.color } }
+          : {}),
+      },
+    });
+  }
   // Reordering folders is not recorded; a new name is.
   if (update.name !== undefined && update.name !== mailbox.name) {
     await recordAudit(db, {

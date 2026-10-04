@@ -57,6 +57,7 @@ const ACTION_TYPES: Array<{ value: RuleAction["type"]; label: string }> = [
   { value: "snooze", label: "Snooze" },
   { value: "assign", label: "Assign" },
   { value: "auto_reply", label: "Auto-reply" },
+  { value: "ai_file", label: "Let the AI file into folders" },
   { value: "reject", label: "Reject the message" },
 ];
 
@@ -100,6 +101,7 @@ function actionFor(
   if (type === "snooze") return { type, hours: 24 };
   if (type === "assign") return { type, userId: users[0]?.id ?? "" };
   if (type === "auto_reply") return { type, bodyText: "" };
+  if (type === "ai_file") return { type, archiveWhenFiled: false };
   return { type };
 }
 
@@ -143,13 +145,20 @@ function actionSummary(action: RuleAction): string {
   if (action.type === "snooze") return "snooze " + String(action.hours) + "h";
   if (action.type === "auto_reply") return "auto-reply";
   if (action.type === "reject") return "reject";
+  if (action.type === "ai_file") {
+    return action.archiveWhenFiled ? "AI filing, then archive" : "AI filing";
+  }
   return action.type;
 }
 
 function warningMessage(warning: RuleWarning): string {
-  return warning.code === "missing_folder"
-    ? "Folder was deleted; this action does nothing"
-    : "Assignee is unavailable; this action does nothing";
+  if (warning.code === "missing_folder") {
+    return "Folder was deleted; this action does nothing";
+  }
+  if (warning.code === "no_ai_folders") {
+    return "No folder in this inbox has a description; the AI files nothing";
+  }
+  return "Assignee is unavailable; this action does nothing";
 }
 
 function emptyDraft(position: number): AutomationRuleInput {
@@ -330,7 +339,8 @@ export default function AutomationsPage() {
           ? current.actions.map((action) =>
               action.type === "move_to_folder" ||
               action.type === "assign" ||
-              action.type === "auto_reply"
+              action.type === "auto_reply" ||
+              action.type === "ai_file"
                 ? ({ type: "archive" } as const)
                 : action,
             )
@@ -877,8 +887,9 @@ export default function AutomationsPage() {
 
               {!draft.inbox && (
                 <p className="mb-3 rounded-[6px] bg-bg-subtle px-3 py-2 text-xs text-text-tertiary">
-                  Move to folder, Assign, and Auto-reply are unavailable for All
-                  inboxes. Choose a specific inbox to use those actions.
+                  Move to folder, Assign, Auto-reply and AI filing are
+                  unavailable for All inboxes. Choose a specific inbox to use
+                  those actions.
                 </p>
               )}
 
@@ -910,7 +921,8 @@ export default function AutomationsPage() {
                             (!draft.inbox &&
                               (type.value === "move_to_folder" ||
                                 type.value === "assign" ||
-                                type.value === "auto_reply")) ||
+                                type.value === "auto_reply" ||
+                                type.value === "ai_file")) ||
                             (type.value === "reject" &&
                               draft.actions.length > 1)
                           }
@@ -1052,6 +1064,43 @@ export default function AutomationsPage() {
                             Won&apos;t reply to automated mail, your own
                             addresses, blocked/suppressed senders, or the same
                             sender more than once per 24h.
+                          </p>
+                        </div>
+                      )}
+                      {action.type === "ai_file" && (
+                        <div className="space-y-2">
+                          <label className="flex items-center gap-2 text-xs text-text-secondary">
+                            <input
+                              type="checkbox"
+                              aria-label={
+                                "Action " + String(index + 1) + " also archive"
+                              }
+                              checked={action.archiveWhenFiled === true}
+                              onChange={(event) =>
+                                updateAction(index, (current) =>
+                                  current.type === "ai_file"
+                                    ? {
+                                        ...current,
+                                        archiveWhenFiled: event.target.checked,
+                                      }
+                                    : current,
+                                )
+                              }
+                            />
+                            Also archive what it files (skip the inbox)
+                          </label>
+                          <p
+                            data-testid="ai-file-folders"
+                            className="text-[11px] leading-4 text-text-tertiary"
+                          >
+                            {mailboxes.some((mailbox) => mailbox.aiDescription)
+                              ? "Files into: " +
+                                mailboxes
+                                  .filter((mailbox) => mailbox.aiDescription)
+                                  .map((mailbox) => mailbox.name)
+                                  .join(", ") +
+                                ". It runs a few seconds after the message arrives, so later rules can't act on its folders."
+                              : "No folder in this inbox has a description yet: edit a folder in Mail and say what belongs in it."}
                           </p>
                         </div>
                       )}

@@ -149,6 +149,13 @@ configs keep the required binding.
 overrides only the selected provider's model and does not alter provider
 precedence.
 
+### `TRIAGE_MODEL`
+
+[AI filing](automations.md#ai-filing) uses the same provider as the agent.
+Set `TRIAGE_MODEL` (a variable, like `AGENT_MODEL`) to file with a different
+model of that provider, a cheaper one for instance, while the agent keeps
+`AGENT_MODEL`. Unset, filing uses `AGENT_MODEL` or the provider's default.
+
 ## Sessions and authentication
 
 The D1 table `agent_sessions` is the caller-owned session directory. It stores

@@ -27,6 +27,8 @@ import {
   fetchInboxAssignees,
   fetchMailboxes,
   fetchStats,
+  fetchAgentStatus,
+  fileWithAi,
   cancelScheduledByMessage,
   type DraftListItem,
   type MailMessage,
@@ -70,6 +72,8 @@ export default function MailPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [assignees, setAssignees] = useState<InboxAssignee[]>([]);
+  // Whether a model is configured, for "File with AI".
+  const [aiConfigured, setAiConfigured] = useState(false);
   const [drafts, setDrafts] = useState<DraftListItem[]>([]);
   const [draftsLoading, setDraftsLoading] = useState(false);
   // A mail-client draft shown read-only.
@@ -313,6 +317,51 @@ export default function MailPage() {
     selectedRef,
     onClearSelected: clearSelection,
   });
+
+  useEffect(() => {
+    fetchAgentStatus()
+      .then((status) => setAiConfigured(status.configured))
+      .catch(() => setAiConfigured(false));
+  }, []);
+
+  // Why "File with AI" cannot run here, or null when it can.
+  const aiFileUnavailable = !aiConfigured
+    ? "No AI model is configured on this server"
+    : mailboxes.some((mailbox) => mailbox.aiDescription)
+      ? null
+      : "Describe what belongs in a folder first (edit a folder)";
+
+  async function fileMessagesWithAi(refs: string[]) {
+    const received = refs.filter((ref) => ref.startsWith("received:"));
+    if (received.length === 0) {
+      showToast({
+        kind: "warning",
+        message: "Only received mail can be filed",
+      });
+      return;
+    }
+    try {
+      const { queued, skipped } = await fileWithAi(received.slice(0, 50));
+      const notes = [
+        "Folders appear in a few seconds.",
+        received.length > 50 ? "Only the first 50 were sent." : null,
+        skipped > 0
+          ? `${skipped} in Junk or Trash ${skipped === 1 ? "was" : "were"} skipped.`
+          : null,
+      ].filter(Boolean);
+      showToast({
+        kind: "success",
+        message: `Filing ${queued} ${queued === 1 ? "message" : "messages"} with AI`,
+        description: notes.join(" "),
+      });
+    } catch (error) {
+      showToast({
+        kind: "error",
+        message: "Couldn’t file with AI",
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  }
 
   const selectedMessages = mail.messages.filter((message) =>
     selectedRefs.has(message.ref),
@@ -675,6 +724,7 @@ export default function MailPage() {
               loadingMore={mail.loadingMore}
               messages={mail.messages}
               assignees={assignees}
+              folders={mailboxes}
               nextCursor={mail.nextCursor}
               selectedRef={selectedRef}
               activeRef={keyboardRef}
@@ -733,6 +783,13 @@ export default function MailPage() {
                     )
                   }
                   onClear={() => setSelectedRefs(new Set())}
+                  aiFile={{
+                    unavailable: aiFileUnavailable,
+                    onFile: () =>
+                      void fileMessagesWithAi(
+                        selectedMessages.map((message) => message.ref),
+                      ),
+                  }}
                 />
               }
               onBackToFolders={() => setMobilePane("folders")}
@@ -787,6 +844,10 @@ export default function MailPage() {
                 );
               }}
               onRefresh={() => void mail.loadMessages(null, false)}
+              aiFile={{
+                unavailable: aiFileUnavailable,
+                onFile: (message) => void fileMessagesWithAi([message.ref]),
+              }}
             />
           )}
         </div>

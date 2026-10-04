@@ -11,6 +11,11 @@ import {
   updateMailbox,
 } from "../lib/messages/state";
 import { bearerSecurity } from "../lib/openapi-auth";
+import {
+  MAILBOX_COLORS,
+  MAX_AI_DESCRIPTION,
+  TooManyAiFoldersError,
+} from "../lib/triage/folders";
 import type { Variables } from "../variables";
 
 export const mailboxesRouter = new OpenAPIHono<{
@@ -18,7 +23,10 @@ export const mailboxesRouter = new OpenAPIHono<{
   Variables: Variables;
 }>();
 
-const ErrorSchema = z.object({ error: z.string() });
+const ErrorSchema = z.object({
+  error: z.string(),
+  code: z.string().optional(),
+});
 const errorResponse = (description: string) => ({
   description,
   content: { "application/json": { schema: ErrorSchema } },
@@ -31,6 +39,11 @@ const MailboxSchema = z.object({
   role: z.string().nullable(),
   parentId: z.string().nullable(),
   sortOrder: z.number(),
+  color: z.enum(MAILBOX_COLORS).nullable(),
+  aiDescription: z.string().nullable().openapi({
+    description:
+      "What belongs in this folder, in words. Folders with one are those the AI filing rule action (`ai_file`) may file into.",
+  }),
   createdBy: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -77,9 +90,23 @@ function isDuplicateMailboxError(error: unknown): boolean {
   return false;
 }
 
+const colorField = z.enum(MAILBOX_COLORS).nullable().optional();
+const aiDescriptionField = z
+  .string()
+  .max(MAX_AI_DESCRIPTION)
+  .nullable()
+  .optional()
+  .openapi({
+    description:
+      "What belongs in this folder, for AI filing (trimmed; empty or null removes it). At most 30 described folders per inbox.",
+  });
+
 function mappedError(
   error: unknown,
-): { status: 400 | 404 | 409; message: string } | null {
+): { status: 400 | 404 | 409; message: string; code?: string } | null {
+  if (error instanceof TooManyAiFoldersError) {
+    return { status: 400, message: error.message, code: error.code };
+  }
   if (error instanceof MessageStateAccessError) {
     return { status: 404, message: error.message };
   }
@@ -132,7 +159,15 @@ mailboxesRouter.openapi(listRoute, async (c) => {
     );
   } catch (error) {
     const mapped = mappedError(error);
-    if (mapped) return c.json({ error: mapped.message }, mapped.status);
+    if (mapped) {
+      return c.json(
+        {
+          error: mapped.message,
+          ...(mapped.code ? { code: mapped.code } : {}),
+        },
+        mapped.status,
+      );
+    }
     throw error;
   }
 });
@@ -150,6 +185,8 @@ const createRouteDefinition = createRoute({
             inbox: z.string().min(1),
             name: z.string().min(1),
             parentId: z.string().nullable().optional(),
+            color: colorField,
+            aiDescription: aiDescriptionField,
           }),
         },
       },
@@ -180,7 +217,15 @@ mailboxesRouter.openapi(createRouteDefinition, async (c) => {
     return c.json(result!, 200);
   } catch (error) {
     const mapped = mappedError(error);
-    if (mapped) return c.json({ error: mapped.message }, mapped.status);
+    if (mapped) {
+      return c.json(
+        {
+          error: mapped.message,
+          ...(mapped.code ? { code: mapped.code } : {}),
+        },
+        mapped.status,
+      );
+    }
     throw error;
   }
 });
@@ -198,6 +243,8 @@ const patchRoute = createRoute({
           schema: z.object({
             name: z.string().optional(),
             sortOrder: z.number().int().optional(),
+            color: colorField,
+            aiDescription: aiDescriptionField,
           }),
         },
       },
@@ -228,7 +275,15 @@ mailboxesRouter.openapi(patchRoute, async (c) => {
     return c.json(result!, 200);
   } catch (error) {
     const mapped = mappedError(error);
-    if (mapped) return c.json({ error: mapped.message }, mapped.status);
+    if (mapped) {
+      return c.json(
+        {
+          error: mapped.message,
+          ...(mapped.code ? { code: mapped.code } : {}),
+        },
+        mapped.status,
+      );
+    }
     throw error;
   }
 });
@@ -262,7 +317,15 @@ mailboxesRouter.openapi(deleteRoute, async (c) => {
     return c.json({ success: true }, 200);
   } catch (error) {
     const mapped = mappedError(error);
-    if (mapped) return c.json({ error: mapped.message }, mapped.status);
+    if (mapped) {
+      return c.json(
+        {
+          error: mapped.message,
+          ...(mapped.code ? { code: mapped.code } : {}),
+        },
+        mapped.status,
+      );
+    }
     throw error;
   }
 });

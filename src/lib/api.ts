@@ -588,6 +588,23 @@ export async function fetchMessages(params?: {
   return apiFetch(`/api/messages?${qs}`);
 }
 
+/** The colours a custom folder may have. */
+export const MAILBOX_COLORS = [
+  "red",
+  "orange",
+  "amber",
+  "yellow",
+  "lime",
+  "green",
+  "teal",
+  "cyan",
+  "blue",
+  "violet",
+  "purple",
+  "pink",
+] as const;
+export type MailboxColor = (typeof MAILBOX_COLORS)[number];
+
 export interface Mailbox {
   id: string;
   inbox: string;
@@ -595,6 +612,9 @@ export interface Mailbox {
   role: string | null;
   parentId: string | null;
   sortOrder: number;
+  color: MailboxColor | null;
+  /** What belongs here, for AI filing; null when the AI does not file into it. */
+  aiDescription: string | null;
   createdBy: string | null;
   createdAt: number;
   updatedAt: number;
@@ -613,6 +633,8 @@ export async function createMailbox(data: {
   inbox: string;
   name: string;
   parentId?: string | null;
+  color?: MailboxColor | null;
+  aiDescription?: string | null;
 }): Promise<Mailbox> {
   return apiFetch("/api/mailboxes", {
     method: "POST",
@@ -625,10 +647,32 @@ export async function renameMailbox(
   id: string,
   name: string,
 ): Promise<Mailbox> {
+  return updateMailbox(id, { name });
+}
+
+export async function updateMailbox(
+  id: string,
+  changes: {
+    name?: string;
+    color?: MailboxColor | null;
+    aiDescription?: string | null;
+  },
+): Promise<Mailbox> {
   return apiFetch(`/api/mailboxes/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(changes),
+  });
+}
+
+/** Asks the AI to file messages into their inbox's described folders. */
+export async function fileWithAi(
+  refs: string[],
+): Promise<{ queued: number; skipped: number }> {
+  return apiFetch("/api/messages/ai-file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refs }),
   });
 }
 
@@ -1533,11 +1577,12 @@ export type RuleAction =
   | { type: "snooze"; hours: number }
   | { type: "assign"; userId: string }
   | { type: "auto_reply"; subject?: string; bodyText: string }
-  | { type: "reject"; reason?: string };
+  | { type: "reject"; reason?: string }
+  | { type: "ai_file"; archiveWhenFiled?: boolean };
 
 export type RuleWarning = {
   actionIndex: number;
-  code: "missing_folder" | "assignee_unavailable";
+  code: "missing_folder" | "assignee_unavailable" | "no_ai_folders";
 };
 
 export interface AutomationRule {

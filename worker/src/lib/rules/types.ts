@@ -67,6 +67,12 @@ export const RuleActionSchema = z.discriminatedUnion("type", [
     bodyText: z.string().min(1).max(5000),
   }),
   z.object({
+    // A model files the message into the inbox's described folders, later
+    // (a queue job): the handler never waits on it.
+    type: z.literal("ai_file"),
+    archiveWhenFiled: z.boolean().optional(),
+  }),
+  z.object({
     // Refuses the message at SMTP time, before anything is stored.
     type: z.literal("reject"),
     // It travels in the SMTP reply: printable ASCII on one line.

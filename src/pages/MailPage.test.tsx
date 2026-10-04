@@ -30,6 +30,10 @@ const api = vi.hoisted(() => ({
   saveDraft: vi.fn(),
   useSuggestedReply: vi.fn(),
   dismissSuggestedReply: vi.fn(),
+  fetchAgentStatus: vi.fn(),
+  fileWithAi: vi.fn(),
+  updateMailbox: vi.fn(),
+  MAILBOX_COLORS: ["red", "blue"],
 }));
 
 vi.mock("@/lib/api", () => api);
@@ -178,6 +182,11 @@ describe("MailPage", () => {
       },
     ]);
     api.fetchMailboxes.mockResolvedValue([]);
+    api.fetchAgentStatus.mockResolvedValue({
+      configured: false,
+      provider: null,
+      model: null,
+    });
     api.fetchMessages.mockResolvedValue({ messages: [], nextCursor: null });
     api.createMailbox.mockResolvedValue(mailbox("mailbox-1", "Projects"));
     api.deleteDraft.mockResolvedValue(undefined);
@@ -606,14 +615,17 @@ describe("MailPage", () => {
     expect(api.fetchMessages.mock.calls.length).toBeGreaterThanOrEqual(2);
   }, 15_000);
 
-  it("wires child create, rename, and confirmed delete folder actions", async () => {
+  it("wires child create, edit, and confirmed delete folder actions", async () => {
     api.fetchMailboxes.mockResolvedValue([
       mailbox("root", "Root"),
       mailbox("child", "Child", "root"),
     ]);
-    const promptSpy = vi
-      .spyOn(window, "prompt")
-      .mockReturnValue("Renamed Root");
+    api.updateMailbox.mockImplementation(
+      async (id: string, changes: Record<string, unknown>) => ({
+        ...mailbox(id, String(changes.name)),
+        ...changes,
+      }),
+    );
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     renderMail();
@@ -635,10 +647,28 @@ describe("MailPage", () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Rename Root" }));
+    // Name, colour and what belongs here, in one dialog.
+    fireEvent.click(screen.getByRole("button", { name: "Edit Root" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "Renamed Root" },
+    });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "blue" }));
+    const description = within(dialog).getByLabelText(
+      /What belongs here\?/,
+    ) as HTMLTextAreaElement;
+    expect(description.maxLength).toBe(300);
+    fireEvent.change(description, { target: { value: " Project mail " } });
+    expect(within(dialog).getByText("14/300")).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId("folder-settings-save"));
     await waitFor(() =>
-      expect(api.renameMailbox).toHaveBeenCalledWith("root", "Renamed Root"),
+      expect(api.updateMailbox).toHaveBeenCalledWith("root", {
+        name: "Renamed Root",
+        color: "blue",
+        aiDescription: "Project mail",
+      }),
     );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "Delete Child" }));
     await waitFor(() =>
@@ -646,7 +676,6 @@ describe("MailPage", () => {
     );
     expect(confirmSpy).toHaveBeenCalled();
 
-    promptSpy.mockRestore();
     confirmSpy.mockRestore();
   });
 

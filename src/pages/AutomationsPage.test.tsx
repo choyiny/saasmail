@@ -177,7 +177,7 @@ describe("AutomationsPage", () => {
     ).toBe(true);
     expect(
       screen.getByText(
-        /Move to folder, Assign, and Auto-reply are unavailable/,
+        /Move to folder, Assign, Auto-reply and AI filing are unavailable/,
       ),
     ).toBeTruthy();
   });
@@ -282,6 +282,55 @@ describe("AutomationsPage", () => {
       /plain letters, digits and punctuation/,
     );
     expect(api.createRule).not.toHaveBeenCalled();
+  });
+
+  it("offers AI filing for one inbox, with the archive choice and the folders it files into", async () => {
+    api.fetchMailboxes.mockResolvedValue([
+      {
+        id: "folder-1",
+        inbox: "support@e2e.test",
+        name: "Billing",
+        role: null,
+        parentId: null,
+        sortOrder: 0,
+        color: null,
+        aiDescription: "Invoices",
+        createdBy: null,
+        createdAt: 1,
+        updatedAt: 1,
+        ruleCount: 0,
+      },
+    ]);
+    await openNew();
+    expect(
+      (
+        within(screen.getByLabelText("Action 1 type")).getByRole("option", {
+          name: "Let the AI file into folders",
+        }) as HTMLOptionElement
+      ).disabled,
+    ).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("Scope"), {
+      target: { value: "support@e2e.test" },
+    });
+    fireEvent.change(screen.getByLabelText("Action 1 type"), {
+      target: { value: "ai_file" },
+    });
+    expect((await screen.findByTestId("ai-file-folders")).textContent).toMatch(
+      /^Files into: Billing\./,
+    );
+    fireEvent.click(screen.getByLabelText("Action 1 also archive"));
+    fireEvent.change(screen.getByLabelText("Rule name"), {
+      target: { value: "File" },
+    });
+    fireEvent.click(screen.getByTestId("automation-save"));
+    await waitFor(() =>
+      expect(api.createRule).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actions: [{ type: "ai_file", archiveWhenFiled: true }],
+        }),
+      ),
+    );
   });
 
   it("does not offer reject next to another action", async () => {

@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { dispatchSuggestedReplyReady } from "@/lib/suggested-reply-events";
 
 const INITIAL_RECONNECT_MS = 1_000;
+/** A burst of AI filings reloads the list once. */
+const MAIL_REFRESH_DEBOUNCE_MS = 1_500;
 const MAX_RECONNECT_MS = 60_000;
 
 // Close codes that indicate the server will keep rejecting us, so we stop
@@ -30,6 +32,7 @@ export function useRealtimeUpdates(
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
     let reconnectDelay = INITIAL_RECONNECT_MS;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     function scheduleReconnect() {
       if (stopped) return;
@@ -61,6 +64,16 @@ export function useRealtimeUpdates(
               inbox: typeof data.inbox === "string" ? data.inbox : undefined,
             });
             promptRef.current?.();
+          } else if (data.type === "mail_refresh") {
+            // Mail changed out of band (the AI filed it): reload, as for new
+            // mail, without announcing anything, and once for a burst.
+            const inbox =
+              typeof data.inbox === "string" ? data.inbox : undefined;
+            if (refreshTimer) clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(() => {
+              refreshTimer = null;
+              callbackRef.current({ inbox });
+            }, MAIL_REFRESH_DEBOUNCE_MS);
           } else if (
             data.type === "suggested_reply" &&
             typeof data.inbox === "string" &&
@@ -88,6 +101,7 @@ export function useRealtimeUpdates(
     return () => {
       stopped = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (refreshTimer) clearTimeout(refreshTimer);
       ws?.close();
     };
   }, []);

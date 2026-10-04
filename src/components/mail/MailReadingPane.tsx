@@ -8,6 +8,7 @@ import {
   Paperclip,
   Reply,
   ShieldAlert,
+  Sparkles,
   Star,
   Trash2,
   UserRoundCheck,
@@ -92,6 +93,11 @@ interface MailReadingPaneProps {
   onRemoveFromCurrentMailbox: (message: MailMessage) => void;
   onOpenCustomer: (message: MailMessage) => void;
   onRefresh: () => void;
+  /** "File with AI": why it is unavailable (null when it is), and the action. */
+  aiFile?: {
+    unavailable: string | null;
+    onFile: (message: MailMessage) => void;
+  };
 }
 
 export default function MailReadingPane({
@@ -117,6 +123,7 @@ export default function MailReadingPane({
   onRemoveFromCurrentMailbox,
   onOpenCustomer,
   onRefresh,
+  aiFile,
 }: MailReadingPaneProps) {
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyComposerKey, setReplyComposerKey] = useState(0);
@@ -326,6 +333,24 @@ export default function MailReadingPane({
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         {moveMenu(selectedMessage)}
+                        {aiFile && selectedMessage.direction === "inbound" && (
+                          <DropdownMenuItem
+                            data-testid="mail-ai-file"
+                            disabled={aiFile.unavailable !== null}
+                            onSelect={() => aiFile.onFile(selectedMessage)}
+                          >
+                            <Sparkles className="h-4 w-4" />
+                            <span className="flex flex-col">
+                              File with AI
+                              {/* A disabled item takes no hover: say why here. */}
+                              {aiFile.unavailable && (
+                                <span className="text-[11px] text-text-tertiary">
+                                  {aiFile.unavailable}
+                                </span>
+                              )}
+                            </span>
+                          </DropdownMenuItem>
+                        )}
                         {mailboxId && (
                           <>
                             <DropdownMenuSeparator />

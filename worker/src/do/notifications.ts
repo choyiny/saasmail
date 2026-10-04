@@ -55,19 +55,26 @@ export class NotificationsHub implements DurableObject {
       inbox?: string;
       emailId?: string;
     };
+    let frame: string;
     if (
-      payload.type !== "suggested_reply" ||
-      typeof payload.inbox !== "string" ||
-      typeof payload.emailId !== "string"
+      payload.type === "suggested_reply" &&
+      typeof payload.inbox === "string" &&
+      typeof payload.emailId === "string"
     ) {
+      frame = JSON.stringify({
+        type: "suggested_reply",
+        inbox: payload.inbox,
+        emailId: payload.emailId,
+      });
+    } else if (
+      // Mail in the inbox changed out of band (the AI filed it): reload.
+      payload.type === "mail_refresh" &&
+      typeof payload.inbox === "string"
+    ) {
+      frame = JSON.stringify({ type: "mail_refresh", inbox: payload.inbox });
+    } else {
       return new Response("invalid realtime event", { status: 400 });
     }
-
-    const frame = JSON.stringify({
-      type: "suggested_reply",
-      inbox: payload.inbox,
-      emailId: payload.emailId,
-    });
     const sockets = this.ctx.getWebSockets();
     for (const ws of sockets) {
       try {

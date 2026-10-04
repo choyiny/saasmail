@@ -101,9 +101,25 @@ Each request accepts at most 500 message refs.
 ### Manage custom mailboxes
 
 - `GET /api/mailboxes?inbox=...`
-- `POST /api/mailboxes` — `{ inbox, name, parentId? }`
-- `PATCH /api/mailboxes/{id}` — `{ name?, sortOrder? }`
+- `POST /api/mailboxes` — `{ inbox, name, parentId?, color?, aiDescription? }`
+- `PATCH /api/mailboxes/{id}` — `{ name?, sortOrder?, color?, aiDescription? }`
 - `DELETE /api/mailboxes/{id}`
+
+A custom folder may have a `color` (one of `red`, `orange`, `amber`,
+`yellow`, `lime`, `green`, `teal`, `cyan`, `blue`, `violet`, `purple`, `pink`)
+and an `aiDescription`: up to 300 characters saying what belongs in it, which
+lets [AI filing](automations.md#ai-filing) file mail into it. An empty
+description removes it. An inbox can have at most 30 described folders
+(`400 TOO_MANY_AI_FOLDERS`). Neither field exists in JMAP.
+
+`POST /api/messages/ai-file` with `{ refs }` (at most 50 received messages
+the caller can see) asks the AI to file them into their inbox's described
+folders, in the background, and answers `202 { queued, skipped }` (mail in
+Junk or Trash is skipped). At most 20 requests an hour per person
+(`429 AI_FILE_RATE_LIMITED`). It needs a
+[configured model](agent.md#provider-selection) (`400 NO_MODEL`) and a
+described folder in each inbox (`400 NO_AI_FOLDERS`), and records one
+`mail.ai_file_requested` audit row.
 
 Inaccessible messages/mailboxes are reported as `404`; invalid state/query
 requests as `400`; duplicate mailbox names as `409`.
@@ -146,7 +162,16 @@ Routes are URL-addressable:
 
 Opening a received message marks personal `seen` state through
 `POST /api/messages/user-state`. Star/archive/spam/trash, snooze, and custom
-folder actions use the state APIs above. HTML bodies are rendered only after
+folder actions use the state APIs above.
+
+A custom folder's pencil opens its settings: name, colour, and "What belongs
+here?", the description AI filing uses. The rail shows the colour dot and an
+**AI** marker on described folders; message rows show up to three chips for
+the custom folders a message is in (name and colour), then "+N". **File with
+AI**, in the reading pane's Folder menu and in the bulk selection bar, files
+the selected received mail; it is disabled, with the reason, when the inbox
+has no described folder or no model is configured. Filed folders appear a few
+seconds later in every open tab. HTML bodies are rendered only after
 the same `sanitizeEmailHtml()` sanitization used by the customer timeline.
 
 The Starred surface is a neutral `starred=true` read with
