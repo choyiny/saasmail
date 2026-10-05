@@ -139,7 +139,6 @@ export function emitButton(block: BlockOf<"button">, theme: Theme): string {
   const align = block.align ?? "center";
   // A square-cornered bulletproof table. VML would restore the radius in
   // Outlook 2016 and roughly double this emitter; it is purely additive later.
-  // See `SPEC-block-compiler.md`, decision 2.
   return row(
     "button",
     `<td class="sm-px" align="${align}" style="padding:${theme.blockSpacing} ${GUTTER};">` +

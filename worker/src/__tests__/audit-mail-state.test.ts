@@ -1,4 +1,4 @@
-// docs/archive/SPEC-audit-log.md §2 and §3: who is recorded as acting, and the
+// docs/audit-log.md: who is recorded as acting, and the
 // events for changes to shared mail state.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { asc, sql } from "drizzle-orm";

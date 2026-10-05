@@ -29,7 +29,7 @@ interface Props {
 }
 
 /**
- * The inbox's conversation mode (SPEC-header-threading): by customer or by
+ * The inbox's conversation mode (docs/inboxes.md): by customer or by
  * thread. A change is confirmed, then regroups the inbox's mail in the
  * background; the control shows how far that got and offers a retry when it
  * stopped.

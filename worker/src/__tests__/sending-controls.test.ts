@@ -1,4 +1,4 @@
-// docs/archive/SPEC-send-controls.md §1 (pause), §3 (daily caps), §4 (settings).
+// docs/sending.md: pausing sends, daily caps and the settings route.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { eq, sql } from "drizzle-orm";

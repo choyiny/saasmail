@@ -1,4 +1,4 @@
-// docs/archive/SPEC-audit-log.md §2: the actor context and the recorder.
+// docs/audit-log.md: the actor context and the recorder.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { auditEvents } from "../db/audit-events.schema";
 import {

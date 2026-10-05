@@ -1,4 +1,4 @@
-// docs/archive/SPEC-audit-log.md §3: events for sends and hard deletes, and
+// docs/audit-log.md: events for sends and hard deletes, and
 // the actor each channel is recorded as.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";

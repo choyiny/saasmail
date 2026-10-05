@@ -44,7 +44,7 @@ limited.
 
 ## API keys
 
-Issue scoped API keys for programmatic access to send email, manage templates, enroll contacts in sequences, and query inbox data. Keys are hashed at rest and follow the `sk_…` format.
+Issue API keys for programmatic access to send email, manage templates, enroll contacts in sequences, and query inbox data. Keys are hashed at rest and follow the `sk_…` format. Each user has at most one key. A key has no scopes of its own: it acts as the user it belongs to, with that user's role and inbox access.
 
 Pass one as `Authorization: Bearer sk_…`. The interactive explorer at
 `/swagger-ui` on your deployment documents every route a key can reach.

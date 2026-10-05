@@ -1,4 +1,4 @@
-// docs/archive/SPEC-backups.md: scheduled database backups to R2.
+// docs/data.md: scheduled database backups to R2.
 import {
   afterEach,
   beforeAll,

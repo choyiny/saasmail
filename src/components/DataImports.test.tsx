@@ -1,4 +1,4 @@
-// docs/archive/SPEC-mail-import.md: Settings → Data → Import mail (admins).
+// docs/data.md: Settings → Data → Import mail (admins).
 import {
   act,
   fireEvent,

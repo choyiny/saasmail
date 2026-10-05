@@ -237,8 +237,7 @@ export default function BlockEditor({ value, onChange }: BlockEditorProps) {
     content: value ? (deserialize(value) as never) : undefined,
     editorProps: {
       attributes: {
-        class:
-          "prose prose-sm max-w-none px-5 py-4 focus:outline-none min-h-[420px]",
+        class: "notion-editor block-editor focus:outline-none",
       },
     },
     onUpdate: ({ editor }) => {

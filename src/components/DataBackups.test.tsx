@@ -1,4 +1,4 @@
-// docs/archive/SPEC-backups.md: Settings → Data → Backups (admins).
+// docs/data.md: Settings → Data → Backups (admins).
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type BackupRun, type BackupsOverview } from "@/lib/api";

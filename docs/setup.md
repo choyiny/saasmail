@@ -26,7 +26,7 @@ Don't have Claude Code? The manual steps below cover the same ground.
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18+
+- [Node.js](https://nodejs.org/) v22 (the version in `.nvmrc`)
 - [Yarn](https://yarnpkg.com/)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm install -g wrangler`)
 - A [Cloudflare](https://dash.cloudflare.com/) account with Email Routing available for your domain
@@ -74,6 +74,8 @@ Edit `wrangler.jsonc`:
 - Set `BASE_URL` to your deployed URL
 - Set `TRUSTED_ORIGINS` to include your deployed URL
 - If using Cloudflare Email Sending, uncomment the `send_email` binding
+- Keep the `AI` binding if the [native mail agent](agent.md) should fall back to
+  Workers AI when no Anthropic or OpenAI key is set
 
 Every key is described in [Configuration](configuration.md#wranglerjsonc).
 
@@ -92,6 +94,7 @@ Edit `.dev.vars`:
 - `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending, Bavimail, or Postmark)
 - `BETTER_AUTH_SECRET` — **required**; generate a random string (`openssl rand -hex 32`). Signs sessions and protects the OAuth signing keys used by the MCP endpoint. Set this before deploying: without it the auth library silently falls back to a publicly known default value.
 - `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
+- Optional: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the [native mail agent](agent.md#provider-selection), and `VAPID_PRIVATE_KEY` for push notifications (`yarn vapid:generate`)
 
 For production, set these as Cloudflare secrets:
 

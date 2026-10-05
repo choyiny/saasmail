@@ -7,14 +7,14 @@ Everything that used to live in one very long README. Start at
 
 ## Deploying and operating
 
-| Page                                  | What's in it                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------ |
-| [Setup](setup.md)                     | Full install — the Claude Code wizard or the manual steps, and backups         |
-| [Email providers](email-providers.md) | Cloudflare Email Sending, Resend, Bavimail, Postmark — and which one wins      |
-| [Configuration](configuration.md)     | Every key in `wrangler.jsonc` and `.dev.vars`, and where secrets go in prod    |
-| [Updating](updating.md)               | Rebasing a fork on upstream, by skill or by hand                               |
-| [Architecture](architecture.md)       | The stack table, the Mermaid diagram, and what the Durable Object and queue do |
-| [Local development](development.md)   | `yarn dev`, seeding, the OpenAPI explorer, and the Playwright E2E suite        |
+| Page                                  | What's in it                                                                  |
+| ------------------------------------- | ----------------------------------------------------------------------------- |
+| [Setup](setup.md)                     | Full install — the Claude Code wizard or the manual steps, and backups        |
+| [Email providers](email-providers.md) | Cloudflare Email Sending, Resend, Bavimail, Postmark — and which one wins     |
+| [Configuration](configuration.md)     | Every key in `wrangler.jsonc` and `.dev.vars`, and where secrets go in prod   |
+| [Updating](updating.md)               | Rebasing a fork on upstream, by skill or by hand                              |
+| [Architecture](architecture.md)       | The stack table, the Mermaid diagram, and what Durable Objects and a queue do |
+| [Local development](development.md)   | `yarn dev`, seeding, the OpenAPI explorer, and the Playwright E2E suite       |
 
 ## Features
 

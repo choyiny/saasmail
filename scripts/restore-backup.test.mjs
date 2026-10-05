@@ -1,4 +1,4 @@
-// docs/archive/SPEC-backups.md: the restore script, against a stubbed wrangler.
+// docs/data.md: the restore script, against a stubbed wrangler.
 import {
   createCipheriv,
   createHash,

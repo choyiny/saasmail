@@ -1,4 +1,4 @@
-// docs/archive/SPEC-mail-export.md: export a mailbox as mbox, and any message
+// docs/data.md: export a mailbox as mbox, and any message
 // as .eml.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";

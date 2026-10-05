@@ -1,4 +1,4 @@
-// docs/archive/SPEC-reject-inbound.md: a `reject` rule action and
+// docs/automations.md: a `reject` rule action and
 // unknown-recipient rejection, both before anything is stored.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";

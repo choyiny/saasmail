@@ -2,6 +2,8 @@
 
 # Newsletters
 
+![Newsletter campaign preview](screenshots/newsletter-editor.jpg)
+
 Lists, subscribe forms, and campaigns — bulk marketing mail, kept deliberately separate from the transactional and sequence paths that share the same worker.
 
 ## Contacts are not people
@@ -18,8 +20,8 @@ The two are linked, never merged. `contacts.personId` is filled in only when a `
 | `PATCH/DELETE /api/lists/{id}`        | Update; delete **archives** once the list has sent campaigns |
 | `GET/POST /api/lists/{id}/members`    | Page through members, add one                                |
 | `DELETE /api/lists/{id}/members/{id}` | Sets `status = 'unsubscribed'` — never deletes the row       |
-| `GET /api/lists/{id}/export`          | Streamed CSV                                                 |
-| `POST /api/lists/{id}/import`         | Async CSV import; returns a job id                           |
+| `GET /api/lists/{id}/members/export`  | Streamed CSV                                                 |
+| `POST /api/lists/{id}/members/import` | Async CSV import; returns a job id                           |
 
 Two rules hold everywhere:
 

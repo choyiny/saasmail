@@ -62,7 +62,7 @@ same tools still register.
 
 ## Tool list
 
-**24 total: 16 read, 8 action.** Read tools return data through the same `/api`
+**26 total: 17 read, 9 action.** Read tools return data through the same `/api`
 client the UI already uses. Action tools drive the real UI — they navigate, open
 the compose drawer pre-filled, save a reply draft into the inbox Drafts filter,
 enroll a contact and switch to the Sequenced view, or render the agent's live
@@ -72,14 +72,15 @@ step-by-step plans for common workflows (summarize unread, reply to unread,
 enroll contacts by criteria).
 
 Read: `get_playbook`, `whoami`, `list_inboxes`, `list_conversations`,
-`list_contacts`, `get_contact`, `list_emails`, `read_email`, `search_emails`,
+`list_contacts`, `get_contact`, `list_emails`, `list_messages`, `read_email`, `search_emails`,
 `list_templates`, `get_template`, `list_sequences`,
 `list_newsletter_lists`, `get_newsletter_list`, `list_campaigns`,
 `get_campaign_stats`.
 
 Action: `open_contact`, `compose_email`, `compose_from_template`,
-`reply_email`, `mark_read`, `mark_unread`, `enroll_in_sequence`,
-`visualize_plan`.
+`reply_email`, `mark_read`, `mark_unread`, `set_message_state`,
+`enroll_in_sequence`, `visualize_plan`. `set_message_state` sets seen, starred,
+archived, spam or snooze state; it cannot trash or delete.
 
 Tools live in `src/webmcp/` — see [AGENTS.md](../AGENTS.md#webmcp-tools) for
 how to add one.

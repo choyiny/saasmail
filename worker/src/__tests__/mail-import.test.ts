@@ -1,4 +1,4 @@
-// docs/archive/SPEC-mail-import.md: import mail from mbox and .eml.
+// docs/data.md: import mail from mbox and .eml.
 import {
   afterEach,
   beforeAll,

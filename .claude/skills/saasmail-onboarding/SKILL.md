@@ -49,7 +49,7 @@ Ask: "Is your Cloudflare account on the **Workers Paid** plan (~$5/month)?"
 Run (the user has cloned the repo):
 
 ```bash
-node --version    # v18+
+node --version    # v22 (see .nvmrc)
 yarn --version
 wrangler --version
 ```
@@ -134,15 +134,21 @@ Edit `wrangler.jsonc` and fill in:
 - `TRUSTED_ORIGINS` — `<BASE_URL>` (production-only; do not add localhost).
 - If Decision 2 is **Option A**, uncomment the `send_email` block.
 - Optional: override `COOKIE_PREFIX` if you want to run multiple saasmail deployments on sibling subdomains without cookie collisions.
+- Optional: for database backups (Settings → Data → Backups), create a bucket (`wrangler r2 bucket create saasmail-backups`) and uncomment the `BACKUPS` entry in `r2_buckets`. Without it, backups go to the attachments bucket under `backups/`.
+
+Keep the `ai` binding, the `durable_objects` bindings and the `migrations` list as they are in the example. The native mail agent runs in the `MailAgent` Durable Object and falls back to Workers AI (`AI`) when no Anthropic or OpenAI key is set.
 
 **Do not rename bindings.** The worker code looks them up by exact name — renaming any of these will break the app:
 
-| Key in `wrangler.jsonc`      | Required value  |
-| ---------------------------- | --------------- |
-| `d1_databases[].binding`     | `"DB"`          |
-| `r2_buckets[].binding`       | `"R2"`          |
-| `queues.producers[].binding` | `"EMAIL_QUEUE"` |
-| `send_email[].name`          | `"EMAIL"`       |
+| Key in `wrangler.jsonc`                          | Required value                                                                       |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| `d1_databases[].binding`                         | `"DB"`                                                                               |
+| `r2_buckets[].binding`                           | `"R2"`                                                                               |
+| `queues.producers[].binding`                     | `"EMAIL_QUEUE"`                                                                      |
+| `send_email[].name`                              | `"EMAIL"`                                                                            |
+| `ai.binding`                                     | `"AI"`                                                                               |
+| `durable_objects.bindings[]`                     | `"NOTIFICATIONS_HUB"` (class `NotificationsHub`), `"MAIL_AGENT"` (class `MailAgent`) |
+| `r2_buckets[].binding` (optional backups bucket) | `"BACKUPS"`                                                                          |
 
 `database_name`, `bucket_name`, `queue`, `account_id`, and all IDs can be freely changed. Only the `binding` / `name` values above are load-bearing.
 
@@ -208,6 +214,11 @@ wrangler secret put POSTMARK_API_KEY
 ```
 
 Paste the Postmark server API token (from the Postmark dashboard → your server → **API Tokens**) when prompted.
+
+Optional secrets, only if the user wants them:
+
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` — a model provider for the native mail agent, suggested replies and AI filing. Anthropic wins over OpenAI; with neither, the `AI` binding (Workers AI) is used.
+- `BACKUP_ENCRYPTION_KEY` — 64 hex characters (`openssl rand -hex 32`) to encrypt database backups. Tell the user to keep a copy outside Cloudflare: the restore script needs it (`--key`).
 
 Set the secret(s) for **only** the provider you chose. A provider's secrets being present is what selects it, in precedence order Bavimail > Postmark > Resend > the `send_email` binding — so a stray `RESEND_API_KEY` or `POSTMARK_API_KEY` will override the `send_email` binding for Option A.
 
@@ -324,7 +335,9 @@ Show the user exactly what was set up, substituting their real values:
 - D1 database `saasmail-db` (binding `DB`)
 - R2 bucket `saasmail-attachments` (binding `R2`)
 - Queue `saasmail-sequence-emails` (binding `EMAIL_QUEUE`)
-- Hourly cron for sequence email delivery
+- Durable Objects `NotificationsHub` (realtime and push) and `MailAgent` (native mail agent)
+- Workers AI binding `AI` (the agent's fallback provider)
+- Hourly cron for sequence emails, the outbox, backups and pruning
 
 ## Common Issues
 

@@ -2,6 +2,8 @@
 
 # Audit log
 
+![Audit log](screenshots/audit-log.jpg)
+
 Shared inboxes are changed by several people, by API keys, by MCP and JMAP
 clients, by automation rules and by the native agent. The audit log records who
 did what, so that when a message leaves Inbox, a reply goes out under a shared

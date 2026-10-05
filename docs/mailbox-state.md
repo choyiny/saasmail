@@ -2,6 +2,8 @@
 
 # Mailbox state
 
+![Mailbox view with folders and reading pane](screenshots/mailbox-view.jpg)
+
 Message state is stored separately from the canonical received and sent message
 rows. Reads still come from the unified `queryMessages()` service; state only
 changes visibility when a caller explicitly asks for a folder/filter policy.

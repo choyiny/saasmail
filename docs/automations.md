@@ -1,6 +1,8 @@
-[Docs](README.md) › **Automations**
+[saasmail](../README.md) › [Docs](README.md) › **Automations**
 
 # Automations
+
+![Automations](screenshots/automations.jpg)
 
 Saasmail has one rules engine for inbound routing and future automation uses.
 Which rules match a received message is decided before it is stored (a

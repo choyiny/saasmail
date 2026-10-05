@@ -15,9 +15,19 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
   `BACKUPS`, backups go to the attachments bucket under `backups/`; a separate
   bucket, ideally with a retention lock or replicated elsewhere, keeps them
   apart from the data they protect.
-- `queues` — Queue for sequence email processing
-- `triggers.crons` — Hourly cron to check for due sequence emails
+- `ai` — Workers AI binding (`AI`), the fallback model provider for the
+  [native mail agent](agent.md#provider-selection), suggested replies and AI
+  filing
+- `queues` — One queue (`EMAIL_QUEUE`) for sequence emails, campaign sends,
+  JMAP delayed sends, and background jobs (imports, exports, backups)
+- `durable_objects` and `migrations` — `NotificationsHub` (realtime and push,
+  tag `v1`) and `MailAgent` (the native agent, a SQLite-backed class, tag `v2`)
+- `triggers.crons` — Hourly cron: due sequence emails, the outbox, newsletter
+  retention, scheduled backups, and pruning
 - `send_email` (optional) — Binding for Cloudflare Email Sending
+- `email_routing` — Lets the worker receive mail from Cloudflare Email Routing
+- `assets` — The built frontend (`dist/client`, binding `ASSETS`), served by the
+  worker as a single-page app
 - `vars.BASE_URL` — Your deployed URL (used for OAuth redirects and BetterAuth)
 - `vars.TRUSTED_ORIGINS` — CORS allowed origins
 - `vars.COOKIE_PREFIX` — Prefix for better-auth session cookies
@@ -36,6 +46,14 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
   browser push notifications. Generate with `yarn vapid:generate` and store
   the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank
   to disable push.
+- `vars.PROVIDER_DAILY_SEND_LIMIT` — optional. Refuses to start a newsletter
+  campaign that would push the sending identity past this many messages in 24
+  hours. Unset by default, in which case the check is skipped entirely. Set it
+  to your provider's real daily quota so an oversized blast is refused up front
+  rather than discovered half-delivered.
+- `vars.AGENT_MODEL` / `vars.TRIAGE_MODEL` — optional model overrides for the
+  [native mail agent](agent.md#agent_model) and
+  [AI filing](agent.md#triage_model). Not secrets.
 
 To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used as both the favicon and the in-app logo. The `/saasmail-onboarding` skill will do this for you interactively.
 
@@ -43,27 +61,30 @@ To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used a
 
 Local development secrets. Created from `.dev.vars.example`. This file is gitignored.
 
-- `vars.PROVIDER_DAILY_SEND_LIMIT` — optional. Refuses to start a newsletter
-  campaign that would push the sending identity past this many messages in 24
-  hours. Unset by default, in which case the check is skipped entirely. Set it
-  to your provider's real daily quota so an oversized blast is refused up front
-  rather than discovered half-delivered.
 - `BAVIMAIL_API_KEY` — Bavimail API bearer token (required for Bavimail, must be paired with `BAVIMAIL_ALIAS_ID`)
 - `BAVIMAIL_ALIAS_ID` — Bavimail alias UUID identifying the sending alias (required for Bavimail)
 - `POSTMARK_API_KEY` — Postmark server API token (if using Postmark)
 - `RESEND_API_KEY` — Resend API key (if using Resend)
+- `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — Optional model provider keys for
+  the [native mail agent](agent.md#provider-selection). Anthropic wins over
+  OpenAI, and either wins over the Workers AI binding.
+- `VAPID_PRIVATE_KEY` — Private half of the VAPID key pair from
+  `yarn vapid:generate`. Without it, push is off.
 - `BETTER_AUTH_SECRET` — Secret for session signing. The native agent also derives a stable 32-byte HKDF-SHA256 tool-approval signing key from it (info: `saasmail/agent-tool-approval/v1`), so pending approval cards remain verifiable across Durable Object reloads and hibernation.
 - `AGENT_APPROVAL_SECRET` — Optional dedicated secret for native-agent approval signatures. When set, it overrides the key derived from `BETTER_AUTH_SECRET`. Set in production with `wrangler secret put AGENT_APPROVAL_SECRET`. Rotating either effective secret invalidates approval cards that were still pending.
-- `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the [suppressions/unsubscribe](suppressions.md) feature.
+- `UNSUBSCRIBE_SECRET` — Secret used to HMAC-sign one-click unsubscribe tokens. Generate with `openssl rand -hex 32`. Set in prod via `wrangler secret put UNSUBSCRIBE_SECRET`. Required for the [suppressions/unsubscribe](suppressions.md) feature and [newsletter](newsletters.md) campaigns, which refuse to start without it.
 - `BACKUP_ENCRYPTION_KEY` — Optional. 64 hex characters (`openssl rand -hex 32`).
   When set, [database backups](data.md#backups) are encrypted with AES-256-GCM
   and the restore script needs the key (`--key`). Keep a copy somewhere other
   than Cloudflare: without it an encrypted backup cannot be read. Set in prod
   via `wrangler secret put BACKUP_ENCRYPTION_KEY`.
 - `DISABLE_PASSKEY_GATE` — Local-only: set to `"true"` to skip the server-side passkey requirement so you can sign in with email+password during development. It also turns off the sign-in rate limits ([Signing in](users-and-api-keys.md#signing-in)), as `DEMO_MODE` does. **Never set this in production.**
+- `DEMO_MODE` — Local-only: set to `"1"` to skip real sending (a send returns a
+  synthetic `demo_…` id) and the queue; it also turns off the passkey gate.
+  Required by `yarn test:e2e`. **Never set this in production.**
 
 In production these are Cloudflare secrets (`wrangler secret put …`), not
-entries in this file.
+entries in this file. The local-only keys are never set in production.
 
 ---
 

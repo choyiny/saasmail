@@ -87,11 +87,14 @@ handshake working, not an error.
 
 Three scopes gate what a connected client may do:
 
-| Scope          | Grants                                                             |
-| -------------- | ------------------------------------------------------------------ |
-| `email:read`   | `whoami`, `list_people`, `get_person`, `list_emails`, `read_email` |
-| `email:send`   | `send_template`, `send_email`, `reply_email`, `enroll_sequence`    |
-| `email:manage` | `mark_read`, `delete_email`                                        |
+| Scope          | Grants                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `email:read`   | `list_rules`, `list_people`, `get_person`, `get_customer`, `list_emails`, `list_messages`, `read_email`, `search_emails` |
+| `email:send`   | `send_template`, `send_email`, `reply_email`, `enroll_sequence`                                                          |
+| `email:manage` | `mark_read`, `set_message_state`, `delete_email`                                                                         |
+
+`whoami` needs no scope: it is how a send-only client finds the inboxes it may
+send from.
 
 **Retrying a send.** `send_email`, `reply_email` and `send_template` take an
 optional `idempotencyKey`: a UUID the client generates for each message it
@@ -132,7 +135,7 @@ attacker-authored content by definition — anyone can email you. Granting
 `email:send` or `email:manage` alongside it means a message in your inbox can
 try to instruct the assistant to mail your data somewhere or delete it. The
 consent screen flags those two scopes for this reason, and `delete_email` is
-permanent (there is no trash). Grant them only to clients you actually trust.
+permanent (it skips Trash). Grant them only to clients you actually trust.
 
 **Revoking access.** Admins can list connected OAuth clients and cut them off at
 **Settings → OAuth apps** (`GET /api/oauth-apps`, `DELETE /api/oauth-apps/{clientId}`).

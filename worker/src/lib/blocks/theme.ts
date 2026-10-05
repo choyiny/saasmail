@@ -55,7 +55,7 @@ export type Theme = {
  * and pure white behind dark text is the pairing their algorithms handle worst
  * — it tends to inverted-grey text on near-black. A slightly warm off-white
  * survives inversion legibly. This is the concrete consequence of accepting
- * forced inversion in v1 (see `SPEC-block-compiler.md`, decision 1).
+ * forced inversion in v1.
  */
 export const DEFAULT_THEME: Theme = {
   fontFamily: FONT_STACKS.system,

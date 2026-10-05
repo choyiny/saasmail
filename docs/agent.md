@@ -2,12 +2,12 @@
 
 # Native mail agent
 
-Stage 2 adds a native in-app mail agent. The runtime is implemented as a
-Cloudflare Durable Object using the Cloudflare `agents` SDK and
+saasmail has a native in-app mail agent. The runtime is implemented as a
+Cloudflare Durable Object (`MailAgent`) using the Cloudflare `agents` SDK and
 `@cloudflare/ai-chat`; chat transcripts live in that Durable Object's SQLite
 storage. Mail data remains in D1, and every mail read or mutation goes through
-the same permission-scoped services used elsewhere in saasmail. Stage 2b adds
-the authenticated side-panel UI on top of that runtime.
+the same permission-scoped services used elsewhere in saasmail. An
+authenticated side panel is the UI on top of that runtime.
 
 ## In-app panel
 
@@ -304,7 +304,7 @@ unchanged.
 
 ## What the agent cannot do
 
-Stage 2 deliberately exposes no tool to:
+The agent deliberately exposes no tool to:
 
 - send email
 - trash or permanently delete mail
@@ -330,7 +330,7 @@ of truth.
 
 Each chat turn is capped at eight AI SDK steps. If the model calls a tool that
 does not exist, the runtime repairs that call to the read-only
-`get_playbook` tool so the model can recover against the actual Stage 2 tool
+`get_playbook` tool so the model can recover against the actual tool
 surface rather than terminating the turn.
 
 Agent-runtime dependencies are intentionally exact-pinned because the

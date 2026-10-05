@@ -1,4 +1,4 @@
-// docs/archive/SPEC-reply-to.md §1: the inbound Reply-To header is parsed into a clean list,
+// docs/inboxes.md: the inbound Reply-To header is parsed into a clean list,
 // stored on the row, and read back through one helper that also covers rows
 // from before the column existed.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";

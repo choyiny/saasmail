@@ -1,4 +1,4 @@
-// docs/archive/SPEC-send-idempotency.md §2: the service.
+// docs/users-and-api-keys.md (retrying a send safely): the service.
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
 import {

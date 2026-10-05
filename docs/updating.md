@@ -43,8 +43,8 @@ patch and pass with it.
 
 Remove the script and `postinstall` hook once a released Cloudflare Agents /
 AI Chat pair explicitly supports AI SDK >= 7.0.61 approval continuations
-without this compatibility shim. The server-side approval ledger added in #31
-remains necessary: the released Cloudflare message builder still does not
+without this compatibility shim. The server-side approval ledger
+(`agent_approval_ledger`, see [Native mail agent](agent.md)) remains necessary: the released Cloudflare message builder still does not
 retain the tool-approval `signature` field when rebuilding the persisted tool
 part.
 
@@ -58,14 +58,19 @@ diff -u wrangler.jsonc.example wrangler.jsonc
 
 Review the diff and add any new bindings, migrations, or variables that apply to your deployment. In particular, the mailbox/agent/JMAP release adds:
 
+- the `enable_request_signal` compatibility flag, which [JMAP](jmap.md) push
+  streams need to notice a disconnected client;
 - the Workers AI binding: `"ai": { "binding": "AI" }`;
 - the `MAIL_AGENT` Durable Object binding for class `MailAgent`;
 - the Durable Object migration `{ "tag": "v2", "new_sqlite_classes": ["MailAgent"] }`;
-- optional `AGENT_APPROVAL_SECRET` and `DB_LOG_QUERIES` variables;
+- the optional `AGENT_APPROVAL_SECRET` secret, and the optional
+  `DB_LOG_QUERIES`, `MCP_SEND_ENABLED` and `PROVIDER_DAILY_SEND_LIMIT` variables;
 - an optional `BACKUPS` R2 bucket for [database backups](data.md#backups)
   (without it they go to the attachments bucket under `backups/`), and the
   optional `BACKUP_ENCRYPTION_KEY` secret. Scheduled backups stay off until an
   admin turns them on.
+
+Also check that `UNSUBSCRIBE_SECRET` is set (`wrangler secret list`): newsletter campaigns refuse to start without it.
 
 The worker fails at runtime without the `MailAgent` binding and its `v2` Durable Object migration. Do not replace a customized `wrangler.jsonc` wholesale; merge the missing entries intentionally.
 

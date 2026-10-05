@@ -1,4 +1,4 @@
-// docs/archive/SPEC-send-idempotency.md §3: the HTTP send routes.
+// docs/users-and-api-keys.md (retrying a send safely): the HTTP send routes.
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import { sql } from "drizzle-orm";

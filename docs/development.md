@@ -6,8 +6,9 @@
 # Start dev server (frontend + worker)
 yarn dev
 
-# Run tests
+# Run tests (worker, then frontend under jsdom)
 yarn test
+yarn test:web
 
 # Type-check
 yarn typecheck
@@ -23,6 +24,12 @@ yarn db:seed:dev
 
 # Open Drizzle Studio (local)
 yarn db:studio:dev
+
+# Regenerate worker-configuration.d.ts after binding changes
+yarn cf-typegen
+
+# Generate VAPID keys for push notifications
+yarn vapid:generate
 ```
 
 Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script populates `seeds/demo.sql` so you can exercise the inbox UI without real inbound email.
@@ -72,6 +79,13 @@ yarn test:e2e e2e/specs/compose.spec.ts
 The E2E suite **wipes and re-seeds the local D1 database** (`.wrangler/state/v3/d1/`) every time it runs. If you have hand-seeded dev data you want to keep, re-run `yarn db:seed:dev` after the E2E suite finishes.
 
 Requirements in `.dev.vars`: `DEMO_MODE=1` and `DISABLE_PASSKEY_GATE=true` — both are in `.dev.vars.example`. The suite also expects `http://localhost:8788` in `TRUSTED_ORIGINS` in `wrangler.jsonc`.
+
+`yarn dev:e2e` starts that demo-mode dev server on its own, and `yarn db:reset:e2e` wipes and re-seeds the local D1 without running the suite.
+
+## Other scripts
+
+- `yarn jmap:e2e` — checks a deployed instance's JMAP sending end to end. It sends real email; see [JMAP](jmap.md#pointing-a-client-at-saasmail).
+- `node scripts/restore-backup.mjs` — loads a database backup into a D1 database. See [Restoring](data.md#restoring).
 
 ---
 
