@@ -65,9 +65,9 @@ GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks 
 
 ## Demo Video
 
-One person's mail across four inboxes, collapsed into a single timeline — filter by inbox and reply inline.
+One person's mail across four inboxes in a single timeline, the table overview, the mailbox view with folders, automations, a newsletter campaign in the block editor, and a browser agent working through unread mail over WebMCP.
 
-https://github.com/user-attachments/assets/870186a2-840f-4b95-b859-4acd44863263
+https://github.com/user-attachments/assets/937d45e9-744e-461f-83fd-71e90a4c38b0
 
 ## Screenshots
 
