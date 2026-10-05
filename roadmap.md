@@ -12,7 +12,7 @@ native agent, MCP, WebMCP and JMAP are further clients of the same services.
 
 Stages 1–7 are complete, including JMAP sending and the JMAP v1 follow-ups (#45–#66).
 Stage 8 is deferred. Stages 9–11 shipped one spec per PR (#67–#78), in the order of
-[`docs/tasks/TASKS-stages-9-11.md`](docs/tasks/TASKS-stages-9-11.md); their specs are in
+[`docs/archive/TASKS-stages-9-11.md`](docs/archive/TASKS-stages-9-11.md); their specs are in
 [`docs/archive/`](docs/archive/).
 
 | Stage | Scope                                                                                                                                  | PR      | Merge commit     |
@@ -134,6 +134,9 @@ The stage order isn't numeric because Stage 3 (the mailbox view) needed Stage
   without it, because a password can't sign in to a passkey account
   (`docs/archive/SPEC-two-factor.md`). It needs a new spec that says what a
   second factor protects once sign-in is passkey-only.
+  Candidates: creating API keys (API keys skip the passkey gate), account
+  recovery after losing every passkey, and a step-up check before sensitive
+  admin actions.
 - **Snooze-expiry notifications:** there is no wake-up cron by design.
 - **Calendar, invites and booking pages:** a second product; revisit booking
   links on the customer timeline after stage 10.
