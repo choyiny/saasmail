@@ -168,15 +168,21 @@ No config to change — the reference is hardcoded to `/saasmail-logo.png`.
 
 ### Step 5: Set Production Secrets
 
+Both of these are **required** for every deployment:
+
 ```bash
 wrangler secret put BETTER_AUTH_SECRET
+wrangler secret put UNSUBSCRIBE_SECRET
 ```
 
-Generate the value to paste when wrangler prompts:
+Generate a **separate** value for each one, and paste it when wrangler prompts:
 
 ```bash
 openssl rand -hex 32
 ```
+
+- `BETTER_AUTH_SECRET` signs sessions and protects the OAuth signing keys used by the MCP endpoint. If it's missing, the auth library silently falls back to a publicly known default.
+- `UNSUBSCRIBE_SECRET` HMAC-signs the one-click unsubscribe tokens added to marketing emails. If it's missing, marketing sends can't sign their tokens and unsubscribe links won't verify. Rotating it later invalidates every unsubscribe link already sent, so set it once and keep it.
 
 If Decision 2 is **Option B (Resend)**, also run:
 
@@ -327,4 +333,5 @@ Show the user exactly what was set up, substituting their real values:
 - **Inbound test email never arrives** — MX records haven't propagated, or the catch-all isn't saved. Email Routing **Overview** should say status **Active**; `dig MX <inbound domain>` should return `*.mx.cloudflare.net` hosts.
 - **Outbound email looks sent but never arrives** — the send-from domain isn't verified. Check Email Service (Option A), Resend → Domains (Option B), the Bavimail dashboard (Option C), or the Postmark dashboard (Option D); status must read **Verified**.
 - **Locked out after sign-up** — passkey enrollment wasn't completed. Sign in again and finish the prompt; the server requires a passkey for `/api/*` in production.
+- **Marketing sends fail, or unsubscribe links return an invalid-token error** — `UNSUBSCRIBE_SECRET` isn't set, or it was changed after the emails went out. Check `wrangler secret list`; if it's missing, run `wrangler secret put UNSUBSCRIBE_SECRET` with a fresh `openssl rand -hex 32` value.
 - **`BASE_URL` serves a blank Cloudflare page instead of saasmail** — the `routes` block in `wrangler.jsonc` wasn't uncommented, or `custom_domain: true` is missing. Fix and redeploy.
