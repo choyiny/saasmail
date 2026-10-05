@@ -1,21 +1,40 @@
-import { eq } from "drizzle-orm";
+import {
+  citedIdsOf,
+  threadKeyForNewMessage,
+  threadingModeOf,
+} from "./messages/thread-key";
+import { currentAuditActor } from "./audit/context";
+import { HUMAN_ACTORS, trainMessages } from "./spam/filter";
+import { auditMailSent } from "./audit/mail-events";
+import { and, eq, isNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
-import { attachments } from "../db/attachments.schema";
 import { emailTemplates } from "../db/email-templates.schema";
 import { emails } from "../db/emails.schema";
 import { people } from "../db/people.schema";
-import { senderIdentities } from "../db/sender-identities.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { cancelSequencesForPerson } from "./cancel-sequence";
-import { computeConversationId, externalsOnly } from "./conversation-id";
-import { createEmailSender } from "./email-sender";
+import { createEmailSender, type EmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
+import { replyToOf } from "./messages/adapters";
+import type { MailAddress } from "./messages/types";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
+import { ownInboxAddresses, replyCandidates } from "./reply-recipients";
+import { MAX_CC_ENTRIES } from "./send-limits";
+import {
+  fetchInternalDomains,
+  findOrCreatePersonId,
+  outboundConversationId,
+} from "./sent-bookkeeping";
+import {
+  discardSentAttachments,
+  discardSentAttachmentsUnlessQueued,
+  stageSentAttachments,
+} from "./sent-attachments";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -42,6 +61,8 @@ export type SendEmailParams = {
   payload: SendEmailPayload;
   files: ParsedFile[];
   allowed: AllowedInboxes;
+  /** Test seam; defaults to the configured provider. */
+  sender?: EmailSender;
 };
 
 export type SendEmailSuccess = {
@@ -52,6 +73,8 @@ export type SendEmailSuccess = {
   attachmentIds: string[];
   delivered: string[];
   suppressed: string[];
+  /** Held in the outbox because outbound sending is paused. */
+  paused?: true;
 };
 
 // The compose path has no recoverable failure mode of its own: multipart
@@ -70,6 +93,9 @@ export type ReplyEmailPayload = {
   replyTo?: string;
 };
 
+/** Who a reply to a received message is addressed to. */
+export type ReplyRecipient = "reply_to" | "sender";
+
 export type ReplyEmailParams = {
   db: Db;
   env: CloudflareBindings;
@@ -77,6 +103,21 @@ export type ReplyEmailParams = {
   payload: ReplyEmailPayload;
   files: ParsedFile[];
   allowed: AllowedInboxes;
+  /**
+   * "reply_to" (the default) follows the original's Reply-To header when it
+   * names someone other than us; "sender" answers its From whatever the
+   * header says. Automatic replies pass "sender": Reply-To is set by whoever
+   * wrote the message.
+   */
+  recipient?: ReplyRecipient;
+  /** Internal automation override; HTTP callers never set this. */
+  subjectOverride?: string;
+  /** Internal headers added to the transport payload. */
+  extraHeaders?: Record<string, string>;
+  /** Internal policy for one-shot sends that must never enter retry state. */
+  retryOnFailure?: boolean;
+  /** Test seam for automation sends. */
+  sender?: EmailSender;
 };
 
 export type ReplyEmailSuccess = {
@@ -85,6 +126,14 @@ export type ReplyEmailSuccess = {
   resendId: string | null;
   status: OutboxOutcome;
   attachmentIds: string[];
+  /** The address the reply was sent to. */
+  to: string;
+  /** Every address it was copied to: the caller's Cc plus any Reply-To extras. */
+  cc: string[];
+  /** Whether that address came from the original's Reply-To or is its sender. */
+  repliedTo: ReplyRecipient;
+  /** Held in the outbox because outbound sending is paused. */
+  paused?: true;
 };
 
 export type ReplyEmailFailure =
@@ -110,63 +159,6 @@ export type ReplyEmailFailure =
 export type ReplyEmailResult = ReplyEmailSuccess | ReplyEmailFailure;
 
 /**
- * Fetch the set of "internal" domains (domains owned by our
- * sender_identities) for the current request — used to derive the
- * external-only participant list when computing a conversation_id.
- */
-async function fetchInternalDomains(db: Db): Promise<string[]> {
-  const rows = await db
-    .select({ email: senderIdentities.email })
-    .from(senderIdentities);
-  return Array.from(
-    new Set(
-      rows
-        .map((r: { email: string }) => {
-          const at = r.email.lastIndexOf("@");
-          return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-        })
-        .filter(Boolean),
-    ),
-  ) as string[];
-}
-
-async function persistSentAttachments(
-  db: Db,
-  env: CloudflareBindings,
-  sentEmailId: string,
-  files: ParsedFile[],
-  now: number,
-): Promise<string[]> {
-  if (files.length === 0) return [];
-  const rows = files.map((f) => {
-    const attachmentId = nanoid();
-    const r2Key = `attachments/sent/${sentEmailId}/${attachmentId}/${f.filename}`;
-    return { attachmentId, r2Key, file: f };
-  });
-  await Promise.all(
-    rows.map((r) =>
-      env.R2.put(r.r2Key, r.file.bytes, {
-        httpMetadata: { contentType: r.file.contentType },
-      }),
-    ),
-  );
-  await db.insert(attachments).values(
-    rows.map((r) => ({
-      id: r.attachmentId,
-      emailId: sentEmailId,
-      kind: "sent" as const,
-      filename: r.file.filename,
-      contentType: r.file.contentType,
-      size: r.file.size,
-      r2Key: r.r2Key,
-      contentId: null,
-      createdAt: now,
-    })),
-  );
-  return rows.map((r) => r.attachmentId);
-}
-
-/**
  * Compose and send a new email, persisting attachments and the sent_emails
  * row. Callers own multipart parsing and hand over the already-parsed
  * payload plus attachment bytes.
@@ -178,7 +170,7 @@ export async function sendEmail(
   params: SendEmailParams,
 ): Promise<SendEmailResult> {
   const { db, env, payload: raw, files, allowed } = params;
-  const sender = createEmailSender(env);
+  const sender = params.sender ?? createEmailSender(env);
 
   const fromAddress = raw.fromAddress.trim().toLowerCase();
   const to = raw.to.trim().toLowerCase();
@@ -204,30 +196,45 @@ export async function sendEmail(
       : undefined;
 
   const id = nanoid();
-  const { outcome, send: sendResult } = await sendViaOutbox({
-    db,
-    env,
-    sender,
-    sentEmailId: id,
-    fromAddress,
-    from: formattedFrom,
-    to,
-    cc,
-    subject,
-    html: bodyHtml,
-    text: bodyText,
-    headers: {
-      "Message-ID": messageId,
-      ...(replyTo ? { "Reply-To": replyTo } : {}),
-    },
-    attachments: attachmentList,
-    transactional,
-  });
+  // Stage BEFORE the provider call: the outbox retry loader reads these rows,
+  // so a crash after the outbox insert must never leave them missing.
+  const attachmentIds = await stageSentAttachments(db, env, id, files, now);
+  let outcome: OutboxOutcome;
+  let sendResult: Awaited<ReturnType<typeof sendViaOutbox>>["send"];
+  try {
+    ({ outcome, send: sendResult } = await sendViaOutbox({
+      db,
+      env,
+      sender,
+      sentEmailId: id,
+      fromAddress,
+      from: formattedFrom,
+      to,
+      cc,
+      subject,
+      html: bodyHtml,
+      text: bodyText,
+      headers: {
+        "Message-ID": messageId,
+        ...(replyTo ? { "Reply-To": replyTo } : {}),
+      },
+      attachments: attachmentList,
+      transactional,
+    }));
+  } catch (err) {
+    await discardSentAttachmentsUnlessQueued(db, env, id);
+    throw err;
+  }
 
   // Every recipient was suppressed — no send happened. Skip sent_emails write,
   // but still cancel any pending sequence enrollments for the recipient so we
   // stop scheduling steps that will all individually re-suppress at dispatch.
   if (sendResult.delivered.length === 0) {
+    // The attachments were staged before suppression was known, so nothing
+    // references them now. Drop rows and objects, or every suppressed send
+    // with a file would leak storage.
+    await discardSentAttachments(db, env, id);
+
     const existingPerson = await db
       .select({ id: people.id })
       .from(people)
@@ -259,44 +266,20 @@ export async function sendEmail(
   const recordedTo = sendResult.delivered[0];
 
   // Find or create the person row for the actual recipient.
-  const existingPerson = await db
-    .select({ id: people.id })
-    .from(people)
-    .where(eq(people.email, recordedTo))
-    .limit(1);
+  const personId = await findOrCreatePersonId(db, recordedTo, now);
 
-  let personId: string;
-  if (existingPerson[0]) {
-    personId = existingPerson[0].id;
-  } else {
-    personId = nanoid();
-    await db
-      .insert(people)
-      .values({
-        id: personId,
-        email: recordedTo,
-        name: null,
-        lastEmailAt: now,
-        unreadCount: 0,
-        totalCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoNothing({ target: people.email });
-    const refetched = await db
-      .select({ id: people.id })
-      .from(people)
-      .where(eq(people.email, recordedTo))
-      .limit(1);
-    personId = refetched[0]!.id;
-  }
-
-  const internalDomains = await fetchInternalDomains(db);
-  const externals = externalsOnly(
-    [recordedTo, ...(cc ?? []).map((c) => c.email)],
-    internalDomains,
+  const conversationId = await outboundConversationId(
+    db,
+    fromAddress,
+    recordedTo,
+    (cc ?? []).map((c) => c.email),
   );
-  const conversationId = await computeConversationId(fromAddress, externals);
+  const storedMessageId = deliveredMessageId(messageId, sendResult.result);
+  // A new message starts its own thread in a headers-mode inbox.
+  const threadKey = await threadKeyForNewMessage(db, {
+    inbox: fromAddress,
+    messageId: storedMessageId,
+  });
 
   await db.insert(sentEmails).values({
     id,
@@ -306,20 +289,28 @@ export async function sendEmail(
     subject,
     bodyHtml: sendResult.renderedHtml ?? bodyHtml,
     bodyText: sendResult.renderedText ?? bodyText ?? null,
-    messageId,
+    messageId: storedMessageId,
     resendId: sendResult.result?.id ?? null,
     status: outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
     conversationId,
+    threadKey,
     sentAt: now,
     createdAt: now,
   });
 
-  // Persist attachments even on failure: a retrying/failed send must be able
-  // to reload its attachment bytes from R2 on a later attempt.
-  const attachmentIds = await persistSentAttachments(db, env, id, files, now);
+  // Attachments were staged above, before the provider call, so a retrying or
+  // failed send can always reload its attachment bytes on a later attempt.
 
   await cancelSequencesForPerson(db, personId);
+  await auditMailSent(db, {
+    id,
+    from: fromAddress,
+    to: recordedTo,
+    otherRecipients: sendResult.delivered.length - 1,
+    subject,
+    status: outcome,
+  });
 
   return {
     ok: true,
@@ -329,6 +320,7 @@ export async function sendEmail(
     attachmentIds,
     delivered: sendResult.delivered,
     suppressed: sendResult.suppressed,
+    ...(sendResult.result?.error?.paused ? { paused: true as const } : {}),
   };
 }
 
@@ -344,13 +336,13 @@ export async function replyToEmail(
   params: ReplyEmailParams,
 ): Promise<ReplyEmailResult> {
   const { db, env, emailId, payload: raw, files, allowed } = params;
-  const sender = createEmailSender(env);
+  const sender = params.sender ?? createEmailSender(env);
 
   // Same canonicalization story as the send route — lowercase the
   // inbox + recipient + CC emails before downstream use so stored
   // rows match the lowercased conversation_id.
   const fromAddress = raw.fromAddress.trim().toLowerCase();
-  const cc = raw.cc?.map((c) => ({
+  let cc = raw.cc?.map((c) => ({
     email: c.email.trim().toLowerCase(),
     name: c.name ?? null,
   }));
@@ -369,7 +361,18 @@ export async function replyToEmail(
   let origPersonId: string;
   let origSubject: string | null;
   let origInReplyToMessageId: string | null;
+  // The original's inbox and thread, for a reply in a headers-mode inbox.
+  let origInbox: string;
+  let origThreadKey: string | null;
   let toAddress: string;
+  // Who the conversation is with. It stays the original's correspondent and
+  // the caller's Cc even when the reply is delivered to a Reply-To address,
+  // so the reply shows up in the thread it was written in.
+  let threadTo: string;
+  const threadCc = (cc ?? []).map((c) => c.email);
+  let repliedTo: ReplyRecipient = "sender";
+  // A Reply-To list read from raw_headers, to store on the row afterwards.
+  let replyToBackfill: MailAddress[] | null = null;
 
   if (receivedRow.length > 0) {
     const orig = receivedRow[0];
@@ -392,8 +395,31 @@ export async function replyToEmail(
     origPersonId = orig.personId;
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
+    origInbox = orig.recipient;
+    origThreadKey = orig.threadKey ?? null;
     // Canonicalize the recipient — older rows may be mixed-case.
     toAddress = person[0].email.toLowerCase();
+    threadTo = toAddress;
+
+    if (params.recipient !== "sender") {
+      const requested = replyToOf(orig);
+      if (requested.length > 0) {
+        // Never answer one of our own inboxes, or the one this reply is
+        // from: a Reply-To that points back at us would have us mail
+        // ourselves.
+        const candidates = replyCandidates(
+          requested,
+          await ownInboxAddresses(db),
+          fromAddress,
+        );
+        if (candidates.length > 0) {
+          toAddress = candidates[0].email.trim().toLowerCase();
+          repliedTo = "reply_to";
+          cc = withReplyToCc(cc, candidates.slice(1), toAddress);
+        }
+        if (orig.replyTo === null) replyToBackfill = requested;
+      }
+    }
   } else {
     const sentRow = await db
       .select()
@@ -418,7 +444,10 @@ export async function replyToEmail(
     origPersonId = orig.personId;
     origSubject = orig.subject ?? null;
     origInReplyToMessageId = orig.messageId ?? null;
+    origInbox = orig.fromAddress;
+    origThreadKey = orig.threadKey ?? null;
     toAddress = orig.toAddress.toLowerCase();
+    threadTo = toAddress;
   }
 
   // Determine subject and body
@@ -475,6 +504,10 @@ export async function replyToEmail(
     };
   }
 
+  if (params.subjectOverride !== undefined) {
+    finalSubject = params.subjectOverride.replace(/[\r\n]+/g, " ");
+  }
+
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
   // Replies are 1:1 conversational responses to an inbound — the recipient
@@ -483,47 +516,76 @@ export async function replyToEmail(
   // the unsubscribe footer / List-Unsubscribe header (this is a reply, not
   // a bulk send).
   const id = nanoid();
-  const { outcome, send: sendResult } = await sendViaOutbox({
-    db,
-    env,
-    sender,
-    sentEmailId: id,
-    fromAddress,
-    from: formattedFrom,
-    to: toAddress,
-    cc,
-    subject: finalSubject,
-    html: finalBodyHtml,
-    ...(bodyText !== undefined ? { text: bodyText } : {}),
-    headers: {
-      "Message-ID": messageId,
-      ...(origInReplyToMessageId
-        ? { "In-Reply-To": origInReplyToMessageId }
+  // Same ordering rule as compose: stage before the provider call so an outbox
+  // retry after a crash still resends the files.
+  const attachmentIds = await stageSentAttachments(db, env, id, files, now);
+  let outcome: OutboxOutcome;
+  let sendResult: Awaited<ReturnType<typeof sendViaOutbox>>["send"];
+  try {
+    ({ outcome, send: sendResult } = await sendViaOutbox({
+      db,
+      env,
+      sender,
+      sentEmailId: id,
+      fromAddress,
+      from: formattedFrom,
+      to: toAddress,
+      cc,
+      subject: finalSubject,
+      html: finalBodyHtml,
+      ...(bodyText !== undefined ? { text: bodyText } : {}),
+      headers: {
+        ...(params.extraHeaders ?? {}),
+        "Message-ID": messageId,
+        ...(origInReplyToMessageId
+          ? {
+              "In-Reply-To": origInReplyToMessageId,
+              References: origInReplyToMessageId,
+            }
+          : {}),
+        ...(replyTo ? { "Reply-To": replyTo } : {}),
+      },
+      ...(files.length > 0
+        ? {
+            attachments: files.map((f) => ({
+              filename: f.filename,
+              contentType: f.contentType,
+              content: f.bytes,
+            })),
+          }
         : {}),
-      ...(replyTo ? { "Reply-To": replyTo } : {}),
-    },
-    ...(files.length > 0
-      ? {
-          attachments: files.map((f) => ({
-            filename: f.filename,
-            contentType: f.contentType,
-            content: f.bytes,
-          })),
-        }
-      : {}),
-    transactional: true,
-  });
+      transactional: true,
+      ...(params.retryOnFailure === undefined
+        ? {}
+        : { retryOnFailure: params.retryOnFailure }),
+    }));
+  } catch (err) {
+    await discardSentAttachmentsUnlessQueued(db, env, id);
+    throw err;
+  }
 
   // Compute conversation_id for this reply.
-  const internalDomainsReply = await fetchInternalDomains(db);
-  const externalsReply = externalsOnly(
-    [toAddress, ...(cc ?? []).map((c) => c.email)],
-    internalDomainsReply,
-  );
-  const conversationIdReply = await computeConversationId(
+  const conversationIdReply = await outboundConversationId(
+    db,
     fromAddress,
-    externalsReply,
+    threadTo,
+    threadCc,
   );
+
+  // In a headers-mode inbox, a reply joins the thread of what it answers:
+  // the original's own thread when it is in this inbox (even without a
+  // Message-ID to cite), else whatever its Message-ID resolves to.
+  const storedReplyId = deliveredMessageId(messageId, sendResult.result);
+  const replyThreadKey =
+    origThreadKey &&
+    origInbox.toLowerCase() === fromAddress.toLowerCase() &&
+    (await threadingModeOf(db, fromAddress)) === "headers"
+      ? origThreadKey
+      : await threadKeyForNewMessage(db, {
+          inbox: fromAddress,
+          messageId: storedReplyId,
+          citedIds: citedIdsOf(origInReplyToMessageId, null),
+        });
 
   // Store sent email
   await db.insert(sentEmails).values({
@@ -535,21 +597,69 @@ export async function replyToEmail(
     bodyHtml: finalBodyHtml,
     bodyText: bodyText ?? null,
     inReplyTo: origInReplyToMessageId,
-    messageId,
+    messageId: storedReplyId,
     resendId: sendResult.result?.id ?? null,
     status: outcome,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
     conversationId: conversationIdReply,
+    threadKey: replyThreadKey,
     sentAt: now,
     createdAt: now,
   });
 
-  // Persist attachments even on failure: a retrying/failed send must be able
-  // to reload its attachment bytes from R2 on a later attempt.
-  const attachmentIds = await persistSentAttachments(db, env, id, files, now);
+  // Attachments were staged above, before the provider call.
+  // Replies are transactional, so they are never suppressed; if a future change
+  // adds a suppressed branch here it must call discardSentAttachments too.
 
   // Cancel any active sequences for this person
   await cancelSequencesForPerson(db, origPersonId);
+  await auditMailSent(db, {
+    id,
+    from: fromAddress,
+    to: toAddress,
+    otherRecipients: cc?.length ?? 0,
+    subject: finalSubject,
+    status: outcome,
+    templateSlug,
+    repliedTo,
+  });
+
+  if (replyToBackfill) {
+    // Best effort: the next reply and every read then use the column instead
+    // of parsing raw_headers again.
+    // Only while the row is as it was read: a re-attribution during the send
+    // cleared its Reply-To on purpose, and this must not bring it back.
+    try {
+      await db
+        .update(emails)
+        .set({ replyTo: JSON.stringify(replyToBackfill) })
+        .where(
+          and(
+            eq(emails.id, emailId),
+            isNull(emails.replyTo),
+            eq(emails.personId, origPersonId),
+          ),
+        );
+    } catch (err) {
+      console.warn(`[reply] Reply-To not stored for ${emailId}:`, err);
+    }
+  }
+
+  // A person answering a received message says it is not junk: that trains
+  // the inbox's learning filter, unless somebody already labelled it (an
+  // explicit junk mark wins over a reply). Never a rule, the agent or the
+  // system.
+  if (receivedRow.length > 0) {
+    const actor = currentAuditActor();
+    if (HUMAN_ACTORS.has(actor.actorType)) {
+      await trainMessages(db, {
+        refs: [{ kind: "received", id: emailId }],
+        label: "ham",
+        userId: actor.actorUserId,
+        onlyIfUntrained: true,
+      });
+    }
+  }
 
   return {
     ok: true,
@@ -557,5 +667,33 @@ export async function replyToEmail(
     resendId: sendResult.result?.id ?? null,
     status: outcome,
     attachmentIds,
+    to: toAddress,
+    cc: (cc ?? []).map((entry) => entry.email),
+    repliedTo,
+    ...(sendResult.result?.error?.paused ? { paused: true as const } : {}),
   };
+}
+
+/**
+ * The Cc of a reply whose To is a Reply-To address: the caller's Cc without
+ * that address (a reply-all composer may carry it over from the original),
+ * plus the Reply-To addresses after the first. Each address once, never the
+ * To itself, and never past the Cc limit.
+ */
+function withReplyToCc(
+  cc: { email: string; name: string | null }[] | undefined,
+  extra: MailAddress[],
+  toAddress: string,
+): { email: string; name: string | null }[] | undefined {
+  if (!cc && extra.length === 0) return cc;
+  const merged = (cc ?? []).filter((entry) => entry.email !== toAddress);
+  const seen = new Set([toAddress, ...merged.map((entry) => entry.email)]);
+  for (const entry of extra) {
+    if (merged.length >= MAX_CC_ENTRIES) break;
+    const email = entry.email.trim().toLowerCase();
+    if (seen.has(email)) continue;
+    seen.add(email);
+    merged.push({ email, name: entry.name ?? null });
+  }
+  return merged;
 }

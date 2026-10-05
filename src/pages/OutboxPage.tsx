@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
-import { Clock, RefreshCw, Send, X } from "lucide-react";
-import { fetchOutbox, retryOutboxItem, cancelOutboxItem } from "@/lib/api";
-import type { OutboxItem } from "@/lib/api";
+import { CalendarClock, Clock, RefreshCw, Send, X } from "lucide-react";
+import {
+  cancelOutboxItem,
+  cancelScheduledSend,
+  fetchOutbox,
+  fetchScheduledSends,
+  retryOutboxItem,
+} from "@/lib/api";
+import type { OutboxItem, ScheduledSend } from "@/lib/api";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 import { SectionHeader } from "@/components/PageForm";
 import { cn } from "@/lib/utils";
@@ -32,7 +38,18 @@ function StatusChip({ status }: { status: OutboxItem["status"] }) {
   );
 }
 
+function scheduledTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function OutboxPage() {
+  const [scheduled, setScheduled] = useState<ScheduledSend[]>([]);
   const [items, setItems] = useState<OutboxItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,9 +82,45 @@ export default function OutboxPage() {
     }
   }
 
+  async function loadScheduled() {
+    try {
+      const res = await fetchScheduledSends();
+      setScheduled(res.items);
+    } catch {
+      setError("Failed to load scheduled sends.");
+    }
+  }
+
   useEffect(() => {
     loadInitial();
+    loadScheduled();
   }, []);
+
+  async function handleCancelScheduled(item: ScheduledSend) {
+    setBusyId(item.id);
+    setNotice(null);
+    try {
+      const res = await cancelScheduledSend(item.id);
+      setScheduled((prev) => prev.filter((i) => i.id !== item.id));
+      const subject = item.subject || "(no subject)";
+      setNotice(
+        res.movedToDrafts
+          ? `Canceled — "${subject}" is back in Drafts.`
+          : res.willMove
+            ? `Canceled — "${subject}" won't be sent. It will move back to Drafts shortly.`
+            : `Canceled — "${subject}" won't be sent.`,
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Cancel failed — the message may already be on its way.",
+      );
+      await loadScheduled();
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function handleRetry(item: OutboxItem) {
     setBusyId(item.id);
@@ -114,10 +167,59 @@ export default function OutboxPage() {
     <PageContainer>
       <PageHeader
         title="Outbox"
-        subtitle="Sends the provider rejected. Retrying items are re-attempted every hour; failed items gave up and need a manual retry."
+        subtitle="Scheduled sends waiting for their time, and sends the provider rejected. Retrying items are re-attempted every hour; failed items gave up and need a manual retry."
       />
 
       <div className="space-y-6">
+        {scheduled.length > 0 && (
+          <section
+            className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border"
+            data-testid="outbox-scheduled"
+          >
+            <div className="border-b border-border px-5 py-4">
+              <SectionHeader
+                icon={CalendarClock}
+                title={`Scheduled (${scheduled.length})`}
+                subtitle="Held until their send time. Cancel moves the message back to Drafts."
+              />
+            </div>
+            <ul className="divide-y divide-border/60">
+              {scheduled.map((item) => (
+                <li key={item.id} className="flex items-start gap-3 px-5 py-3">
+                  <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-muted">
+                    <CalendarClock size={14} className="text-text-tertiary" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-medium text-text-primary">
+                        {item.subject || "(no subject)"}
+                      </p>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200">
+                        <Clock size={10} />
+                        Scheduled for {scheduledTime(item.sendAt)}
+                      </span>
+                    </div>
+                    <p className="truncate text-xs font-light text-text-tertiary">
+                      To {item.toAddress} · from {item.fromAddress} · sends{" "}
+                      {relativeTime(item.sendAt)}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      onClick={() => handleCancelScheduled(item)}
+                      disabled={busyId === item.id}
+                      className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60"
+                    >
+                      <X size={12} />
+                      Cancel
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader

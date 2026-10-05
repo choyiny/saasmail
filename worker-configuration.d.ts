@@ -9,6 +9,16 @@ declare namespace Cloudflare {
 	interface Env {
 		R2: R2Bucket;
 		DB: D1Database;
+		AI: Ai;
+		MAIL_AGENT: DurableObjectNamespace<import("./worker/src/agent/mail-agent").MailAgent>;
+		/** Optional Anthropic API key for the native agent. Set via wrangler secret. */
+		ANTHROPIC_API_KEY?: string;
+		/** Optional OpenAI API key for the native agent. Set via wrangler secret. */
+		OPENAI_API_KEY?: string;
+		/** Optional native-agent model override. */
+		AGENT_MODEL?: string;
+		/** Optional model for AI filing (`ai_file`), on the agent's provider. Defaults to AGENT_MODEL. */
+		TRIAGE_MODEL?: string;
 		EMAIL_QUEUE: Queue;
 		ASSETS: Fetcher;
 		BASE_URL: "<your-deployed-url>";
@@ -22,6 +32,16 @@ declare namespace Cloudflare {
 		UNSUBSCRIBE_SECRET: string;
 		/** Secret: set via `wrangler secret put BETTER_AUTH_SECRET`. Signs sessions and protects the OAuth signing keys in `jwkss`. Not emitted by `wrangler types`; added manually. */
 		BETTER_AUTH_SECRET: string;
+		/** Optional secret: set via `wrangler secret put AGENT_APPROVAL_SECRET`. Overrides the BETTER_AUTH_SECRET-derived key used to sign native-agent tool approvals. Not emitted by `wrangler types`; added manually. */
+		AGENT_APPROVAL_SECRET?: string;
+		/** Optional query logging toggle. Set to "true" only while debugging; Drizzle logs SQL parameters. Not emitted by `wrangler types`; added manually. */
+		DB_LOG_QUERIES?: string;
+		/** Optional kill switch: "false" makes the MCP tools that send mail (send_email, reply_email, send_template, enroll_sequence) refuse. Default on. Not emitted by `wrangler types`; added manually. */
+		MCP_SEND_ENABLED?: string;
+		/** Optional dedicated bucket for scheduled database backups; without it they go to `R2` under `backups/`. Not emitted by `wrangler types`; added manually. */
+		BACKUPS?: R2Bucket;
+		/** Optional secret: 64 hex characters (AES-256). When set, backup files are encrypted. Not emitted by `wrangler types`; added manually. */
+		BACKUP_ENCRYPTION_KEY?: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
 	}
 }

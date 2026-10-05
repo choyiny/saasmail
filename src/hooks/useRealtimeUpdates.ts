@@ -1,6 +1,11 @@
 import { useEffect, useRef } from "react";
+import { dispatchSuggestedReplyReady } from "@/lib/suggested-reply-events";
+import { dispatchExportReady, dispatchImportDone } from "@/lib/export-events";
+import { showToast } from "@/lib/toast";
 
 const INITIAL_RECONNECT_MS = 1_000;
+/** A burst of AI filings reloads the list once. */
+const MAIL_REFRESH_DEBOUNCE_MS = 1_500;
 const MAX_RECONNECT_MS = 60_000;
 
 // Close codes that indicate the server will keep rejecting us, so we stop
@@ -9,8 +14,12 @@ const MAX_RECONNECT_MS = 60_000;
 // immediately closes with an explicit code.
 const TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403]);
 
+export interface RealtimeEmailReceived {
+  inbox?: string;
+}
+
 export function useRealtimeUpdates(
-  onEmailReceived: () => void,
+  onEmailReceived: (event: RealtimeEmailReceived) => void,
   onShouldPromptPush?: () => void,
 ) {
   // Keep the latest callback in a ref so we don't bake a stale closure into
@@ -25,6 +34,7 @@ export function useRealtimeUpdates(
     let reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
     let reconnectDelay = INITIAL_RECONNECT_MS;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     function scheduleReconnect() {
       if (stopped) return;
@@ -52,8 +62,66 @@ export function useRealtimeUpdates(
         try {
           const data = JSON.parse(event.data);
           if (data.type === "email_received") {
-            callbackRef.current();
+            callbackRef.current({
+              inbox: typeof data.inbox === "string" ? data.inbox : undefined,
+            });
             promptRef.current?.();
+          } else if (data.type === "mail_refresh") {
+            // Mail changed out of band (the AI filed it): reload, as for new
+            // mail, without announcing anything, and once for a burst.
+            const inbox =
+              typeof data.inbox === "string" ? data.inbox : undefined;
+            if (refreshTimer) clearTimeout(refreshTimer);
+            refreshTimer = setTimeout(() => {
+              refreshTimer = null;
+              callbackRef.current({ inbox });
+            }, MAIL_REFRESH_DEBOUNCE_MS);
+          } else if (
+            data.type === "export_ready" &&
+            typeof data.inbox === "string" &&
+            typeof data.jobId === "string"
+          ) {
+            // A mailbox export this person asked for can be downloaded.
+            dispatchExportReady({ inbox: data.inbox, jobId: data.jobId });
+            showToast({
+              kind: "success",
+              message: `Your export of ${data.inbox} is ready.`,
+              action: {
+                label: "Open",
+                onClick: (dismiss) => {
+                  dismiss();
+                  window.location.assign("/settings#data");
+                },
+              },
+            });
+          } else if (
+            data.type === "import_done" &&
+            typeof data.inbox === "string" &&
+            typeof data.jobId === "string"
+          ) {
+            // A mail import this admin started has finished.
+            dispatchImportDone({ inbox: data.inbox, jobId: data.jobId });
+            callbackRef.current({ inbox: data.inbox });
+            showToast({
+              kind: "success",
+              message: `Your import into ${data.inbox} is done.`,
+              action: {
+                label: "Open",
+                onClick: (dismiss) => {
+                  dismiss();
+                  window.location.assign("/settings#data");
+                },
+              },
+            });
+          } else if (
+            data.type === "suggested_reply" &&
+            typeof data.inbox === "string" &&
+            typeof data.emailId === "string"
+          ) {
+            dispatchSuggestedReplyReady({
+              inbox: data.inbox,
+              emailId: data.emailId,
+            });
           }
         } catch {}
       };
@@ -72,6 +140,7 @@ export function useRealtimeUpdates(
     return () => {
       stopped = true;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (refreshTimer) clearTimeout(refreshTimer);
       ws?.close();
     };
   }, []);

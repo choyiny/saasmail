@@ -1,7 +1,12 @@
+import { respondIdempotently } from "../lib/idempotent-send-route";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq, inArray, isNull, or } from "drizzle-orm";
+import { eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { assertInboxAllowed, isInboxAllowed } from "../lib/inbox-permissions";
+import {
+  assertInboxAllowed,
+  isInboxAllowed,
+  jsonList,
+} from "../lib/inbox-permissions";
 import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import { analyzeTemplate, TemplateParseError } from "../lib/interpolate";
@@ -10,10 +15,19 @@ import type { Variables } from "../variables";
 import { bearerSecurity } from "../lib/openapi-auth";
 import {
   ErrorSchema,
+  dailySendLimitResponses,
+  idempotencyConflictResponses,
+  idempotencyKeyHeader,
+  idempotent201Response,
   inboxForbiddenResponse,
   SendPathErrorSchema,
 } from "../lib/openapi-send-errors";
 import { templateVariablesSchema } from "../lib/template-variables-schema";
+import {
+  isBodyError,
+  resolveCreateBody,
+  resolveUpdateBody,
+} from "../lib/template-body";
 
 export const emailTemplatesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -45,12 +59,23 @@ function templateParseError(subject: string, bodyHtml: string): string | null {
   }
 }
 
+/**
+ * `bodyJson` is typed loosely here on purpose. The authoritative shape is
+ * `BlockDocumentSchema`, which carries `.transform()` sanitization — running it
+ * through the OpenAPI generator would document the *input* shape while the
+ * route actually stores the transformed one. The route validates strictly in
+ * the handler instead; see `lib/template-body.ts`.
+ */
+const BlockDocumentIo = z.record(z.string(), z.unknown());
+
 const EmailTemplateSchema = z.object({
   id: z.string(),
   slug: z.string(),
   name: z.string(),
   subject: z.string(),
   bodyHtml: z.string(),
+  format: z.enum(["html", "block"]),
+  bodyJson: BlockDocumentIo.nullable(),
   fromAddress: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -69,7 +94,9 @@ const createTemplateRoute = createRoute({
             slug: z.string().regex(/^[a-z0-9-]+$/),
             name: z.string(),
             subject: z.string(),
-            bodyHtml: z.string(),
+            format: z.enum(["html", "block"]).optional(),
+            bodyHtml: z.string().optional(),
+            bodyJson: BlockDocumentIo.optional(),
             fromAddress: z.string().email().nullable().optional(),
           }),
         },
@@ -88,16 +115,27 @@ const createTemplateRoute = createRoute({
 
 emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
   const db = c.get("db");
-  const { slug, name, subject, bodyHtml, fromAddress } = c.req.valid("json");
+  const { slug, name, subject, fromAddress, ...body } = c.req.valid("json");
 
-  const parseError = templateParseError(subject, bodyHtml);
+  // Resolve first: a block template's `bodyHtml` does not exist until the
+  // document is compiled, and the tag check below has to run on the compiled
+  // output so a malformed `{{#section}}` typed into a block fails the write
+  // with the same diagnostic a hand-written template would produce.
+  const resolved = resolveCreateBody(body);
+  if (isBodyError(resolved)) {
+    return c.json({ error: resolved.error }, resolved.status);
+  }
+
+  const parseError = templateParseError(subject, resolved.bodyHtml);
   if (parseError) {
     return c.json({ error: parseError }, 400);
   }
 
   const allowed = c.get("allowedInboxes")!;
-  if (fromAddress != null) {
-    assertInboxAllowed(allowed, fromAddress);
+  const canonicalFromAddress =
+    fromAddress == null ? null : fromAddress.trim().toLowerCase();
+  if (canonicalFromAddress != null) {
+    assertInboxAllowed(allowed, canonicalFromAddress);
   } else if (!allowed.isAdmin) {
     // Members cannot create global (null) templates.
     return c.json({ error: "from_address is required for members" }, 403);
@@ -109,8 +147,10 @@ emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
     slug,
     name,
     subject,
-    bodyHtml,
-    fromAddress: fromAddress ?? null,
+    bodyHtml: resolved.bodyHtml,
+    format: resolved.format,
+    bodyJson: resolved.bodyJson,
+    fromAddress: canonicalFromAddress,
     createdAt: now,
     updatedAt: now,
   };
@@ -146,7 +186,7 @@ emailTemplatesRouter.openapi(listTemplatesRoute, async (c) => {
       .where(
         or(
           isNull(emailTemplates.fromAddress),
-          inArray(emailTemplates.fromAddress, allowed.inboxes),
+          sql`${emailTemplates.fromAddress} IN ${jsonList(allowed.inboxes)}`,
         ),
       );
   }
@@ -203,7 +243,9 @@ const updateTemplateRoute = createRoute({
           schema: z.object({
             name: z.string().optional(),
             subject: z.string().optional(),
+            format: z.enum(["html", "block"]).optional(),
             bodyHtml: z.string().optional(),
+            bodyJson: BlockDocumentIo.optional(),
             fromAddress: z.string().email().nullable().optional(),
           }),
         },
@@ -214,7 +256,12 @@ const updateTemplateRoute = createRoute({
     ...json200Response(EmailTemplateSchema, "Updated email template"),
     400: {
       description:
-        "Template has an unbalanced section or an unknown filter — see the parse diagnostic.",
+        "Template has an unbalanced section or an unknown filter, or the body fields do not match the format — see the diagnostic.",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    422: {
+      description:
+        "An HTML template cannot be converted to blocks. The reverse conversion is allowed and is one-way.",
       content: { "application/json": { schema: ErrorSchema } },
     },
   },
@@ -236,8 +283,21 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
   }
 
   const allowed = c.get("allowedInboxes")!;
-  if (updates.fromAddress !== undefined && updates.fromAddress !== null) {
-    assertInboxAllowed(allowed, updates.fromAddress);
+  const canonicalFromAddress =
+    updates.fromAddress === undefined
+      ? undefined
+      : updates.fromAddress === null
+        ? null
+        : updates.fromAddress.trim().toLowerCase();
+  if (canonicalFromAddress !== undefined && canonicalFromAddress !== null) {
+    assertInboxAllowed(allowed, canonicalFromAddress);
+  }
+
+  // Resolve the body against the row as it exists: this is where a format
+  // conversion is decided, and where a block document is compiled.
+  const resolved = resolveUpdateBody(updates, existing[0]);
+  if (isBodyError(resolved)) {
+    return c.json({ error: resolved.error }, resolved.status);
   }
 
   // Both fields are optional on this route, so validate the template as it
@@ -245,15 +305,31 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
   // section unbalanced across the pair.
   const parseError = templateParseError(
     updates.subject ?? existing[0].subject,
-    updates.bodyHtml ?? existing[0].bodyHtml,
+    resolved.bodyHtml,
   );
   if (parseError) {
     return c.json({ error: parseError }, 400);
   }
 
+  const {
+    format: _f,
+    bodyHtml: _h,
+    bodyJson: _j,
+    fromAddress: _from,
+    ...rest
+  } = updates;
   await db
     .update(emailTemplates)
-    .set({ ...updates, updatedAt: now })
+    .set({
+      ...rest,
+      ...(canonicalFromAddress !== undefined
+        ? { fromAddress: canonicalFromAddress }
+        : {}),
+      format: resolved.format,
+      bodyHtml: resolved.bodyHtml,
+      bodyJson: resolved.bodyJson,
+      updatedAt: now,
+    })
     .where(eq(emailTemplates.slug, slug));
 
   const updated = await db
@@ -378,9 +454,11 @@ const sendTemplateRoute = createRoute({
   path: "/{slug}/send",
   tags: ["Email Templates"],
   security: bearerSecurity,
-  description: "Send an email using a template.",
+  description:
+    "Send an email using a template. Send an `Idempotency-Key` so that a retry never sends twice.",
   request: {
     params: z.object({ slug: z.string() }),
+    headers: idempotencyKeyHeader,
     body: {
       content: {
         "application/json": {
@@ -388,13 +466,17 @@ const sendTemplateRoute = createRoute({
             to: z.string().email(),
             fromAddress: z.string().email(),
             variables: templateVariablesSchema.optional().default({}),
+            idempotencyKey: z.string().optional().openapi({
+              description:
+                "Same as the `Idempotency-Key` header, for clients that cannot set one; the header wins.",
+            }),
           }),
         },
       },
     },
   },
   responses: {
-    ...json201Response(
+    ...idempotent201Response(
       z.object({
         id: z.string().nullable(),
         resendId: z.string().nullable(),
@@ -404,6 +486,10 @@ const sendTemplateRoute = createRoute({
         }),
         delivered: z.array(z.string()),
         suppressed: z.array(z.string()),
+        paused: z.boolean().optional().openapi({
+          description:
+            "`true` when outbound sending is paused: the message is held and goes out when sending resumes.",
+        }),
       }),
       "Email sent",
     ),
@@ -419,49 +505,69 @@ const sendTemplateRoute = createRoute({
       description: "Template slug not found",
       content: { "application/json": { schema: ErrorSchema } },
     },
+    ...idempotencyConflictResponses,
+    ...dailySendLimitResponses,
   },
 });
 
 emailTemplatesRouter.openapi(sendTemplateRoute, async (c) => {
   const db = c.get("db");
   const { slug } = c.req.valid("param");
-  const { to, fromAddress, variables } = c.req.valid("json");
+  const { to, fromAddress, variables, idempotencyKey } = c.req.valid("json");
 
-  const result = await sendTemplate({
-    db,
-    env: c.env,
-    slug,
-    to,
-    fromAddress,
-    variables,
-    allowed: c.get("allowedInboxes")!,
-  });
-
-  if (!result.ok) {
-    if (result.code === "TEMPLATE_NOT_FOUND") {
-      return c.json({ error: result.message }, 404);
-    }
-    if (result.code === "TEMPLATE_PARSE_ERROR") {
-      return c.json({ error: result.message }, 400);
-    }
-    return c.json(
-      {
-        error: result.message,
-        missingVariables: result.missingVariables,
-        requiredVariables: result.requiredVariables,
-      },
-      400,
-    );
-  }
-
-  return c.json(
+  return respondIdempotently(
+    c,
     {
-      id: result.id,
-      resendId: result.resendId,
-      status: result.status,
-      delivered: result.delivered,
-      suppressed: result.suppressed,
+      payloadKey: idempotencyKey,
+      fields: {
+        kind: "template",
+        templateSlug: slug,
+        to: to.trim().toLowerCase(),
+        fromAddress: fromAddress.trim().toLowerCase(),
+        variables,
+      },
     },
-    201,
+    async () => {
+      const result = await sendTemplate({
+        db,
+        env: c.env,
+        slug,
+        to,
+        fromAddress,
+        variables,
+        allowed: c.get("allowedInboxes")!,
+      });
+
+      // Refusals are answered, not remembered: a corrected retry may run.
+      if (!result.ok) {
+        if (result.code === "TEMPLATE_NOT_FOUND") {
+          return { status: 404, body: { error: result.message } };
+        }
+        if (result.code === "TEMPLATE_PARSE_ERROR") {
+          return { status: 400, body: { error: result.message } };
+        }
+        return {
+          status: 400,
+          body: {
+            error: result.message,
+            missingVariables: result.missingVariables,
+            requiredVariables: result.requiredVariables,
+          },
+        };
+      }
+
+      return {
+        status: 201,
+        body: {
+          id: result.id,
+          resendId: result.resendId,
+          status: result.status,
+          delivered: result.delivered,
+          suppressed: result.suppressed,
+          ...(result.paused ? { paused: true } : {}),
+        },
+        sentEmailId: result.id,
+      };
+    },
   );
 });

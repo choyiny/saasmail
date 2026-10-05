@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
+import { forgetSendKey, sendKeyFor, sendKeyProblem } from "@/lib/send-key";
+import { useState, useEffect, useMemo, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { PenSquare, Send, X } from "lucide-react";
 import TiptapEditor from "@/components/TiptapEditor";
@@ -14,6 +15,7 @@ import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import AttachmentPicker from "@/components/AttachmentPicker";
+import SendingPausedNotice from "@/components/SendingPausedNotice";
 import AttachmentChips from "@/components/AttachmentChips";
 
 // Effective backend cap is ~18MB on the Cloudflare email path; we cap the
@@ -42,6 +44,7 @@ interface ComposeModalProps {
   open: boolean;
   onClose: () => void;
   prefill?: ComposePrefill | null;
+  contextKey?: string;
 }
 
 /**
@@ -53,6 +56,7 @@ export default function ComposeModal({
   open,
   onClose,
   prefill,
+  contextKey = "compose",
 }: ComposeModalProps) {
   const [to, setTo] = useState("");
   const [fromAddress, setFromAddress] = useState("");
@@ -167,7 +171,7 @@ export default function ComposeModal({
       (prefill.cc && prefill.cc.length > 0))
   );
   const { clear: clearDraft } = useDraftAutosave({
-    contextKey: "compose",
+    contextKey,
     enabled: open,
     isEmpty: composeIsEmpty,
     restore: open && !hasPrefill,
@@ -181,6 +185,16 @@ export default function ComposeModal({
       if (draft.fromAddress) setFromAddress(draft.fromAddress);
     },
   });
+
+  const sendContext = `send:${contextKey}`;
+  // Closing the window ends this message: the next one gets a new key. Only
+  // a close does: after a reload the window starts closed, and a retry from
+  // the restored draft must keep the key.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) forgetSendKey(sendContext);
+    wasOpen.current = open;
+  }, [open, sendContext]);
 
   async function handleSend() {
     if (!to || bodyIsEmpty) return;
@@ -203,14 +217,20 @@ export default function ComposeModal({
         bodyHtml: finalBody,
         ...(bodyText.trim() ? { bodyText } : {}),
         ...(files.length > 0 ? { files: files.map((file) => ({ file })) } : {}),
+        // Every attempt of this message carries the same key, so a retry
+        // after a timeout can't send it twice.
+        idempotencyKey: sendKeyFor(sendContext),
       });
+      forgetSendKey(sendContext);
       dispatchEmailSent({ fromAddress, to, origin: "compose" });
       // The message went out — discard its draft so it doesn't reappear.
       clearDraft();
       setFiles([]);
       onClose();
-    } catch {
-      setError("Failed to send email");
+    } catch (sendError) {
+      setError(
+        sendKeyProblem(sendError, sendContext) ?? "Failed to send email",
+      );
     } finally {
       setSending(false);
     }
@@ -362,6 +382,7 @@ export default function ComposeModal({
             </AttachmentPicker>
           </div>
 
+          <SendingPausedNotice className="border-t border-border bg-card px-4 pt-2 sm:px-5" />
           {/* Slim footer — single row, just send + cancel + hint. */}
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 sm:px-5">
             <div className="min-w-0 truncate text-[11px] font-light text-text-tertiary">

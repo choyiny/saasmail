@@ -12,7 +12,7 @@
 
 <!-- How did you verify this works? Include commands run and/or scenarios exercised. -->
 
-- [ ] `yarn tsc --noEmit`
+- [ ] `yarn typecheck`
 - [ ] `yarn test`
 - [ ] `yarn test:e2e` (if the change touches UI or API surface)
 - [ ] Manual verification:

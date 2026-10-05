@@ -24,3 +24,14 @@ DEMO_MODE=1
 # with: openssl rand -hex 32. Set in prod via:
 #   wrangler secret put UNSUBSCRIBE_SECRET
 UNSUBSCRIBE_SECRET=replace-with-output-of-openssl-rand-hex-32
+
+# Optional: 64 hex characters (openssl rand -hex 32). Encrypts database
+# backups (AES-256-GCM); the restore script then needs it (--key). Set in
+# prod via: wrangler secret put BACKUP_ENCRYPTION_KEY
+# BACKUP_ENCRYPTION_KEY=
+
+# Optional: a model provider for the native mail agent, suggested replies and
+# AI filing. Anthropic wins over OpenAI; with neither, the AI binding (Workers
+# AI) is used. Set in prod via: wrangler secret put ANTHROPIC_API_KEY
+# ANTHROPIC_API_KEY=
+# OPENAI_API_KEY=

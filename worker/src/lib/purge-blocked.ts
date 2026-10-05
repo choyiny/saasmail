@@ -1,3 +1,5 @@
+import { auditMailDeleted } from "./audit/mail-events";
+import { collectAudit } from "./audit/record";
 import { eq, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { emails } from "../db/emails.schema";
@@ -7,13 +9,27 @@ import {
   deleteEmailWithAttachments,
   SYSTEM_INBOX_ACCESS,
 } from "./delete-email";
+import { deleteMessageState } from "./messages/state";
+import { cancelScheduledSendsFor } from "./scheduled-sends";
+import {
+  collectPersonGroupConversations,
+  deletePersonConversationState,
+} from "./messages/conversation-state";
 
 /**
  * Hard-delete every email + person whose address matches any block rule, and
  * clean up R2 attachments. Matches exact-email rules and domain rules (via the
  * computed domain of people.email). Returns counts for the caller/UI.
  */
-export async function purgeBlockedMail(
+export function purgeBlockedMail(
+  db: DrizzleD1Database<any>,
+  r2: R2Bucket,
+): Promise<{ emailsDeleted: number; peopleDeleted: number }> {
+  // One audit row per inbox for the whole purge, not one per message.
+  return collectAudit(db, () => purgeBlocked(db, r2));
+}
+
+async function purgeBlocked(
   db: DrizzleD1Database<any>,
   r2: R2Bucket,
 ): Promise<{ emailsDeleted: number; peopleDeleted: number }> {
@@ -29,6 +45,11 @@ export async function purgeBlockedMail(
 
   let emailsDeleted = 0;
   for (const { id: personId } of blockedPeople) {
+    const groupConversations = await collectPersonGroupConversations(
+      db,
+      personId,
+    );
+
     // Received emails (with R2 attachment cleanup).
     const received = await db
       .select({ id: emails.id })
@@ -46,7 +67,24 @@ export async function purgeBlockedMail(
       if (res) emailsDeleted++;
     }
     // Any sent emails attributed to this person.
+    const sent = await db
+      .select({ id: sentEmails.id, fromAddress: sentEmails.fromAddress })
+      .from(sentEmails)
+      .where(eq(sentEmails.personId, personId));
+    await deleteMessageState(
+      db,
+      sent.map((message) => ({ kind: "sent" as const, id: message.id })),
+    );
+    await cancelScheduledSendsFor(db, sql`person_id = ${personId}`);
     await db.delete(sentEmails).where(eq(sentEmails.personId, personId));
+    await auditMailDeleted(
+      db,
+      sent.map((message) => ({
+        ref: { kind: "sent" as const, id: message.id },
+        inbox: message.fromAddress,
+      })),
+    );
+    await deletePersonConversationState(db, personId, groupConversations);
     // Finally the person row.
     await db.delete(people).where(eq(people.id, personId));
   }

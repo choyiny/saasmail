@@ -3,6 +3,7 @@ import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import {
   AlertTriangle,
   Clock,
+  Download,
   Link2,
   Maximize2,
   Paperclip,
@@ -10,8 +11,9 @@ import {
   UserPen,
 } from "lucide-react";
 import CcChips from "@/components/CcChips";
-import type { Email } from "@/lib/api";
+import { messageEmlUrl, type Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
+import DeliveryBadge from "@/components/mail/DeliveryBadge";
 
 interface MessageBubbleProps {
   email: Email;
@@ -155,6 +157,19 @@ export default function MessageBubble({
             Retrying
           </span>
         )}
+        {isSent && (
+          <DeliveryBadge status={email.status} sendAt={email.timestamp} />
+        )}
+        {isSent && email.campaignId && (
+          <span
+            data-testid="message-campaign-badge"
+            title="Part of a newsletter campaign, not a message written to this person."
+            className="inline-flex shrink-0 items-center rounded-[5px] bg-violet/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: "#7c5cfc" }}
+          >
+            Campaign
+          </span>
+        )}
         <span className="text-[10px] text-text-tertiary shrink-0 ml-auto">
           {dateStr} {timeStr}
         </span>
@@ -253,6 +268,16 @@ export default function MessageBubble({
         >
           Reply
         </button>
+        <a
+          href={messageEmlUrl(`${email.type}:${email.id}`)}
+          download
+          onClick={(e) => e.stopPropagation()}
+          className="flex items-center gap-1 text-[11px] text-text-tertiary hover:text-text-secondary"
+          title="Download (.eml)"
+        >
+          <Download size={12} />
+          .eml
+        </a>
         {onReassign && (
           <button
             onClick={(e) => {

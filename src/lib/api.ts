@@ -1,3 +1,5 @@
+import type { BlockDocument } from "@worker/lib/blocks/schema";
+
 export interface Person {
   id: string;
   email: string;
@@ -20,6 +22,7 @@ export interface GroupedPerson {
   recipientCount: number;
   recipients: string[];
   hasAttachment: number;
+  linkedCount: number;
 }
 
 /**
@@ -68,12 +71,27 @@ export interface Email {
   isRead: number | null;
   cc: CcEntry[];
   timestamp: number;
-  /** Delivery status for sent messages: "sent" | "failed" | "retrying". Null for received. */
+  /**
+   * Delivery status for sent messages: "sent" | "failed" | "retrying", or for
+   * a delayed send "scheduled" | "canceled". Null for received.
+   */
   status?: string | null;
   attachmentCount?: number;
   attachments?: Attachment[];
-  /** Inbound Reply-To address, surfaced by the single-email endpoint. */
+  /**
+   * Where a reply to this received message goes when that is not its sender:
+   * the first Reply-To address that isn't one of our own inboxes. Null when
+   * replies go to the sender.
+   */
   replyTo?: string | null;
+  /**
+   * Every address a reply to this received message reaches when it follows
+   * Reply-To: the first is To, the others are copied. Empty when the reply
+   * simply goes to the sender.
+   */
+  replyRecipients?: CcEntry[];
+  /** Set when this was a campaign send rather than mail someone wrote. */
+  campaignId?: string | null;
 }
 
 export type InboxDisplayMode = "thread" | "chat";
@@ -110,15 +128,186 @@ export interface Stats {
   }>;
 }
 
+/** A failed API call: the server's message, its HTTP status and its `code`. */
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
     ...options,
   });
   if (!res.ok) {
-    throw new Error(`API error: ${res.status}`);
+    let message = `API error: ${res.status}`;
+    let code: string | null = null;
+    try {
+      const body = (await res.json()) as { error?: unknown; code?: unknown };
+      if (typeof body.error === "string" && body.error.trim()) {
+        message = body.error;
+      }
+      if (typeof body.code === "string") code = body.code;
+    } catch {
+      // Keep the status fallback when the server did not return JSON.
+    }
+    throw new ApiError(message, res.status, code);
   }
   return res.json();
+}
+
+/** The header that makes a retry of the same send return the first answer. */
+function idempotencyHeaders(key: string | undefined): HeadersInit | undefined {
+  return key ? { "Idempotency-Key": key } : undefined;
+}
+
+export interface AgentStatus {
+  configured: boolean;
+  provider: "anthropic" | "openai" | "workers-ai" | null;
+  model: string | null;
+}
+
+export interface AgentSession {
+  id: string;
+  title: string | null;
+  createdAt: number;
+  updatedAt: number;
+  archivedAt: number | null;
+  instanceName: string;
+}
+
+export async function fetchAgentApprovalSummary(
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<{ summary: string }> {
+  return apiFetch("/api/agent/approval-summary", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ toolName, input }),
+  });
+}
+
+export interface SuggestedReply {
+  id: string;
+  emailId: string;
+  inbox: string;
+  bodyText: string;
+  model: string;
+  status: "pending" | "used" | "dismissed";
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchSuggestedReply(
+  emailId: string,
+): Promise<SuggestedReply | null> {
+  const result = await apiFetch<{ suggestion: SuggestedReply | null }>(
+    `/api/suggested-replies?emailId=${encodeURIComponent(emailId)}`,
+  );
+  return result.suggestion;
+}
+
+export async function useSuggestedReply(id: string): Promise<SuggestedReply> {
+  return apiFetch(`/api/suggested-replies/${encodeURIComponent(id)}/use`, {
+    method: "POST",
+  });
+}
+
+export async function dismissSuggestedReply(
+  id: string,
+): Promise<SuggestedReply> {
+  return apiFetch(`/api/suggested-replies/${encodeURIComponent(id)}/dismiss`, {
+    method: "POST",
+  });
+}
+
+export async function fetchAgentStatus(): Promise<AgentStatus> {
+  return apiFetch("/api/agent/status");
+}
+
+export async function fetchAgentSessions(): Promise<{
+  sessions: AgentSession[];
+}> {
+  return apiFetch("/api/agent/sessions");
+}
+
+export async function createAgentSession(
+  title?: string,
+): Promise<AgentSession> {
+  return apiFetch("/api/agent/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(title ? { title } : {}),
+  });
+}
+
+export async function updateAgentSession(
+  id: string,
+  patch: { title?: string | null; archived?: boolean },
+): Promise<AgentSession> {
+  return apiFetch(`/api/agent/sessions/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteAgentSession(
+  id: string,
+): Promise<{ success: true }> {
+  return apiFetch(`/api/agent/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export interface Customer {
+  id: string;
+  displayName: string | null;
+  people: Array<{ id: string; email: string; name: string | null }>;
+}
+
+export async function fetchCustomerByPerson(
+  personId: string,
+): Promise<{ customer: Customer | null }> {
+  return apiFetch(`/api/customers/by-person/${encodeURIComponent(personId)}`);
+}
+
+export async function linkCustomerPeople(
+  personId: string,
+  otherPersonId: string,
+): Promise<Customer> {
+  return apiFetch("/api/customers/link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ personId, otherPersonId }),
+  });
+}
+
+export async function unlinkCustomerPerson(
+  personId: string,
+): Promise<{ success: true }> {
+  return apiFetch("/api/customers/unlink", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ personId }),
+  });
+}
+
+export async function updateCustomer(
+  id: string,
+  displayName: string | null,
+): Promise<Customer> {
+  return apiFetch(`/api/customers/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ displayName }),
+  });
 }
 
 export interface PaginatedPeople {
@@ -240,13 +429,20 @@ export async function fetchConversationEmails(
 
 export async function fetchPersonEmails(
   personId: string,
-  params?: { q?: string; recipient?: string; page?: number; limit?: number },
+  params?: {
+    q?: string;
+    recipient?: string;
+    page?: number;
+    limit?: number;
+    allAddresses?: boolean;
+  },
 ): Promise<PersonEmailsResponse> {
   const qs = new URLSearchParams();
   if (params?.q) qs.set("q", params.q);
   if (params?.recipient) qs.set("recipient", params.recipient);
   if (params?.page) qs.set("page", params.page.toString());
   if (params?.limit) qs.set("limit", params.limit.toString());
+  if (params?.allAddresses) qs.set("allAddresses", "true");
   return apiFetch(`/api/emails/by-person/${personId}?${qs}`);
 }
 
@@ -292,6 +488,290 @@ export async function searchEmails(params: {
   if (params.page) qs.set("page", String(params.page));
   if (params.limit) qs.set("limit", String(params.limit));
   return apiFetch(`/api/emails/search?${qs}`);
+}
+
+// Mirrors the worker's UnifiedMessage + state response from GET /api/messages.
+// Kept local rather than imported through `@worker/*` because worker message
+// modules pull server-only dependencies into the frontend typecheck.
+export interface MailAddress {
+  email: string;
+  name?: string | null;
+}
+
+export interface MailMessageState {
+  seen: boolean;
+  starredAt: number | null;
+  archivedAt: number | null;
+  spamAt: number | null;
+  trashedAt: number | null;
+  mailboxIds: string[];
+  conversationKey: string | null;
+  snoozedUntil: number | null;
+  assignedUserId?: string | null;
+}
+
+export interface MailMessage {
+  ref: string;
+  direction: "inbound" | "outbound";
+  inbox: string;
+  personId: string | null;
+  conversationId: string | null;
+  messageId: string | null;
+  inReplyTo: string | null;
+  from: MailAddress | null;
+  to: MailAddress;
+  additionalTo?: MailAddress[];
+  cc: MailAddress[];
+  bcc?: MailAddress[];
+  /**
+   * The addresses a reply to this received message would use, from its
+   * Reply-To header without our own inboxes: the first is To, the others are
+   * copied. Empty when the reply simply goes to the sender, and for sent
+   * messages.
+   */
+  replyTo?: MailAddress[];
+  subject: string | null;
+  bodyText: string | null;
+  bodyHtml: string | null;
+  occurredAt: number;
+  isRead: boolean | null;
+  /** Received mail's score from its inbox's learning filter, when scored. */
+  spamProbability?: number | null;
+  source: {
+    campaignId: string | null;
+    sequenceId: string | null;
+    sequenceEnrollmentId: string | null;
+  };
+  delivery: { status: string } | null;
+  attachmentCount?: number;
+  state: MailMessageState;
+}
+
+export interface MessageListResult {
+  messages: MailMessage[];
+  nextCursor: string | null;
+}
+
+export async function fetchMessages(params?: {
+  inbox?: string;
+  folder?: "inbox" | "sent" | "archive" | "junk" | "trash" | "snoozed";
+  mailboxId?: string;
+  starred?: boolean;
+  unseen?: boolean;
+  includeTrashed?: boolean;
+  includeSpam?: boolean;
+  personId?: string;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+  excludeCampaignSends?: boolean;
+  assignedTo?: string;
+}): Promise<MessageListResult> {
+  const qs = new URLSearchParams();
+  if (params?.inbox) qs.set("inbox", params.inbox);
+  if (params?.folder) qs.set("folder", params.folder);
+  if (params?.mailboxId) qs.set("mailboxId", params.mailboxId);
+  if (params?.starred !== undefined) qs.set("starred", String(params.starred));
+  if (params?.unseen !== undefined) qs.set("unseen", String(params.unseen));
+  if (params?.includeTrashed !== undefined) {
+    qs.set("includeTrashed", String(params.includeTrashed));
+  }
+  if (params?.includeSpam !== undefined) {
+    qs.set("includeSpam", String(params.includeSpam));
+  }
+  if (params?.personId) qs.set("personId", params.personId);
+  if (params?.q) qs.set("q", params.q);
+  if (params?.cursor) qs.set("cursor", params.cursor);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.excludeCampaignSends !== undefined) {
+    qs.set("excludeCampaignSends", String(params.excludeCampaignSends));
+  }
+  if (params?.assignedTo) qs.set("assignedTo", params.assignedTo);
+  return apiFetch(`/api/messages?${qs}`);
+}
+
+/** The colours a custom folder may have. */
+export const MAILBOX_COLORS = [
+  "red",
+  "orange",
+  "amber",
+  "yellow",
+  "lime",
+  "green",
+  "teal",
+  "cyan",
+  "blue",
+  "violet",
+  "purple",
+  "pink",
+] as const;
+export type MailboxColor = (typeof MAILBOX_COLORS)[number];
+
+export interface Mailbox {
+  id: string;
+  inbox: string;
+  name: string;
+  role: string | null;
+  parentId: string | null;
+  sortOrder: number;
+  color: MailboxColor | null;
+  /** What belongs here, for AI filing; null when the AI does not file into it. */
+  aiDescription: string | null;
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+  ruleCount: number;
+}
+
+export async function fetchMailboxes(inbox: string): Promise<Mailbox[]> {
+  const qs = new URLSearchParams({ inbox });
+  const result = await apiFetch<{ mailboxes: Mailbox[] }>(
+    `/api/mailboxes?${qs}`,
+  );
+  return result.mailboxes;
+}
+
+export async function createMailbox(data: {
+  inbox: string;
+  name: string;
+  parentId?: string | null;
+  color?: MailboxColor | null;
+  aiDescription?: string | null;
+}): Promise<Mailbox> {
+  return apiFetch("/api/mailboxes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function renameMailbox(
+  id: string,
+  name: string,
+): Promise<Mailbox> {
+  return updateMailbox(id, { name });
+}
+
+export async function updateMailbox(
+  id: string,
+  changes: {
+    name?: string;
+    color?: MailboxColor | null;
+    aiDescription?: string | null;
+  },
+): Promise<Mailbox> {
+  return apiFetch(`/api/mailboxes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+}
+
+/** Asks the AI to file messages into their inbox's described folders. */
+export async function fileWithAi(
+  refs: string[],
+): Promise<{ queued: number; skipped: number }> {
+  return apiFetch("/api/messages/ai-file", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refs }),
+  });
+}
+
+export async function deleteMailbox(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/api/mailboxes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function setMailboxMembership(data: {
+  refs: string[];
+  add?: string[];
+  remove?: string[];
+}): Promise<{ success: boolean }> {
+  return apiFetch("/api/messages/mailbox-membership", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function snoozeMessages(
+  refs: string[],
+  until: number | null,
+): Promise<{ conversations: number }> {
+  return apiFetch("/api/messages/snooze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refs, until }),
+  });
+}
+
+export interface InboxAssignee {
+  id: string;
+  name: string;
+  email: string;
+  image: string | null;
+}
+
+export async function fetchInboxAssignees(
+  inbox: string,
+): Promise<InboxAssignee[]> {
+  const qs = new URLSearchParams({ inbox });
+  return apiFetch(`/api/messages/assignees?${qs}`);
+}
+
+export async function assignMessages(
+  refs: string[],
+  userId: string | null,
+): Promise<{ conversations: number }> {
+  return apiFetch("/api/messages/assign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refs, userId }),
+  });
+}
+
+export async function setMessageState(data: {
+  refs: string[];
+  seen?: boolean;
+  starred?: boolean;
+  archived?: boolean;
+  spam?: boolean;
+  trashed?: boolean;
+  snoozeUntil?: number | null;
+}): Promise<{ success: boolean }> {
+  if (data.seen !== undefined || data.starred !== undefined) {
+    await apiFetch("/api/messages/user-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refs: data.refs,
+        seen: data.seen,
+        starred: data.starred,
+      }),
+    });
+  }
+  if (
+    data.archived !== undefined ||
+    data.spam !== undefined ||
+    data.trashed !== undefined
+  ) {
+    await apiFetch("/api/messages/mailbox-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refs: data.refs,
+        archived: data.archived,
+        spam: data.spam,
+        trashed: data.trashed,
+      }),
+    });
+  }
+  if (data.snoozeUntil !== undefined) {
+    await snoozeMessages(data.refs, data.snoozeUntil);
+  }
+  return { success: true };
 }
 
 export async function markEmailRead(
@@ -386,8 +866,10 @@ export async function sendEmail(data: {
   bodyHtml: string;
   bodyText?: string;
   files?: AttachedFile[];
+  /** The same on every attempt of one message (see `sendKeyFor`). */
+  idempotencyKey?: string;
 }): Promise<{ id: string; attachmentIds: string[]; status: string }> {
-  const { files = [], ...payload } = data;
+  const { files = [], idempotencyKey, ...payload } = data;
   const fd = new FormData();
   // Manually composed emails are 1:1 transactional messages: no unsubscribe
   // footer or List-Unsubscribe headers, and they bypass the suppression list
@@ -396,9 +878,12 @@ export async function sendEmail(data: {
   for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch("/api/send", {
     method: "POST",
+    headers: idempotencyHeaders(idempotencyKey),
     body: fd, // do not set Content-Type; the browser sets the multipart boundary
   });
 }
+
+export type ReplyRecipient = "reply_to" | "sender";
 
 export async function replyToEmail(
   emailId: string,
@@ -410,14 +895,31 @@ export async function replyToEmail(
     templateSlug?: string;
     variables?: Record<string, string>;
     files?: AttachedFile[];
+    /**
+     * "sender" answers the message's From even when it has a Reply-To. The
+     * default follows the Reply-To.
+     */
+    recipient?: ReplyRecipient;
+    /** The same on every attempt of one reply (see `sendKeyFor`). */
+    idempotencyKey?: string;
   },
-): Promise<{ id: string; attachmentIds: string[]; status: string }> {
-  const { files = [], ...payload } = data;
+): Promise<{
+  id: string;
+  attachmentIds: string[];
+  status: string;
+  /** The address the reply was sent to. */
+  to: string;
+  /** Every address it was copied to. */
+  cc: string[];
+  repliedTo: ReplyRecipient;
+}> {
+  const { files = [], idempotencyKey, ...payload } = data;
   const fd = new FormData();
   fd.append("payload", JSON.stringify(payload));
   for (const af of files) fd.append("files", af.file, af.file.name);
   return apiFetch(`/api/send/reply/${emailId}`, {
     method: "POST",
+    headers: idempotencyHeaders(idempotencyKey),
     body: fd,
   });
 }
@@ -432,7 +934,13 @@ export interface EmailTemplate {
   slug: string;
   name: string;
   subject: string;
+  /**
+   * The rendering source for every send path. For a block template this is
+   * compiled by the server from `bodyJson` — the client never writes it.
+   */
   bodyHtml: string;
+  format: "html" | "block";
+  bodyJson: BlockDocument | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -449,7 +957,9 @@ export async function createTemplate(data: {
   slug: string;
   name: string;
   subject: string;
-  bodyHtml: string;
+  format?: "html" | "block";
+  bodyHtml?: string;
+  bodyJson?: BlockDocument;
 }): Promise<EmailTemplate> {
   return apiFetch("/api/email-templates", {
     method: "POST",
@@ -460,7 +970,13 @@ export async function createTemplate(data: {
 
 export async function updateTemplate(
   slug: string,
-  data: { name?: string; subject?: string; bodyHtml?: string },
+  data: {
+    name?: string;
+    subject?: string;
+    format?: "html" | "block";
+    bodyHtml?: string;
+    bodyJson?: BlockDocument;
+  },
 ): Promise<EmailTemplate> {
   return apiFetch(`/api/email-templates/${slug}`, {
     method: "PUT",
@@ -493,6 +1009,16 @@ export interface Draft {
   updatedAt: number;
 }
 
+export interface DraftListItem {
+  id: string;
+  contextKey: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  subject: string | null;
+  replyToEmailId: string | null;
+  updatedAt: number;
+}
+
 export interface DraftInput {
   contextKey: string;
   fromAddress?: string;
@@ -502,6 +1028,22 @@ export interface DraftInput {
   bodyHtml?: string;
   bodyText?: string;
   replyToEmailId?: string | null;
+}
+
+export async function fetchDraftList(params?: {
+  inbox?: string;
+  limit?: number;
+  offset?: number;
+  /** Also list drafts made in a mail client (read-only), on the first page. */
+  includeMailClient?: boolean;
+}): Promise<{ drafts: DraftListItem[] }> {
+  const qs = new URLSearchParams();
+  if (params?.inbox) qs.set("inbox", params.inbox);
+  if (params?.includeMailClient) qs.set("includeMailClient", "1");
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return apiFetch(`/api/drafts/list${query ? `?${query}` : ""}`);
 }
 
 export async function fetchDraft(contextKey: string): Promise<Draft | null> {
@@ -523,6 +1065,49 @@ export async function saveDraft(data: DraftInput): Promise<Draft> {
 export async function deleteDraft(contextKey: string): Promise<void> {
   await apiFetch(`/api/drafts?contextKey=${encodeURIComponent(contextKey)}`, {
     method: "DELETE",
+  });
+}
+
+/** A draft written in a mail client, as the web shows it (read-only). */
+export interface JmapDraftPreview {
+  contextKey: string;
+  from: { email: string; name: string | null } | null;
+  to: { email: string; name: string | null }[];
+  cc: { email: string; name: string | null }[];
+  bcc: { email: string; name: string | null }[];
+  subject: string;
+  html: string | null;
+  text: string | null;
+  attachments: { name: string | null; type: string; size: number }[];
+  updatedAt: number;
+}
+
+export async function fetchJmapDraftPreview(
+  contextKey: string,
+): Promise<JmapDraftPreview> {
+  const res = await apiFetch<{ draft: JmapDraftPreview }>(
+    `/api/drafts/jmap-preview?contextKey=${encodeURIComponent(contextKey)}`,
+  );
+  return res.draft;
+}
+
+export type PublishDraftStatus =
+  | "published"
+  | "unchanged"
+  | "skipped"
+  | "gone"
+  | "notFound";
+
+/**
+ * Shared drafts: publish a compose surface's draft so JMAP clients see it.
+ * `gone` means it was sent or deleted from a JMAP client.
+ */
+export async function publishDraft(
+  contextKey: string,
+): Promise<{ status: PublishDraftStatus; reason?: string }> {
+  return apiFetch("/api/drafts/publish", {
+    method: "POST",
+    body: JSON.stringify({ contextKey }),
   });
 }
 
@@ -806,14 +1391,70 @@ export async function fetchSequenceEnrollments(
 
 // --- Admin Inboxes ---
 
+/**
+ * How an inbox groups mail into conversations: by customer (`relationship`,
+ * the default) or by In-Reply-To/References threads (`headers`).
+ */
+export type ThreadingMode = "relationship" | "headers";
+
+/** The inbox's last regrouping after a conversation-mode change. */
+export interface ThreadBackfillStatus {
+  id: string;
+  mode: ThreadingMode;
+  status: "running" | "completed" | "failed";
+  processed: number;
+  total: number;
+}
+
 export interface AdminInbox {
   email: string;
   displayName: string | null;
   displayMode: InboxDisplayMode;
+  threadingMode: ThreadingMode;
+  threadBackfill: ThreadBackfillStatus | null;
   signatureHtml: string | null;
   /** Destination address for per-inbox forwarding; null = forwarding off. */
   forwardTo: string | null;
+  /** SpamAssassin-style X-Spam-Score cutoff; null = automatic filing off. */
+  spamThreshold: number | null;
+  /** Optional per-inbox instructions appended to the native agent prompt. */
+  agentInstructions: string | null;
+  /** Whether eligible inbound messages get AI-generated suggested replies. */
+  agentAutodraft: boolean;
   assignedUserIds: string[];
+  /** The inbox's learning spam filter. */
+  spamFilter: SpamFilterStatus;
+}
+
+export interface SpamFilterStatus {
+  enabled: boolean;
+  spamMessages: number;
+  hamMessages: number;
+  /** Trained on 20 of each: it scores new mail. */
+  ready: boolean;
+}
+
+export async function setSpamFilter(
+  email: string,
+  enabled: boolean,
+): Promise<SpamFilterStatus> {
+  return apiFetch(
+    `/api/admin/inboxes/${encodeURIComponent(email)}/spam-filter`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    },
+  );
+}
+
+export async function resetSpamFilter(
+  email: string,
+): Promise<SpamFilterStatus> {
+  return apiFetch(
+    `/api/admin/inboxes/${encodeURIComponent(email)}/spam-filter/reset`,
+    { method: "POST" },
+  );
 }
 
 export async function fetchAdminInboxes(): Promise<AdminInbox[]> {
@@ -839,13 +1480,22 @@ export async function updateInboxSettings(
     displayMode?: InboxDisplayMode;
     signatureHtml?: string | null;
     forwardTo?: string | null;
+    spamThreshold?: number | null;
+    agentInstructions?: string;
+    agentAutodraft?: boolean;
+    threadingMode?: ThreadingMode;
   },
 ): Promise<{
   email: string;
   displayName: string | null;
   displayMode: InboxDisplayMode;
+  threadingMode: ThreadingMode;
+  threadBackfill: ThreadBackfillStatus | null;
   signatureHtml: string | null;
   forwardTo: string | null;
+  spamThreshold: number | null;
+  agentInstructions: string | null;
+  agentAutodraft: boolean;
 }> {
   return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
     method: "PATCH",
@@ -886,6 +1536,199 @@ export interface AdminUser {
 
 export async function fetchAdminUsers(): Promise<AdminUser[]> {
   return apiFetch("/api/admin/users");
+}
+
+// --- Audit log ---
+
+export interface AuditEvent {
+  id: string;
+  /** Unix seconds. */
+  at: number;
+  /** user, api_key, mcp, jmap, agent, rule or system. */
+  actorType: string;
+  actorUserId: string | null;
+  actorLabel: string;
+  /** web, api, mcp, jmap, agent, rule, inbound, cron, queue or import. */
+  channel: string;
+  /** A dotted name such as `mail.archived`. */
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  inbox: string | null;
+  summary: string;
+  details: Record<string, unknown> | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+export interface AuditFilters {
+  action?: string;
+  /** Every action that starts with this, e.g. `mail.`. */
+  actionPrefix?: string;
+  actorUserId?: string;
+  inbox?: string;
+  /** Unix seconds, inclusive. */
+  from?: number;
+  to?: number;
+  q?: string;
+}
+
+function auditQuery(filters: AuditFilters): URLSearchParams {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") qs.set(key, String(value));
+  }
+  return qs;
+}
+
+export async function fetchAuditEvents(
+  filters: AuditFilters = {},
+  cursor?: string | null,
+): Promise<{ events: AuditEvent[]; nextCursor: string | null }> {
+  const qs = auditQuery(filters);
+  if (cursor) qs.set("cursor", cursor);
+  const query = qs.toString();
+  return apiFetch(`/api/admin/audit${query ? `?${query}` : ""}`);
+}
+
+export async function fetchAuditActions(): Promise<{ actions: string[] }> {
+  return apiFetch("/api/admin/audit/actions");
+}
+
+/** Where the browser downloads the filtered log as CSV (at most 10,000 rows). */
+export function auditExportUrl(filters: AuditFilters = {}): string {
+  const query = auditQuery(filters).toString();
+  return `/api/admin/audit/export.csv${query ? `?${query}` : ""}`;
+}
+
+// --- Automations ---
+
+export type RuleCondition =
+  | {
+      field: "from_address";
+      operator: "equals" | "contains" | "ends_with";
+      value: string;
+    }
+  | { field: "from_domain"; operator: "equals"; value: string }
+  | {
+      field: "subject";
+      operator: "contains" | "equals" | "starts_with";
+      value: string;
+    }
+  | { field: "body"; operator: "contains"; value: string }
+  | { field: "has_attachments"; operator: "is"; value: boolean }
+  | { field: "spam_score"; operator: "gte" | "lte"; value: number }
+  | { field: "spam_probability"; operator: "gte" | "lte"; value: number }
+  | {
+      field: "header";
+      name: string;
+      operator: "equals" | "contains";
+      value: string;
+    };
+
+export type RuleAction =
+  | { type: "archive" }
+  | { type: "mark_spam" }
+  | { type: "move_to_folder"; mailboxId: string }
+  | { type: "snooze"; hours: number }
+  | { type: "assign"; userId: string }
+  | { type: "auto_reply"; subject?: string; bodyText: string }
+  | { type: "reject"; reason?: string }
+  | { type: "ai_file"; archiveWhenFiled?: boolean };
+
+export type RuleWarning = {
+  actionIndex: number;
+  code: "missing_folder" | "assignee_unavailable" | "no_ai_folders";
+};
+
+export interface AutomationRule {
+  id: string;
+  name: string;
+  inbox: string | null;
+  trigger: "message.received";
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  warnings: RuleWarning[];
+  position: number;
+  stopProcessing: boolean;
+  enabled: boolean;
+  matchCount: number;
+  lastMatchedAt: number | null;
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AutomationRuleInput {
+  name: string;
+  inbox: string | null;
+  trigger?: "message.received";
+  conditions: RuleCondition[];
+  actions: RuleAction[];
+  position: number;
+  stopProcessing: boolean;
+  enabled: boolean;
+}
+
+export interface RuleTestResult {
+  matched: boolean;
+  /** Matched with a reject action: the message would be refused. */
+  wouldReject: boolean;
+  conditionResults: Array<{
+    condition: RuleCondition;
+    matched: boolean;
+  }>;
+}
+
+export async function fetchRules(): Promise<AutomationRule[]> {
+  return apiFetch("/api/admin/rules");
+}
+
+export async function createRule(
+  rule: AutomationRuleInput,
+): Promise<AutomationRule> {
+  return apiFetch("/api/admin/rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rule),
+  });
+}
+
+export async function updateRule(
+  id: string,
+  patch: Partial<AutomationRuleInput>,
+): Promise<AutomationRule> {
+  return apiFetch(`/api/admin/rules/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteRule(id: string): Promise<{ success: true }> {
+  return apiFetch(`/api/admin/rules/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function reorderRules(ids: string[]): Promise<{ success: true }> {
+  return apiFetch("/api/admin/rules/reorder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+}
+
+export async function testRule(
+  conditions: RuleCondition[],
+  emailId: string,
+  actions?: RuleAction[],
+): Promise<RuleTestResult> {
+  return apiFetch("/api/admin/rules/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rule: { conditions, actions }, emailId }),
+  });
 }
 
 // --- Suppressions ---
@@ -996,8 +1839,65 @@ export async function fetchOutbox(
   return apiFetch(`/api/outbox${qs}`);
 }
 
-export async function fetchOutboxCount(): Promise<{ pending: number }> {
+export async function fetchOutboxCount(): Promise<{
+  pending: number;
+  /** Pending sends held because outbound sending is paused. */
+  held: number;
+  paused: boolean;
+}> {
   return apiFetch("/api/outbox/count");
+}
+
+export type SendChannel = "web" | "api" | "mcp" | "jmap";
+/** Messages a user may send a UTC day per channel; `null` is unlimited. */
+export type DailySendLimits = Record<SendChannel, number | null>;
+
+export interface AdminSettings {
+  brandName: string;
+  outboundPaused: boolean;
+  /** Unix seconds and who, while paused. */
+  outboundPause: { since: number; byLabel: string } | null;
+  dailySendLimits: DailySendLimits;
+  /** Inbound mail to an address that is not an inbox is refused. */
+  rejectUnknownRecipients: boolean;
+}
+
+export async function fetchAdminSettings(): Promise<AdminSettings> {
+  return apiFetch("/api/admin/settings");
+}
+
+export async function updateAdminSettings(changes: {
+  outboundPaused?: boolean;
+  dailySendLimits?: Partial<DailySendLimits>;
+  rejectUnknownRecipients?: boolean;
+}): Promise<AdminSettings> {
+  return apiFetch("/api/admin/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+}
+
+/** Addresses with recent mail that are not inboxes: what rejection would refuse. */
+export async function fetchUnknownRecipients(): Promise<{
+  addresses: { address: string; count: number; lastReceivedAt: number }[];
+}> {
+  return apiFetch("/api/admin/settings/unknown-recipients");
+}
+
+export interface SendUsage {
+  day: string;
+  limits: DailySendLimits;
+  usage: {
+    channel: string;
+    userId: string;
+    email: string | null;
+    count: number;
+  }[];
+}
+
+export async function fetchSendUsage(): Promise<SendUsage> {
+  return apiFetch("/api/admin/send-usage");
 }
 
 export async function retryOutboxItem(id: string): Promise<{
@@ -1010,4 +1910,709 @@ export async function cancelOutboxItem(
   id: string,
 ): Promise<{ deleted: boolean }> {
   return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
+}
+
+/** A delayed send a JMAP client scheduled; only its author sees it. */
+export interface ScheduledSend {
+  id: string;
+  sentEmailId: string;
+  fromAddress: string;
+  toAddress: string;
+  subject: string;
+  /** Unix seconds when it goes out. */
+  sendAt: number;
+}
+
+export async function fetchScheduledSends(): Promise<{
+  items: ScheduledSend[];
+}> {
+  return apiFetch("/api/outbox/scheduled");
+}
+
+/**
+ * Cancel a delayed send, then move its message back to Drafts. Rejects (409)
+ * once the send has started.
+ */
+/**
+ * Cancel a scheduled Sent message's delayed send without moving it back to
+ * Drafts (the mail UI trashes it itself). `cannotUnsend` once the send has
+ * started; `notYours` when it isn't the caller's scheduled send.
+ */
+export async function cancelScheduledByMessage(
+  sentEmailId: string,
+): Promise<"canceled" | "cannotUnsend" | "notYours"> {
+  const res = await fetch(
+    `/api/outbox/scheduled/by-message/${encodeURIComponent(sentEmailId)}/cancel`,
+    { method: "POST", credentials: "include" },
+  );
+  if (res.ok) return "canceled";
+  if (res.status === 409) return "cannotUnsend";
+  if (res.status === 404) return "notYours";
+  throw new Error(`API error: ${res.status}`);
+}
+
+export async function cancelScheduledSend(
+  id: string,
+): Promise<{ canceled: true; movedToDrafts: boolean; willMove: boolean }> {
+  return apiFetch(`/api/outbox/scheduled/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+  });
+}
+
+// --- Newsletters: lists, members, subscribe forms, campaigns -----------------
+
+export interface SubscriberList {
+  id: string;
+  name: string;
+  description: string | null;
+  fromAddress: string;
+  doubleOptIn: boolean;
+  confirmationTemplateSlug: string | null;
+  archivedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type MemberStatus = "pending" | "subscribed" | "unsubscribed";
+
+export interface ListMember {
+  id: string;
+  listId: string;
+  contactId: string;
+  email: string;
+  name: string | null;
+  status: MemberStatus;
+  source: "form" | "api" | "import";
+  consentSource: "form" | "api" | "import";
+  consentAt: number | null;
+  subscribedAt: number | null;
+  confirmedAt: number | null;
+  unsubscribedAt: number | null;
+  createdAt: number;
+}
+
+export interface ImportJob {
+  jobId: string;
+  status: "running" | "completed" | "failed" | "cancelled";
+  totalRows: number | null;
+  processedRows: number;
+  importedCount: number;
+  skippedCount: number;
+  errors: Array<{ row: number; reason: string }>;
+}
+
+export interface SubscribeForm {
+  id: string;
+  listId: string;
+  name: string;
+  showNameField: boolean;
+  nameRequired: boolean;
+  successMessage: string;
+  redirectUrl: string | null;
+  allowedOrigins: string | null;
+  /**
+   * Copy-paste markup, built server-side. It carries the honeypot field the
+   * public subscribe endpoint checks by name, so it must never be rebuilt on
+   * the client. Present on create and on the single-form read.
+   */
+  embedSnippet?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type CampaignStatus =
+  | "draft"
+  | "scheduled"
+  | "overdue"
+  | "preparing"
+  | "sending"
+  | "sent"
+  | "completed_with_failures"
+  | "cancelled"
+  | "stalled";
+
+export interface Campaign {
+  id: string;
+  name: string;
+  subject: string;
+  /** What the campaign was seeded from, if anything. Provenance only. */
+  templateSlug: string | null;
+  format: "html" | "block";
+  bodyJson: BlockDocument | null;
+  /** The campaign's own editable body — the thing that actually gets sent. */
+  bodyHtml: string;
+  fromAddress: string;
+  listId: string;
+  status: CampaignStatus;
+  scheduledAt: number | null;
+  sentAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface CampaignStats {
+  targeted: number;
+  delivered: number;
+  suppressed: number;
+  retryableFailed: number;
+  permanentFailed: number;
+  unsubscribes: number;
+  /** Approximate — see the tracking caveat in docs/newsletters.md. */
+  uniqueOpeners: number;
+  /** Approximate, and identical to "unique clickers" by schema construction. */
+  uniqueClicks: number;
+}
+
+export type CampaignDetail = Campaign & { stats: CampaignStats };
+
+export interface CampaignTimeseriesPoint {
+  hour: number;
+  opens: number;
+  clicks: number;
+}
+
+export interface CampaignLinkStat {
+  url: string;
+  clicks: number;
+  clickRate: number;
+}
+
+export async function fetchLists(params?: {
+  includeArchived?: boolean;
+}): Promise<{ items: SubscriberList[]; nextCursor: string | null }> {
+  const qs = params?.includeArchived ? "?includeArchived=true" : "";
+  return apiFetch(`/api/lists${qs}`);
+}
+
+export async function fetchList(id: string): Promise<SubscriberList> {
+  return apiFetch(`/api/lists/${id}`);
+}
+
+export async function createList(body: {
+  name: string;
+  description?: string | null;
+  fromAddress: string;
+  doubleOptIn?: boolean;
+  confirmationTemplateSlug?: string | null;
+}): Promise<SubscriberList> {
+  return apiFetch("/api/lists", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateList(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string | null;
+    fromAddress: string;
+    doubleOptIn: boolean;
+    confirmationTemplateSlug: string | null;
+  }>,
+): Promise<SubscriberList> {
+  return apiFetch(`/api/lists/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Archives instead of deleting once the list has campaign history. */
+export async function deleteList(id: string): Promise<void> {
+  await apiFetch(`/api/lists/${id}`, { method: "DELETE" });
+}
+
+export async function fetchListMembers(
+  id: string,
+  params?: { status?: MemberStatus; cursor?: string; limit?: number },
+): Promise<{ items: ListMember[]; nextCursor: string | null }> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.cursor) qs.set("cursor", params.cursor);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  return apiFetch(`/api/lists/${id}/members?${qs}`);
+}
+
+export async function addListMember(
+  id: string,
+  body: { email: string; name?: string | null },
+): Promise<ListMember> {
+  return apiFetch(`/api/lists/${id}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Sets `status = 'unsubscribed'`; the consent record is never deleted. */
+export async function unsubscribeListMember(
+  id: string,
+  memberId: string,
+): Promise<void> {
+  await apiFetch(`/api/lists/${id}/members/${memberId}`, { method: "DELETE" });
+}
+
+export function listMembersExportUrl(id: string): string {
+  return `/api/lists/${id}/members/export`;
+}
+
+export async function startListImport(
+  id: string,
+  file: File,
+): Promise<{ jobId: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/lists/${id}/members/import`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchImportJob(
+  id: string,
+  jobId: string,
+): Promise<ImportJob> {
+  return apiFetch(`/api/lists/${id}/members/import/${jobId}`);
+}
+
+export async function cancelImportJob(
+  id: string,
+  jobId: string,
+): Promise<void> {
+  await apiFetch(`/api/lists/${id}/members/import/${jobId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function fetchSubscribeForms(): Promise<{
+  items: SubscribeForm[];
+}> {
+  return apiFetch("/api/subscribe-forms");
+}
+
+export async function fetchSubscribeForm(id: string): Promise<SubscribeForm> {
+  return apiFetch(`/api/subscribe-forms/${id}`);
+}
+
+export async function createSubscribeForm(body: {
+  listId: string;
+  name: string;
+  showNameField?: boolean;
+  nameRequired?: boolean;
+  successMessage?: string;
+  redirectUrl?: string | null;
+  allowedOrigins?: string | null;
+}): Promise<SubscribeForm> {
+  return apiFetch("/api/subscribe-forms", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateSubscribeForm(
+  id: string,
+  body: Partial<{
+    name: string;
+    showNameField: boolean;
+    nameRequired: boolean;
+    successMessage: string;
+    redirectUrl: string | null;
+    allowedOrigins: string | null;
+  }>,
+): Promise<SubscribeForm> {
+  return apiFetch(`/api/subscribe-forms/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteSubscribeForm(id: string): Promise<void> {
+  await apiFetch(`/api/subscribe-forms/${id}`, { method: "DELETE" });
+}
+
+export async function fetchCampaigns(): Promise<{
+  items: Campaign[];
+  nextCursor: string | null;
+}> {
+  return apiFetch("/api/campaigns");
+}
+
+export async function fetchCampaign(id: string): Promise<CampaignDetail> {
+  return apiFetch(`/api/campaigns/${id}`);
+}
+
+export async function createCampaign(body: {
+  name: string;
+  subject: string;
+  /** Optional: copies that template's content in as a starting point. */
+  templateSlug?: string;
+  listId: string;
+  format?: "html" | "block";
+  bodyHtml?: string;
+  bodyJson?: BlockDocument;
+}): Promise<Campaign> {
+  return apiFetch("/api/campaigns", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateCampaign(
+  id: string,
+  body: Partial<{
+    name: string;
+    subject: string;
+    listId: string;
+    format: "html" | "block";
+    bodyHtml: string;
+    bodyJson: BlockDocument;
+  }>,
+): Promise<Campaign> {
+  return apiFetch(`/api/campaigns/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  await apiFetch(`/api/campaigns/${id}`, { method: "DELETE" });
+}
+
+/**
+ * Campaign actions. Each answers 409 when the campaign's current status does
+ * not permit it — the state machine is enforced server-side, and the UI only
+ * mirrors it.
+ */
+async function campaignAction<T>(
+  id: string,
+  action: string,
+  body?: unknown,
+): Promise<T> {
+  return apiFetch(`/api/campaigns/${id}/${action}`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+export const sendCampaign = (id: string) =>
+  campaignAction<{ status: string }>(id, "send");
+export const scheduleCampaign = (id: string, scheduledAt: number) =>
+  campaignAction<{ status: string }>(id, "schedule", { scheduledAt });
+export const cancelCampaign = (id: string) =>
+  campaignAction<{ status: string }>(id, "cancel");
+export const retryCampaign = (id: string) =>
+  campaignAction<{ requeued: number }>(id, "retry");
+export const testSendCampaign = (id: string) =>
+  campaignAction<{ sent: boolean }>(id, "test-send");
+
+export async function fetchCampaignPreview(
+  id: string,
+): Promise<{ subject: string; html: string }> {
+  return apiFetch(`/api/campaigns/${id}/preview`);
+}
+
+export async function fetchCampaignTimeseries(
+  id: string,
+): Promise<{ data: CampaignTimeseriesPoint[] }> {
+  return apiFetch(`/api/campaigns/${id}/stats/timeseries`);
+}
+
+export async function fetchCampaignLinks(
+  id: string,
+): Promise<{ data: CampaignLinkStat[] }> {
+  return apiFetch(`/api/campaigns/${id}/links`);
+}
+
+export interface ContactExport {
+  email: string;
+  contact: { id: string; name: string | null; createdAt: number } | null;
+  memberships: Array<ListMember & { listName: string | null }>;
+  events: Array<{
+    id: string;
+    campaignId: string;
+    eventType: "open" | "click";
+    occurredAt: number;
+  }>;
+}
+
+export async function exportContact(email: string): Promise<ContactExport> {
+  return apiFetch(`/api/contacts/${encodeURIComponent(email)}/export`);
+}
+
+export async function eraseContact(email: string): Promise<{
+  contacts: number;
+  memberships: number;
+  events: number;
+  recipients: number;
+  attempts: number;
+}> {
+  return apiFetch(`/api/contacts/${encodeURIComponent(email)}/erase`, {
+    method: "POST",
+  });
+}
+
+export interface ListMembershipSummary {
+  listId: string;
+  listName: string;
+  status: MemberStatus;
+  subscribedAt: number | null;
+  unsubscribedAt: number | null;
+}
+
+export async function fetchListMemberships(
+  email: string,
+): Promise<{ items: ListMembershipSummary[] }> {
+  return apiFetch(`/api/lists/memberships?email=${encodeURIComponent(email)}`);
+}
+
+/** A stored newsletter image, as returned by the upload endpoint. */
+export interface NewsletterAsset {
+  id: string;
+  url: string;
+  contentType: string;
+  width: number;
+  height: number;
+  size: number;
+}
+
+/**
+ * Upload an image for use in a block template.
+ *
+ * The body is the raw bytes, not a multipart form — the server determines the
+ * format from the file header and ignores whatever the client declares, so
+ * there is nothing for a form envelope to carry.
+ */
+export async function uploadNewsletterAsset(
+  file: File,
+): Promise<NewsletterAsset> {
+  const res = await fetch("/api/newsletter-assets", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: file,
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(
+      (detail as { error?: string } | null)?.error ??
+        `Upload failed (${res.status})`,
+    );
+  }
+  return res.json();
+}
+
+/** The `.eml` download of one message, from its `kind:id` ref. */
+export function messageEmlUrl(ref: string): string {
+  const separator = ref.indexOf(":");
+  const kind = ref.slice(0, separator);
+  const id = ref.slice(separator + 1);
+  return `/api/messages/${kind}/${encodeURIComponent(id)}/raw.eml`;
+}
+
+export type MailExportStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+export interface MailExport {
+  id: string;
+  inbox: string;
+  status: MailExportStatus;
+  processedMessages: number;
+  totalMessages: number | null;
+  /** Written so far; the file's size once completed. */
+  bytes: number;
+  from: number | null;
+  to: number | null;
+  includeTrash: boolean;
+  includeCampaignSends: boolean;
+  requestedBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+  /** Completed exports: when the file is deleted. */
+  expiresAt: number | null;
+  error: string | null;
+}
+
+export async function fetchExports(): Promise<MailExport[]> {
+  const body = await apiFetch<{ exports: MailExport[] }>("/api/exports");
+  return body.exports;
+}
+
+export async function startExport(input: {
+  inbox: string;
+  from?: number | null;
+  to?: number | null;
+  includeTrash?: boolean;
+  includeCampaignSends?: boolean;
+}): Promise<MailExport> {
+  return apiFetch("/api/exports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteExport(id: string): Promise<void> {
+  await apiFetch(`/api/exports/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export function exportDownloadUrl(id: string): string {
+  return `/api/exports/${encodeURIComponent(id)}/download`;
+}
+
+export type MailImportStatus =
+  | "uploading"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "expired";
+
+export interface MailImport {
+  id: string;
+  inbox: string;
+  filename: string;
+  status: MailImportStatus;
+  size: number;
+  bytesRead: number;
+  processedMessages: number;
+  importedMessages: number;
+  skippedMessages: number;
+  direction: "strict" | "all_received";
+  createFoldersFromLabels: boolean;
+  partSize: number;
+  partsExpected: number;
+  partsUploaded: number;
+  /** Skipped messages and dropped attachments, by message number (first 50). */
+  notes: { row: number; reason: string }[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchImports(): Promise<MailImport[]> {
+  const body = await apiFetch<{ imports: MailImport[] }>("/api/admin/imports");
+  return body.imports;
+}
+
+export async function startImport(input: {
+  inbox: string;
+  filename: string;
+  size: number;
+  direction: "strict" | "all_received";
+  createFoldersFromLabels: boolean;
+}): Promise<MailImport> {
+  return apiFetch("/api/admin/imports", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function uploadImportPart(
+  id: string,
+  partNumber: number,
+  bytes: Blob,
+): Promise<void> {
+  await apiFetch(
+    `/api/admin/imports/${encodeURIComponent(id)}/parts/${partNumber}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: bytes,
+    },
+  );
+}
+
+export async function completeImport(id: string): Promise<MailImport> {
+  return apiFetch(`/api/admin/imports/${encodeURIComponent(id)}/complete`, {
+    method: "POST",
+  });
+}
+
+export async function deleteImport(id: string): Promise<void> {
+  await apiFetch(`/api/admin/imports/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export interface BackupRun {
+  id: string;
+  status: "running" | "completed" | "failed";
+  startedAt: number;
+  finishedAt: number | null;
+  prefix: string;
+  bytes: number;
+  tablesDone: number;
+  tablesTotal: number;
+  rows: number;
+  encrypted: boolean;
+  error: string | null;
+  manual: boolean;
+  prunedAt: number | null;
+}
+
+export interface BackupSettings {
+  enabled: boolean;
+  hourUtc: number;
+  keepDays: number;
+  lastStarted: number | null;
+  nextDue: number | null;
+}
+
+export interface BackupsOverview {
+  settings: BackupSettings;
+  /** `BACKUPS`: a dedicated bucket; `R2`: the attachments bucket, under backups/. */
+  destination: "BACKUPS" | "R2";
+  encryption: "configured" | "not_configured" | "invalid";
+  runs: BackupRun[];
+}
+
+export interface BackupManifestTable {
+  name: string;
+  file: string;
+  rows: number;
+  bytes: number;
+}
+
+export interface BackupManifest {
+  lastMigration: string | null;
+  encryption: string | null;
+  tables: BackupManifestTable[];
+}
+
+export async function fetchBackups(): Promise<BackupsOverview> {
+  return apiFetch("/api/admin/backups");
+}
+
+export async function updateBackupSettings(
+  changes: Partial<Pick<BackupSettings, "enabled" | "hourUtc" | "keepDays">>,
+): Promise<BackupSettings> {
+  return apiFetch("/api/admin/backups/settings", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(changes),
+  });
+}
+
+export async function startBackupNow(): Promise<BackupRun> {
+  return apiFetch("/api/admin/backups/run", { method: "POST" });
+}
+
+export async function fetchBackupManifest(id: string): Promise<BackupManifest> {
+  return apiFetch(`/api/admin/backups/${encodeURIComponent(id)}/manifest`);
 }

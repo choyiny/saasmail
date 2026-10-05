@@ -1,3 +1,4 @@
+import { forgetSendKey, sendKeyFor, sendKeyProblem } from "@/lib/send-key";
 import { useState, useRef, useEffect } from "react";
 import { Maximize2 } from "lucide-react";
 import {
@@ -9,7 +10,9 @@ import {
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
 import AttachmentPicker from "@/components/AttachmentPicker";
+import SendingPausedNotice from "@/components/SendingPausedNotice";
 import AttachmentChips from "@/components/AttachmentChips";
+import ReplyToHint from "@/components/ReplyToHint";
 
 const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
 
@@ -24,6 +27,12 @@ interface ChatQuickReplyProps {
    * section's own inbox address. Ignored when there's no reply target.
    */
   replyCc?: CcEntry[];
+  /**
+   * Every address a reply to the target reaches when it follows its Reply-To
+   * (the first is To, the others are copied); empty when replies simply go to
+   * the sender. The reply follows it unless the user chooses the sender.
+   */
+  replyRecipients?: CcEntry[];
   onSent: () => void; // Refetch + scroll
   /**
    * Optional handoff to the global compose drawer. When provided, the
@@ -67,10 +76,16 @@ export default function ChatQuickReply({
   latestReceivedEmailId,
   personEmail,
   replyCc,
+  replyRecipients = [],
   onSent,
   onOpenCompose,
 }: ChatQuickReplyProps) {
   const [text, setText] = useState("");
+  const [replyToSender, setReplyToSender] = useState(false);
+  // The choice belongs to one reply target; a new message starts over.
+  useEffect(() => {
+    setReplyToSender(false);
+  }, [latestReceivedEmailId]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
@@ -116,11 +131,20 @@ export default function ChatQuickReply({
   }, [text]);
 
   const canSend = text.trim().length > 0 && !sending && !overCap;
+  const followsReplyTo = replyRecipients.length > 0 && !replyToSender;
+
+  // One key per message typed here: every attempt sends it, a sent message
+  // forgets it. A reply shares its key with the full reply composer for the
+  // same message, so retrying there after a lost answer is still recognised.
+  const sendContext = latestReceivedEmailId
+    ? `send:reply:${latestReceivedEmailId}`
+    : `send:quick:${inboxAddress}:${personEmail}`;
 
   async function handleSend() {
     if (!canSend) return;
     setSending(true);
     setError(null);
+    const idempotencyKey = sendKeyFor(sendContext);
     try {
       if (latestReceivedEmailId) {
         // Default to reply-all semantics for the chat bubble: carry the
@@ -135,6 +159,10 @@ export default function ChatQuickReply({
           ...(files.length > 0
             ? { files: files.map((file) => ({ file })) }
             : {}),
+          // Always the target this box showed: with no hint on screen the
+          // reply goes to the sender, never to a Reply-To the user didn't see.
+          recipient: followsReplyTo ? "reply_to" : "sender",
+          idempotencyKey,
         });
       } else {
         await sendEmail({
@@ -146,8 +174,10 @@ export default function ChatQuickReply({
           ...(files.length > 0
             ? { files: files.map((file) => ({ file })) }
             : {}),
+          idempotencyKey,
         });
       }
+      forgetSendKey(sendContext);
       // The reply went out — discard any saved draft for it so it doesn't
       // reappear in this box (or the Drafts filter) next time.
       if (latestReceivedEmailId) {
@@ -163,7 +193,7 @@ export default function ChatQuickReply({
       setFiles([]);
       onSent();
     } catch (e) {
-      setError("Failed to send message");
+      setError(sendKeyProblem(e, sendContext) ?? "Failed to send message");
       console.error(e);
     } finally {
       setSending(false);
@@ -180,6 +210,15 @@ export default function ChatQuickReply({
 
   return (
     <div className="border-t border-border bg-card px-4 py-3 sm:px-6">
+      {latestReceivedEmailId && replyRecipients.length > 0 && (
+        <ReplyToHint
+          recipients={replyRecipients}
+          toSender={replyToSender}
+          onToggle={setReplyToSender}
+          className="mb-2"
+        />
+      )}
+      <SendingPausedNotice className="mb-2" />
       {files.length > 0 && (
         <div className="mb-2">
           <AttachmentChips

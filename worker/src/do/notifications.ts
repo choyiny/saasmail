@@ -1,6 +1,5 @@
-import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { pushSubscriptions } from "../db/push-subscriptions.schema";
 import { sendPush, type PushPayload, type VapidConfig } from "../lib/web-push";
 
@@ -31,6 +30,10 @@ export class NotificationsHub implements DurableObject {
       return this.handleDeliver(request);
     }
 
+    if (url.pathname === "/realtime" && request.method === "POST") {
+      return this.handleRealtime(request);
+    }
+
     // Back-compat: /notify falls through to WS-only delivery. Remove once the
     // email-handler is fully migrated (Task 9) and no callers remain.
     if (url.pathname === "/notify" && request.method === "POST") {
@@ -44,6 +47,100 @@ export class NotificationsHub implements DurableObject {
     }
 
     return new Response("Not found", { status: 404 });
+  }
+
+  private async handleRealtime(request: Request): Promise<Response> {
+    const payload = (await request.json()) as {
+      type?: string;
+      inbox?: string;
+      emailId?: string;
+      jobId?: string;
+      imported?: number;
+      skipped?: number;
+    };
+    let frame: string;
+    if (
+      payload.type === "suggested_reply" &&
+      typeof payload.inbox === "string" &&
+      typeof payload.emailId === "string"
+    ) {
+      frame = JSON.stringify({
+        type: "suggested_reply",
+        inbox: payload.inbox,
+        emailId: payload.emailId,
+      });
+    } else if (
+      // Mail in the inbox changed out of band (the AI filed it): reload.
+      payload.type === "mail_refresh" &&
+      typeof payload.inbox === "string"
+    ) {
+      frame = JSON.stringify({ type: "mail_refresh", inbox: payload.inbox });
+    } else if (
+      // A mailbox export this person asked for can be downloaded.
+      payload.type === "export_ready" &&
+      typeof payload.inbox === "string" &&
+      typeof payload.jobId === "string"
+    ) {
+      frame = JSON.stringify({
+        type: "export_ready",
+        inbox: payload.inbox,
+        jobId: payload.jobId,
+      });
+    } else if (
+      // A mail import this admin started has finished.
+      payload.type === "import_done" &&
+      typeof payload.inbox === "string" &&
+      typeof payload.jobId === "string"
+    ) {
+      frame = JSON.stringify({
+        type: "import_done",
+        inbox: payload.inbox,
+        jobId: payload.jobId,
+      });
+    } else {
+      return new Response("invalid realtime event", { status: 400 });
+    }
+    const sockets = this.ctx.getWebSockets();
+    for (const ws of sockets) {
+      try {
+        ws.send(frame);
+      } catch {}
+    }
+    if (payload.type === "export_ready") {
+      // The export may take a while: the tab may be closed by now.
+      return this.push(
+        {
+          title: "Your export is ready",
+          body: `Your export of ${payload.inbox} is ready to download.`,
+          tag: `export:${payload.jobId}`,
+          icon: "/saasmail-logo.png",
+          badge: "/saasmail-logo.png",
+          data: { url: "/settings#data" },
+        },
+        sockets.length,
+        payload.inbox!,
+      );
+    }
+    if (payload.type === "import_done") {
+      const imported = Number(payload.imported ?? 0);
+      const skipped = Number(payload.skipped ?? 0);
+      return this.push(
+        {
+          title: "Your import is done",
+          body: `${imported} ${imported === 1 ? "message" : "messages"} imported into ${payload.inbox}${skipped > 0 ? `, ${skipped} skipped` : ""}.`,
+          tag: `import:${payload.jobId}`,
+          icon: "/saasmail-logo.png",
+          badge: "/saasmail-logo.png",
+          data: { url: "/settings#data" },
+        },
+        sockets.length,
+        payload.inbox!,
+      );
+    }
+    return Response.json({
+      via: sockets.length > 0 ? "ws" : "none",
+      wsCount: sockets.length,
+    });
   }
 
   private async handleDeliver(request: Request): Promise<Response> {
@@ -74,6 +171,26 @@ export class NotificationsHub implements DurableObject {
 
     // Always attempt Web Push as well — a connected WS tab may be backgrounded,
     // the user may have other devices, or the socket may be a stale hibernated one.
+    const pushPayload: PushPayload = {
+      title: payload.senderName || "New email",
+      body: payload.subject || payload.bodyPreview || "",
+      tag: `thread:${payload.threadId}`,
+      icon: "/saasmail-logo.png",
+      badge: "/saasmail-logo.png",
+      data: {
+        url: `/inbox/${encodeURIComponent(payload.inbox)}/${payload.personId}`,
+        threadId: payload.threadId,
+      },
+    };
+    return this.push(pushPayload, wsCount, payload.inbox);
+  }
+
+  /** Web Push to every subscription of this hub's user. */
+  private async push(
+    pushPayload: PushPayload,
+    wsCount: number,
+    inbox: string,
+  ): Promise<Response> {
     const userId = this.ctx.id.name; // DO id is idFromName(userId)
     if (!userId) {
       console.warn("[push] deliver: missing DO name (userId); skipping push");
@@ -100,7 +217,7 @@ export class NotificationsHub implements DurableObject {
       );
     }
 
-    const db = drizzle(this.env.DB, { schema });
+    const db = createDb(this.env);
     const subs = await db
       .select()
       .from(pushSubscriptions)
@@ -113,24 +230,13 @@ export class NotificationsHub implements DurableObject {
       return Response.json({ via: wsCount > 0 ? "ws" : "none", wsCount });
     }
     console.log(
-      `[push] deliver: user=${userId} subs=${subs.length} wsCount=${wsCount} inbox=${payload.inbox}`,
+      `[push] deliver: user=${userId} subs=${subs.length} wsCount=${wsCount} inbox=${inbox}`,
     );
 
     const vapid: VapidConfig = {
       publicKey: vapidPublic,
       privateKey: vapidPrivate,
       subject: vapidSubject,
-    };
-    const pushPayload: PushPayload = {
-      title: payload.senderName || "New email",
-      body: payload.subject || payload.bodyPreview || "",
-      tag: `thread:${payload.threadId}`,
-      icon: "/saasmail-logo.png",
-      badge: "/saasmail-logo.png",
-      data: {
-        url: `/inbox/${encodeURIComponent(payload.inbox)}/${payload.personId}`,
-        threadId: payload.threadId,
-      },
     };
 
     const results = await Promise.allSettled(

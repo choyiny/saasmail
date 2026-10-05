@@ -1,16 +1,16 @@
-import { drizzle } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
-import { schema } from "./db/schema";
-import { people } from "./db/people.schema";
+import { and, eq } from "drizzle-orm";
+import { createDb } from "./db/client";
 import { emails } from "./db/emails.schema";
-import { attachments } from "./db/attachments.schema";
 import { inboxPermissions } from "./db/inbox-permissions.schema";
 import { senderIdentities } from "./db/sender-identities.schema";
 import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
+import {
+  MAX_ATTACHMENTS,
+  domainsOf,
+  storeReceivedMessage,
+} from "./lib/inbound/store-received";
 import { isBlocked } from "./lib/blocklist";
-import { computeConversationId, externalsOnly } from "./lib/conversation-id";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 import {
   MAX_ADMIN_FANOUT,
@@ -19,16 +19,51 @@ import {
 import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
 import { forwardInbound } from "./lib/inbound-forward";
+import { wakeConversation } from "./lib/messages/conversation-state";
+import { setSystemSpamState } from "./lib/messages/state";
+import { selectModel } from "./lib/agent/provider";
+import { isAutomatedInbound } from "./lib/automated-inbound";
+import {
+  recordRuleMatch,
+  rejectionOf,
+  runMatchedRules,
+  selectMatchingRules,
+  type MatchedRule,
+} from "./lib/rules/evaluate";
+import type { RuleMessage } from "./lib/rules/match";
+import { scoreInbound } from "./lib/spam/filter";
+import { ruleActor } from "./lib/audit/actors";
+import { runWithAudit } from "./lib/audit/context";
+import {
+  UNKNOWN_RECIPIENT_REASON,
+  hasInboxMembers,
+  recordInboundRejection,
+  rejectsUnknownRecipients,
+} from "./lib/inbound-rejection";
 
-const MAX_ATTACHMENTS = 50;
-const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
+export { isAutomatedInbound } from "./lib/automated-inbound";
+
+export function shouldEnqueueSuggestedReply(options: {
+  agentAutodraft: number | null | undefined;
+  autoFiledSpam: boolean;
+  modelConfigured: boolean;
+  headers: Record<string, string>;
+  senderAddress: string;
+}): boolean {
+  return (
+    options.agentAutodraft === 1 &&
+    !options.autoFiledSpam &&
+    options.modelConfigured &&
+    !isAutomatedInbound(options.headers, options.senderAddress)
+  );
+}
 
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
   ctx: ExecutionContext,
 ): Promise<void> {
-  const db = drizzle(env.DB, { schema, logger: true });
+  const db = createDb(env);
   const parsed = await parseEmail(message);
   const now = Math.floor(Date.now() / 1000);
 
@@ -40,18 +75,64 @@ export async function handleEmail(
   const recipientCanonical = parsed.to.trim().toLowerCase();
   const fromAddressCanonical = parsed.from.address.trim().toLowerCase();
 
+  // One scan of sender_identities serves four consumers: the unknown-recipient
+  // check below, the "our domains" set, the forward destination for this
+  // inbox, and the known-inbox loop guard in `forwardInbound`.
+  const identityRows = await db
+    .select({
+      email: senderIdentities.email,
+      displayName: senderIdentities.displayName,
+      forwardTo: senderIdentities.forwardTo,
+      spamThreshold: senderIdentities.spamThreshold,
+      agentAutodraft: senderIdentities.agentAutodraft,
+      threadingMode: senderIdentities.threadingMode,
+    })
+    .from(senderIdentities);
+  const inboxIdentity = identityRows.find(
+    (row) => row.email.trim().toLowerCase() === recipientCanonical,
+  );
+
+  // Mail to an address that is not an inbox (no sender identity, no members)
+  // is refused while the sender's server is still connected, when an admin
+  // turned that on. Off, the catch-all stores mail to any address under the
+  // routed domains.
+  if (
+    !inboxIdentity &&
+    (await rejectsUnknownRecipients(db)) &&
+    !(await hasInboxMembers(db, recipientCanonical))
+  ) {
+    message.setReject(UNKNOWN_RECIPIENT_REASON);
+    await recordInboundRejection(db, {
+      from: fromAddressCanonical,
+      recipient: recipientCanonical,
+      subject: parsed.subject,
+      messageId: parsed.messageId,
+      reason: "unknown_recipient",
+    });
+    console.log(
+      `Rejected email from ${fromAddressCanonical} to ${recipientCanonical}: not an inbox`,
+    );
+    return;
+  }
+
   // Drop mail from blocked senders/domains before any storage or side effects.
   if (await isBlocked(db, fromAddressCanonical)) {
     console.log(`Dropped blocked email from ${fromAddressCanonical}`);
     return;
   }
 
-  // Deduplicate by Message-ID
+  // Deduplicate by Message-ID within this inbox: a redelivery is dropped, but a
+  // message addressed to two of our inboxes is stored in each.
   if (parsed.messageId) {
     const existing = await db
       .select({ id: emails.id })
       .from(emails)
-      .where(eq(emails.messageId, parsed.messageId))
+      .where(
+        and(
+          eq(emails.messageId, parsed.messageId),
+          eq(emails.recipient, recipientCanonical),
+        ),
+      )
       .limit(1);
     if (existing.length > 0) {
       console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);
@@ -59,224 +140,221 @@ export async function handleEmail(
     }
   }
 
-  const senderAuthenticated =
-    parsed.auth.spf === "pass" ||
-    parsed.auth.dkim === "pass" ||
-    parsed.auth.dmarc === "pass";
-
-  // Upsert person — only update name if sender passes authentication
-  const personId = nanoid();
-  await db
-    .insert(people)
-    .values({
-      id: personId,
-      email: fromAddressCanonical,
-      name: parsed.from.name || null,
-      lastEmailAt: now,
-      unreadCount: 1,
-      totalCount: 1,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: people.email,
-      set: {
-        ...(senderAuthenticated
-          ? { name: sql`COALESCE(${parsed.from.name || null}, ${people.name})` }
-          : {}),
-        lastEmailAt: now,
-        unreadCount: sql`${people.unreadCount} + 1`,
-        totalCount: sql`${people.totalCount} + 1`,
-        updatedAt: now,
-      },
+  // The inbox's learning filter scores the message, when it is on and
+  // trained; a rule acts on the score. Never fatal.
+  let spamProbability: number | null = null;
+  try {
+    spamProbability = await scoreInbound(db, recipientCanonical, {
+      fromAddress: fromAddressCanonical,
+      subject: parsed.subject,
+      bodyText: parsed.bodyText,
+      bodyHtml: parsed.bodyHtml,
+      hasAttachments: parsed.attachments.length > 0,
     });
-
-  // Get the actual person ID (could be existing). Lookup by the
-  // canonical (lowercased) email so legacy mixed-case rows still
-  // resolve to the same person.
-  const personRow = await db
-    .select({ id: people.id })
-    .from(people)
-    .where(eq(people.email, fromAddressCanonical))
-    .limit(1);
-  const actualPersonId = personRow[0]!.id;
-
-  // Process attachments first (need IDs for CID rewriting)
-  const cidMap: Record<string, string> = {};
-  const emailId = nanoid();
-
-  // Enforce attachment limits
-  const cappedAttachments = parsed.attachments.slice(0, MAX_ATTACHMENTS);
-  let totalAttachmentBytes = 0;
-
-  for (const att of cappedAttachments) {
-    totalAttachmentBytes += att.content.byteLength;
-    if (totalAttachmentBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
-      console.log(
-        `Attachment size limit exceeded for email from ${parsed.from.address}, skipping remaining attachments`,
-      );
-      break;
-    }
-
-    const safeFilename = sanitizeFilename(att.filename);
-    const attachmentId = nanoid();
-    const r2Key = `attachments/${emailId}/${attachmentId}/${safeFilename}`;
-
-    await env.R2.put(r2Key, att.content, {
-      httpMetadata: { contentType: att.contentType },
-    });
-
-    const isInline = att.disposition === "inline" && !!att.contentId;
-
-    await db.insert(attachments).values({
-      id: attachmentId,
-      emailId,
-      kind: "inbound",
-      filename: safeFilename,
-      contentType: att.contentType,
-      size: att.content.byteLength,
-      r2Key,
-      contentId: isInline ? att.contentId : null,
-      createdAt: now,
-    });
-
-    if (isInline && att.contentId) {
-      const cleanCid = att.contentId.replace(/^<|>$/g, "");
-      cidMap[cleanCid] = attachmentId;
-    }
+  } catch (error) {
+    console.warn("Failed to score inbound mail:", error);
   }
 
-  // Rewrite CID references in HTML body
-  let bodyHtml = parsed.bodyHtml;
-  if (bodyHtml && Object.keys(cidMap).length > 0) {
-    for (const [cid, attachmentId] of Object.entries(cidMap)) {
-      bodyHtml = bodyHtml.replace(
-        new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi"),
-        `/api/attachments/${attachmentId}/inline`,
-      );
-    }
-  }
-
-  // Compute the conversation_id, if this is a multi-participant thread.
-  // External participants = the sender + everyone on the Cc line, minus
-  // any addresses that match one of our sender_identities (those are
-  // "internal" team members and don't change the group identity).
-  //
-  // One scan of sender_identities serves three consumers: the "our domains"
-  // set below, the forward destination for this inbox, and the known-inbox
-  // loop guard in `forwardInbound`.
-  const identityRows = await db
-    .select({
-      email: senderIdentities.email,
-      displayName: senderIdentities.displayName,
-      forwardTo: senderIdentities.forwardTo,
-    })
-    .from(senderIdentities);
-
-  const ourDomains = Array.from(
-    new Set(
-      identityRows
-        .map((r) => {
-          const at = r.email.lastIndexOf("@");
-          return at === -1 ? "" : r.email.slice(at + 1).toLowerCase();
-        })
-        .filter(Boolean),
-    ),
-  );
-  const allParticipants = [
-    fromAddressCanonical,
-    ...parsed.cc.map((c) => c.email),
-  ];
-  const externals = externalsOnly(allParticipants, ourDomains);
-  const conversationId = await computeConversationId(
-    recipientCanonical,
-    externals,
-  );
-
-  // Insert email (with rewritten HTML and auth results). Store the
-  // canonical (lowercased) recipient so it matches the conversation
-  // group key.
-  await db.insert(emails).values({
-    id: emailId,
-    personId: actualPersonId,
-    recipient: recipientCanonical,
+  // Which rules match is decided before storage: every condition reads the
+  // parsed message only. A matching `reject` rule refuses the message here;
+  // the other rules' actions run once it is stored.
+  const ruleMessage: RuleMessage = {
+    spamProbability,
+    fromAddress: fromAddressCanonical,
     subject: parsed.subject,
-    bodyHtml,
     bodyText: parsed.bodyText,
-    rawHeaders: JSON.stringify(parsed.headers),
-    messageId: parsed.messageId,
-    spf: parsed.auth.spf,
-    dkim: parsed.auth.dkim,
-    dmarc: parsed.auth.dmarc,
+    bodyHtml: parsed.bodyHtml,
+    hasAttachments: parsed.attachments.length > 0,
     spamScore: parsed.spamScore,
-    isRead: 0,
-    cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
-    conversationId,
-    receivedAt: now,
-    createdAt: now,
-  });
+    headers: parsed.headers,
+  };
+  let matchedRules: MatchedRule[] = [];
+  try {
+    matchedRules = await selectMatchingRules(db, {
+      inbox: recipientCanonical,
+      message: ruleMessage,
+    });
+  } catch (error) {
+    console.warn("Failed to select inbound rules:", error);
+  }
+  const rejection = rejectionOf(matchedRules);
+  if (rejection) {
+    message.setReject(rejection.reason);
+    await recordRuleMatch(db, rejection.rule.id, now);
+    await runWithAudit(ruleActor(rejection.rule), () =>
+      recordInboundRejection(db, {
+        from: fromAddressCanonical,
+        recipient: recipientCanonical,
+        subject: parsed.subject,
+        messageId: parsed.messageId,
+        reason: rejection.reason,
+        ruleId: rejection.rule.id,
+        ruleName: rejection.rule.name,
+      }),
+    );
+    console.log(
+      `Rejected email from ${fromAddressCanonical} to ${recipientCanonical} by rule ${rejection.rule.id}`,
+    );
+    return;
+  }
 
-  // Notify connected WebSocket clients about the new email (per-user DOs).
-  // Fan out to users with explicit permission for this inbox, plus admins
-  // (capped) — all best-effort via ctx.waitUntil so push failures never
-  // block the inbound-email path.
-  ctx.waitUntil(
-    (async () => {
-      try {
-        const [permRows, adminRows] = await Promise.all([
-          db
-            .select({ userId: inboxPermissions.userId })
-            .from(inboxPermissions)
-            .where(eq(inboxPermissions.email, recipientCanonical)),
-          db
-            .select({ id: users.id })
-            .from(users)
-            .where(eq(users.role, "admin"))
-            .limit(MAX_ADMIN_FANOUT + 1),
-        ]);
-        const { userIds, adminTruncated } = computeFanoutTargets({
-          permissionUserIds: permRows.map((r) => r.userId),
-          adminUserIds: adminRows.map((r) => r.id),
-        });
-        if (adminTruncated) {
-          console.warn(
-            `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
-          );
-        }
-        const deliverPayload = JSON.stringify({
+  // Stored exactly as the importer stores history, but as live mail: unread,
+  // counted as unread for its person, with the filter's score.
+  const {
+    emailId,
+    personId: actualPersonId,
+    conversationId,
+    threadKey,
+    bodyHtml,
+  } = await storeReceivedMessage(db, env, {
+    parsed,
+    inbox: recipientCanonical,
+    fromAddress: fromAddressCanonical,
+    receivedAt: now,
+    now,
+    source: "inbound",
+    ourDomains: domainsOf(identityRows.map((r) => r.email)),
+    spamProbability,
+    threadingMode: inboxIdentity?.threadingMode ?? "relationship",
+  });
+  // The webhook and the forward describe the first 50 attachments, as they
+  // always have.
+  const cappedAttachments = parsed.attachments.slice(0, MAX_ATTACHMENTS);
+
+  let autoFiledSpam = false;
+  if (
+    inboxIdentity?.spamThreshold !== null &&
+    inboxIdentity?.spamThreshold !== undefined &&
+    parsed.spamScore !== null &&
+    parsed.spamScore >= inboxIdentity.spamThreshold
+  ) {
+    try {
+      await setSystemSpamState(db, recipientCanonical, emailId);
+      autoFiledSpam = true;
+    } catch (error) {
+      console.warn("Failed to auto-file inbound message as spam:", error);
+    }
+  }
+
+  let ruleSnoozed = false;
+  if (!autoFiledSpam) {
+    try {
+      const ruleResult = await runMatchedRules(
+        db,
+        matchedRules,
+        {
+          ...ruleMessage,
+          emailId,
           inbox: recipientCanonical,
-          threadId: actualPersonId,
-          personId: actualPersonId,
-          senderName: parsed.from.name || fromAddressCanonical,
-          subject: parsed.subject ?? "",
-          bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
-        });
-        const results = await Promise.allSettled(
-          userIds.map((userId) => {
-            const hub = env.NOTIFICATIONS_HUB.get(
-              env.NOTIFICATIONS_HUB.idFromName(userId),
-            );
-            return hub.fetch(
-              new Request("http://do/deliver", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: deliverPayload,
-              }),
-            );
-          }),
+          bodyHtml,
+          now,
+        },
+        { env, ctx },
+      );
+      autoFiledSpam ||= ruleResult.markedSpam;
+      ruleSnoozed = ruleResult.snoozed;
+    } catch (error) {
+      console.warn("Failed to run inbound rules:", error);
+    }
+  }
+
+  if (
+    shouldEnqueueSuggestedReply({
+      agentAutodraft: inboxIdentity?.agentAutodraft,
+      autoFiledSpam,
+      modelConfigured: selectModel(env).ok,
+      headers: parsed.headers,
+      senderAddress: fromAddressCanonical,
+    })
+  ) {
+    ctx.waitUntil(
+      env.EMAIL_QUEUE.send({ type: "suggest_reply", emailId }).catch(
+        (error) => {
+          console.warn("Failed to enqueue suggested reply:", error);
+        },
+      ),
+    );
+  }
+
+  if (!autoFiledSpam) {
+    // A new non-spam inbound message wakes its conversation. Junk is silent:
+    // auto-filed spam must not resurface a snoozed customer conversation.
+    if (!ruleSnoozed) {
+      try {
+        await wakeConversation(
+          db,
+          recipientCanonical,
+          threadKey ?? conversationId ?? `p:${actualPersonId}`,
         );
-        const failures = results.filter((r) => r.status === "rejected").length;
-        if (failures > 0) {
-          console.warn(
-            `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
-          );
-        }
-      } catch (err) {
-        // Non-fatal: real-time push is best-effort.
-        console.warn("Real-time fanout error:", err);
+      } catch (error) {
+        console.warn("Failed to wake snoozed conversation:", error);
       }
-    })(),
-  );
+    }
+
+    // Notify connected WebSocket clients about non-spam mail (per-user DOs).
+    // Fan out to users with explicit permission for this inbox, plus admins
+    // (capped) — all best-effort via ctx.waitUntil so push failures never
+    // block the inbound-email path.
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const [permRows, adminRows] = await Promise.all([
+            db
+              .select({ userId: inboxPermissions.userId })
+              .from(inboxPermissions)
+              .where(eq(inboxPermissions.email, recipientCanonical)),
+            db
+              .select({ id: users.id })
+              .from(users)
+              .where(eq(users.role, "admin"))
+              .limit(MAX_ADMIN_FANOUT + 1),
+          ]);
+          const { userIds, adminTruncated } = computeFanoutTargets({
+            permissionUserIds: permRows.map((r) => r.userId),
+            adminUserIds: adminRows.map((r) => r.id),
+          });
+          if (adminTruncated) {
+            console.warn(
+              `Admin count exceeds notification fanout cap (${MAX_ADMIN_FANOUT}); truncating.`,
+            );
+          }
+          const deliverPayload = JSON.stringify({
+            inbox: recipientCanonical,
+            threadId: actualPersonId,
+            personId: actualPersonId,
+            senderName: parsed.from.name || fromAddressCanonical,
+            subject: parsed.subject ?? "",
+            bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
+          });
+          const results = await Promise.allSettled(
+            userIds.map((userId) => {
+              const hub = env.NOTIFICATIONS_HUB.get(
+                env.NOTIFICATIONS_HUB.idFromName(userId),
+              );
+              return hub.fetch(
+                new Request("http://do/deliver", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: deliverPayload,
+                }),
+              );
+            }),
+          );
+          const failures = results.filter(
+            (r) => r.status === "rejected",
+          ).length;
+          if (failures > 0) {
+            console.warn(
+              `Real-time fanout: ${failures}/${results.length} DO notifies failed`,
+            );
+          }
+        } catch (err) {
+          // Non-fatal: real-time push is best-effort.
+          console.warn("Real-time fanout error:", err);
+        }
+      })(),
+    );
+  }
 
   // Best-effort outbound webhook for external automation (n8n / Make / etc.).
   // No-op unless an admin has configured a destination URL. Mirrors the push
@@ -311,9 +389,6 @@ export async function handleEmail(
   // rationale. Best-effort and non-blocking, like the webhook above — and it
   // sits after the blocklist and dedupe gates, so blocked senders and duplicate
   // deliveries are never forwarded.
-  const inboxIdentity = identityRows.find(
-    (r) => r.email.trim().toLowerCase() === recipientCanonical,
-  );
   forwardInbound(env, ctx, {
     inbox: recipientCanonical,
     forwardTo: inboxIdentity?.forwardTo ?? null,

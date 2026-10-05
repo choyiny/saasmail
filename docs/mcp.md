@@ -87,11 +87,43 @@ handshake working, not an error.
 
 Three scopes gate what a connected client may do:
 
-| Scope          | Grants                                                             |
-| -------------- | ------------------------------------------------------------------ |
-| `email:read`   | `whoami`, `list_people`, `get_person`, `list_emails`, `read_email` |
-| `email:send`   | `send_template`, `enroll_sequence`                                 |
-| `email:manage` | `mark_read`, `delete_email`                                        |
+| Scope          | Grants                                                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `email:read`   | `list_rules`, `list_people`, `get_person`, `get_customer`, `list_emails`, `list_messages`, `read_email`, `search_emails` |
+| `email:send`   | `send_template`, `send_email`, `reply_email`, `enroll_sequence`                                                          |
+| `email:manage` | `mark_read`, `set_message_state`, `delete_email`                                                                         |
+
+`whoami` needs no scope: it is how a send-only client finds the inboxes it may
+send from.
+
+**Retrying a send.** `send_email`, `reply_email` and `send_template` take an
+optional `idempotencyKey`: a UUID the client generates for each message it
+intends to send and passes again if it retries. A retry returns the first
+result with `replayed: true` and sends nothing; the same key with a different
+message is a tool error naming the key. Once the provider has a message its key
+never sends again, even if the call failed afterwards. Keys belong to the
+connected user and are kept 24 hours. An assistant should always pass one: a transport error after
+the server sent the message is indistinguishable from one before it.
+
+**When sending is turned off or limited.** The deployer can turn agent sending
+off with `MCP_SEND_ENABLED=false`: the four `email:send` tools then refuse with
+`MCP_SEND_DISABLED: Sending through MCP is disabled on this server by its
+administrator.`, and `whoami` reports `sendEnabled: false`. Each user may also
+send at most 200 messages a UTC day through `send_email`, `reply_email` and
+`send_template` by default (an admin setting); past it the tool error starts
+with `DAILY_SEND_LIMIT_REACHED` and the count starts again at midnight UTC.
+While an admin has paused outbound sending, a send succeeds with
+`status: "retrying"` and `paused: true`: the message is queued and goes out on
+resume ([Sending controls](sending.md)).
+
+**Where `reply_email` sends.** A reply to a received message follows that
+message's `Reply-To` header: its first address becomes To and any others are
+added to Cc, never one of this instance's own inboxes
+([Replying](inboxes.md#replying)). Pass `recipient: "sender"` to answer the
+`From` address instead. `read_email` lists the addresses beforehand in
+`replyRecipients`. The result's `to` is the address the reply went to, `cc`
+every address it was copied to, and `repliedTo` says whether `to` came from the
+header (`reply_to`) or is the sender (`sender`).
 
 **Access is scoped to the connecting user.** A client acting for a member with
 access to one inbox sees only that inbox — the same permission model as the web
@@ -103,7 +135,7 @@ attacker-authored content by definition — anyone can email you. Granting
 `email:send` or `email:manage` alongside it means a message in your inbox can
 try to instruct the assistant to mail your data somewhere or delete it. The
 consent screen flags those two scopes for this reason, and `delete_email` is
-permanent (there is no trash). Grant them only to clients you actually trust.
+permanent (it skips Trash). Grant them only to clients you actually trust.
 
 **Revoking access.** Admins can list connected OAuth clients and cut them off at
 **Settings → OAuth apps** (`GET /api/oauth-apps`, `DELETE /api/oauth-apps/{clientId}`).

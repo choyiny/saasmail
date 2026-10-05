@@ -339,6 +339,27 @@ describe("reassign email to person", () => {
       Object.keys(headers).some((k) => k.toLowerCase() === "reply-to"),
     ).toBe(false);
   });
+
+  it("clears the stored Reply-To list too", async () => {
+    await createTestPerson({ id: "p-old", email: "forms@site.test" });
+    await createTestEmail({
+      id: "e1",
+      personId: "p-old",
+      replyTo: JSON.stringify([
+        { email: "submitter@example.com", name: "Submitter" },
+      ]),
+    });
+
+    const res = await reassign("e1", apiKey, { email: "charlie@example.com" });
+    expect(res.status).toBe(200);
+
+    const email = await getDb()
+      .select({ replyTo: emails.replyTo })
+      .from(emails)
+      .where(eq(emails.id, "e1"))
+      .get();
+    expect(email?.replyTo).toBeNull();
+  });
 });
 
 async function createSent(opts: {

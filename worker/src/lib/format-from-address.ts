@@ -14,10 +14,15 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 const RFC5322_SPECIALS = /[()<>[\]:;@\\,."]/;
 
 /**
- * Encodes a display-name for use in a From header, quoting and escaping it
- * when it contains characters that can't appear in a bare atom.
+ * Encodes a display-name for use in a From, To or Cc header, quoting and
+ * escaping it when it contains characters that can't appear in a bare atom.
+ *
+ * CR and LF are replaced with spaces first: a line break in a header value
+ * would end the header and let the rest of the name inject new ones. Every
+ * send path formats names through here, so this is the guard of last resort.
  */
-export function encodeDisplayName(name: string): string {
+export function encodeDisplayName(raw: string): string {
+  const name = raw.replace(/[\r\n]+/g, " ");
   if (!RFC5322_SPECIALS.test(name)) return name;
   return `"${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }

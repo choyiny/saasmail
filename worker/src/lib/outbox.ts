@@ -1,12 +1,13 @@
+import { SENDING_PAUSED_MESSAGE, isSendingPaused } from "./sending-controls";
+import { notifySendAccepted } from "./send-idempotency";
 import { nanoid } from "nanoid";
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, eq, lte, min, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { drizzle } from "drizzle-orm/d1";
 import { outboxEmails } from "../db/outbox-emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { attachments } from "../db/attachments.schema";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import type { EmailSender, SendEmailAttachment } from "./email-sender";
 import { createEmailSender } from "./email-sender";
 import {
@@ -15,6 +16,8 @@ import {
   type SendOutput,
 } from "./send";
 import { formatFromAddress } from "./format-from-address";
+import { loadFrozenJmapSend } from "./jmap-frozen-send";
+import { bracketedMessageId } from "./message-id";
 import { isDemoMode } from "./is-dev";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
@@ -28,6 +31,25 @@ const OUTBOX_BATCH_LIMIT = 200;
 
 export type OutboxOutcome = "sent" | "suppressed" | "retrying" | "failed";
 
+/** Subsystem that must confirm its bookkeeping before an accepted row goes. */
+export type BookkeepingOwner = "campaign" | "jmap";
+
+/**
+ * The owner that must confirm its bookkeeping before a provider-accepted row
+ * may be deleted. Rows written before `bookkeeping_owner` existed have it null;
+ * a set `campaign_recipient_id` still marks them as campaign-owned, so rows in
+ * flight at deploy keep their hold without a data backfill.
+ */
+export function bookkeepingOwnerOf(row: {
+  bookkeepingOwner: string | null;
+  campaignRecipientId: string | null;
+}): BookkeepingOwner | null {
+  if (row.bookkeepingOwner === "campaign" || row.bookkeepingOwner === "jmap") {
+    return row.bookkeepingOwner;
+  }
+  return row.campaignRecipientId ? "campaign" : null;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
 
@@ -37,25 +59,67 @@ export interface OutboxSendParams {
   sender: EmailSender;
   /** Pre-generated id of the sent_emails row the caller will write. */
   sentEmailId: string;
+  /**
+   * The outbox row's id, when a caller may repeat the same send after an
+   * attempt that threw (a JMAP delayed send's release): reusing it keeps the
+   * provider idempotency key the same. Otherwise a fresh id.
+   */
+  outboxId?: string;
   /** Set for sequence-step sends. */
   sequenceEmailId?: string | null;
+  /**
+   * Set for campaign sends. Its presence changes what happens on provider
+   * success: the row is held as `bookkeeping_pending` instead of deleted, so a
+   * crash before the campaign finishes its own bookkeeping leaves durable
+   * evidence that the message was already accepted.
+   */
+  campaignRecipientId?: string | null;
+  /**
+   * Holds a provider-accepted row as `bookkeeping_pending` until the owner
+   * confirms (finalizeOutboxRow). Campaign sends may omit it: a set
+   * campaignRecipientId implies 'campaign'.
+   */
+  bookkeepingOwner?: BookkeepingOwner | null;
   /** Bare lowercase inbox address (scoping key; re-formatted on retry). */
   fromAddress: string;
   /** Formatted "Name <addr>" for the wire. */
   from: string;
   to: string;
+  /** Display name for `to` (transactional sends); the row stores the bare address. */
+  toName?: string | null;
+  /** More To recipients and blind recipients (JMAP submissions). */
+  additionalTo?: CcRecipient[];
   cc?: CcRecipient[];
+  bcc?: CcRecipient[];
   subject: string;
   html?: string;
   text?: string;
   headers?: Record<string, string>;
   attachments?: SendEmailAttachment[];
   transactional?: boolean;
+  /** When false, provider failures are terminal and the outbox row is deleted. */
+  retryOnFailure?: boolean;
+  /**
+   * Caller-minted unsubscribe URL (campaigns use a per-list v2 token). Passed
+   * straight through; the retry path recovers it from the stored
+   * `List-Unsubscribe` header instead, so both attempts carry the same link.
+   */
+  unsubscribeContext?: { url: string };
 }
 
 export interface OutboxSendResult {
   outcome: OutboxOutcome;
   send: SendOutput;
+  /**
+   * The outbox row's id. Campaign callers need it to delete the row once their
+   * bookkeeping is done; other callers can ignore it (the row is already gone).
+   */
+  outboxId: string;
+}
+
+/** One key per outbox row: its first attempt and every retry share it. */
+export function outboxIdempotencyKey(outboxId: string): string {
+  return `saasmail-outbox-${outboxId}`;
 }
 
 /**
@@ -73,27 +137,48 @@ export async function sendViaOutbox(
     sender,
     sentEmailId,
     sequenceEmailId,
-    fromAddress,
+    campaignRecipientId,
+    bookkeepingOwner,
+    fromAddress: rawFromAddress,
     from,
     to,
+    toName,
+    additionalTo,
     cc,
+    bcc,
     subject,
     html,
     text,
     headers,
     attachments,
     transactional,
+    retryOnFailure,
+    unsubscribeContext,
   } = params;
+  // Defense in depth: every retry is scoped by the persisted bare inbox
+  // address, so never trust a caller to have canonicalized it already.
+  const fromAddress = rawFromAddress.trim().toLowerCase();
   const now = Math.floor(Date.now() / 1000);
-  const outboxId = nanoid();
+  const outboxId = params.outboxId ?? nanoid();
+  const owner = bookkeepingOwnerOf({
+    bookkeepingOwner: bookkeepingOwner ?? null,
+    campaignRecipientId: campaignRecipientId ?? null,
+  });
 
   await db.insert(outboxEmails).values({
     id: outboxId,
     sentEmailId,
     sequenceEmailId: sequenceEmailId ?? null,
+    campaignRecipientId: campaignRecipientId ?? null,
+    bookkeepingOwner: owner,
     fromAddress,
     toAddress: to,
     cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
+    additionalTo:
+      additionalTo && additionalTo.length > 0
+        ? JSON.stringify(additionalTo)
+        : null,
+    bcc: bcc && bcc.length > 0 ? JSON.stringify(bcc) : null,
     subject,
     bodyHtml: html ?? null,
     bodyText: text ?? null,
@@ -124,13 +209,18 @@ export async function sendViaOutbox(
       sender,
       from,
       to,
+      toName,
+      additionalTo,
       cc,
+      bcc,
       subject,
       html,
       text,
       headers,
       attachments,
       transactional,
+      unsubscribeContext,
+      idempotencyKey: outboxIdempotencyKey(outboxId),
     });
   } catch (err) {
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
@@ -143,16 +233,44 @@ export async function sendViaOutbox(
     // Every recipient suppressed — no transport call happened. Nothing to
     // retry; sent_emails gets no row (matches pre-outbox behavior).
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
-    return { outcome: "suppressed", send };
+    return { outcome: "suppressed", send, outboxId };
   }
 
   const result = send.result!;
   if (!result.error) {
+    // Before any write that could fail: a keyed send must remember from now
+    // on that this message went out.
+    await notifySendAccepted({ sentEmailId, outcome: "sent" });
+    if (owner) {
+      // The provider has ACCEPTED this message and an owner still owes
+      // bookkeeping. Deleting now would erase the only durable evidence of
+      // that, and a crash before the owner writes its own rows would look
+      // exactly like a send that never happened — which is how you get a
+      // duplicate. Hold the row until the owner confirms.
+      await db
+        .update(outboxEmails)
+        .set({
+          status: "bookkeeping_pending",
+          attempts: 1,
+          deliveredMessageId: result.deliveredMessageId ?? null,
+          updatedAt: after,
+        })
+        .where(eq(outboxEmails.id, outboxId));
+    } else {
+      await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
+    }
+    return { outcome: "sent", send, outboxId };
+  }
+
+  // A one-shot send (an auto-reply) is still held by a pause: nothing failed.
+  if (retryOnFailure === false && !result.error.paused) {
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
-    return { outcome: "sent", send };
+    return { outcome: "failed", send, outboxId };
   }
 
   if (result.error.transient) {
+    // The outbox will deliver it: for a keyed send it is as good as sent.
+    await notifySendAccepted({ sentEmailId, outcome: "retrying" });
     // Stays pending; due at the next hourly run (after + 60: the 60-second cool-down
     // covers the caller's post-return bookkeeping — specifically the sent_emails insert
     // that happens after sendViaOutbox returns. Without this gap, a concurrent
@@ -162,13 +280,14 @@ export async function sendViaOutbox(
     await db
       .update(outboxEmails)
       .set({
-        attempts: 1,
+        // Held by the pause: no attempt was made.
+        attempts: result.error.paused ? 0 : 1,
         lastError: result.error.message,
         nextRetryAt: after + 60,
         updatedAt: after,
       })
       .where(eq(outboxEmails.id, outboxId));
-    return { outcome: "retrying", send };
+    return { outcome: "retrying", send, outboxId };
   }
 
   await db
@@ -180,7 +299,7 @@ export async function sendViaOutbox(
       updatedAt: after,
     })
     .where(eq(outboxEmails.id, outboxId));
-  return { outcome: "failed", send };
+  return { outcome: "failed", send, outboxId };
 }
 
 /**
@@ -189,7 +308,9 @@ export async function sendViaOutbox(
  */
 export async function processOutbox(env: CloudflareBindings): Promise<void> {
   if (isDemoMode(env)) return;
-  const db = drizzle(env.DB, { schema }) as unknown as Db;
+  const db = createDb(env) as unknown as Db;
+  // Held mail waits for the resume, which drains it through the queue.
+  if (await isSendingPaused(db)) return;
   const sender = createEmailSender(env);
   const now = Math.floor(Date.now() / 1000);
 
@@ -217,6 +338,56 @@ export async function processOutbox(env: CloudflareBindings): Promise<void> {
     }
   }
   console.log(`[outbox] processed ${claimed}/${due.length} due rows`);
+}
+
+/** Held rows tried per `outbox_drain` queue message. */
+export const OUTBOX_DRAIN_BATCH = 50;
+/** A later run further off than this is left to the hourly processor. */
+const OUTBOX_DRAIN_MAX_WAIT = 120;
+
+/** Delivers what a pause held, after the resume (see `drainHeldOutbox`). */
+export type OutboxDrainMessage = { type: "outbox_drain" };
+
+/**
+ * After a resume: tries the rows the pause held, a batch at a time. Returns
+ * the seconds until the next batch is due (0: now), or null when nothing held
+ * is left, or when the next one is further off than the hourly run would be
+ * worth waiting for. A try replaces the row's pause marker with its outcome,
+ * so each held row is tried by the drain at most once; the rest is the hourly
+ * processor's, as for any retry.
+ */
+export async function drainHeldOutbox(
+  env: CloudflareBindings,
+  sender: EmailSender = createEmailSender(env),
+): Promise<number | null> {
+  const db = createDb(env) as unknown as Db;
+  if (await isSendingPaused(db)) return null;
+  const held = and(
+    eq(outboxEmails.status, "pending"),
+    eq(outboxEmails.lastError, SENDING_PAUSED_MESSAGE),
+  );
+  const due = await db
+    .select({ id: outboxEmails.id })
+    .from(outboxEmails)
+    .where(
+      and(held, lte(outboxEmails.nextRetryAt, Math.floor(Date.now() / 1000))),
+    )
+    .limit(OUTBOX_DRAIN_BATCH);
+  for (const row of due) {
+    try {
+      await attemptOutboxRow(db, env, sender, row.id);
+    } catch (err) {
+      // As in processOutbox: the claim keeps it an hour, then it is retried.
+      console.error(`[outbox] held row ${row.id} failed to send:`, err);
+    }
+  }
+  const [next] = await db
+    .select({ at: min(outboxEmails.nextRetryAt) })
+    .from(outboxEmails)
+    .where(held);
+  if (next?.at === null || next?.at === undefined) return null;
+  const wait = Math.max(0, next.at - Math.floor(Date.now() / 1000));
+  return wait <= OUTBOX_DRAIN_MAX_WAIT ? wait : null;
 }
 
 /**
@@ -254,28 +425,61 @@ export async function attemptOutboxRow(
   if (claimed.length === 0) return null;
   const row = claimed[0];
 
-  const from = await formatFromAddress(db, row.fromAddress);
-  const storedAttachments = await loadOutboxAttachments(
-    db,
-    env,
-    row.sentEmailId,
-  );
+  // A JMAP row replays its frozen content (spec §10.1): the content row keeps
+  // the To name, Cc, References and inline attachments, and the intention keeps
+  // the exact From of the first attempt. Every other row — and a JMAP row whose
+  // intention, content or R2 objects are gone — uses the stored outbox fields.
+  const frozen =
+    bookkeepingOwnerOf(row) === "jmap"
+      ? await loadFrozenJmapSend(db, env, row.sentEmailId)
+      : null;
+  if (bookkeepingOwnerOf(row) === "jmap" && !frozen) {
+    console.error(
+      `[outbox] no frozen content for JMAP row ${row.id}; retrying from stored fields`,
+    );
+  }
+  const from = frozen
+    ? frozen.from
+    : await formatFromAddress(db, row.fromAddress);
+  const storedAttachments = frozen
+    ? frozen.attachments
+    : await loadOutboxAttachments(db, env, row.sentEmailId);
 
   const send = await sendWithSuppressionCheck({
     db,
     env,
     sender,
     from,
-    to: row.toAddress,
-    cc: row.cc ? (JSON.parse(row.cc) as CcRecipient[]) : undefined,
-    subject: row.subject,
-    html: row.bodyHtml ?? undefined,
-    text: row.bodyText ?? undefined,
-    headers: row.headers
-      ? (JSON.parse(row.headers) as Record<string, string>)
-      : undefined,
+    to: frozen ? frozen.to : row.toAddress,
+    ...(frozen && frozen.toName ? { toName: frozen.toName } : {}),
+    cc: frozen
+      ? frozen.cc.length > 0
+        ? frozen.cc
+        : undefined
+      : row.cc
+        ? (JSON.parse(row.cc) as CcRecipient[])
+        : undefined,
+    additionalTo: frozen
+      ? frozen.additionalTo
+      : row.additionalTo
+        ? (JSON.parse(row.additionalTo) as CcRecipient[])
+        : undefined,
+    bcc: frozen
+      ? frozen.bcc
+      : row.bcc
+        ? (JSON.parse(row.bcc) as CcRecipient[])
+        : undefined,
+    subject: frozen ? frozen.subject : row.subject,
+    html: frozen ? frozen.html : (row.bodyHtml ?? undefined),
+    text: frozen ? frozen.text : (row.bodyText ?? undefined),
+    headers: frozen
+      ? frozen.headers
+      : row.headers
+        ? (JSON.parse(row.headers) as Record<string, string>)
+        : undefined,
     attachments: storedAttachments.length > 0 ? storedAttachments : undefined,
     transactional: row.transactional === 1,
+    idempotencyKey: outboxIdempotencyKey(row.id),
   });
 
   const after = Math.floor(Date.now() / 1000);
@@ -302,7 +506,17 @@ export async function attemptOutboxRow(
   if (!result.error) {
     await db
       .update(sentEmails)
-      .set({ status: "sent", resendId: result.id, sentAt: after })
+      .set({
+        status: "sent",
+        resendId: result.id,
+        sentAt: after,
+        // The provider may have replaced the Message-ID on this attempt; the
+        // row keeps the one recipients actually got. Without a provider id the
+        // row's submitted id stands.
+        ...(result.deliveredMessageId?.trim()
+          ? { messageId: bracketedMessageId(result.deliveredMessageId) }
+          : {}),
+      })
       .where(eq(sentEmails.id, row.sentEmailId));
     if (row.sequenceEmailId) {
       await resolveSequenceStep(
@@ -312,18 +526,40 @@ export async function attemptOutboxRow(
         row.sentEmailId,
       );
     }
-    await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
+    if (bookkeepingOwnerOf(row)) {
+      // Same reasoning as the inline path: a retry that finally succeeds still
+      // owes its owner the bookkeeping, so hand the row over rather than
+      // deleting it here.
+      await db
+        .update(outboxEmails)
+        .set({
+          status: "bookkeeping_pending",
+          deliveredMessageId: result.deliveredMessageId ?? null,
+          updatedAt: after,
+        })
+        .where(eq(outboxEmails.id, row.id));
+    } else {
+      await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
+    }
     return "sent";
   }
 
-  if (result.error.transient && row.attempts < MAX_OUTBOX_ATTEMPTS) {
-    // Due again immediately — i.e. at the next hourly run.
+  if (
+    result.error.paused ||
+    (result.error.transient && row.attempts < MAX_OUTBOX_ATTEMPTS)
+  ) {
+    // Due again immediately — i.e. at the next hourly run. A send held by the
+    // pause gives its attempt back: nothing was tried, and a held message
+    // must never run out of attempts.
     await db
       .update(outboxEmails)
       .set({
         lastError: result.error.message,
         nextRetryAt: after,
         updatedAt: after,
+        ...(result.error.paused
+          ? { attempts: sql`MAX(${outboxEmails.attempts} - 1, 0)` }
+          : {}),
       })
       .where(eq(outboxEmails.id, row.id));
     // No-op on the normal cron path (already retrying); matters when a manual
@@ -415,4 +651,13 @@ async function loadOutboxAttachments(
     });
   }
   return out;
+}
+
+/**
+ * Delete a `bookkeeping_pending` row once the campaign's own bookkeeping has
+ * committed. Separate from the send path so the only way a held row disappears
+ * is a caller explicitly confirming it is safe.
+ */
+export async function finalizeOutboxRow(db: Db, id: string): Promise<void> {
+  await db.delete(outboxEmails).where(eq(outboxEmails.id, id));
 }

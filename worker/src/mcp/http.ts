@@ -1,3 +1,5 @@
+import { mcpActor } from "../lib/audit/actors";
+import { runWithAudit } from "../lib/audit/context";
 import type { Context, Hono } from "hono";
 import { StreamableHTTPTransport } from "@hono/mcp";
 import {
@@ -6,7 +8,7 @@ import {
 } from "@better-auth/oauth-provider";
 import { verifyJwsAccessToken } from "better-auth/oauth2";
 import type { JSONWebKeySet, JWTPayload } from "jose";
-import { eq } from "drizzle-orm";
+import { count, eq, min } from "drizzle-orm";
 import { createAuth } from "../auth";
 import { OAUTH_SCOPES } from "../auth";
 import { parseScopes } from "../auth/scopes";
@@ -120,7 +122,7 @@ export function registerMcpRoutes(app: App) {
     const clientId = typeof jwt.azp === "string" ? jwt.azp : undefined;
     if (!clientId) return unauthorized(baseURL, "invalid token client");
     const client = await db
-      .select({ disabled: oauthClients.disabled })
+      .select({ disabled: oauthClients.disabled, name: oauthClients.name })
       .from(oauthClients)
       .where(eq(oauthClients.clientId, clientId))
       .limit(1);
@@ -157,13 +159,29 @@ export function registerMcpRoutes(app: App) {
     // delete), so exempting it would make "passkey registration is required to
     // access data" false for the most powerful surface.
     if (!isDevEnvironment(c.env)) {
-      const pk = await db
-        .select({ id: passkeys.id })
+      const [pk] = await db
+        .select({ n: count(), first: min(passkeys.createdAt) })
         .from(passkeys)
-        .where(eq(passkeys.userId, user.id))
-        .limit(1);
-      if (pk.length === 0) {
+        .where(eq(passkeys.userId, user.id));
+      if (!pk || Number(pk.n) === 0) {
         return unauthorized(baseURL, "passkey registration required");
+      }
+      // A token minted before the account had a passkey was granted by a
+      // password session alone; registering the first passkey revokes its
+      // grant, and this stops the access token it already holds. (A passkey
+      // stored without its creation time cannot be compared.)
+      const first =
+        pk.first instanceof Date
+          ? pk.first.getTime()
+          : pk.first
+            ? Number(pk.first)
+            : null;
+      if (
+        first !== null &&
+        typeof jwt.iat === "number" &&
+        jwt.iat * 1000 < first
+      ) {
+        return unauthorized(baseURL, "token predates passkey registration");
       }
     }
 
@@ -181,8 +199,14 @@ export function registerMcpRoutes(app: App) {
       brandName: await readBrandName(db),
     });
     const transport = new StreamableHTTPTransport();
-    await server.connect(transport);
-    return transport.handleRequest(c);
+    // Whatever the tools do is audited as this client acting for this user.
+    return runWithAudit(
+      mcpActor(user, { id: clientId, name: client[0].name }, c.req.raw),
+      async () => {
+        await server.connect(transport);
+        return transport.handleRequest(c);
+      },
+    );
   });
 }
 

@@ -1,10 +1,12 @@
+import { auditAfterHook } from "./audit-hooks";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin, openAPI, jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
+import { isDevEnvironment } from "../lib/is-dev";
+import { d1RateLimitStorage } from "./rate-limit-storage";
 import { MCP_SCOPES } from "./scopes";
 import { mcpAudience, oauthIssuer } from "../mcp/resource";
 
@@ -21,7 +23,7 @@ export const OAUTH_SCOPES = [
 ];
 
 export function createAuth(env?: CloudflareBindings) {
-  const db = env ? drizzle(env.DB, { schema, logger: true }) : ({} as any);
+  const db = env ? createDb(env) : ({} as any);
   const baseURL = env?.BASE_URL || "http://localhost:8080";
 
   // Fail closed rather than silently signing with better-auth's published
@@ -37,7 +39,11 @@ export function createAuth(env?: CloudflareBindings) {
     );
   }
 
-  return betterAuth({
+  // better-auth's own endpoint paths, filled in once the instance exists:
+  // the rate limiter counts a made-up path in a shared bucket.
+  const servedPaths = new Set<string>();
+
+  const auth = betterAuth({
     baseURL,
     // Passed explicitly: better-auth resolves this from `process.env`, which
     // is not where `wrangler secret put` values reliably land. Without it the
@@ -51,6 +57,28 @@ export function createAuth(env?: CloudflareBindings) {
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
+    },
+    // Sign-ins, passkey changes and OAuth consent never pass a route of ours:
+    // this hook is where the audit log sees them, and where registering a
+    // first passkey ends the sessions and grants opened before it.
+    hooks: { after: auditAfterHook(db) },
+    // On everywhere but local development and demo deploys, counted in D1 so a
+    // limit holds across isolates: better-auth's own default (in memory, and
+    // only when NODE_ENV is "production") limited nothing on Workers. Its
+    // built-in rules apply: 3 sign-in attempts per 10 seconds per address,
+    // 100 requests per 10 seconds on any other auth path. Reading the
+    // session is not limited: it guards nothing, and it would cost a D1
+    // write on every page load.
+    rateLimit: {
+      enabled: !!env && !isDevEnvironment(env),
+      ...(env
+        ? {
+            customStorage: d1RateLimitStorage(db, (path) =>
+              servedPaths.has(path),
+            ),
+          }
+        : {}),
+      customRules: { "/get-session": false },
     },
     plugins: [
       admin(),
@@ -75,6 +103,12 @@ export function createAuth(env?: CloudflareBindings) {
       }),
     ],
     advanced: {
+      // The address Cloudflare saw, for rate limits and session records.
+      // Without it every client shares one rate-limit bucket. The IPv6 header
+      // comes first: with Cloudflare's "Pseudo IPv4" it holds the real one.
+      ipAddress: {
+        ipAddressHeaders: ["cf-connecting-ipv6", "cf-connecting-ip"],
+      },
       cookiePrefix: env?.COOKIE_PREFIX || "saasmail",
       defaultCookieAttributes: { sameSite: "lax", secure: true },
     },
@@ -82,6 +116,11 @@ export function createAuth(env?: CloudflareBindings) {
       ? env.TRUSTED_ORIGINS.split(",")
       : ["http://localhost:8080"],
   });
+  for (const endpoint of Object.values(auth.api)) {
+    const path = (endpoint as { path?: unknown }).path;
+    if (typeof path === "string") servedPaths.add(path);
+  }
+  return auth;
 }
 
 export const auth = createAuth();

@@ -183,8 +183,11 @@ test.describe.serial("compose & send", () => {
     // Now the Send button should be enabled
     await expect(sendButton).toBeEnabled();
 
-    // Clear the text (select all, delete)
-    await page.keyboard.press("Control+a");
+    // Clear the text (select all, delete). ProseMirror binds select-all to
+    // "Mod", which is Cmd on macOS and Ctrl elsewhere, so a hard-coded
+    // Control+a silently does nothing on a Mac dev machine (it passes on Linux
+    // CI). ControlOrMeta is the platform-portable spelling.
+    await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.press("Backspace");
 
     // Send button should be disabled again

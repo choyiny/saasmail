@@ -4,6 +4,7 @@ import {
   integer,
   real,
   index,
+  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
 export const emails = sqliteTable(
@@ -16,11 +17,27 @@ export const emails = sqliteTable(
     bodyHtml: text("body_html"),
     bodyText: text("body_text"),
     rawHeaders: text("raw_headers"),
-    messageId: text("message_id").unique(),
+    messageId: text("message_id"),
+    /**
+     * The raw `In-Reply-To` and `References` header values, as received
+     * (one or more `<id>`s). JMAP exposes them as `inReplyTo`/`references`.
+     * Rows from before migration 0063 were backfilled from `raw_headers`.
+     */
+    inReplyTo: text("in_reply_to"),
+    referencesHeader: text("references_header"),
+    /**
+     * The message exactly as received (RFC 5322 bytes) in R2, and its size in
+     * octets: JMAP's `blobId` and `size`. Kept for the life of the row. NULL
+     * for mail received before migration 0068, or if the R2 write failed.
+     */
+    rawR2Key: text("raw_r2_key"),
+    rawSize: integer("raw_size"),
     spf: text("spf"),
     dkim: text("dkim"),
     dmarc: text("dmarc"),
     spamScore: real("spam_score"),
+    /** The inbox's learning filter's score (0–1), when it had enough training. */
+    spamProbability: real("spam_probability"),
     isRead: integer("is_read").notNull().default(0),
     /**
      * JSON-encoded array of {"email","name"} objects for additional
@@ -29,6 +46,13 @@ export const emails = sqliteTable(
      */
     cc: text("cc"),
     /**
+     * JSON-encoded array of {"email","name"} objects from the inbound
+     * Reply-To header, the `cc` convention. NULL when the header is absent
+     * or empty, and for rows from before migration 0074, which readers
+     * resolve from `raw_headers` instead (see `replyToOf`).
+     */
+    replyTo: text("reply_to"),
+    /**
      * Group-thread identity. When 2+ external participants are in this
      * email's thread, this column is set to a deterministic hash of
      * (inbox, sorted-external-emails). NULL means a 1-on-1 thread — the
@@ -36,6 +60,13 @@ export const emails = sqliteTable(
      * See migration 0022.
      */
     conversationId: text("conversation_id"),
+    /** The mail import that stored this message; null for live mail. */
+    importJobId: text("import_job_id"),
+    /**
+     * `t:<sha256 of the thread's root Message-ID>` for inboxes that thread by
+     * headers; NULL otherwise. Comes first in the conversation key.
+     */
+    threadKey: text("thread_key"),
     receivedAt: integer("received_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
@@ -46,5 +77,12 @@ export const emails = sqliteTable(
       table.receivedAt,
     ),
     index("emails_conversation_idx").on(table.conversationId),
+    index("emails_thread_key_idx").on(table.threadKey),
+    // One row per Message-ID per inbox: a message addressed to two inboxes is
+    // stored in both, and a redelivery to the same inbox is dropped.
+    uniqueIndex("emails_message_id_recipient_unique").on(
+      table.messageId,
+      table.recipient,
+    ),
   ],
 );

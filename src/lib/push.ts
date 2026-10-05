@@ -26,13 +26,13 @@ export function markPromptDismissed(): void {
   } catch {}
 }
 
-function urlB64ToUint8Array(base64String: string): Uint8Array {
+function urlB64ToArrayBuffer(base64String: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = atob(base64);
-  const out = new Uint8Array(rawData.length);
+  const out = new Uint8Array(new ArrayBuffer(rawData.length));
   for (let i = 0; i < rawData.length; i++) out[i] = rawData.charCodeAt(i);
-  return out;
+  return out.buffer;
 }
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration> {
@@ -71,7 +71,7 @@ export async function enablePush(): Promise<
     existing ??
     (await reg.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: urlB64ToUint8Array(cfg.vapidPublicKey),
+      applicationServerKey: urlB64ToArrayBuffer(cfg.vapidPublicKey),
     }));
 
   const json = sub.toJSON();

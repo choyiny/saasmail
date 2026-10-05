@@ -1,4 +1,4 @@
-import PostalMime from "postal-mime";
+import PostalMime, { addressParser } from "postal-mime";
 
 export interface AuthResults {
   spf: string | null;
@@ -12,10 +12,25 @@ export interface ParsedEmailAddress {
 }
 
 export interface ParsedEmail {
+  /** The message exactly as received. */
+  raw: Uint8Array;
   from: { address: string; name: string };
   to: string;
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
   cc: ParsedEmailAddress[];
+  /** The To header's addresses (groups flattened), cleaned like Cc. */
+  toList: ParsedEmailAddress[];
+  /** The Bcc header's addresses, when the message carries one (sent copies). */
+  bcc: ParsedEmailAddress[];
+  /** The Date header, as written. */
+  date: string | null;
+  /**
+   * Addresses in every `Delivered-To` and `X-Original-To` header, lowercased:
+   * where a copy of the message was delivered.
+   */
+  deliveredTo: string[];
+  /** Where the sender asked for replies (Reply-To); empty when absent. */
+  replyTo: ParsedEmailAddress[];
   subject: string;
   /** Quote-trimmed HTML body, with `cid:` refs left intact. For display/storage. */
   bodyHtml: string | null;
@@ -139,17 +154,97 @@ function parseSpamScore(headers: Record<string, string>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Valid addresses only, lowercased, names trimmed, at most 50. */
+function cleanAddresses(
+  list: Array<{ address?: string; name?: string }>,
+): ParsedEmailAddress[] {
+  return list
+    .filter((c): c is { address: string; name?: string } => {
+      if (!c.address || typeof c.address !== "string") return false;
+      // Cheap RFC 5322-ish gate. Defers strict validation to downstream
+      // schemas; we only need to reject the obviously-not-email cases.
+      return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
+    })
+    .slice(0, 50)
+    .map((c) => ({
+      email: c.address.trim().toLowerCase(),
+      name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
+    }));
+}
+
+/**
+ * The addresses of a stored address header (the value kept in
+ * `emails.raw_headers`), with groups flattened as RFC 8621 does and the same
+ * clean-up as the Cc list.
+ */
+export function parseAddressHeader(value: string): ParsedEmailAddress[] {
+  return cleanAddresses(
+    addressParser(value).flatMap((entry) =>
+      "group" in entry && entry.group ? entry.group : [entry],
+    ),
+  );
+}
+
+const MAX_REPLY_TO = 10;
+
+/** A Reply-To list: each address once, at most 10. */
+function uniqueReplyTo(list: ParsedEmailAddress[]): ParsedEmailAddress[] {
+  const seen = new Set<string>();
+  const unique: ParsedEmailAddress[] = [];
+  for (const entry of list) {
+    if (seen.has(entry.email)) continue;
+    seen.add(entry.email);
+    unique.push(entry);
+  }
+  return unique.slice(0, MAX_REPLY_TO);
+}
+
+/** The Reply-To list of a stored `reply-to` header value. */
+export function parseReplyToHeader(value: string): ParsedEmailAddress[] {
+  return uniqueReplyTo(parseAddressHeader(value));
+}
+
 export async function parseEmail(
   message: ForwardableEmailMessage,
 ): Promise<ParsedEmail> {
   const rawEmail = await new Response(message.raw).arrayBuffer();
+  return parseRawEmail(rawEmail, { from: message.from, to: message.to });
+}
+
+/** Address list fields of postal-mime, with groups flattened. */
+function flattened(
+  list: Array<{ address?: string; name?: string; group?: unknown }> | undefined,
+): Array<{ address?: string; name?: string }> {
+  return (list ?? []).flatMap((entry) =>
+    "group" in entry && Array.isArray(entry.group)
+      ? (entry.group as Array<{ address?: string; name?: string }>)
+      : [entry],
+  );
+}
+
+/**
+ * Parses a message from its bytes: what `parseEmail` does for live mail, and
+ * what an import does for a message read from a file. `envelope` gives the
+ * SMTP sender and recipient when there are any; without one, `to` is the
+ * first To address.
+ */
+export async function parseRawEmail(
+  rawEmail: ArrayBuffer | Uint8Array,
+  envelope: { from?: string; to?: string } = {},
+): Promise<ParsedEmail> {
   const parser = new PostalMime();
   const parsed = await parser.parse(rawEmail);
 
   const headers: Record<string, string> = {};
+  const deliveredTo: string[] = [];
   if (parsed.headers) {
     for (const header of parsed.headers) {
       headers[header.key] = header.value;
+      if (header.key === "delivered-to" || header.key === "x-original-to") {
+        deliveredTo.push(
+          ...parseAddressHeader(header.value).map((entry) => entry.email),
+        );
+      }
     }
   }
 
@@ -165,28 +260,36 @@ export async function parseEmail(
   //   don't fork conversation_id buckets,
   // - cap the array so a single inbound message can't slam storage
   //   with thousands of header-entries.
-  const cc: ParsedEmailAddress[] = (
-    (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? []
-  )
-    .filter((c): c is { address: string; name?: string } => {
-      if (!c.address || typeof c.address !== "string") return false;
-      // Cheap RFC 5322-ish gate. Defers strict validation to downstream
-      // schemas; we only need to reject the obviously-not-email cases.
-      return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
-    })
-    .slice(0, 50)
-    .map((c) => ({
-      email: c.address.trim().toLowerCase(),
-      name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
-    }));
+  const cc = cleanAddresses(
+    (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? [],
+  );
+  const toList = cleanAddresses(flattened(parsed.to));
+  const bcc = cleanAddresses(flattened(parsed.bcc));
+
+  // Reply-To gets the Cc clean-up, with groups flattened; replies are
+  // addressed from this list, so a duplicate would be mailed twice.
+  const replyTo = uniqueReplyTo(
+    cleanAddresses(
+      (parsed.replyTo ?? []).flatMap((entry) =>
+        "group" in entry && entry.group ? entry.group : [entry],
+      ),
+    ),
+  );
 
   return {
+    // A view of an import's file is kept as it is, not copied.
+    raw: rawEmail instanceof Uint8Array ? rawEmail : new Uint8Array(rawEmail),
     from: {
-      address: parsed.from?.address || message.from,
+      address: parsed.from?.address || envelope.from || "",
       name: parsed.from?.name || "",
     },
-    to: message.to,
+    to: envelope.to ?? toList[0]?.email ?? "",
     cc,
+    toList,
+    bcc,
+    date: parsed.date || headers["date"] || null,
+    deliveredTo,
+    replyTo,
     subject: parsed.subject || "",
     bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
     bodyText: bodyText ? trimQuotedText(bodyText) : null,

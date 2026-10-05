@@ -5,6 +5,8 @@ import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
+import { resolveCustomerScope } from "../lib/customers";
+import { getPersonScoped } from "../lib/queries/people";
 import { json200Response } from "../lib/helpers";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { isInboxAllowed } from "../lib/inbox-permissions";
@@ -14,6 +16,7 @@ import {
   setEmailRead,
 } from "../lib/queries/emails";
 import { searchEmails } from "../lib/queries/search";
+import { citedIdsOf, threadKeyForNewMessage } from "../lib/messages/thread-key";
 import type { Variables } from "../variables";
 
 export const emailsRouter = new OpenAPIHono<{
@@ -68,6 +71,10 @@ export const EmailSchema = z.object({
         "provider failure, will be retried), or 'failed' (the provider " +
         "rejected it). Null for received messages.",
     }),
+  campaignId: z.string().nullable().optional().openapi({
+    description:
+      "The campaign this message was part of, when it was a campaign send. Null or absent for ordinary sent mail and for received messages.",
+  }),
   attachmentCount: z.number().optional().openapi({
     description:
       "Number of attachments on this message. Set on list endpoints; may be omitted on GET /api/emails/{id}.",
@@ -82,10 +89,23 @@ export const EmailSchema = z.object({
     .optional()
     .openapi({
       description:
-        "Address from the inbound Reply-To header, when present (e.g. a " +
-        "contact form's actual submitter behind a noreply@ sender). Populated " +
-        "only on GET /api/emails/{id} for received messages; omitted or null " +
-        "on list/conversation endpoints and on sent messages.",
+        "Where a reply to this received message goes when that is not the " +
+        "sender: the first address of the inbound Reply-To header that is " +
+        "not one of this instance's own inboxes (e.g. a contact form's " +
+        "actual submitter behind a noreply@ sender). Null when there is no " +
+        "such address, when it is the sender, and on sent messages. Filled " +
+        "on GET /api/emails/{id}, GET /api/emails/by-person/{personId} and " +
+        "GET /api/conversations/{id}/emails.",
+    }),
+  replyRecipients: z
+    .array(CcEntrySchema)
+    .optional()
+    .openapi({
+      description:
+        "Every address a reply to this received message is sent to when it " +
+        "follows the Reply-To header: the first becomes To and the others " +
+        "are added to Cc. This instance's own inboxes are left out. Empty " +
+        "when the reply simply goes to the sender, and on sent messages.",
     }),
 });
 
@@ -142,6 +162,7 @@ const listPersonEmailsRoute = createRoute({
         .openapi({ description: "Filter by recipient address" }),
       page: z.coerce.number().optional().default(1),
       limit: z.coerce.number().optional().default(50),
+      allAddresses: z.enum(["true", "false"]).optional(),
     }),
   },
   responses: {
@@ -155,13 +176,21 @@ const listPersonEmailsRoute = createRoute({
 emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
   const db = c.get("db");
   const { personId } = c.req.valid("param");
-  const { q, recipient, page, limit } = c.req.valid("query");
+  const { q, recipient, page, limit, allAddresses } = c.req.valid("query");
   const allowed = c.get("allowedInboxes")!;
+  let customerId: string | undefined;
+  if (
+    allAddresses === "true" &&
+    (await getPersonScoped(db, personId, allowed))
+  ) {
+    const scope = await resolveCustomerScope(db, personId);
+    customerId = scope.customerId ?? undefined;
+  }
 
   const result = await listPersonEmails(
     db,
     personId,
-    { q, recipient, page, limit },
+    { q, recipient, page, limit, customerId },
     allowed,
   );
 
@@ -220,7 +249,7 @@ const getEmailRoute = createRoute({
   path: "/{id}",
   tags: ["Emails"],
   description:
-    "Get a single email with full details, including attachments. replyTo is set for received messages when a Reply-To header was present.",
+    "Get a single email with full details, including attachments. replyTo is set for received messages whose Reply-To header names someone other than the sender.",
   request: {
     params: z.object({ id: z.string() }),
   },
@@ -564,6 +593,9 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
         .update(emails)
         .set({
           personId: person.id,
+          // The stored list goes with the header: from here on the new
+          // person's address is the reply target.
+          replyTo: null,
           ...(rawHeaders !== target.rawHeaders ? { rawHeaders } : {}),
         })
         .where(eq(emails.id, target.id));
@@ -593,6 +625,8 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
       personId: sentEmails.personId,
       fromAddress: sentEmails.fromAddress,
       toAddress: sentEmails.toAddress,
+      messageId: sentEmails.messageId,
+      inReplyTo: sentEmails.inReplyTo,
     })
     .from(sentEmails)
     .where(eq(sentEmails.id, id))
@@ -619,6 +653,12 @@ emailsRouter.openapi(reassignPersonRoute, async (c) => {
   }
   if (newFrom) {
     updates.fromAddress = newFrom;
+    // Its thread is the new inbox's: none there unless it groups by thread.
+    updates.threadKey = await threadKeyForNewMessage(db, {
+      inbox: newFrom,
+      messageId: sent.messageId,
+      citedIds: citedIdsOf(sent.inReplyTo, null),
+    });
   }
   if (Object.keys(updates).length > 0) {
     await db.update(sentEmails).set(updates).where(eq(sentEmails.id, sent.id));

@@ -21,6 +21,129 @@ Different inboxes call for different UX. Set each inbox to render as **Thread** 
 
 One deployment, one person timeline, but the interaction model matches the channel.
 
+## Conversations: by customer or by thread
+
+Thread or chat is how an inbox's mail looks. **Conversations** (on the Inboxes page, under the Thread/Chat toggle) is how it is grouped, which decides what snooze and assignment apply to and what a JMAP mail client sees as a thread:
+
+- **By customer** (the default): all mail with a person is one conversation (a group conversation has its own). Snoozing or assigning a message snoozes or assigns the customer.
+- **By thread**: replies form threads by their `In-Reply-To` and `References` headers, like a mail client. Snooze and assignment apply to the thread, and JMAP clients see ordinary threads.
+
+In an inbox grouped by thread, a message joins the thread of the first message it cites (its `In-Reply-To`, then its `References` from the nearest back to the root, at most 20) that is in the same inbox: received mail, mail sent from the inbox, or a JMAP send by the Message-ID the client gave it. A message that cites nothing known starts a thread of its own. There is no subject matching: mail clients set these headers reliably, and subjects merge unrelated mail. Sequence, campaign and template sends start their own threads; replies from the composer join the thread they answer. The customer view and the person timeline are the same in both modes.
+
+Changing the mode asks for confirmation, then:
+
+1. **Regroups the inbox's mail in the background**, on the queue, oldest first. Going to threads walks the mail twice, so a reply that arrived before the message it answers ends up in its thread. The control shows how far it got; if it stops part-way, **Retry** runs it again. Mail that arrives meanwhile is grouped the new way at once.
+2. **Clears the inbox's snoozes and assignments.** They were keyed by conversations that no longer exist and can't be mapped one-to-one. The audit log records how many were cleared.
+3. **Makes every JMAP client resync once** the regrouping ends (or stops), since thread ids changed under the account it holds ([JMAP: the account epoch](jmap.md#ids-and-account-breaking-in-this-release)).
+
+Good to know:
+
+- Mail is walked in date order, so a reply chain whose dates run backwards over several generations (a sender with a clock far off) can stay split.
+- While an import into the inbox is running, the mode can't be changed (`409`): wait for it to finish. An import into an inbox grouped by thread ends with one more walk that joins replies imported before the messages they answer ([Import mail](data.md#import-mail)).
+- Deleting an inbox grouped by thread keeps its mail and clears its threads in the background; an inbox can't be deleted while its mail is being regrouped (`409`).
+- A JMAP draft saved before the switch keeps its thread until it is sent.
+- On a demo deployment (no queue), the regrouping runs after the request and in the hourly run, which suits demo-sized inboxes only.
+
+Over the API: `PATCH /api/admin/inboxes/{email}` with `{"threadingMode": "headers"}` (or `"relationship"`) starts the change, `409` while a regrouping of that inbox runs; sending the current mode again after a regrouping stopped runs it again. `GET /api/admin/inboxes` lists each inbox's `threadingMode` and its last regrouping (`threadBackfill`: mode, status, processed and total).
+
+## Replying
+
+A reply goes where the sender asked for it. When a received message has a
+`Reply-To` header (a ticketing system, a contact form, a `noreply@` notification
+that names a real support address), the reply is addressed to that address
+instead of the `From` address. If the header lists several addresses, the first
+becomes To and the others are added to Cc.
+
+The reply composer and the chat view's quick reply say so before you send
+("Replies go to support@acme.com (the sender asked for replies there)"), name
+every address that will get a copy, and offer **Reply to the sender instead**,
+which ignores the header altogether. The mail view's reading pane shows the
+`Reply-To:` line on such a message. An address is never both in To and in Cc.
+
+Two guards apply:
+
+- A Reply-To address that is one of this instance's own inboxes is ignored, so a
+  message whose Reply-To points back at you never makes saasmail mail itself.
+  With no other address left, the reply goes to the sender.
+- [Rule auto-replies](automations.md#auto-replies) always answer the sender,
+  whatever the header says.
+
+The reply stays on the original sender's timeline, marked with the address it
+went to; it does not start a timeline for the Reply-To address. A reply written
+in a group conversation stays in that conversation.
+
+The API and MCP behave the same way. `POST /api/send/reply/{emailId}` and the
+MCP tool `reply_email` follow Reply-To by default; pass `recipient: "sender"` to
+answer the `From` address. Both return `to`, the address the reply went to,
+`cc`, every address it was copied to, and `repliedTo` (`reply_to` or `sender`).
+To see the addresses beforehand, read `replyRecipients` on the message
+(`GET /api/emails/{id}`, MCP `read_email`). The web composers always send
+`recipient`, so a reply never goes to an address they did not show.
+
+## Unknown recipients
+
+An Email Routing catch-all rule sends mail for any address under your domain to
+saasmail, and by default all of it is stored, including mail to addresses no
+inbox has. Turn on **Reject mail to addresses that aren't inboxes** at the
+bottom of the **Inboxes** page (or `PATCH /api/admin/settings` with
+`{"rejectUnknownRecipients": true}`) and such mail is refused while the sending
+server is connected, with `No such mailbox`. Nothing is stored, and the audit
+log records `inbound.rejected` with the address. The check runs first, before
+the blocklist and the [rules](automations.md#rejecting-mail).
+
+An address counts as an inbox when it has a sender identity (it was created or
+edited on the Inboxes page) or members assigned to it, whatever its case. The
+Inboxes page also lists addresses that only ever received mail through the
+catch-all; those are not inboxes, and turning the setting on first lists the
+ones that received mail in the last 30 days and asks you to confirm. To keep
+one, give it a sender identity or assign members. Also:
+
+- Plus addresses are separate addresses: `support+orders@` is refused unless
+  it is an inbox itself.
+- A **Forward to** address on your own domain that is not an inbox is refused
+  too, so forwarded copies to it bounce.
+- Refusing unknown addresses tells a sender which addresses exist, as any mail
+  server that rejects them does.
+- Each refusal writes one audit row (kept 180 days by default), so a
+  dictionary attack shows up there in volume.
+
+## Learning spam filter
+
+Each inbox can have a spam filter that learns from your team: **Learn from junk
+marks** under Spam threshold on the **Inboxes** page (off by default). It is a
+naive-Bayes filter in the style of SpamAssassin's and Thunderbird's, one per
+inbox, kept in D1.
+
+- **What trains it**: a person marking a message as junk (spam) or taking it
+  out of Junk (not spam), from the web app, the API, MCP or JMAP, and a person
+  replying to a received message nobody has labelled yet (not spam; through
+  the web app, the API or MCP's `reply_email`). Rules, the spam threshold, the
+  agent, auto-replies and imports never train it, so it cannot learn from its
+  own output or from a model a message talked into something. A message counts
+  once, even if two people mark it at the same moment; changing its label
+  moves it, and a reply never undoes an explicit junk mark. One web or API mark
+  trains at most 50 messages; a JMAP client moves messages one by one, so each
+  one it moves trains. An API key or MCP client that replies to everything
+  automatically would teach the filter that everything is fine: give such
+  integrations their own inbox.
+- **When it scores**: once it has seen 20 junk and 20 not-junk messages, each
+  new message gets a spam probability from 0 to 1 (Graham's method with
+  Robinson's smoothing: a word seen once or twice weighs little) (shown in the reading pane
+  as "Spam probability 0.97 (learned filter)" and on the message as
+  `spamProbability`). A message with too little evidence gets none.
+- **Acting on it is a rule**: the condition `spam_probability ≥ 0.9` with Mark
+  as spam. **Create the junk rule** opens Automations with that rule
+  prefilled for the inbox. The filter itself never files anything.
+- **Reset** forgets everything it learned (it stays on or off). Each inbox keeps
+  about 100,000 tokens: the hourly pass removes the rarest, oldest ones beyond
+  that, at most 10,000 at a time.
+
+The API: `GET /api/admin/inboxes` returns `spamFilter: { enabled,
+spamMessages, hamMessages, ready }`, `PUT /api/admin/inboxes/{email}/spam-filter`
+with `{ enabled }` turns it on or off, and
+`POST /api/admin/inboxes/{email}/spam-filter/reset` empties it; both are
+recorded as `inbox.updated`.
+
 ## Per-inbox forwarding
 
 Give any inbox a **Forward to** address and every message it receives is re-sent to

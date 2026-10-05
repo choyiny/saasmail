@@ -1,17 +1,21 @@
+import { recordFailedSignIn } from "./auth/audit-hooks";
 import { OpenAPIHono } from "@hono/zod-openapi";
+import { routeAgentRequest } from "agents";
 import { swaggerUI } from "@hono/swagger-ui";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { injectDb } from "./db/middleware";
+import { createDb } from "./db/client";
 import { createAuth } from "./auth";
-import { apiKeys } from "./db/api-keys.schema";
 import { users } from "./db/auth.schema";
 import { eq } from "drizzle-orm";
-import { hashKey } from "./lib/crypto";
 import { handleEmail } from "./email-handler";
 import { peopleRouter } from "./routers/people-router";
+import { customersRouter } from "./routers/customers-router";
 import { emailsRouter } from "./routers/emails-router";
 import { conversationsRouter } from "./routers/conversations-router";
+import { messagesRouter } from "./routers/messages-router";
+import { mailboxesRouter } from "./routers/mailboxes-router";
 import {
   sendRouter,
   CcEntrySchema,
@@ -24,35 +28,77 @@ import { setupRouter } from "./routers/setup-router";
 import { emailTemplatesRouter } from "./routers/email-templates-router";
 import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
+import { adminRulesRouter } from "./routers/admin-rules-router";
+import { adminAuditRouter } from "./routers/admin-audit-router";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
-import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
-import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { handleScheduled } from "./lib/sequence-processor";
+import { handleQueueBatch } from "./lib/queue-router";
 import { processOutbox } from "./lib/outbox";
+import { reapOrphanSentAttachments } from "./lib/sent-attachments";
+import { runNewsletterMaintenance } from "./lib/newsletter-cron";
+import { pruneJmapChanges } from "./jmap/changes";
+import { anonymousHttpActor, httpActor } from "./lib/audit/actors";
+import { runWithAudit, systemActor } from "./lib/audit/context";
+import { auditRetentionDays, pruneAuditEvents } from "./lib/audit/prune";
+import { pruneSendIdempotency } from "./lib/send-idempotency";
+import { pruneSendCounters } from "./lib/sending-controls";
+import {
+  d1RateLimitStorage,
+  pruneAuthRateLimits,
+} from "./auth/rate-limit-storage";
+import { pruneSpamTokens } from "./lib/spam/filter";
+import { reapMailExports } from "./lib/export/mail-export";
+import { reapMailImports } from "./lib/import/mail-import";
+import { reapThreadBackfills } from "./lib/messages/thread-backfill";
+import { importsRouter } from "./routers/imports-router";
+import { runBackupSchedule } from "./lib/backup/run";
+import { backupsRouter } from "./routers/backups-router";
+import { exportsRouter } from "./routers/exports-router";
+import { collectUnreferencedContent } from "./jmap/content";
+import { runJmapSubmissionMaintenance } from "./jmap/recovery";
+import { reapExpiredUploads } from "./jmap/upload";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
+import { contactsRouter } from "./routers/contacts-router";
+import { publicTrackRouter } from "./routers/public-track-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
+import { agentSessionsRouter } from "./routers/agent-sessions-router";
+import { agentStatusRouter } from "./routers/agent-status-router";
+import { agentApprovalRouter } from "./routers/agent-approval-router";
+import { suggestedRepliesRouter } from "./routers/suggested-replies-router";
+import { listsRouter } from "./routers/lists-router";
+import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
+import { campaignsRouter } from "./routers/campaigns-router";
+import { publicSubscribeRouter } from "./routers/public-subscribe-router";
+import { newsletterAssetsRouter } from "./routers/newsletter-assets-router";
+import { publicAssetsRouter } from "./routers/public-assets-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
+export { MailAgent } from "./agent/mail-agent";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
 import { requirePasskey } from "./middleware/require-passkey";
+import { authRoutePasskeyGate } from "./middleware/auth-route-passkey-gate";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
 import { registerMcpRoutes } from "./mcp/http";
+import { registerJmapRoutes } from "./jmap/http";
 import {
   BEARER_AUTH_SCHEME,
   bearerAuthSecurityScheme,
   openapiInfoDescription,
 } from "./lib/openapi-auth";
+import { resolveRequestAuth } from "./lib/request-auth";
+import { authorizeMailAgentRequest } from "./agent/auth";
 
 const app = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -72,6 +118,9 @@ app.openAPIRegistry.registerComponent(
 // Middleware
 app.use("*", injectDb);
 app.use("*", logger());
+// Every HTTP request starts as an anonymous audit actor; the authenticated
+// boundaries below (and MCP, JMAP) replace it with who is really acting.
+app.use("*", (c, next) => runWithAudit(anonymousHttpActor(c.req.raw), next));
 // `exposeHeaders` is required so browser-based MCP clients (e.g. Claude.ai
 // connectors) can read the `WWW-Authenticate` challenge on a 401 to discover
 // the OAuth protected-resource metadata URL, plus the `Mcp-Session-Id` header
@@ -81,7 +130,16 @@ app.use(
   "*",
   cors({
     origin: "*",
-    exposeHeaders: ["WWW-Authenticate", "Mcp-Session-Id"],
+    exposeHeaders: [
+      "WWW-Authenticate",
+      "Mcp-Session-Id",
+      // So a browser client of the send routes can tell a replay and a
+      // still-running request's wait.
+      "Idempotency-Replayed",
+      "Retry-After",
+      // better-auth's rate-limit answer.
+      "X-Retry-After",
+    ],
   }),
 );
 
@@ -137,6 +195,34 @@ app.post("/api/auth/sign-in/email", async (c, next) => {
     .where(eq(passkeys.userId, userRows[0].id))
     .limit(1);
   if (pkRows.length > 0) {
+    // Counted like an attempt, or this answer could be used without limit to
+    // find which addresses have an account with a passkey.
+    const address =
+      c.req.header("cf-connecting-ipv6") ??
+      c.req.header("cf-connecting-ip") ??
+      "no-ip";
+    const limit = await d1RateLimitStorage(db, () => true).consume(
+      `${address}|/sign-in/email`,
+      { window: 10, max: 3 },
+    );
+    if (!limit.allowed) {
+      return c.json(
+        { message: "Too many requests. Please try again later." },
+        429,
+        { "X-Retry-After": String(limit.retryAfter ?? 10) },
+      );
+    }
+    // Refused before better-auth sees it, so its hook cannot record it.
+    try {
+      await recordFailedSignIn(db, {
+        method: "password",
+        user: { id: userRows[0].id, email },
+        request: c.req.raw,
+        reason: "passkey_required",
+      });
+    } catch (error) {
+      console.warn("[audit] refused sign-in not recorded:", error);
+    }
     return c.json(
       {
         error:
@@ -149,56 +235,31 @@ app.post("/api/auth/sign-in/email", async (c, next) => {
   return next();
 });
 
+// A session whose account has no passkey yet may only register one, on
+// better-auth's endpoints as on ours.
+app.use("/api/auth/*", authRoutePasskeyGate);
+
 // BetterAuth handler
 app.all("/api/auth/*", (c) => {
   const auth = createAuth(c.env);
   return auth.handler(c.req.raw);
 });
 
-// Session resolution for all API routes
+// Session/API-key resolution for all API routes. The same resolver is reused by
+// the MailAgent routing hooks so agent traffic cannot drift onto a second auth
+// implementation.
 app.use("/api/*", async (c, next) => {
   if (isUnauthenticatedPath(c.req.path)) return next();
 
-  // Try session cookie first
-  const auth = createAuth(c.env);
-  const session = await auth.api.getSession({
-    headers: c.req.raw.headers,
-  });
-  if (session) {
-    c.set("user", session.user);
-    c.set("authMethod", "session");
-    return next();
+  const resolved = await resolveRequestAuth(c.req.raw, c.env, c.get("db"));
+  if (!resolved) {
+    return c.json({ error: "Unauthorized" }, 401);
   }
 
-  // Try Bearer token (API key)
-  const authHeader = c.req.header("Authorization");
-  if (authHeader?.startsWith("Bearer sk_")) {
-    const token = authHeader.slice(7); // Remove "Bearer "
-    const tokenHash = await hashKey(token);
-
-    const db = c.get("db");
-    const rows = await db
-      .select({ userId: apiKeys.userId })
-      .from(apiKeys)
-      .where(eq(apiKeys.keyHash, tokenHash))
-      .limit(1);
-
-    if (rows.length > 0) {
-      const userRows = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, rows[0].userId))
-        .limit(1);
-
-      if (userRows.length > 0) {
-        c.set("user", userRows[0]);
-        c.set("authMethod", "apiKey");
-        return next();
-      }
-    }
-  }
-
-  return c.json({ error: "Unauthorized" }, 401);
+  c.set("user", resolved.user);
+  c.set("authMethod", resolved.authMethod);
+  // Everything downstream is audited as this person or API key.
+  return runWithAudit(httpActor(resolved, c.req.raw), next);
 });
 
 // Enforce passkey registration for session-cookie users. Runs before
@@ -229,8 +290,12 @@ const requireAdmin: MiddlewareHandler<{
 
 // API Routes
 app.route("/api/people", peopleRouter);
+app.route("/api/customers", customersRouter);
 app.route("/api/emails", emailsRouter);
 app.route("/api/conversations", conversationsRouter);
+app.route("/api/messages", messagesRouter);
+app.route("/api/exports", exportsRouter);
+app.route("/api/mailboxes", mailboxesRouter);
 app.route("/api/send", sendRouter);
 app.route("/api/attachments", attachmentsRouter);
 app.route("/api/stats", statsRouter);
@@ -244,11 +309,34 @@ app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
+app.route("/api/agent/status", agentStatusRouter);
+app.route("/api/agent/approval-summary", agentApprovalRouter);
+app.route("/api/agent/sessions", agentSessionsRouter);
+app.route("/api/suggested-replies", suggestedRepliesRouter);
+app.route("/api/lists", listsRouter);
+
+// Subscribe forms are admin-only per the Authorization Matrix: a form is a
+// public write surface onto a list, so creating one is a higher bar than
+// editing the list itself.
+app.use("/api/subscribe-forms", requireAdmin);
+app.use("/api/subscribe-forms/*", requireAdmin);
+app.route("/api/subscribe-forms", subscribeFormsRouter);
+app.route("/api/campaigns", campaignsRouter);
+app.route("/api/newsletter-assets", newsletterAssetsRouter);
+
+// Subject-access and erasure. Admin only: these read and rewrite an
+// identified person's whole newsletter history.
+app.use("/api/contacts/*", requireAdmin);
+app.route("/api/contacts", contactsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
+app.route("/api/admin/rules", adminRulesRouter);
+app.route("/api/admin/audit", adminAuditRouter);
+app.route("/api/admin/imports", importsRouter);
+app.route("/api/admin/backups", backupsRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a
@@ -278,14 +366,53 @@ app.route("/api/unsubscribe", unsubscribeRouter);
 // GET requests don't match the router and fall through to the SPA assets handler.
 app.route("/unsubscribe", unsubscribeRouter);
 
+// Public subscribe endpoints — no auth at all. Mounted outside `/api` so the
+// session/passkey/inbox middleware (scoped to `/api/*`) never applies, matching
+// the `/unsubscribe` precedent above.
+app.route("/subscribe", publicSubscribeRouter);
+
+// Open pixel and click redirect. Must be reachable by anyone holding a valid
+// token — the requests come from mail clients and image proxies, which carry
+// no session — so this is mounted outside `/api` alongside the other public
+// token-authenticated routes.
+app.route("/track", publicTrackRouter);
+
+// Newsletter images. Fetched by subscribers' mail clients months after a
+// send, with no session and no API key, so this sits outside `/api` for the
+// same reason `/track` does. NOT mounted at `/assets` — that is where Vite
+// emits the SPA bundle. Hardening lives in the router.
+app.route("/newsletter-images", publicAssetsRouter);
+
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);
+
+// Read-only JMAP discovery/API/download endpoints live outside /api/* and
+// therefore perform their own session/API-key, passkey, and inbox checks.
+registerJmapRoutes(app);
 
 // MCP endpoint + OAuth discovery. Registered before the SPA catch-all so
 // `/.well-known/*` isn't served index.html. `/mcp` authenticates with OAuth
 // bearer tokens via mcpHandler rather than the session/API-key pipeline, and
 // it sits outside `/api/*` so that middleware never applies to it.
 registerMcpRoutes(app);
+
+// Native agent traffic lives outside /api/* but uses the exact same
+// session/API-key resolver in both SDK auth hooks. Scope this route to the
+// MailAgent binding so other Durable Objects are never exposed by the generic
+// Agents SDK router.
+app.all("/agents/mail-agent/*", async (c) => {
+  const authorize = (
+    request: Request,
+    route: { className: string; name: string },
+  ) => authorizeMailAgentRequest(request, route, c.env, c.get("db"));
+
+  const response = await routeAgentRequest(c.req.raw, c.env, {
+    onBeforeConnect: authorize,
+    onBeforeRequest: authorize,
+  });
+
+  return response ?? c.json({ error: "Not found" }, 404);
+});
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
@@ -323,22 +450,139 @@ app.all("*", async (c) => {
 
 export default {
   fetch: app.fetch,
-  email: handleEmail,
+  email: (
+    message: ForwardableEmailMessage,
+    env: CloudflareBindings,
+    ctx: ExecutionContext,
+  ) =>
+    runWithAudit(systemActor("inbound"), () => handleEmail(message, env, ctx)),
   async scheduled(
     event: ScheduledEvent,
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(
-      handleScheduled(env)
-        .catch((err) => console.error("[cron] sequence dispatch failed:", err))
-        .then(() => processOutbox(env)),
+    ctx.waitUntil(runWithAudit(systemActor("cron"), () => scheduledChain(env)));
+  },
+  async queue(batch: MessageBatch<unknown>, env: CloudflareBindings) {
+    await runWithAudit(systemActor("queue"), () =>
+      handleQueueBatch(batch, env),
     );
   },
-  async queue(
-    batch: MessageBatch<SequenceEmailMessage>,
-    env: CloudflareBindings,
-  ) {
-    await handleQueueBatch(batch, env);
-  },
 };
+
+/**
+ * Every scheduled job, in order, on every cron tick. Each step catches its
+ * own failure so a later one still runs.
+ */
+function scheduledChain(env: CloudflareBindings): Promise<unknown> {
+  return (
+    handleScheduled(env)
+      .catch((err) => console.error("[cron] sequence dispatch failed:", err))
+      .then(() => processOutbox(env))
+      // Newsletter retention sweep. Chained after the delivery work and
+      // separately caught so a cleanup failure can never stop mail going out.
+      .then(() => runNewsletterMaintenance(env))
+      .catch((err) =>
+        console.error("[cron] outbox/newsletter maintenance failed:", err),
+      )
+      .then(() =>
+        pruneJmapChanges(createDb(env), Math.floor(Date.now() / 1000)).catch(
+          (err) => console.error("[cron] JMAP pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneAuditEvents(
+          createDb(env),
+          Math.floor(Date.now() / 1000),
+          auditRetentionDays(env),
+        ).catch((err) =>
+          console.error("[cron] audit log pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneSendIdempotency(
+          createDb(env),
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] idempotency key pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneSendCounters(createDb(env), Math.floor(Date.now() / 1000)).catch(
+          (err) => console.error("[cron] send counter pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneAuthRateLimits(createDb(env), Date.now()).catch((err) =>
+          console.error("[cron] auth rate limit pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        pruneSpamTokens(createDb(env)).catch((err) =>
+          console.error("[cron] spam token pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        reapMailExports(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) => console.error("[cron] export reaping failed:", err)),
+      )
+      .then(() =>
+        reapMailImports(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) => console.error("[cron] import reaping failed:", err)),
+      )
+      .then(() =>
+        reapThreadBackfills(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] thread backfill recovery failed:", err),
+        ),
+      )
+      .then(() =>
+        runBackupSchedule(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) => console.error("[cron] backups failed:", err)),
+      )
+      .then(() =>
+        reapOrphanSentAttachments(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] sent attachment reaping failed:", err),
+        ),
+      )
+      .then(() =>
+        reapExpiredUploads(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] JMAP upload reaping failed:", err),
+        ),
+      )
+      // JMAP submission recovery, before the content GC it depends on: an
+      // interrupted send's content must be settled before it can be collected.
+      .then(() =>
+        runJmapSubmissionMaintenance(env).catch((err) =>
+          console.error("[cron] JMAP submission maintenance failed:", err),
+        ),
+      )
+      .then(() =>
+        collectUnreferencedContent(
+          createDb(env),
+          env,
+          Math.floor(Date.now() / 1000),
+        ).catch((err) => console.error("[cron] JMAP content GC failed:", err)),
+      )
+  );
+}

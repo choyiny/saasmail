@@ -1,13 +1,28 @@
+import {
+  IdempotencyInProgressError,
+  IdempotencyReusedError,
+  idempotencyKeyOf,
+  sendFingerprint,
+  sendRequestFields,
+  withIdempotency,
+} from "../lib/send-idempotency";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { asc } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import type { AllowedInboxes } from "../lib/inbox-permissions";
+import { isInboxAllowed, type AllowedInboxes } from "../lib/inbox-permissions";
+import { rules } from "../db/rules.schema";
 import { SCOPE_READ, SCOPE_SEND, SCOPE_MANAGE, hasScope } from "../auth/scopes";
 import { sendTemplate } from "../lib/send-template";
+import {
+  DAILY_SEND_LIMIT_CODE,
+  reserveDailySend,
+} from "../lib/sending-controls";
 import { enrollPersonInSequence } from "../lib/enroll-sequence";
 import { sendEmail, replyToEmail } from "../lib/send-email";
 import { listPeople, getPersonScoped } from "../lib/queries/people";
+import { getCustomerByPerson } from "../lib/customers";
 import {
   listPersonEmails,
   getEmailById,
@@ -20,6 +35,25 @@ import {
 import { templateVariablesSchema } from "../lib/template-variables-schema";
 import { deleteEmailWithAttachments } from "../lib/delete-email";
 import { searchEmails } from "../lib/queries/search";
+import { InvalidCursorError } from "../lib/messages/cursor";
+import {
+  InvalidQueryError,
+  queryMessages,
+  type MessageFolder,
+} from "../lib/messages/query";
+import {
+  parseMessageRef,
+  serializeMessageRef,
+  type MessageRef,
+} from "../lib/messages/types";
+import { snoozeConversations } from "../lib/messages/conversation-state";
+import {
+  InvalidMessageStateError,
+  MessageStateAccessError,
+  getMailbox,
+  setMailboxState,
+  setUserState,
+} from "../lib/messages/state";
 
 export interface McpUser {
   id: string;
@@ -87,10 +121,39 @@ function guard<Args extends unknown[]>(
       // third-party software the operator never vetted, so log the detail and
       // return an opaque failure.
       if (e instanceof HTTPException) return fail(e.message);
+      if (
+        e instanceof MessageStateAccessError ||
+        e instanceof InvalidMessageStateError ||
+        e instanceof InvalidQueryError ||
+        e instanceof InvalidCursorError
+      ) {
+        return fail(e.message);
+      }
       console.error("[mcp] tool failed:", e);
       return fail("The request could not be completed.");
     }
   };
+}
+
+/** Whether this deployment lets agents send (`MCP_SEND_ENABLED`, default on). */
+export function mcpSendEnabled(env: CloudflareBindings): boolean {
+  return env.MCP_SEND_ENABLED !== "false";
+}
+
+export const MCP_SEND_DISABLED =
+  "MCP_SEND_DISABLED: Sending through MCP is disabled on this server by its administrator.";
+
+/**
+ * `guard` for the tools that cause mail: they need the send scope, and refuse
+ * while the deployment's kill switch is off. The scope error comes first.
+ */
+function sendGuard<Args extends unknown[]>(
+  ctx: McpContext,
+  run: (...args: Args) => Promise<ReturnType<typeof ok>>,
+) {
+  return guard(ctx, SCOPE_SEND, async (...args: Args) =>
+    mcpSendEnabled(ctx.env) ? run(...args) : fail(MCP_SEND_DISABLED),
+  );
 }
 
 /**
@@ -98,6 +161,16 @@ function guard<Args extends unknown[]>(
  * probe for the existence of ids outside its inboxes. Mirrors the HTTP API.
  */
 const NOT_FOUND = "Not found, or outside the inboxes you may access.";
+
+function parseRefs(values: string[]): MessageRef[] {
+  return values.map((value) => {
+    const ref = parseMessageRef(value);
+    if (!ref) {
+      throw new InvalidMessageStateError(`Invalid message ref: ${value}`);
+    }
+    return ref;
+  });
+}
 
 const pagination = {
   page: z.number().int().min(1).optional().describe("1-based page. Default 1."),
@@ -141,8 +214,39 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         role: ctx.user.role,
         inboxes: allowed.isAdmin ? "all" : allowed.inboxes,
         scopes: ctx.scopes,
+        // False when the administrator turned agent sending off: the send
+        // tools then refuse with MCP_SEND_DISABLED.
+        sendEnabled: mcpSendEnabled(ctx.env),
       }),
     ),
+  );
+
+  server.registerTool(
+    "list_rules",
+    {
+      description:
+        "List automation rules that apply globally or to inboxes this connection may access.",
+      annotations: { readOnlyHint: true, title: "List Rules" },
+      inputSchema: {},
+    },
+    guard(ctx, SCOPE_READ, async () => {
+      const rows = await db
+        .select()
+        .from(rules)
+        .orderBy(asc(rules.position), asc(rules.id));
+      return ok(
+        rows
+          .filter(
+            (rule) =>
+              rule.inbox === null || isInboxAllowed(allowed, rule.inbox),
+          )
+          .map((rule) => ({
+            ...rule,
+            stopProcessing: rule.stopProcessing === 1,
+            enabled: rule.enabled === 1,
+          })),
+      );
+    }),
   );
 
   server.registerTool(
@@ -196,6 +300,28 @@ export function buildMcpServer(ctx: McpContext): McpServer {
   );
 
   server.registerTool(
+    "get_customer",
+    {
+      description:
+        "Return the linked customer identity for a person, including visible email addresses connected to the same customer.",
+      annotations: { readOnlyHint: true, title: "Get Customer" },
+      inputSchema: {
+        personId: z.string().describe("Person id, from list_people."),
+      },
+    },
+    guard(ctx, SCOPE_READ, async ({ personId }) => {
+      try {
+        return ok({
+          customer: await getCustomerByPerson(db, allowed, personId),
+        });
+      } catch (error: any) {
+        if (error?.status === 404) return fail(NOT_FOUND);
+        throw error;
+      }
+    }),
+  );
+
+  server.registerTool(
     "list_emails",
     {
       description:
@@ -226,6 +352,114 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         ),
       ),
     ),
+  );
+
+  server.registerTool(
+    "list_messages",
+    {
+      description:
+        "List unified messages with mailbox state, folder filters, cursor pagination, and attachment counts.",
+      annotations: { readOnlyHint: true, title: "List Messages" },
+      inputSchema: {
+        inbox: z.string().optional(),
+        folder: z
+          .enum(["inbox", "sent", "archive", "junk", "trash", "snoozed"])
+          .optional(),
+        mailboxId: z.string().optional(),
+        starred: z.boolean().optional(),
+        unseen: z.boolean().optional(),
+        personId: z.string().optional(),
+        q: z.string().optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(100).optional(),
+        excludeCampaignSends: z.boolean().optional(),
+      },
+    },
+    guard(ctx, SCOPE_READ, async (input) => {
+      if (input.folder && input.mailboxId) {
+        throw new InvalidQueryError("folder and mailboxId cannot be combined");
+      }
+
+      let folder: MessageFolder | undefined = input.folder;
+      if (input.mailboxId) {
+        await getMailbox(db, allowed, input.mailboxId);
+        folder = { mailboxId: input.mailboxId };
+      }
+
+      const page = await queryMessages(db, allowed, {
+        inboxes: input.inbox ? [input.inbox] : undefined,
+        folder,
+        starred: input.starred ? true : undefined,
+        unseen: input.unseen ? true : undefined,
+        personId: input.personId,
+        search: input.q,
+        searchMode: input.q ? "fulltext" : undefined,
+        cursor: input.cursor,
+        limit: input.limit ?? 50,
+        viewer: { userId: ctx.user.id },
+        withState: true,
+        withAttachmentCounts: true,
+        excludeCampaignSends:
+          input.excludeCampaignSends ??
+          (input.folder === "sent" ? true : undefined),
+      });
+
+      return ok({
+        messages: page.messages.map((message) => ({
+          ...message,
+          ref: serializeMessageRef(message.ref),
+        })),
+        nextCursor: page.nextCursor,
+      });
+    }),
+  );
+
+  server.registerTool(
+    "set_message_state",
+    {
+      description:
+        "Set personal or shared state on one or more messages. Shared archive/spam state applies only to received mail.",
+      annotations: { readOnlyHint: false, title: "Set Message State" },
+      inputSchema: {
+        refs: z.array(z.string()).min(1).max(500),
+        seen: z.boolean().optional(),
+        starred: z.boolean().optional(),
+        archived: z.boolean().optional(),
+        spam: z.boolean().optional(),
+        trashed: z.boolean().optional(),
+        snoozeUntil: z.number().int().nullable().optional(),
+      },
+    },
+    guard(ctx, SCOPE_MANAGE, async (input) => {
+      const refs = parseRefs(input.refs);
+      if (
+        input.archived !== undefined ||
+        input.spam !== undefined ||
+        input.trashed !== undefined
+      ) {
+        await setMailboxState(db, allowed, ctx.user.id, refs, {
+          archived: input.archived,
+          spam: input.spam,
+          trashed: input.trashed,
+        });
+      }
+      if (input.seen !== undefined || input.starred !== undefined) {
+        await setUserState(db, ctx.user.id, refs, {
+          seen: input.seen,
+          starred: input.starred,
+        });
+      }
+      if (input.snoozeUntil !== undefined) {
+        await snoozeConversations(
+          db,
+          allowed,
+          ctx.user.id,
+          refs,
+          input.snoozeUntil,
+        );
+      }
+      return ok({ success: true });
+    }),
   );
 
   server.registerTool(
@@ -338,6 +572,98 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     }),
   );
 
+  const idempotencyKeySchema = z
+    .string()
+    .optional()
+    .describe(
+      "A UUID you generate per intended send and reuse if you retry. A retry with the same key returns the first result (with replayed: true) instead of sending again; the same key with a different message is refused. Kept 24 hours.",
+    );
+
+  type SendAttempt = { result?: unknown; error?: string };
+
+  /**
+   * Runs one send against the user's daily MCP limit: refused over the
+   * limit, and the slot given back when the send is refused or fails.
+   */
+  const runCounted = async (
+    run: () => Promise<SendAttempt>,
+  ): Promise<SendAttempt> => {
+    const reservation = await reserveDailySend(db, {
+      userId: ctx.user.id,
+      channel: "mcp",
+    });
+    if (!reservation.allowed) {
+      return { error: `${DAILY_SEND_LIMIT_CODE}: ${reservation.message}` };
+    }
+    try {
+      const attempt = await run();
+      if (attempt.error !== undefined) await reservation.release();
+      return attempt;
+    } catch (error) {
+      await reservation.release();
+      throw error;
+    }
+  };
+
+  /**
+   * Runs a send tool at most once per idempotency key (none: just runs). A
+   * refusal releases the key, so a corrected retry runs. Each run counts
+   * against the daily limit; a replay does not run, so it does not count.
+   */
+  const sendOnce = async (
+    key: string | undefined,
+    fields: Record<string, unknown>,
+    send: () => Promise<SendAttempt>,
+  ) => {
+    const run = () => runCounted(send);
+    if (key === undefined) {
+      const outcome = await run();
+      return outcome.error !== undefined
+        ? fail(outcome.error)
+        : ok(outcome.result);
+    }
+    const checked = idempotencyKeyOf(undefined, key);
+    if (checked.error) return fail(checked.error);
+    try {
+      const outcome = await withIdempotency(
+        db,
+        {
+          userId: ctx.user.id,
+          key,
+          // A key used over HTTP answers there only: the two store
+          // different answers for the same send.
+          fingerprint: await sendFingerprint({ surface: "mcp", ...fields }),
+          // A send accepted before this call finished answers as a result.
+          acceptedStatus: 200,
+        },
+        async () => {
+          const attempt = await run();
+          if (attempt.error !== undefined) {
+            return { status: 400, body: { error: attempt.error } };
+          }
+          const result = attempt.result as { id?: string | null };
+          return { status: 200, body: attempt.result, sentEmailId: result?.id };
+        },
+      );
+      if (outcome.status >= 300) {
+        return fail((outcome.body as { error: string }).error);
+      }
+      return ok(
+        outcome.replayed
+          ? { ...(outcome.body as object), replayed: true }
+          : outcome.body,
+      );
+    } catch (error) {
+      if (
+        error instanceof IdempotencyReusedError ||
+        error instanceof IdempotencyInProgressError
+      ) {
+        return fail(error.message);
+      }
+      throw error;
+    }
+  };
+
   server.registerTool(
     "send_template",
     {
@@ -355,29 +681,43 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .describe(
             "Values for the template's {{placeholders}}. Missing ones are reported back with the full required list. Values may be nested arrays/objects for {{#section}} bodies.",
           ),
+        idempotencyKey: idempotencyKeySchema,
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
-      const result = await sendTemplate({
-        db,
-        env: ctx.env,
-        slug: input.slug,
-        to: input.to,
-        fromAddress: input.fromAddress,
-        variables: input.variables ?? {},
-        allowed,
-      });
-      if (!result.ok) {
-        // Hand the model the required-variable list so it can retry correctly
-        // rather than guessing at what was missing.
-        return result.code === "MISSING_VARIABLES"
-          ? fail(
-              `${result.message} Missing: ${result.missingVariables.join(", ")}. Required: ${result.requiredVariables.join(", ")}.`,
-            )
-          : fail(result.message);
-      }
-      return ok(result);
-    }),
+    sendGuard(ctx, async (input) =>
+      sendOnce(
+        input.idempotencyKey,
+        {
+          kind: "template",
+          templateSlug: input.slug,
+          to: input.to.trim().toLowerCase(),
+          fromAddress: input.fromAddress.trim().toLowerCase(),
+          variables: input.variables ?? {},
+        },
+        async () => {
+          const result = await sendTemplate({
+            db,
+            env: ctx.env,
+            slug: input.slug,
+            to: input.to,
+            fromAddress: input.fromAddress,
+            variables: input.variables ?? {},
+            allowed,
+          });
+          if (!result.ok) {
+            // Hand the model the required-variable list so it can retry
+            // correctly rather than guessing at what was missing.
+            return {
+              error:
+                result.code === "MISSING_VARIABLES"
+                  ? `${result.message} Missing: ${result.missingVariables.join(", ")}. Required: ${result.requiredVariables.join(", ")}.`
+                  : result.message,
+            };
+          }
+          return { result };
+        },
+      ),
+    ),
   );
 
   const ccSchema = z
@@ -410,27 +750,34 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .email()
           .optional()
           .describe("Where replies should go, if not fromAddress."),
+        idempotencyKey: idempotencyKeySchema,
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
-      const result = await sendEmail({
-        db,
-        env: ctx.env,
-        // Attachments would mean base64 in the tool payload; omitted until
-        // there is a staged-upload path like the one taxspace uses.
-        files: [],
-        payload: {
-          to: input.to,
-          fromAddress: input.fromAddress,
-          subject: input.subject,
-          bodyHtml: input.bodyHtml,
-          bodyText: input.bodyText,
-          cc: input.cc,
-          replyTo: input.replyTo,
-        },
-        allowed,
-      });
-      return ok(result);
+    sendGuard(ctx, async (input) => {
+      const payload = {
+        to: input.to,
+        fromAddress: input.fromAddress,
+        subject: input.subject,
+        bodyHtml: input.bodyHtml,
+        bodyText: input.bodyText,
+        cc: input.cc,
+        replyTo: input.replyTo,
+      };
+      return sendOnce(
+        input.idempotencyKey,
+        { kind: "send", ...sendRequestFields(payload) },
+        async () => ({
+          result: await sendEmail({
+            db,
+            env: ctx.env,
+            // Attachments would mean base64 in the tool payload; omitted until
+            // there is a staged-upload path like the one taxspace uses.
+            files: [],
+            payload,
+            allowed,
+          }),
+        }),
+      );
     }),
   );
 
@@ -438,7 +785,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     "reply_email",
     {
       description:
-        "Reply to a message, threading correctly via its Message-ID. Works for received and sent messages. Provide either bodyHtml or a templateSlug with its variables.",
+        "Reply to a message, threading correctly via its Message-ID. Works for received and sent messages. Provide either bodyHtml or a templateSlug with its variables. A reply to a received message follows its Reply-To header (first address in To, the others in Cc, never one of this instance's own inboxes) unless recipient is \"sender\"; the result's `to` and `cc` are the addresses the reply went to, and read_email's `replyRecipients` lists them beforehand.",
       annotations: { readOnlyHint: false, title: "Reply To Email" },
       inputSchema: {
         emailId: z
@@ -466,9 +813,16 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           .email()
           .optional()
           .describe("Override the reply-to address."),
+        recipient: z
+          .enum(["reply_to", "sender"])
+          .optional()
+          .describe(
+            'Who the reply is addressed to: "reply_to" (default) follows the message\'s Reply-To header, "sender" answers its From address instead.',
+          ),
+        idempotencyKey: idempotencyKeySchema,
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
+    sendGuard(ctx, async (input) => {
       // Check visibility through the same masked path read_email uses, before
       // the send core asserts on the target's inbox. That assertion throws
       // "Inbox not allowed", which would confirm the message exists somewhere
@@ -477,40 +831,57 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       const target = await getEmailById(db, input.emailId, allowed);
       if (!target) return fail(NOT_FOUND);
 
-      const result = await replyToEmail({
-        db,
-        env: ctx.env,
-        emailId: input.emailId,
-        files: [],
-        payload: {
-          fromAddress: input.fromAddress,
-          bodyHtml: input.bodyHtml,
-          bodyText: input.bodyText,
+      const payload = {
+        fromAddress: input.fromAddress,
+        bodyHtml: input.bodyHtml,
+        bodyText: input.bodyText,
+        templateSlug: input.templateSlug,
+        variables: input.variables,
+        cc: input.cc,
+        replyTo: input.replyTo,
+      };
+      return sendOnce(
+        input.idempotencyKey,
+        {
+          kind: "reply",
+          emailId: input.emailId,
+          recipient: input.recipient,
           templateSlug: input.templateSlug,
           variables: input.variables,
-          cc: input.cc,
-          replyTo: input.replyTo,
+          ...sendRequestFields(payload),
         },
-        allowed,
-      });
-      if (!result.ok) {
-        // Denials on the referenced message are reported as not-found, matching
-        // read_email — the caller supplied an id, and confirming it exists in
-        // an inbox they cannot see would be a probe oracle.
-        if (
-          result.code === "EMAIL_NOT_FOUND" ||
-          result.code === "PERSON_NOT_FOUND" ||
-          result.code === "EMAIL_HAS_NO_PERSON"
-        ) {
-          return fail(NOT_FOUND);
-        }
-        return fail(
-          result.code === "MISSING_VARIABLES" && "missingVariables" in result
-            ? `${result.message} Missing: ${(result as { missingVariables: string[] }).missingVariables.join(", ")}.`
-            : result.message,
-        );
-      }
-      return ok(result);
+        async () => {
+          const result = await replyToEmail({
+            db,
+            env: ctx.env,
+            emailId: input.emailId,
+            files: [],
+            payload,
+            allowed,
+            recipient: input.recipient,
+          });
+          if (!result.ok) {
+            // Denials on the referenced message are reported as not-found,
+            // matching read_email: confirming it exists in an inbox the caller
+            // cannot see would be a probe oracle.
+            if (
+              result.code === "EMAIL_NOT_FOUND" ||
+              result.code === "PERSON_NOT_FOUND" ||
+              result.code === "EMAIL_HAS_NO_PERSON"
+            ) {
+              return { error: NOT_FOUND };
+            }
+            return {
+              error:
+                result.code === "MISSING_VARIABLES" &&
+                "missingVariables" in result
+                  ? `${result.message} Missing: ${(result as { missingVariables: string[] }).missingVariables.join(", ")}.`
+                  : result.message,
+            };
+          }
+          return { result };
+        },
+      );
     }),
   );
 
@@ -550,7 +921,7 @@ export function buildMcpServer(ctx: McpContext): McpServer {
           ),
       },
     },
-    guard(ctx, SCOPE_SEND, async (input) => {
+    sendGuard(ctx, async (input) => {
       // The HTTP route expresses this as a Zod .refine() on the whole object;
       // an MCP inputSchema is a bare shape with no cross-field validation, so
       // without this the lib would query `people.email = undefined` and then

@@ -1,0 +1,911 @@
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
+import { AgentContextProvider, useAgentContext } from "@/agent/AgentContext";
+
+const api = vi.hoisted(() => ({
+  messageEmlUrl: (ref: string) => `/api/messages/${ref}/raw.eml`,
+  assignMessages: vi.fn(),
+  createMailbox: vi.fn(),
+  deleteDraft: vi.fn(),
+  deleteMailbox: vi.fn(),
+  fetchDraft: vi.fn(),
+  fetchDraftList: vi.fn(),
+  fetchJmapDraftPreview: vi.fn(),
+  cancelScheduledByMessage: vi.fn(),
+  fetchSuggestedReply: vi.fn(),
+  fetchInboxAssignees: vi.fn(),
+  fetchMailboxes: vi.fn(),
+  fetchMessages: vi.fn(),
+  fetchStats: vi.fn(),
+  renameMailbox: vi.fn(),
+  setMailboxMembership: vi.fn(),
+  setMessageState: vi.fn(),
+  snoozeMessages: vi.fn(),
+  saveDraft: vi.fn(),
+  useSuggestedReply: vi.fn(),
+  dismissSuggestedReply: vi.fn(),
+  fetchAgentStatus: vi.fn(),
+  fileWithAi: vi.fn(),
+  updateMailbox: vi.fn(),
+  MAILBOX_COLORS: ["red", "blue"],
+}));
+
+vi.mock("@/lib/api", () => api);
+vi.mock("@/hooks/useRealtimeUpdates", () => ({
+  useRealtimeUpdates: vi.fn(),
+}));
+vi.mock("@/components/ReplyComposer", () => ({
+  default: () => <div data-testid="reply-composer-mock" />,
+}));
+
+import MailPage from "@/pages/MailPage";
+
+const onCompose = vi.fn();
+
+function AgentContextProbe() {
+  const { context } = useAgentContext();
+  return (
+    <output data-testid="agent-context-probe">{JSON.stringify(context)}</output>
+  );
+}
+
+const baseState = {
+  seen: false,
+  starredAt: null,
+  archivedAt: null,
+  spamAt: null,
+  trashedAt: null,
+  mailboxIds: [],
+  conversationKey: "p:person-1",
+  snoozedUntil: null,
+  assignedUserId: null,
+};
+
+function message(
+  id: string,
+  subject: string,
+  options?: {
+    direction?: "inbound" | "outbound";
+    state?: Partial<typeof baseState>;
+  },
+) {
+  const direction = options?.direction ?? "inbound";
+  const inbound = direction === "inbound";
+  return {
+    ref: `${inbound ? "received" : "sent"}:${id}`,
+    direction,
+    inbox: "support@e2e.test",
+    personId: "person-1",
+    conversationId: null,
+    messageId: `${id}@example.test`,
+    inReplyTo: null,
+    from: inbound
+      ? { email: "person@example.test", name: "Person" }
+      : { email: "support@e2e.test", name: "Support" },
+    to: inbound
+      ? { email: "support@e2e.test", name: "Support" }
+      : { email: "person@example.test", name: "Person" },
+    cc: [],
+    subject,
+    bodyText: `Body for ${subject}`,
+    bodyHtml: null,
+    occurredAt: 1_800_000_000,
+    isRead: inbound ? false : null,
+    source: {
+      campaignId: null,
+      sequenceId: null,
+      sequenceEnrollmentId: null,
+    },
+    delivery: inbound ? null : { status: "sent" },
+    attachmentCount: 0,
+    state: {
+      ...baseState,
+      seen: inbound ? baseState.seen : true,
+      ...options?.state,
+    },
+  };
+}
+
+function mailbox(id: string, name: string, parentId: string | null = null) {
+  return {
+    id,
+    inbox: "support@e2e.test",
+    name,
+    role: null,
+    parentId,
+    sortOrder: 0,
+    createdBy: null,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+function renderMail(path = "/mail/support%40e2e.test/inbox") {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <>
+            <AgentContextProbe />
+            <Outlet context={{ onCompose }} />
+          </>
+        ),
+        children: [
+          { path: "/mail/:inbox/:folder", element: <MailPage /> },
+          { path: "/mail/:inbox/f/:mailboxId", element: <MailPage /> },
+          { path: "/settings", element: <div>Settings page</div> },
+        ],
+      },
+    ],
+    { initialEntries: [path] },
+  );
+  render(
+    <AgentContextProvider>
+      <RouterProvider router={router} />
+    </AgentContextProvider>,
+  );
+  return router;
+}
+
+describe("MailPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onCompose.mockReset();
+    api.fetchStats.mockResolvedValue({
+      totalPeople: 1,
+      totalEmails: 2,
+      unreadCount: 1,
+      recipients: ["support@e2e.test"],
+      senderIdentities: [
+        {
+          email: "support@e2e.test",
+          displayName: "Support",
+          signatureHtml: null,
+        },
+      ],
+    });
+    api.fetchDraft.mockResolvedValue(null);
+    api.fetchDraftList.mockResolvedValue({ drafts: [] });
+    api.fetchSuggestedReply.mockResolvedValue(null);
+    api.fetchInboxAssignees.mockResolvedValue([
+      {
+        id: "member-1",
+        name: "Support Agent",
+        email: "agent@e2e.test",
+        image: null,
+      },
+    ]);
+    api.fetchMailboxes.mockResolvedValue([]);
+    api.fetchAgentStatus.mockResolvedValue({
+      configured: false,
+      provider: null,
+      model: null,
+    });
+    api.fetchMessages.mockResolvedValue({ messages: [], nextCursor: null });
+    api.createMailbox.mockResolvedValue(mailbox("mailbox-1", "Projects"));
+    api.deleteDraft.mockResolvedValue(undefined);
+    api.deleteMailbox.mockResolvedValue({ success: true });
+    api.renameMailbox.mockImplementation(async (id: string, name: string) => ({
+      ...mailbox(id, name),
+      updatedAt: 2,
+    }));
+    api.assignMessages.mockResolvedValue({ conversations: 1 });
+    api.setMailboxMembership.mockResolvedValue({ success: true });
+    api.setMessageState.mockResolvedValue({ success: true });
+    api.snoozeMessages.mockResolvedValue({ conversations: 1 });
+    api.saveDraft.mockResolvedValue({});
+    api.useSuggestedReply.mockResolvedValue({});
+    api.dismissSuggestedReply.mockResolvedValue({});
+  });
+
+  it("clears published agent context when navigating away", async () => {
+    const router = renderMail(
+      "/mail/support%40e2e.test/inbox?m=received%3Aone",
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-context-probe").textContent).toContain(
+        "support@e2e.test",
+      ),
+    );
+    await router.navigate("/settings");
+    await screen.findByText("Settings page");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-context-probe").textContent).toBe("{}"),
+    );
+  });
+
+  it("lists inbox drafts and opens compose and draft contexts", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "draft-compose",
+          contextKey: "compose",
+          fromAddress: "support@e2e.test",
+          toAddress: "alice@example.test",
+          subject: "Legacy compose",
+          replyToEmailId: null,
+          updatedAt: 1_800_000_000,
+        },
+        {
+          id: "draft-new",
+          contextKey: "draft:new-1",
+          fromAddress: null,
+          toAddress: "bob@example.test",
+          subject: "Independent draft",
+          replyToEmailId: null,
+          updatedAt: 1_799_999_000,
+        },
+      ],
+    });
+
+    renderMail("/mail/support%40e2e.test/drafts");
+
+    await waitFor(() =>
+      expect(api.fetchDraftList).toHaveBeenCalledWith({
+        inbox: "support@e2e.test",
+        includeMailClient: true,
+      }),
+    );
+    expect(await screen.findByText("To: alice@example.test")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Legacy compose"));
+    expect(onCompose).toHaveBeenLastCalledWith(undefined, "compose");
+
+    fireEvent.click(screen.getByText("Independent draft"));
+    expect(onCompose).toHaveBeenLastCalledWith(undefined, "draft:new-1");
+
+    fireEvent.click(screen.getByTestId("mail-new-message"));
+    expect(onCompose.mock.calls.at(-1)?.[0]).toEqual({
+      from: "support@e2e.test",
+    });
+    expect(onCompose.mock.calls.at(-1)?.[1]).toMatch(/^draft:[A-Za-z0-9_-]+$/);
+  });
+
+  it("shows a mail-client draft read-only, never in the composer", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "jmap:abc",
+          contextKey: "jmap:abc",
+          fromAddress: "support@e2e.test",
+          toAddress: "alice@example.test",
+          subject: "From my phone",
+          replyToEmailId: null,
+          updatedAt: 1_800_000_000,
+        },
+      ],
+    });
+    api.fetchJmapDraftPreview.mockResolvedValue({
+      contextKey: "jmap:abc",
+      from: { email: "support@e2e.test", name: "Support" },
+      to: [{ email: "alice@example.test", name: null }],
+      cc: [],
+      bcc: [{ email: "boss@example.test", name: null }],
+      subject: "From my phone",
+      html: '<p>Hello</p><script>window.__pwned = true</script><img src=x onerror="window.__pwned = true">',
+      text: "Hello",
+      attachments: [{ name: "scan.pdf", type: "application/pdf", size: 9 }],
+      updatedAt: 1_800_000_000,
+    });
+    api.deleteDraft.mockResolvedValue(undefined);
+
+    renderMail("/mail/support%40e2e.test/drafts");
+    expect(await screen.findByTestId("mail-draft-from-client")).toBeTruthy();
+    fireEvent.click(screen.getByText("From my phone"));
+    const dialog = await screen.findByTestId("jmap-draft-preview");
+    expect(onCompose).not.toHaveBeenCalled();
+    expect(api.fetchJmapDraftPreview).toHaveBeenCalledWith("jmap:abc");
+    await waitFor(() => expect(within(dialog).getByText("Hello")).toBeTruthy());
+    expect(within(dialog).getByText("boss@example.test")).toBeTruthy();
+    expect(within(dialog).getByText("scan.pdf")).toBeTruthy();
+    const body = within(dialog).getByTestId("jmap-draft-preview-body");
+    expect(body.innerHTML).not.toContain("<script");
+    expect(body.innerHTML).not.toContain("onerror");
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(within(dialog).getByTestId("jmap-draft-preview-delete"));
+    await waitFor(() =>
+      expect(api.deleteDraft).toHaveBeenCalledWith("jmap:abc"),
+    );
+    confirm.mockRestore();
+  });
+
+  it("opens reply drafts on the received message and restores the reply composer", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "draft-reply",
+          contextKey: "reply:reply-target",
+          fromAddress: "support@e2e.test",
+          toAddress: "person@example.test",
+          subject: "Reply draft",
+          replyToEmailId: "reply-target",
+          updatedAt: 1_800_000_000,
+        },
+      ],
+    });
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("reply-target", "Original message", {
+          state: { seen: true },
+        }),
+      ],
+      nextCursor: null,
+    });
+    const router = renderMail("/mail/support%40e2e.test/drafts");
+
+    fireEvent.click(await screen.findByText("Reply draft"));
+
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        "/mail/support%40e2e.test/inbox",
+      ),
+    );
+    await waitFor(() =>
+      expect(router.state.location.search).toContain(
+        "m=received%3Areply-target",
+      ),
+    );
+    expect(await screen.findByTestId("reply-composer-mock")).toBeTruthy();
+  });
+
+  it("deletes a draft after confirmation", async () => {
+    api.fetchDraftList.mockResolvedValue({
+      drafts: [
+        {
+          id: "draft-delete",
+          contextKey: "draft:delete-me",
+          fromAddress: "support@e2e.test",
+          toAddress: "person@example.test",
+          subject: "Delete me",
+          replyToEmailId: null,
+          updatedAt: 1_800_000_000,
+        },
+      ],
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderMail("/mail/support%40e2e.test/drafts");
+
+    await screen.findByText("Delete me");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete draft Delete me" }),
+    );
+
+    await waitFor(() =>
+      expect(api.deleteDraft).toHaveBeenCalledWith("draft:delete-me"),
+    );
+    await waitFor(() => expect(screen.queryByText("Delete me")).toBeNull());
+    expect(confirmSpy).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("switches folders using the matching message query", async () => {
+    renderMail();
+    await waitFor(() => expect(api.fetchMessages).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("mail-folder-starred"));
+
+    await waitFor(() =>
+      expect(api.fetchMessages).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          inbox: "support@e2e.test",
+          starred: true,
+          includeTrashed: false,
+          includeSpam: false,
+        }),
+      ),
+    );
+  });
+
+  it("appends Load more results and stops when nextCursor is null", async () => {
+    api.fetchMessages
+      .mockResolvedValueOnce({
+        messages: [message("one", "First subject")],
+        nextCursor: "cursor-1",
+      })
+      .mockResolvedValueOnce({
+        messages: [message("two", "Second subject")],
+        nextCursor: null,
+      });
+
+    renderMail();
+
+    await screen.findByText("First subject");
+    fireEvent.click(screen.getByTestId("mail-load-more"));
+
+    await screen.findByText("Second subject");
+    expect(screen.getByText("First subject")).toBeTruthy();
+    expect(screen.queryByTestId("mail-load-more")).toBeNull();
+  });
+
+  it("wires reading-pane seen, star, and archive actions to state APIs", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [message("one", "Action subject")],
+      nextCursor: null,
+    });
+
+    renderMail("/mail/support%40e2e.test/inbox?m=received%3Aone");
+
+    await screen.findByTestId("mail-reading-pane");
+    await waitFor(() =>
+      expect(api.setMessageState).toHaveBeenCalledWith({
+        refs: ["received:one"],
+        seen: true,
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId("mail-reading-star"));
+    await waitFor(() =>
+      expect(api.setMessageState).toHaveBeenCalledWith({
+        refs: ["received:one"],
+        starred: true,
+      }),
+    );
+
+    fireEvent.click(screen.getByTestId("mail-reading-archive"));
+    await waitFor(() =>
+      expect(api.setMessageState).toHaveBeenCalledWith({
+        refs: ["received:one"],
+        archived: true,
+      }),
+    );
+  });
+
+  describe("trashing a scheduled message", () => {
+    function scheduled() {
+      return {
+        ...message("s1", "Later", { direction: "outbound" }),
+        delivery: { status: "scheduled" },
+      };
+    }
+
+    it("asks, cancels first, then trashes", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [scheduled()],
+        nextCursor: null,
+      });
+      api.cancelScheduledByMessage.mockResolvedValue("canceled");
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As1");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() =>
+        expect(api.setMessageState).toHaveBeenCalledWith({
+          refs: ["sent:s1"],
+          trashed: true,
+        }),
+      );
+      expect(confirm).toHaveBeenCalledWith(
+        expect.stringContaining("Cancel the scheduled send"),
+      );
+      expect(api.cancelScheduledByMessage).toHaveBeenCalledWith("s1");
+      expect(
+        api.cancelScheduledByMessage.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        api.setMessageState.mock.invocationCallOrder.at(-1) as number,
+      );
+      confirm.mockRestore();
+    });
+
+    it("does nothing when the user declines", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [scheduled()],
+        nextCursor: null,
+      });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As1");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() => expect(confirm).toHaveBeenCalled());
+      expect(api.cancelScheduledByMessage).not.toHaveBeenCalled();
+      expect(api.setMessageState).not.toHaveBeenCalledWith(
+        expect.objectContaining({ trashed: true }),
+      );
+      confirm.mockRestore();
+    });
+
+    it("doesn't trash or claim a cancel once the send has started", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [scheduled()],
+        nextCursor: null,
+      });
+      api.cancelScheduledByMessage.mockResolvedValue("cannotUnsend");
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As1");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() =>
+        expect(api.cancelScheduledByMessage).toHaveBeenCalledWith("s1"),
+      );
+      // Give a trash call the chance to happen; it must not.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(api.setMessageState).not.toHaveBeenCalledWith(
+        expect.objectContaining({ trashed: true }),
+      );
+      confirm.mockRestore();
+    });
+
+    it("trashes an ordinary sent message without asking", async () => {
+      api.fetchMessages.mockResolvedValue({
+        messages: [message("s2", "Sent", { direction: "outbound" })],
+        nextCursor: null,
+      });
+      const confirm = vi.spyOn(window, "confirm");
+      renderMail("/mail/support%40e2e.test/sent?m=sent%3As2");
+      await screen.findByTestId("mail-reading-pane");
+      fireEvent.click(screen.getByTestId("mail-reading-trash"));
+      await waitFor(() =>
+        expect(api.setMessageState).toHaveBeenCalledWith({
+          refs: ["sent:s2"],
+          trashed: true,
+        }),
+      );
+      expect(confirm).not.toHaveBeenCalled();
+      confirm.mockRestore();
+    });
+  });
+
+  it("hides archive and spam bulk actions when any selected message is sent", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("received-one", "Inbound", {
+          state: { seen: true },
+        }),
+        message("sent-one", "Outbound", {
+          direction: "outbound",
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    renderMail();
+
+    const rows = await screen.findAllByTestId("mail-message-row");
+    fireEvent.click(
+      within(rows[0]!).getByRole("checkbox", { name: "Select message" }),
+    );
+    fireEvent.click(
+      within(rows[1]!).getByRole("checkbox", { name: "Select message" }),
+    );
+
+    await screen.findByTestId("mail-selection-bar");
+    expect(screen.queryByTestId("mail-bulk-archive")).toBeNull();
+    expect(screen.queryByTestId("mail-bulk-spam")).toBeNull();
+  });
+
+  it("chunks bulk refs at 500 and refetches authoritative state after a later chunk fails", async () => {
+    const loaded = Array.from({ length: 501 }, (_, index) =>
+      message(`bulk-${index}`, `Bulk ${index}`),
+    );
+    api.fetchMessages
+      .mockResolvedValueOnce({ messages: loaded, nextCursor: null })
+      .mockResolvedValue({
+        messages: [
+          message("authoritative", "Authoritative state", {
+            state: { seen: false },
+          }),
+        ],
+        nextCursor: null,
+      });
+    api.setMessageState
+      .mockResolvedValueOnce({ success: true })
+      .mockRejectedValueOnce(new Error("second chunk failed"));
+
+    renderMail();
+
+    await screen.findByText("Bulk 0");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Select all loaded messages" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Seen" }));
+
+    await waitFor(() => expect(api.setMessageState).toHaveBeenCalledTimes(2));
+    expect(api.setMessageState.mock.calls[0]?.[0].refs).toHaveLength(500);
+    expect(api.setMessageState.mock.calls[1]?.[0].refs).toHaveLength(1);
+    await screen.findByText("Authoritative state");
+    expect(api.fetchMessages.mock.calls.length).toBeGreaterThanOrEqual(2);
+  }, 15_000);
+
+  it("wires child create, edit, and confirmed delete folder actions", async () => {
+    api.fetchMailboxes.mockResolvedValue([
+      mailbox("root", "Root"),
+      mailbox("child", "Child", "root"),
+    ]);
+    api.updateMailbox.mockImplementation(
+      async (id: string, changes: Record<string, unknown>) => ({
+        ...mailbox(id, String(changes.name)),
+        ...changes,
+      }),
+    );
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    renderMail();
+
+    await screen.findByRole("button", { name: "Root" });
+    fireEvent.change(screen.getByTestId("mail-create-folder-parent"), {
+      target: { value: "root" },
+    });
+    fireEvent.change(screen.getByTestId("mail-create-folder-input"), {
+      target: { value: "Nested" },
+    });
+    fireEvent.click(screen.getByTestId("mail-create-folder-button"));
+
+    await waitFor(() =>
+      expect(api.createMailbox).toHaveBeenCalledWith({
+        inbox: "support@e2e.test",
+        name: "Nested",
+        parentId: "root",
+      }),
+    );
+
+    // Name, colour and what belongs here, in one dialog.
+    fireEvent.click(screen.getByRole("button", { name: "Edit Root" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Name"), {
+      target: { value: "Renamed Root" },
+    });
+    fireEvent.click(within(dialog).getByRole("radio", { name: "blue" }));
+    const description = within(dialog).getByLabelText(
+      /What belongs here\?/,
+    ) as HTMLTextAreaElement;
+    expect(description.maxLength).toBe(300);
+    fireEvent.change(description, { target: { value: " Project mail " } });
+    expect(within(dialog).getByText("14/300")).toBeTruthy();
+    fireEvent.click(within(dialog).getByTestId("folder-settings-save"));
+    await waitFor(() =>
+      expect(api.updateMailbox).toHaveBeenCalledWith("root", {
+        name: "Renamed Root",
+        color: "blue",
+        aiDescription: "Project mail",
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Child" }));
+    await waitFor(() =>
+      expect(api.deleteMailbox).toHaveBeenCalledWith("child"),
+    );
+    expect(confirmSpy).toHaveBeenCalled();
+
+    confirmSpy.mockRestore();
+  });
+
+  it("supports j/k navigation, Enter/o open, and u back", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("one", "Keyboard one", { state: { seen: true } }),
+        message("two", "Keyboard two", { state: { seen: true } }),
+      ],
+      nextCursor: null,
+    });
+    const router = renderMail();
+
+    await screen.findByText("Keyboard one");
+    fireEvent.keyDown(window, { key: "j" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() =>
+      expect(router.state.location.search).toContain("m=received%3Aone"),
+    );
+
+    fireEvent.keyDown(window, { key: "u" });
+    await waitFor(() =>
+      expect(router.state.location.search).not.toContain("m="),
+    );
+
+    fireEvent.keyDown(window, { key: "j" });
+    fireEvent.keyDown(window, { key: "k" });
+    fireEvent.keyDown(window, { key: "o" });
+    await waitFor(() =>
+      expect(router.state.location.search).toContain("m=received%3Aone"),
+    );
+  });
+
+  it("uses x to toggle selection", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [message("one", "Keyboard select", { state: { seen: true } })],
+      nextCursor: null,
+    });
+    renderMail();
+
+    await screen.findByText("Keyboard select");
+    fireEvent.keyDown(window, { key: "j" });
+    fireEvent.keyDown(window, { key: "x" });
+
+    expect(await screen.findByTestId("mail-selection-bar")).toBeTruthy();
+  });
+
+  it.each([
+    ["e", { archived: true }],
+    ["s", { starred: true }],
+    ["#", { trashed: true }],
+  ])("uses %s for the matching message action", async (key, expectedState) => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [message("one", "Keyboard action", { state: { seen: true } })],
+      nextCursor: null,
+    });
+    renderMail("/mail/support%40e2e.test/inbox?m=received%3Aone");
+
+    await screen.findByTestId("mail-reading-pane");
+    api.setMessageState.mockClear();
+    fireEvent.keyDown(window, { key, shiftKey: key === "#" });
+
+    await waitFor(() =>
+      expect(api.setMessageState).toHaveBeenCalledWith({
+        refs: ["received:one"],
+        ...expectedState,
+      }),
+    );
+  });
+
+  it("uses r to reply to the open received message", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [message("one", "Keyboard reply", { state: { seen: true } })],
+      nextCursor: null,
+    });
+    renderMail("/mail/support%40e2e.test/inbox?m=received%3Aone");
+
+    await screen.findByTestId("mail-reading-pane");
+    fireEvent.keyDown(window, { key: "r" });
+
+    expect(await screen.findByTestId("reply-composer-mock")).toBeTruthy();
+  });
+
+  it("uses ? to open the shortcuts dialog", async () => {
+    renderMail();
+    await waitFor(() => expect(api.fetchMessages).toHaveBeenCalled());
+
+    fireEvent.keyDown(window, { key: "?", shiftKey: true });
+
+    expect(await screen.findByTestId("mail-shortcuts-dialog")).toBeTruthy();
+  });
+
+  it("ignores shortcuts in editable controls and with command modifiers", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [message("one", "Keyboard guard", { state: { seen: true } })],
+      nextCursor: null,
+    });
+    renderMail();
+
+    await screen.findByText("Keyboard guard");
+    fireEvent.keyDown(window, { key: "j" });
+
+    const agentInput = document.createElement("textarea");
+    const agentPanel = document.createElement("div");
+    agentPanel.setAttribute("data-agent-panel", "");
+    agentPanel.appendChild(agentInput);
+    document.body.appendChild(agentPanel);
+
+    const editableElements: HTMLElement[] = [
+      screen.getByLabelText("Search mail"),
+      document.createElement("textarea"),
+      document.createElement("select"),
+      document.createElement("div"),
+      agentInput,
+    ];
+    editableElements[3]!.setAttribute("contenteditable", "true");
+
+    for (const element of editableElements.slice(1, 4)) {
+      document.body.appendChild(element);
+    }
+
+    for (const element of editableElements) {
+      element.focus();
+      fireEvent.keyDown(element, { key: "s" });
+    }
+    fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+
+    expect(api.setMessageState).not.toHaveBeenCalled();
+
+    for (const element of editableElements.slice(1, 4)) element.remove();
+    agentPanel.remove();
+  });
+  it("assigns optimistically and rolls back when assignment fails", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("assign-one", "Needs an owner", {
+          state: { seen: true },
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    let rejectAssignment!: (error: Error) => void;
+    api.assignMessages.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectAssignment = reject;
+        }),
+    );
+
+    renderMail("/mail/support%40e2e.test/inbox?m=received%3Aassign-one");
+
+    await screen.findAllByText("Needs an owner");
+    await waitFor(() =>
+      expect(api.fetchInboxAssignees).toHaveBeenCalledWith("support@e2e.test"),
+    );
+    fireEvent.pointerDown(screen.getByTestId("mail-assign-menu"), {
+      button: 0,
+    });
+    const options = await screen.findAllByTestId("mail-assign-option");
+    const memberOption = options.find(
+      (option) => option.dataset.userId === "member-1",
+    );
+    expect(memberOption).toBeTruthy();
+    fireEvent.click(memberOption!);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("mail-assignee-chip").textContent).toBe("SA"),
+    );
+    expect(api.assignMessages).toHaveBeenCalledWith(
+      ["received:assign-one"],
+      "member-1",
+    );
+
+    rejectAssignment(new Error("assignment failed"));
+
+    await waitFor(() =>
+      expect(screen.queryByTestId("mail-assignee-chip")).toBeNull(),
+    );
+  });
+
+  it("uses assignedTo=me for Assigned to me", async () => {
+    renderMail();
+    await waitFor(() => expect(api.fetchMessages).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByTestId("mail-folder-assigned"));
+
+    await waitFor(() =>
+      expect(api.fetchMessages).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          inbox: "support@e2e.test",
+          assignedTo: "me",
+          includeTrashed: false,
+          includeSpam: false,
+        }),
+      ),
+    );
+  });
+  it("removes a message after unassigning it from Assigned to me", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [
+        message("assigned-one", "Assigned message", {
+          state: { seen: true, assignedUserId: "member-1" },
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    renderMail("/mail/support%40e2e.test/assigned?m=received%3Aassigned-one");
+
+    await screen.findAllByText("Assigned message");
+    fireEvent.pointerDown(screen.getByTestId("mail-assign-menu"), {
+      button: 0,
+    });
+    const options = await screen.findAllByTestId("mail-assign-option");
+    const unassignOption = options.find(
+      (option) => option.dataset.userId === "",
+    );
+    expect(unassignOption).toBeTruthy();
+    fireEvent.click(unassignOption!);
+
+    await waitFor(() =>
+      expect(api.assignMessages).toHaveBeenCalledWith(
+        ["received:assigned-one"],
+        null,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Assigned message")).toBeNull(),
+    );
+  });
+});

@@ -8,7 +8,6 @@ import {
   UserPen,
   ArrowDown,
   Check,
-  CheckCheck,
 } from "lucide-react";
 import type { Email } from "@/lib/api";
 import { fetchDraft } from "@/lib/api";
@@ -103,6 +102,11 @@ function dayLabel(ts: number): string {
 
 interface BubbleProps {
   email: Email;
+  /**
+   * The person this one-to-one timeline belongs to. A sent bubble addressed
+   * to someone else (a reply that followed Reply-To) says who it went to.
+   */
+  personEmail?: string;
   internalDomains?: string[];
   senderResolver?: (
     email: Email,
@@ -115,6 +119,7 @@ interface BubbleProps {
 
 function Bubble({
   email,
+  personEmail,
   internalDomains = [],
   senderResolver,
   onOpenHtml,
@@ -129,6 +134,11 @@ function Bubble({
   const [expanded, setExpanded] = useState(false);
   const isSent = email.type === "sent";
   const isUnread = email.type === "received" && email.isRead === 0;
+  const sentElsewhere =
+    isSent &&
+    !!personEmail &&
+    !!email.toAddress &&
+    email.toAddress.toLowerCase() !== personEmail.toLowerCase();
 
   // Subscribe to the local "Hide signatures in chat" preference. When on,
   // we strip the trailing signature block from each bubble's body so the
@@ -300,12 +310,10 @@ function Bubble({
         className={`mt-1 flex items-center gap-2 text-[10px] text-text-tertiary ${isSent ? "flex-row-reverse" : ""}`}
       >
         <span>{stamp}</span>
-        {isSent &&
-          (email.deliveredAt ? (
-            <CheckCheck size={11} className="text-text-tertiary" />
-          ) : (
-            <Check size={11} className="text-text-tertiary" />
-          ))}
+        {isSent && <Check size={11} className="text-text-tertiary" />}
+        {sentElsewhere && (
+          <span data-testid="chat-bubble-to">to {email.toAddress}</span>
+        )}
         {email.bodyHtml && (
           <button
             type="button"
@@ -583,6 +591,9 @@ export default function ChatInboxSection({
               <Bubble
                 key={item.email.id}
                 email={item.email}
+                // Group threads name each sender already; only a one-to-one
+                // timeline has a single person to compare against.
+                personEmail={senderResolver ? undefined : _personEmail}
                 internalDomains={internalDomains}
                 senderResolver={senderResolver}
                 onOpenHtml={onOpenHtml}
@@ -627,6 +638,7 @@ export default function ChatInboxSection({
           latestReceivedEmailId={replyTarget?.id ?? null}
           personEmail={_personEmail}
           replyCc={replyCc}
+          replyRecipients={replyTarget?.replyRecipients}
           onSent={onSent}
           onOpenCompose={handleOpenInCompose}
         />

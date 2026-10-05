@@ -1,0 +1,634 @@
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  applyMigrations,
+  authFetch,
+  cleanDb,
+  createTestEmail,
+  createTestPerson,
+  createTestSentEmail,
+  createTestUser,
+  getDb,
+} from "./helpers";
+import { inboxPermissions } from "../db/inbox-permissions.schema";
+import {
+  createMailbox,
+  setMailboxMembership,
+  setMailboxState,
+} from "../lib/messages/state";
+import { assignConversations } from "../lib/messages/conversation-state";
+
+const INBOX = "support@saasmail.test";
+
+describe("message state routes", () => {
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+  });
+
+  async function admin() {
+    return createTestUser({
+      id: "route-admin",
+      email: "route-admin@example.com",
+    });
+  }
+
+  it("lists messages with serialized refs and sent campaign exclusion defaults", async () => {
+    const { apiKey } = await admin();
+    await createTestPerson({ id: "route-person", email: "route@example.com" });
+    await createTestSentEmail({
+      id: "ordinary-send",
+      personId: "route-person",
+      fromAddress: INBOX,
+      toAddress: "route@example.com",
+    });
+    await createTestSentEmail({
+      id: "campaign-send",
+      personId: "route-person",
+      fromAddress: INBOX,
+      toAddress: "route@example.com",
+      campaignId: "campaign-1",
+    });
+
+    let res = await authFetch("/api/messages?folder=sent", { apiKey });
+    expect(res.status).toBe(200);
+    let body = (await res.json()) as { messages: Array<{ ref: string }> };
+    expect(body.messages.map((message) => message.ref)).toEqual([
+      "sent:ordinary-send",
+    ]);
+
+    res = await authFetch(
+      "/api/messages?folder=sent&excludeCampaignSends=false",
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+    body = (await res.json()) as { messages: Array<{ ref: string }> };
+    expect(body.messages.map((message) => message.ref).sort()).toEqual(
+      ["sent:ordinary-send", "sent:campaign-send"].sort(),
+    );
+  });
+
+  it("forwards includeTrashed and includeSpam to neutral message reads", async () => {
+    const { apiKey, userId } = await admin();
+    await createTestPerson({
+      id: "visibility-person",
+      email: "visibility@example.com",
+    });
+    for (const id of ["visible", "trashed", "spam"]) {
+      await createTestEmail({
+        id: `visibility-${id}`,
+        personId: "visibility-person",
+        recipient: INBOX,
+        messageId: `visibility-${id}@example.com`,
+      });
+    }
+
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "visibility-trashed" }],
+      { trashed: true },
+    );
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "visibility-spam" }],
+      { spam: true },
+    );
+
+    const neutral = await authFetch("/api/messages", { apiKey });
+    expect(neutral.status).toBe(200);
+    const neutralBody = (await neutral.json()) as {
+      messages: Array<{ ref: string }>;
+    };
+    expect(neutralBody.messages.map((message) => message.ref).sort()).toEqual(
+      [
+        "received:visibility-spam",
+        "received:visibility-trashed",
+        "received:visibility-visible",
+      ].sort(),
+    );
+
+    const filtered = await authFetch(
+      "/api/messages?includeTrashed=false&includeSpam=false",
+      { apiKey },
+    );
+    expect(filtered.status).toBe(200);
+    const filteredBody = (await filtered.json()) as {
+      messages: Array<{ ref: string }>;
+    };
+    expect(filteredBody.messages.map((message) => message.ref)).toEqual([
+      "received:visibility-visible",
+    ]);
+  });
+
+  it("returns 404 for a custom mailbox outside a member's inboxes", async () => {
+    const owner = await admin();
+    const member = await createTestUser({
+      id: "route-member",
+      role: "member",
+      email: "route-member@example.com",
+    });
+    await getDb().insert(inboxPermissions).values({
+      userId: member.userId,
+      email: "other@saasmail.test",
+      createdAt: 1,
+      createdBy: owner.userId,
+    });
+    const mailbox = await createMailbox(
+      getDb(),
+      { isAdmin: true },
+      owner.userId,
+      { inbox: INBOX, name: "Private" },
+    );
+
+    const res = await authFetch(
+      `/api/messages?mailboxId=${encodeURIComponent(mailbox.id)}`,
+      { apiKey: member.apiKey },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("maps invalid cursor/state to 400 and missing refs to 404", async () => {
+    const { apiKey } = await admin();
+    let res = await authFetch("/api/messages?cursor=not-a-cursor", { apiKey });
+    expect(res.status).toBe(400);
+
+    await createTestSentEmail({
+      id: "route-sent",
+      fromAddress: INBOX,
+      toAddress: "someone@example.com",
+    });
+    res = await authFetch("/api/messages/mailbox-state", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["sent:route-sent"],
+        archived: true,
+      }),
+    });
+    expect(res.status).toBe(400);
+
+    res = await authFetch("/api/messages/user-state", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["received:missing"],
+        starred: true,
+      }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects 501 message refs", async () => {
+    const { apiKey } = await admin();
+    const refs = Array.from({ length: 501 }, (_, index) => `received:${index}`);
+    const res = await authFetch("/api/messages/user-state", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ refs, starred: true }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("supports message state and mailbox membership mutations", async () => {
+    const { apiKey, userId } = await admin();
+    await createTestPerson({ id: "mut-person", email: "mut@example.com" });
+    await createTestEmail({
+      id: "mut-message",
+      personId: "mut-person",
+      recipient: INBOX,
+      messageId: "mut@example.com",
+    });
+    const mailbox = await createMailbox(getDb(), { isAdmin: true }, userId, {
+      inbox: INBOX,
+      name: "Projects",
+    });
+
+    expect(
+      (
+        await authFetch("/api/messages/user-state", {
+          apiKey,
+          method: "POST",
+          body: JSON.stringify({
+            refs: ["received:mut-message"],
+            starred: true,
+            seen: true,
+          }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await authFetch("/api/messages/mailbox-state", {
+          apiKey,
+          method: "POST",
+          body: JSON.stringify({
+            refs: ["received:mut-message"],
+            archived: true,
+          }),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await authFetch("/api/messages/mailbox-membership", {
+          apiKey,
+          method: "POST",
+          body: JSON.stringify({
+            refs: ["received:mut-message"],
+            add: [mailbox.id],
+          }),
+        })
+      ).status,
+    ).toBe(200);
+
+    const list = await authFetch("/api/messages?mailboxId=" + mailbox.id, {
+      apiKey,
+    });
+    expect(list.status).toBe(200);
+    const body = (await list.json()) as {
+      messages: Array<{
+        ref: string;
+        state?: {
+          starredAt: number | null;
+          archivedAt: number | null;
+          mailboxIds: string[];
+        };
+      }>;
+    };
+    expect(body.messages[0].ref).toBe("received:mut-message");
+    expect(body.messages[0].state?.starredAt).not.toBeNull();
+    expect(body.messages[0].state?.archivedAt).not.toBeNull();
+    expect(body.messages[0].state?.mailboxIds).toContain(mailbox.id);
+  });
+
+  it("implements mailbox CRUD and duplicate-name conflicts", async () => {
+    const { apiKey } = await admin();
+    let res = await authFetch("/api/mailboxes", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ inbox: INBOX, name: "Projects" }),
+    });
+    expect(res.status).toBe(200);
+    const mailbox = (await res.json()) as { id: string; name: string };
+
+    res = await authFetch("/api/mailboxes", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({ inbox: INBOX, name: "Projects" }),
+    });
+    expect(res.status).toBe(409);
+
+    res = await authFetch(`/api/mailboxes/${mailbox.id}`, {
+      apiKey,
+      method: "PATCH",
+      body: JSON.stringify({ name: "Renamed", sortOrder: 7 }),
+    });
+    expect(res.status).toBe(200);
+    const updated = (await res.json()) as { name: string; sortOrder: number };
+    expect(updated).toMatchObject({ name: "Renamed", sortOrder: 7 });
+
+    res = await authFetch("/api/mailboxes?inbox=" + encodeURIComponent(INBOX), {
+      apiKey,
+    });
+    expect(res.status).toBe(200);
+    const listed = (await res.json()) as {
+      mailboxes: Array<{ id: string; name: string }>;
+    };
+    expect(listed.mailboxes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: mailbox.id, name: "Renamed" }),
+      ]),
+    );
+
+    res = await authFetch(`/api/mailboxes/${mailbox.id}`, {
+      apiKey,
+      method: "DELETE",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects folder and mailboxId together as an invalid query", async () => {
+    const { apiKey, userId } = await admin();
+    const mailbox = await createMailbox(getDb(), { isAdmin: true }, userId, {
+      inbox: INBOX,
+      name: "Custom",
+    });
+    const res = await authFetch(
+      `/api/messages?folder=inbox&mailboxId=${mailbox.id}`,
+      { apiKey },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("applies mailbox membership only to matching messages", async () => {
+    const { apiKey, userId } = await admin();
+    await createTestPerson({
+      id: "member-person",
+      email: "member@example.com",
+    });
+    await createTestEmail({
+      id: "member-message",
+      personId: "member-person",
+      recipient: INBOX,
+      messageId: "member-message@example.com",
+    });
+    const mailbox = await createMailbox(getDb(), { isAdmin: true }, userId, {
+      inbox: INBOX,
+      name: "Membership",
+    });
+    await setMailboxMembership(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "member-message" }],
+      { add: [mailbox.id] },
+    );
+
+    const res = await authFetch("/api/messages?mailboxId=" + mailbox.id, {
+      apiKey,
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { messages: Array<{ ref: string }> };
+    expect(body.messages.map((message) => message.ref)).toEqual([
+      "received:member-message",
+    ]);
+  });
+  it("snoozes conversations through the API and lists the snoozed folder", async () => {
+    const { apiKey } = await admin();
+    await createTestPerson({
+      id: "route-snooze-person",
+      email: "route-snooze@example.com",
+    });
+    await createTestEmail({
+      id: "route-snooze-a",
+      personId: "route-snooze-person",
+      recipient: INBOX,
+      messageId: "route-snooze-a@example.com",
+    });
+    await createTestEmail({
+      id: "route-snooze-b",
+      personId: "route-snooze-person",
+      recipient: INBOX,
+      messageId: "route-snooze-b@example.com",
+    });
+
+    const until = Math.floor(Date.now() / 1000) + 3600;
+    let res = await authFetch("/api/messages/snooze", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["received:route-snooze-a"],
+        until,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ conversations: 1 });
+
+    res = await authFetch(
+      `/api/messages?folder=snoozed&inbox=${encodeURIComponent(INBOX)}`,
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      messages: Array<{
+        ref: string;
+        state?: { conversationKey: string | null; snoozedUntil: number | null };
+      }>;
+    };
+    expect(body.messages.map((message) => message.ref).sort()).toEqual([
+      "received:route-snooze-a",
+      "received:route-snooze-b",
+    ]);
+    expect(
+      body.messages.every(
+        (message) =>
+          message.state?.conversationKey === "p:route-snooze-person" &&
+          message.state.snoozedUntil === until,
+      ),
+    ).toBe(true);
+
+    res = await authFetch("/api/messages/snooze", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["received:route-snooze-a"],
+        until: null,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ conversations: 1 });
+  });
+
+  it("rejects invalid snooze times and messages without a conversation key", async () => {
+    const { apiKey } = await admin();
+    await createTestSentEmail({
+      id: "route-no-key",
+      personId: null,
+      fromAddress: INBOX,
+      toAddress: "campaign-contact@example.com",
+      conversationId: null,
+    });
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const until of [now, now + 367 * 24 * 60 * 60]) {
+      const res = await authFetch("/api/messages/snooze", {
+        apiKey,
+        method: "POST",
+        body: JSON.stringify({ refs: ["sent:route-no-key"], until }),
+      });
+      expect(res.status).toBe(400);
+    }
+
+    const res = await authFetch("/api/messages/snooze", {
+      apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["sent:route-no-key"],
+        until: now + 60,
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 404 when a member snoozes a message outside their inboxes", async () => {
+    const member = await createTestUser({
+      id: "route-snooze-member",
+      role: "member",
+      email: "route-snooze-member@example.com",
+    });
+    await createTestPerson({
+      id: "route-private-person",
+      email: "route-private@example.com",
+    });
+    await createTestEmail({
+      id: "route-private-message",
+      personId: "route-private-person",
+      recipient: INBOX,
+      messageId: "route-private-message@example.com",
+    });
+
+    const res = await authFetch("/api/messages/snooze", {
+      apiKey: member.apiKey,
+      method: "POST",
+      body: JSON.stringify({
+        refs: ["received:route-private-message"],
+        until: Math.floor(Date.now() / 1000) + 60,
+      }),
+    });
+    expect(res.status).toBe(404);
+  });
+  it("lists inbox assignees case-insensitively without cross-inbox users or duplicates", async () => {
+    const adminUser = await createTestUser({
+      id: "a11-admin",
+      name: "Admin",
+      email: "assignee-admin@example.com",
+    });
+    const caller = await createTestUser({
+      id: "b22-caller",
+      role: "member",
+      name: "Caller",
+      email: "assignee-caller@example.com",
+    });
+    const teammate = await createTestUser({
+      id: "c33-teammate",
+      role: "member",
+      name: "Teammate",
+      email: "assignee-teammate@example.com",
+    });
+    const other = await createTestUser({
+      id: "d44-other",
+      role: "member",
+      name: "Other",
+      email: "assignee-other@example.com",
+    });
+
+    await getDb()
+      .insert(inboxPermissions)
+      .values([
+        {
+          userId: caller.userId,
+          email: "SUPPORT@SAASMAIL.TEST",
+          createdAt: 1,
+          createdBy: adminUser.userId,
+        },
+        {
+          userId: teammate.userId,
+          email: "support@saasmail.test",
+          createdAt: 1,
+          createdBy: adminUser.userId,
+        },
+        {
+          userId: teammate.userId,
+          email: "SUPPORT@SAASMAIL.TEST",
+          createdAt: 2,
+          createdBy: adminUser.userId,
+        },
+        {
+          userId: other.userId,
+          email: "other@saasmail.test",
+          createdAt: 1,
+          createdBy: adminUser.userId,
+        },
+      ]);
+
+    const res = await authFetch(
+      `/api/messages/assignees?inbox=${encodeURIComponent(INBOX)}`,
+      { apiKey: caller.apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as Array<{ id: string }>;
+    const ids = body.map((user) => user.id);
+    expect(ids).toEqual(["a11-admin", "b22-caller", "c33-teammate"]);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("returns 404 when a caller cannot access the assignee inbox", async () => {
+    const owner = await createTestUser({
+      id: "a22-owner",
+      email: "assignee-owner@example.com",
+    });
+    const member = await createTestUser({
+      id: "e55-denied",
+      role: "member",
+      email: "assignee-denied@example.com",
+    });
+    await getDb().insert(inboxPermissions).values({
+      userId: member.userId,
+      email: "other@saasmail.test",
+      createdAt: 1,
+      createdBy: owner.userId,
+    });
+
+    const res = await authFetch(
+      `/api/messages/assignees?inbox=${encodeURIComponent(INBOX)}`,
+      { apiKey: member.apiKey },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("excludes assigned spam and trashed messages when those states are filtered", async () => {
+    const { apiKey, userId } = await createTestUser({
+      id: "a55-assigned",
+      email: "assigned-route@example.com",
+    });
+
+    for (const name of ["visible", "trashed", "spam"] as const) {
+      await createTestPerson({
+        id: `assigned-${name}-person`,
+        email: `assigned-${name}@example.com`,
+      });
+      await createTestEmail({
+        id: `assigned-${name}`,
+        personId: `assigned-${name}-person`,
+        recipient: INBOX,
+        messageId: `assigned-${name}@example.com`,
+      });
+    }
+
+    await assignConversations(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [
+        { kind: "received", id: "assigned-visible" },
+        { kind: "received", id: "assigned-trashed" },
+        { kind: "received", id: "assigned-spam" },
+      ],
+      userId,
+    );
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "assigned-trashed" }],
+      { trashed: true },
+    );
+    await setMailboxState(
+      getDb(),
+      { isAdmin: true },
+      userId,
+      [{ kind: "received", id: "assigned-spam" }],
+      { spam: true },
+    );
+
+    const res = await authFetch(
+      `/api/messages?inbox=${encodeURIComponent(INBOX)}&assignedTo=me&includeTrashed=false&includeSpam=false`,
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as {
+      messages: Array<{ ref: string }>;
+    };
+    expect(body.messages.map((message) => message.ref)).toEqual([
+      "received:assigned-visible",
+    ]);
+  });
+});

@@ -12,7 +12,9 @@ import {
 import { sequences } from "../db/sequences.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { users } from "../db/auth.schema";
+import { auditEvents } from "../db/audit-events.schema";
 import { emails } from "../db/emails.schema";
+import { customerPeople, customers } from "../db/customers.schema";
 import { people } from "../db/people.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import {
@@ -128,13 +130,17 @@ describe("MCP tools", () => {
         [
           "delete_email",
           "enroll_sequence",
+          "get_customer",
           "get_person",
           "list_emails",
+          "list_messages",
           "list_people",
+          "list_rules",
           "mark_read",
           "read_email",
           "reply_email",
           "search_emails",
+          "set_message_state",
           "send_email",
           "send_template",
           "whoami",
@@ -199,6 +205,51 @@ describe("MCP tools", () => {
       });
       expect(out.isError).toBe(true);
       expect(out.text).toContain("Not found");
+    });
+  });
+
+  describe("get_customer", () => {
+    it("is read-only and returns only linked people visible to the caller", async () => {
+      const db = getDb();
+      const now = Math.floor(Date.now() / 1000);
+      await db.insert(customers).values({
+        id: "mcp-customer",
+        displayName: "Acme",
+        createdBy: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await db.insert(customerPeople).values([
+        {
+          customerId: "mcp-customer",
+          personId: "p-mine",
+          linkedBy: null,
+          linkedAt: now,
+        },
+        {
+          customerId: "mcp-customer",
+          personId: "p-other",
+          linkedBy: null,
+          linkedAt: now,
+        },
+      ]);
+
+      const member = await callTool(memberToken, "get_customer", {
+        personId: "p-mine",
+      });
+      expect(member.isError, member.text).toBe(false);
+      expect(member.data.customer.displayName).toBe("Acme");
+      expect(member.data.customer.people.map((p: any) => p.id)).toEqual([
+        "p-mine",
+      ]);
+
+      const admin = await callTool(adminToken, "get_customer", {
+        personId: "p-mine",
+      });
+      expect(admin.data.customer.people.map((p: any) => p.id).sort()).toEqual([
+        "p-mine",
+        "p-other",
+      ]);
     });
   });
 
@@ -577,6 +628,126 @@ describe("MCP tools", () => {
         bodyHtml: "<p>replying</p>",
       });
       expect(out.isError, out.text).toBe(false);
+
+      // Recorded as the MCP client acting for the member.
+      const [sent] = (await getDb().select().from(auditEvents)).filter(
+        (event) => event.action === "mail.sent",
+      );
+      expect(sent).toMatchObject({
+        actorType: "mcp",
+        channel: "mcp",
+        inbox: MINE,
+      });
+      expect(sent.actorLabel).toMatch(/^MCP client /);
+      expect(sent.actorUserId).toBeTruthy();
+    });
+
+    it("follows the Reply-To unless asked for the sender, and reports where it went", async () => {
+      await getDb()
+        .update(emails)
+        .set({
+          replyTo: JSON.stringify([{ email: "desk@example.com", name: null }]),
+        })
+        .where(eq(emails.id, "e-mine"));
+
+      const followed = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+      });
+      expect(followed.isError, followed.text).toBe(false);
+      expect(followed.data.to).toBe("desk@example.com");
+      expect(followed.data.repliedTo).toBe("reply_to");
+
+      const toSender = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+        recipient: "sender",
+      });
+      expect(toSender.isError, toSender.text).toBe(false);
+      expect(toSender.data.repliedTo).toBe("sender");
+      expect(toSender.data.to).toBe("alice@example.com");
+
+      const invalid = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying</p>",
+        recipient: "everyone",
+      });
+      expect(invalid.isError).toBe(true);
+    });
+
+    it("sends once for a repeated idempotencyKey and replays the result", async () => {
+      const args = {
+        to: "alice@example.com",
+        fromAddress: MINE,
+        subject: "Once only",
+        bodyHtml: "<p>Hi</p>",
+        idempotencyKey: "agent-send-1",
+      };
+      const first = await callTool(memberToken, "send_email", args);
+      expect(first.isError, first.text).toBe(false);
+      expect(first.data.replayed).toBeUndefined();
+
+      const retry = await callTool(memberToken, "send_email", args);
+      expect(retry.isError, retry.text).toBe(false);
+      expect(retry.data.replayed).toBe(true);
+      expect(retry.data.id).toBe(first.data.id);
+
+      const sent = (await getDb().select().from(sentEmails)).filter(
+        (row) => row.subject === "Once only",
+      );
+      expect(sent).toHaveLength(1);
+      // One message handed to the provider: one audit row, not two.
+      const audited = (await getDb().select().from(auditEvents)).filter(
+        (event) =>
+          event.action === "mail.sent" && event.summary.includes("Once only"),
+      );
+      expect(audited).toHaveLength(1);
+
+      const reused = await callTool(memberToken, "send_email", {
+        ...args,
+        subject: "Something else",
+      });
+      expect(reused.isError).toBe(true);
+      expect(reused.text).toContain("agent-send-1");
+      expect(reused.text).toContain("different request");
+    });
+
+    it("refuses an invalid idempotencyKey without sending", async () => {
+      const before = (await getDb().select().from(sentEmails)).length;
+      const out = await callTool(memberToken, "send_email", {
+        to: "alice@example.com",
+        fromAddress: MINE,
+        subject: "Bad key",
+        bodyHtml: "<p>Hi</p>",
+        idempotencyKey: "has spaces in it",
+      });
+      expect(out.isError).toBe(true);
+      expect(out.text).toContain("printable ASCII");
+      expect((await getDb().select().from(sentEmails)).length).toBe(before);
+    });
+
+    it("keeps reply_email's key free after a refusal, then replays", async () => {
+      const refused = await callTool(memberToken, "reply_email", {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        idempotencyKey: "agent-reply-1",
+      });
+      expect(refused.isError).toBe(true);
+
+      const args = {
+        emailId: "e-mine",
+        fromAddress: MINE,
+        bodyHtml: "<p>replying once</p>",
+        idempotencyKey: "agent-reply-1",
+      };
+      const first = await callTool(memberToken, "reply_email", args);
+      expect(first.isError, first.text).toBe(false);
+      const retry = await callTool(memberToken, "reply_email", args);
+      expect(retry.data.replayed).toBe(true);
+      expect(retry.data.id).toBe(first.data.id);
     });
 
     it("reports a reply target in another inbox as not found", async () => {

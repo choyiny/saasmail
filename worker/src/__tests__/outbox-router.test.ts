@@ -104,7 +104,7 @@ describe("outbox router", () => {
     await seedRow("ob-2", { status: "failed" });
     const res = await authFetch("/api/outbox/count", { apiKey });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ pending: 1 });
+    expect(await res.json()).toEqual({ pending: 1, held: 0, paused: false });
   });
 
   it("cancels a row: deletes it and fails the sent email", async () => {
@@ -196,6 +196,49 @@ describe("outbox router", () => {
     ];
     expect(new Set(allIds).size).toBe(3);
     expect(allIds.sort()).toEqual(["aa-1", "bb-2", "cc-3"]);
+  });
+
+  describe("a row the provider already accepted (bookkeeping_pending)", () => {
+    // Its retry timestamp is in the past, which is exactly when the old
+    // timestamp-only guards let Retry resend it and Cancel fail it.
+    beforeEach(async () => {
+      await seedRow("ob-held", { status: "bookkeeping_pending" });
+    });
+
+    it("is not listed", async () => {
+      await seedRow("ob-live", { createdAtOffset: -5 });
+      const res = await authFetch("/api/outbox", { apiKey });
+      const body = (await res.json()) as { items: Array<{ id: string }> };
+      expect(body.items.map((item) => item.id)).toEqual(["ob-live"]);
+    });
+
+    it("can't be retried: 409, and the row is untouched", async () => {
+      const res = await authFetch("/api/outbox/ob-held/retry", {
+        apiKey,
+        method: "POST",
+      });
+      expect(res.status).toBe(409);
+      const [row] = await getDb()
+        .select()
+        .from(outboxEmails)
+        .where(eq(outboxEmails.id, "ob-held"));
+      expect(row.status).toBe("bookkeeping_pending");
+      expect(row.attempts).toBe(1);
+    });
+
+    it("can't be cancelled: 409, and the message isn't marked failed", async () => {
+      const res = await authFetch("/api/outbox/ob-held", {
+        apiKey,
+        method: "DELETE",
+      });
+      expect(res.status).toBe(409);
+      expect(await getDb().select().from(outboxEmails)).toHaveLength(1);
+      const [sent] = await getDb()
+        .select()
+        .from(sentEmails)
+        .where(eq(sentEmails.id, "sent-ob-held"));
+      expect(sent.status).not.toBe("failed");
+    });
   });
 
   it("returns 404 for retry on a nonexistent id", async () => {

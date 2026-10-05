@@ -569,6 +569,25 @@ body {
   opacity: 1;
 }
 
+/* The block editor (newsletter campaigns, block templates) reuses the styles
+   above with room around the page and the list markers preflight removes. */
+.notion-editor.block-editor {
+  padding: 16px 20px;
+  min-height: 420px;
+}
+
+.notion-editor.block-editor > :first-child {
+  margin-top: 0;
+}
+
+.notion-editor.block-editor ul {
+  list-style: disc;
+}
+
+.notion-editor.block-editor ol {
+  list-style: decimal;
+}
+
 /* Deep-link landing flash — applied to a message bubble (id="m-<emailId>")
    after PersonDetail scrolls to a `?#m=<id>` target so the user can see
    which message the link pointed at. */

@@ -1,7 +1,11 @@
 // e2e/specs/inboxes.spec.ts
-// Covers: inbox CRUD + mode toggle + member scoping via the admin UI.
+// Covers: inbox CRUD + mode toggle + agent instructions + member scoping via the admin UI.
 import { test, expect } from "../fixtures/test";
-import { truncateAndReseed } from "../support/reset-db";
+import {
+  execLocalSql,
+  queryLocalSql,
+  truncateAndReseed,
+} from "../support/reset-db";
 import { TEST_IDS } from "../support/selectors";
 import { request } from "@playwright/test";
 import { BASE_URL, MEMBER, loginViaApi } from "../support/login";
@@ -62,6 +66,59 @@ test.describe.serial("inboxes CRUD", () => {
     ).toHaveValue("Support Renamed");
   });
 
+  test("agent instructions persist with a character counter", async ({
+    page,
+  }) => {
+    await page.goto("/inboxes");
+
+    const agentRow = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-ui@e2e.test"]`,
+    );
+    await expect(agentRow).toBeVisible();
+
+    const instructions = agentRow.getByTestId(TEST_IDS.inboxAgentInstructions);
+    const text = "Prefer concise replies and preserve customer terminology.";
+    await instructions.fill(text);
+    await expect(
+      agentRow.getByTestId(TEST_IDS.inboxAgentInstructionsCount),
+    ).toHaveText(`${text.length}/4000`);
+    await instructions.press("Tab");
+
+    await page.reload();
+
+    const reloadedRow = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-ui@e2e.test"]`,
+    );
+    await expect(
+      reloadedRow.getByTestId(TEST_IDS.inboxAgentInstructions),
+    ).toHaveValue(text);
+  });
+
+  test("auto-suggest replies toggle persists after reload", async ({
+    page,
+  }) => {
+    await page.goto("/inboxes");
+
+    const row = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-autodraft-ui@e2e.test"]`,
+    );
+    await expect(row).toBeVisible();
+
+    const toggle = row.getByTestId("inbox-agent-autodraft");
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await page.reload();
+
+    const reloadedRow = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="agent-autodraft-ui@e2e.test"]`,
+    );
+    await expect(
+      reloadedRow.getByTestId("inbox-agent-autodraft"),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
   // ── 3. Toggle thread → chat mode persists after reload ───────────────────────
 
   test("toggle thread to chat mode persists after reload", async ({ page }) => {
@@ -93,6 +150,72 @@ test.describe.serial("inboxes CRUD", () => {
       `[data-testid="${TEST_IDS.inboxModeToggle}"][data-mode="chat"]`,
     );
     await expect(reloadedChatToggle).toHaveAttribute("aria-pressed", "true");
+  });
+
+  // ── 3b. Conversations by thread, then by customer again ─────────────────────
+
+  test("conversations by thread and back regroup the inbox's mail", async ({
+    page,
+  }) => {
+    // See docs/inboxes.md. Alice's second message answers her
+    // first; Bob's mail answers nothing.
+    execLocalSql(
+      "UPDATE emails SET in_reply_to = 'mid_s_a1' WHERE id = 'e_s_a2'",
+    );
+    const latest = () =>
+      queryLocalSql<{ status: string; params: string }>(
+        "SELECT status, params FROM async_jobs WHERE job_type = 'thread_backfill' AND ref_id = 'support@e2e.test' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      )[0];
+    const keys = () =>
+      Object.fromEntries(
+        queryLocalSql<{ id: string; thread_key: string | null }>(
+          "SELECT id, thread_key FROM emails WHERE recipient = 'support@e2e.test'",
+        ).map((row) => [row.id, row.thread_key]),
+      );
+
+    await page.goto("/inboxes");
+    const row = page.locator(
+      `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="support@e2e.test"]`,
+    );
+    const select = row.getByTestId(TEST_IDS.inboxThreadingMode);
+    await expect(select).toHaveValue("relationship");
+
+    // The confirmation lists what changes; the regrouping runs on the queue.
+    let asked = "";
+    page.once("dialog", (dialog) => {
+      asked = dialog.message();
+      void dialog.accept();
+    });
+    await select.selectOption("headers");
+    await expect.poll(() => asked).toContain("Snoozes and assignments");
+    await expect
+      .poll(() => latest()?.status, { timeout: 60_000 })
+      .toBe("completed");
+    const threaded = keys();
+    expect(Object.values(threaded).every((key) => key?.startsWith("t:"))).toBe(
+      true,
+    );
+    expect(threaded.e_s_a2).toBe(threaded.e_s_a1);
+    expect(new Set(Object.values(threaded)).size).toBe(
+      Object.keys(threaded).length - 1,
+    );
+    await page.reload();
+    await expect(select).toHaveValue("headers");
+
+    page.once("dialog", (dialog) => void dialog.accept());
+    await select.selectOption("relationship");
+    await expect
+      .poll(
+        () => {
+          const job = latest();
+          return job && `${JSON.parse(job.params).mode} ${job.status}`;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("relationship completed");
+    expect(Object.values(keys()).every((key) => key === null)).toBe(true);
+    await page.reload();
+    await expect(select).toHaveValue("relationship");
   });
 
   // ── 4. Assign member to inbox — confirm via API ──────────────────────────────

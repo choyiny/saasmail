@@ -20,8 +20,8 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 1. Create a branch from `main`: `git checkout -b my-feature`
 2. Make your changes
 3. Format: `yarn format` (CI runs `yarn format:check`)
-4. Run tests: `yarn test`
-5. Run type checking: `yarn tsc --noEmit`
+4. Run tests: `yarn test` and `yarn test:web`
+5. Run type checking: `yarn typecheck`
 6. If you changed the schema, generate a migration: `yarn db:generate` (data-only backfills: see [AGENTS.md](AGENTS.md) / [migrations/README.md](migrations/README.md))
 7. Add an entry under `## [Unreleased]` in `CHANGELOG.md` for any user-visible change
 8. Commit and push your branch
@@ -38,7 +38,7 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 
 ## Code Style
 
-- TypeScript strict mode
+- TypeScript (strict mode is off; `yarn typecheck` is the gate)
 - Follow existing patterns in the codebase
 - Tailwind CSS for styling (light theme using the existing color tokens)
 - Hono + Zod OpenAPI for backend routes

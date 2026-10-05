@@ -1,16 +1,23 @@
-import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { emails } from "../../db/emails.schema";
 import { sentEmails } from "../../db/sent-emails.schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
 import { attachments } from "../../db/attachments.schema";
 import { people } from "../../db/people.schema";
-import { escapeLike } from "../helpers";
+import { parseCc, replyToOf } from "../messages/adapters";
+import { queryMessages } from "../messages/query";
 import {
-  inboxFilter,
-  type AllowedInboxes,
-  isInboxAllowed,
-} from "../inbox-permissions";
+  applyReplyGuard,
+  ownInboxAddresses,
+  replyCandidates,
+  replyRecipients,
+  replyTarget,
+} from "../reply-recipients";
+import type { AllowedInboxes } from "../inbox-permissions";
+import { isInboxAllowed } from "../inbox-permissions";
+
+export { parseCc };
 
 export type CcEntry = { email: string; name?: string | null };
 
@@ -34,8 +41,13 @@ export type PersonEmailRow = {
   bodyText: string | null;
   isRead: number | null;
   cc: CcEntry[];
+  /** Where a reply goes when that is not the sender; see `replyTarget`. */
+  replyTo: string | null;
+  /** Every address a reply would use; see `replyRecipients`. */
+  replyRecipients: CcEntry[];
   timestamp: number;
   status: string | null;
+  campaignId?: string | null;
   attachmentCount: number;
   attachments: AttachmentRow[];
 };
@@ -43,6 +55,7 @@ export type PersonEmailRow = {
 export type ListPersonEmailsOptions = {
   q?: string;
   recipient?: string;
+  customerId?: string;
   page: number;
   limit: number;
 };
@@ -52,12 +65,16 @@ export type ListPersonEmailsResult = {
   inboxes: InboxMeta[];
 };
 
-export type ReceivedEmailDetail = Omit<typeof emails.$inferSelect, "cc"> & {
+export type ReceivedEmailDetail = Omit<
+  typeof emails.$inferSelect,
+  "cc" | "replyTo"
+> & {
   type: "received";
   timestamp: number;
   fromAddress: string | null;
   toAddress: null;
   replyTo: string | null;
+  replyRecipients: CcEntry[];
   cc: CcEntry[];
   attachments: AttachmentRow[];
 };
@@ -74,6 +91,7 @@ export type SentEmailDetail = {
   bodyText: string | null;
   isRead: null;
   replyTo: null;
+  replyRecipients: CcEntry[];
   cc: CcEntry[];
   timestamp: number;
   status: string;
@@ -82,258 +100,69 @@ export type SentEmailDetail = {
 
 export type EmailDetail = ReceivedEmailDetail | SentEmailDetail;
 
-/** Parse a stored cc TEXT column (JSON) into a typed array, falling back to
- *  [] for NULL or any malformed/corrupt JSON so a bad row never breaks reads. */
-export function parseCc(raw: string | null | undefined): CcEntry[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Pull the Reply-To address out of an email's stored raw headers.
- * `raw_headers` is a JSON object of all inbound headers (see email-handler),
- * so no schema change is needed to surface this. Returns the bare address
- * (lower-cased), unwrapping a "Name <addr>" form. Null when absent/malformed.
- */
-function extractReplyTo(rawHeaders: string | null): string | null {
-  if (!rawHeaders) return null;
-  try {
-    const headers = JSON.parse(rawHeaders) as Record<string, unknown>;
-    for (const [key, value] of Object.entries(headers)) {
-      if (key.toLowerCase() === "reply-to" && typeof value === "string") {
-        const angle = value.match(/<([^>]+)>/);
-        const addr = (angle ? angle[1] : value).trim().toLowerCase();
-        return addr || null;
-      }
-    }
-  } catch {
-    // Malformed raw_headers — treat as no Reply-To rather than failing the read.
-  }
-  return null;
-}
-
-/** Reply-To is only meaningful when it differs from the attributed sender. */
-export function surfaceReplyTo(
-  rawHeaders: string | null,
-  personEmail: string | null,
-): string | null {
-  const replyTo = extractReplyTo(rawHeaders);
-  if (!replyTo) return null;
-  const person = personEmail?.trim().toLowerCase();
-  if (person && replyTo === person) return null;
-  return replyTo;
-}
-
-/**
- * List every message exchanged with a person (received + sent, interleaved
- * newest-first), plus per-inbox display metadata for the addresses involved.
- * Scoped to the caller's allowed inboxes on both sides of the conversation.
- */
+/** Compatibility wrapper for the existing person-timeline API. */
 export async function listPersonEmails(
   db: DrizzleD1Database<any>,
   personId: string,
   opts: ListPersonEmailsOptions,
   allowed: AllowedInboxes,
 ): Promise<ListPersonEmailsResult> {
-  const { q, recipient, page, limit } = opts;
-  const offset = (page - 1) * limit;
+  const { q, recipient, customerId, page, limit } = opts;
+  const requested = Math.max(Math.floor(limit), 0);
+  if (requested === 0) return { emails: [], inboxes: [] };
 
-  // Build conditions for received emails
-  const receivedConditions: any[] = [eq(emails.personId, personId)];
-  if (q) {
-    receivedConditions.push(like(emails.subject, `%${escapeLike(q)}%`));
-  }
-  if (recipient) {
-    receivedConditions.push(eq(emails.recipient, recipient));
-  }
-  const recvScope = inboxFilter(allowed, emails.recipient);
-  if (recvScope) receivedConditions.push(recvScope);
-
-  const received = await db
-    .select({
-      id: emails.id,
-      subject: emails.subject,
-      bodyHtml: emails.bodyHtml,
-      bodyText: emails.bodyText,
-      isRead: emails.isRead,
-      cc: emails.cc,
-      timestamp: emails.receivedAt,
-      recipient: emails.recipient,
-    })
-    .from(emails)
-    .where(and(...receivedConditions))
-    .orderBy(desc(emails.receivedAt));
-
-  // Build conditions for sent emails
-  const sentConditions: any[] = [eq(sentEmails.personId, personId)];
-  if (q) {
-    sentConditions.push(like(sentEmails.subject, `%${escapeLike(q)}%`));
-  }
-  if (recipient) {
-    sentConditions.push(eq(sentEmails.fromAddress, recipient));
-  }
-  const sentScope = inboxFilter(allowed, sentEmails.fromAddress);
-  if (sentScope) sentConditions.push(sentScope);
-
-  const sent = await db
-    .select({
-      id: sentEmails.id,
-      subject: sentEmails.subject,
-      bodyHtml: sentEmails.bodyHtml,
-      bodyText: sentEmails.bodyText,
-      cc: sentEmails.cc,
-      timestamp: sentEmails.sentAt,
-      fromAddress: sentEmails.fromAddress,
-      toAddress: sentEmails.toAddress,
-      status: sentEmails.status,
-    })
-    .from(sentEmails)
-    .where(and(...sentConditions))
-    .orderBy(desc(sentEmails.sentAt));
-
-  const personRow = await db
-    .select({ email: people.email })
-    .from(people)
-    .where(eq(people.id, personId))
-    .limit(1);
-  const personEmail = personRow[0]?.email ?? null;
-
-  // Merge and sort
-  const merged = [
-    ...received.map((e) => ({
-      id: e.id,
-      type: "received" as const,
-      personId,
-      recipient: e.recipient,
-      fromAddress: personEmail,
-      toAddress: null,
-      subject: e.subject,
-      bodyHtml: e.bodyHtml,
-      bodyText: e.bodyText,
-      isRead: e.isRead,
-      cc: parseCc(e.cc),
-      timestamp: e.timestamp,
-      status: null,
-    })),
-    ...sent.map((e) => ({
-      id: e.id,
-      type: "sent" as const,
-      personId,
-      recipient: null,
-      fromAddress: e.fromAddress,
-      toAddress: e.toAddress,
-      subject: e.subject,
-      bodyHtml: e.bodyHtml,
-      bodyText: e.bodyText,
-      isRead: null,
-      cc: parseCc(e.cc),
-      timestamp: e.timestamp,
-      status: e.status,
-    })),
-  ].sort((a, b) => b.timestamp - a.timestamp);
-
-  const paginated = merged.slice(offset, offset + limit);
-
-  // Get attachment counts for received emails
-  const receivedIds = paginated
-    .filter((e) => e.type === "received")
-    .map((e) => e.id);
-
-  let attachmentCounts: Record<string, number> = {};
-  if (receivedIds.length > 0) {
-    const counts = await db
-      .select({
-        emailId: attachments.emailId,
-        count: sql<number>`COUNT(*)`,
-      })
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          receivedIds.map((id) => sql`${id}`),
-          sql`,`,
-        )})`,
-      )
-      .groupBy(attachments.emailId);
-
-    for (const row of counts) {
-      attachmentCounts[row.emailId] = row.count;
-    }
-  }
-
-  // Fetch attachment details for received emails
-  let attachmentDetails: Record<string, any[]> = {};
-  if (receivedIds.length > 0) {
-    const attRows = await db
-      .select()
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          receivedIds.map((id) => sql`${id}`),
-          sql`,`,
-        )})`,
-      );
-
-    for (const att of attRows) {
-      if (!attachmentDetails[att.emailId]) {
-        attachmentDetails[att.emailId] = [];
-      }
-      attachmentDetails[att.emailId].push(att);
-    }
-  }
-
-  // Same lookup for sent emails so the chat/thread surface includes outgoing
-  // attachments. Mirrors conversations-router; sent rows only have
-  // kind='sent' attachment rows, so no kind filter is needed.
-  const sentIds = paginated.filter((e) => e.type === "sent").map((e) => e.id);
-  let sentAttachmentDetails: Record<string, any[]> = {};
-  if (sentIds.length > 0) {
-    const attRows = await db
-      .select()
-      .from(attachments)
-      .where(
-        sql`${attachments.emailId} IN (${sql.join(
-          sentIds.map((id) => sql`${id}`),
-          sql`,`,
-        )})`,
-      );
-
-    for (const att of attRows) {
-      if (!sentAttachmentDetails[att.emailId]) {
-        sentAttachmentDetails[att.emailId] = [];
-      }
-      sentAttachmentDetails[att.emailId].push(att);
-    }
-  }
-
-  const result = paginated.map((e) => {
-    const atts =
-      e.type === "sent"
-        ? (sentAttachmentDetails[e.id] ?? [])
-        : (attachmentDetails[e.id] ?? []);
-    const count =
-      e.type === "sent" ? atts.length : (attachmentCounts[e.id] ?? 0);
-    return {
-      ...e,
-      attachmentCount: count,
-      attachments: atts,
-    };
+  const pageResult = await queryMessages(db, allowed, {
+    personId: customerId ? undefined : personId,
+    customerId,
+    inboxes: recipient !== undefined ? [recipient] : undefined,
+    search: q,
+    searchMode: "subject",
+    offset: Math.max((page - 1) * requested, 0),
+    limit: requested,
+    withAttachmentCounts: true,
+    withAttachments: true,
+    withReplyTo: true,
+    includeTrashed: false,
+    includeSpam: false,
   });
+  await applyReplyGuard(db, pageResult.messages);
 
-  // Collect distinct inbox addresses referenced by the returned emails.
-  const inboxAddrs = new Set<string>();
-  for (const e of result) {
-    if (e.type === "received" && e.recipient) inboxAddrs.add(e.recipient);
-    if (e.type === "sent" && e.fromAddress) inboxAddrs.add(e.fromAddress);
-  }
-  const addrList = [...inboxAddrs];
+  const result: PersonEmailRow[] = pageResult.messages.map((message) => ({
+    id: message.ref.id,
+    type: message.ref.kind,
+    personId: message.personId,
+    recipient: message.ref.kind === "received" ? message.inbox : null,
+    fromAddress:
+      message.ref.kind === "received"
+        ? (message.from?.email ?? null)
+        : (message.from?.email ?? message.inbox),
+    toAddress: message.ref.kind === "sent" ? message.to.email : null,
+    subject: message.subject,
+    bodyHtml: message.bodyHtml,
+    bodyText: message.bodyText,
+    isRead: message.isRead === null ? null : message.isRead ? 1 : 0,
+    cc: message.cc,
+    replyTo: replyTarget(message.replyTo ?? [], message.from?.email),
+    replyRecipients: message.replyTo ?? [],
+    timestamp: message.occurredAt,
+    status: message.delivery?.status ?? null,
+    campaignId: message.source.campaignId,
+    attachmentCount: message.attachmentCount ?? 0,
+    attachments: message.attachments ?? [],
+  }));
+
+  const inboxAddrs = [
+    ...new Set(
+      result
+        .map((email) =>
+          email.type === "received" ? email.recipient : email.fromAddress,
+        )
+        .filter((email): email is string => !!email),
+    ),
+  ];
 
   const identities =
-    addrList.length > 0
+    inboxAddrs.length > 0
       ? await db
           .select({
             email: senderIdentities.email,
@@ -341,20 +170,20 @@ export async function listPersonEmails(
             displayMode: senderIdentities.displayMode,
           })
           .from(senderIdentities)
-          .where(inArray(senderIdentities.email, addrList))
+          .where(inArray(senderIdentities.email, inboxAddrs))
       : [];
-  const identityMap = new Map(identities.map((r) => [r.email, r]));
+  const identityMap = new Map(identities.map((row) => [row.email, row]));
 
-  const inboxesMeta = addrList.map((email) => {
-    const id = identityMap.get(email);
+  const inboxes = inboxAddrs.map((email) => {
+    const identity = identityMap.get(email);
     return {
       email,
-      displayName: id?.displayName ?? null,
-      displayMode: (id?.displayMode ?? "chat") as "thread" | "chat",
+      displayName: identity?.displayName ?? null,
+      displayMode: (identity?.displayMode ?? "chat") as "thread" | "chat",
     };
   });
 
-  return { emails: result, inboxes: inboxesMeta };
+  return { emails: result, inboxes };
 }
 
 /**
@@ -383,13 +212,24 @@ export async function getEmailById(
       .from(people)
       .where(eq(people.id, row[0].personId))
       .limit(1);
+    // Most mail has no Reply-To; only then is the identity list needed.
+    const requested = replyToOf(row[0]);
+    const candidates =
+      requested.length > 0
+        ? replyCandidates(
+            requested,
+            await ownInboxAddresses(db),
+            row[0].recipient,
+          )
+        : [];
     return {
       ...row[0],
       type: "received",
       timestamp: row[0].receivedAt,
       fromAddress: senderRow[0]?.email ?? null,
       toAddress: null,
-      replyTo: surfaceReplyTo(row[0].rawHeaders, senderRow[0]?.email ?? null),
+      replyTo: replyTarget(candidates, senderRow[0]?.email),
+      replyRecipients: replyRecipients(candidates, senderRow[0]?.email),
       cc: parseCc(row[0].cc),
       attachments: atts,
     };
@@ -433,6 +273,7 @@ export async function getEmailById(
     bodyText: sent.bodyText,
     isRead: null,
     replyTo: null,
+    replyRecipients: [],
     cc: parseCc(sent.cc),
     timestamp: sent.sentAt,
     status: sent.status,

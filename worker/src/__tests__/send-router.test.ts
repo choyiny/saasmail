@@ -185,14 +185,14 @@ describe("send router", () => {
       expect(res.status).toBe(400);
     });
 
-    it("rejects more than 50 files with 400", async () => {
+    it("rejects more than 32 files with 400", async () => {
       const payload = {
         to: "a@example.com",
         fromAddress: "me@saasmail.test",
         subject: "many",
         bodyHtml: "<p>x</p>",
       };
-      const files = Array.from({ length: 51 }, (_, i) => ({
+      const files = Array.from({ length: 33 }, (_, i) => ({
         name: `f${i}.txt`,
         bytes: new Uint8Array([0]),
       }));
@@ -200,6 +200,40 @@ describe("send router", () => {
         apiKey,
         method: "POST",
         body: buildSendForm(payload, files),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects a Cc display name with a line break with 400", async () => {
+      const payload = {
+        to: "a@example.com",
+        fromAddress: "me@saasmail.test",
+        subject: "cc",
+        bodyHtml: "<p>x</p>",
+        cc: [{ email: "b@example.com", name: "Bob\r\nBcc: c@example.com" }],
+      };
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm(payload, []),
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("rejects more than 49 Cc (50 recipients with the To) with 400", async () => {
+      const payload = {
+        to: "a@example.com",
+        fromAddress: "me@saasmail.test",
+        subject: "cc",
+        bodyHtml: "<p>x</p>",
+        cc: Array.from({ length: 50 }, (_, i) => ({
+          email: `cc${i}@example.com`,
+        })),
+      };
+      const res = await authFetch("/api/send", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm(payload, []),
       });
       expect(res.status).toBe(400);
     });

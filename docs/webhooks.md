@@ -5,7 +5,7 @@
 POST to an external URL whenever a **new inbound message** is received — useful for help-desk automation (post to a team chat, trigger triage, draft a reply via n8n / Make / etc.).
 
 - **Config:** Admins set a destination URL (and optional signing secret) on the **API keys** page. Global, single best-effort attempt, **disabled by default** (no URL = nothing fires). Any URL scheme is accepted, including `http://` for local automation.
-- **Event:** one `message.received` per received message (deduped by `Message-ID`).
+- **Event:** one `message.received` per received message per inbox (deduped by `Message-ID` within an inbox: a message addressed to two of your inboxes produces one event for each).
 - **Security:** when a secret is set, each request includes `X-SaaSMail-Signature: sha256=<hmac>`, an HMAC-SHA256 of the raw request body. Verify it before trusting the payload.
 
 ## Payload

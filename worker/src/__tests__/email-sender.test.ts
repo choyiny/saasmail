@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createEmailSender,
   BavimailSender,
+  DemoSender,
   PostmarkSender,
+  ResendSender,
 } from "../lib/email-sender";
 
 describe("createEmailSender", () => {
@@ -87,88 +89,140 @@ describe("createEmailSender", () => {
 });
 
 describe("CloudflareSender", () => {
-  it("sends a raw MIME message with custom headers embedded", async () => {
-    const fakeBinding = {
-      send: vi.fn().mockResolvedValue({ messageId: "msg-123" }),
+  type Send = (message: unknown) => Promise<{ messageId: string }>;
+  function cloudflare(
+    send = vi.fn<Send>().mockResolvedValue({ messageId: "msg-123" }),
+  ) {
+    const binding = { send };
+    return {
+      binding,
+      sender: createEmailSender({
+        EMAIL: binding,
+      } as unknown as CloudflareBindings),
+      sent: () => binding.send.mock.calls[0][0] as Record<string, unknown>,
     };
-    const sender = createEmailSender({
-      EMAIL: fakeBinding,
-    } as unknown as CloudflareBindings);
+  }
 
+  it("sends a structured message: To and every Cc are real recipients, with names", async () => {
+    // The raw EmailMessage form had one envelope recipient, the To: Cc lived
+    // only in the headers and was never delivered (live QA 2026-09-27).
+    const { sender, sent, binding } = cloudflare();
     const result = await sender.send({
       from: '"Alice" <a@b.com>',
-      to: "c@d.com",
+      to: "Bob Example <c@d.com>",
+      cc: ['"Doe, Jane" <j@x.com>', "k@x.com"],
       subject: "hello",
       html: "<p>hi</p>",
       text: "hi",
-      headers: {
-        "Message-ID": "<new@msg>",
-        "In-Reply-To": "<orig@msg>",
-      },
     });
 
-    expect(result.id).toBe("msg-123");
-    expect(result.error).toBeNull();
-    expect(fakeBinding.send).toHaveBeenCalledTimes(1);
-    const sent = fakeBinding.send.mock.calls[0][0] as {
-      from: string;
-      to: string;
-    };
-    // EmailMessage uses the bare address as the envelope sender.
-    expect(sent.from).toBe("a@b.com");
-    expect(sent.to).toBe("c@d.com");
-    const serialized = JSON.stringify(sent);
-    expect(serialized).toContain("Message-ID: <new@msg>");
-    expect(serialized).toContain("In-Reply-To: <orig@msg>");
-    expect(serialized).toContain("text/plain");
-    expect(serialized).toContain("text/html");
+    expect(result).toEqual({
+      id: "msg-123",
+      // Cloudflare generates the Message-ID itself and returns it.
+      deliveredMessageId: "msg-123",
+      error: null,
+    });
+    expect(binding.send).toHaveBeenCalledTimes(1);
+    expect(sent()).toEqual({
+      from: { email: "a@b.com", name: "Alice" },
+      to: [{ email: "c@d.com", name: "Bob Example" }],
+      cc: [{ email: "j@x.com", name: "Doe, Jane" }, "k@x.com"],
+      subject: "hello",
+      html: "<p>hi</p>",
+      text: "hi",
+    });
   });
 
-  it("serializes a Reply-To header without throwing", async () => {
-    // Regression: Reply-To is a single-mailbox header in mimetext, so a bare
-    // string threw MIMETEXT_INVALID_HEADER_VALUE and was swallowed as a failed
-    // send. It must be wrapped in a Mailbox and round-trip into the raw MIME.
-    const fakeBinding = {
-      send: vi.fn().mockResolvedValue({ messageId: "msg-rt" }),
-    };
-    const sender = createEmailSender({
-      EMAIL: fakeBinding,
-    } as unknown as CloudflareBindings);
-
-    const result = await sender.send({
+  it("passes threading and list headers, drops the ones Cloudflare controls, and sends Reply-To as its field", async () => {
+    const { sender, sent } = cloudflare();
+    await sender.send({
       from: "noreply@readerful.com",
       to: "team@readerful.com",
       subject: "contact form",
       html: "<p>hi</p>",
       headers: {
         "Message-ID": "<new@msg>",
-        "Reply-To": "submitter@example.com",
+        Date: "Sat, 26 Sep 2026 10:00:00 +0200",
+        "In-Reply-To": "<orig@msg>",
+        References: "<root@msg> <orig@msg>",
+        "List-Unsubscribe": "<https://x.test/u>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Auto-Submitted": "auto-replied",
+        "X-SaaSMail-Forwarded-For": "team@readerful.com",
+        "Reply-To": "Sub Mitter <submitter@example.com>",
       },
     });
 
-    expect(result.error).toBeNull();
-    expect(result.id).toBe("msg-rt");
-    const sent = fakeBinding.send.mock.calls[0][0];
-    expect(JSON.stringify(sent)).toContain("Reply-To: <submitter@example.com>");
+    expect(sent().from).toBe("noreply@readerful.com");
+    expect(sent().to).toEqual(["team@readerful.com"]);
+    expect(sent().replyTo).toEqual({
+      email: "submitter@example.com",
+      name: "Sub Mitter",
+    });
+    // Message-ID and Date are platform-controlled: sending them fails the
+    // whole message with E_HEADER_NOT_ALLOWED.
+    expect(sent().headers).toEqual({
+      "In-Reply-To": "<orig@msg>",
+      References: "<root@msg> <orig@msg>",
+      "List-Unsubscribe": "<https://x.test/u>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      "Auto-Submitted": "auto-replied",
+      "X-SaaSMail-Forwarded-For": "team@readerful.com",
+    });
   });
 
-  it("catches thrown errors and returns normalized result", async () => {
-    const fakeBinding = {
-      send: vi.fn().mockRejectedValue(new Error("sender not allowed")),
-    };
-    const sender = createEmailSender({
-      EMAIL: fakeBinding,
-    } as unknown as CloudflareBindings);
-
-    const result = await sender.send({
+  it("sends a text-only message without an html field", async () => {
+    const { sender, sent } = cloudflare();
+    await sender.send({
       from: "a@b.com",
       to: "c@d.com",
       subject: "x",
-      html: "<p>x</p>",
+      html: "",
+      text: "plain",
     });
+    expect(sent().html).toBeUndefined();
+    expect(sent().text).toBe("plain");
+  });
 
-    expect(result.id).toBeNull();
-    expect(result.error?.message).toBe("sender not allowed");
+  it("classifies failures by their error code", async () => {
+    const rejectWith = (code: string, message: string) =>
+      vi
+        .fn<Send>()
+        .mockRejectedValue(Object.assign(new Error(message), { code }));
+    const send = (fn: ReturnType<typeof vi.fn<Send>>) =>
+      cloudflare(fn).sender.send({
+        from: "a@b.com",
+        to: "c@d.com",
+        subject: "x",
+        html: "<p>x</p>",
+      });
+
+    const limited = await send(
+      rejectWith("E_RATE_LIMIT_EXCEEDED", "slow down"),
+    );
+    expect(limited.id).toBeNull();
+    expect(limited.error).toEqual({
+      message: "E_RATE_LIMIT_EXCEEDED: slow down",
+      transient: true,
+    });
+    for (const code of [
+      "E_SENDER_NOT_VERIFIED",
+      "E_RECIPIENT_NOT_ALLOWED",
+      "E_RECIPIENT_SUPPRESSED",
+      "E_TOO_MANY_RECIPIENTS",
+      "E_TOO_MANY_ATTACHMENTS",
+      "E_HEADER_NOT_ALLOWED",
+    ]) {
+      const result = await send(rejectWith(code, "no"));
+      expect(result.error?.transient, code).toBe(false);
+    }
+    const plain = await send(
+      vi.fn<Send>().mockRejectedValue(new Error("sender not allowed")),
+    );
+    expect(plain.error).toEqual({
+      message: "sender not allowed",
+      transient: false,
+    });
   });
 });
 
@@ -180,13 +234,14 @@ describe("maxAttachmentBytes", () => {
     expect(sender.maxAttachmentBytes()).toBe(25 * 1024 * 1024);
   });
 
-  it("returns ~18MB for Cloudflare", () => {
+  it("returns ~3.7MB for Cloudflare", () => {
     const sender = createEmailSender({
       EMAIL: { send: async () => ({ messageId: "x" }) },
     } as any);
-    // 25MB / 1.4 = ~18.7MB raw budget so post-base64 fits 25MB.
+    // Cloudflare caps the whole message at 5 MiB to arbitrary recipients;
+    // 5 MiB / 1.4 leaves room for base64 and the rest of the message.
     expect(sender.maxAttachmentBytes()).toBe(
-      Math.floor((25 * 1024 * 1024) / 1.4),
+      Math.floor((5 * 1024 * 1024) / 1.4),
     );
   });
 
@@ -236,6 +291,8 @@ describe("BavimailSender", () => {
 
     expect(result.error).toBeNull();
     expect(result.id).toBe("bm-msg-123");
+    // Bavimail's id is a provider id, not the RFC Message-ID.
+    expect(result.deliveredMessageId ?? null).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.bavimail.com/emails");
@@ -519,6 +576,8 @@ describe("PostmarkSender", () => {
 
     expect(result.error).toBeNull();
     expect(result.id).toBe("pm-msg-123");
+    // Postmark's MessageID is a tracking id, not the RFC Message-ID.
+    expect(result.deliveredMessageId ?? null).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("https://api.postmarkapp.com/email");
@@ -678,5 +737,404 @@ describe("PostmarkSender", () => {
 
     expect(result.id).toBeNull();
     expect(result.error?.message).toBe("network down");
+  });
+});
+
+describe("maxMessageBytes", () => {
+  const envOf = (extra: Record<string, unknown>) =>
+    extra as unknown as CloudflareBindings;
+
+  it("returns each provider's documented whole-message cap", () => {
+    expect(
+      createEmailSender(envOf({ RESEND_API_KEY: "re_test" })).maxMessageBytes(),
+    ).toBe(40_000_000);
+    expect(
+      createEmailSender(envOf({ EMAIL: { send: vi.fn() } })).maxMessageBytes(),
+    ).toBe(5 * 1024 * 1024);
+    expect(
+      createEmailSender(
+        envOf({ POSTMARK_API_KEY: "pm_test" }),
+      ).maxMessageBytes(),
+    ).toBe(10_000_000);
+    expect(
+      createEmailSender(
+        envOf({ BAVIMAIL_API_KEY: "bm_test", BAVIMAIL_ALIAS_ID: "alias" }),
+      ).maxMessageBytes(),
+    ).toBe(25 * 1024 * 1024);
+    expect(new DemoSender().maxMessageBytes()).toBe(25 * 1024 * 1024);
+    expect(createEmailSender(envOf({})).maxMessageBytes()).toBe(0);
+  });
+});
+
+describe("inline attachments and exact headers", () => {
+  const png = new Uint8Array([1, 2, 3]);
+
+  it("Cloudflare: inline parts with their contentId, other parts as attachments", async () => {
+    const fakeBinding = {
+      send: vi.fn().mockResolvedValue({ messageId: "cf-1" }),
+    };
+    const sender = createEmailSender({
+      EMAIL: fakeBinding,
+    } as unknown as CloudflareBindings);
+    const text = new TextEncoder().encode("a");
+
+    const result = await sender.send({
+      from: "Mine <mine@x.com>",
+      to: '"Doe, John" <john@example.com>',
+      subject: "s",
+      html: '<p><img src="cid:logo@x"></p>',
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: png,
+          contentId: "logo@x",
+          disposition: "inline",
+        },
+        { filename: "a.txt", contentType: "text/plain", content: text },
+        {
+          // Inline needs a Content-ID to be referenced; without one it's an
+          // ordinary attachment.
+          filename: "b.png",
+          contentType: "image/png",
+          content: png,
+          disposition: "inline",
+        },
+      ],
+    });
+
+    expect(result.error).toBeNull();
+    const sent = fakeBinding.send.mock.calls[0][0] as Record<string, unknown>;
+    expect(sent.to).toEqual([{ email: "john@example.com", name: "Doe, John" }]);
+    expect(sent.attachments).toEqual([
+      {
+        disposition: "inline",
+        contentId: "logo@x",
+        filename: "logo.png",
+        type: "image/png",
+        content: png,
+      },
+      {
+        disposition: "attachment",
+        filename: "a.txt",
+        type: "text/plain",
+        content: text,
+      },
+      {
+        disposition: "attachment",
+        filename: "b.png",
+        type: "image/png",
+        content: png,
+      },
+    ]);
+  });
+
+  it("Postmark: ContentID for inline parts, Date left to Postmark", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ErrorCode: 0, MessageID: "pm-1" }), {
+        status: 200,
+      }),
+    );
+    const sender = new PostmarkSender(
+      "pm_test",
+      fetchMock as unknown as typeof fetch,
+    );
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      headers: {
+        Date: "Sat, 26 Sep 2026 10:00:00 +0200",
+        "Message-ID": "<m@b.com>",
+      },
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: new Uint8Array([1]),
+          contentId: "logo@b",
+          disposition: "inline",
+        },
+      ],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.Attachments).toEqual([
+      {
+        Name: "logo.png",
+        Content: "AQ==",
+        ContentType: "image/png",
+        ContentID: "cid:logo@b",
+      },
+    ]);
+    expect(body.Headers).toEqual([{ Name: "Message-ID", Value: "<m@b.com>" }]);
+  });
+
+  it("Resend: contentType and contentId on attachments, Date left to Resend", async () => {
+    const sender = new ResendSender("re_test");
+    const send = vi
+      .fn()
+      .mockResolvedValue({ data: { id: "rs-1" }, error: null });
+    (
+      sender as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+
+    const result = await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "<p>h</p>",
+      headers: {
+        Date: "Sat, 26 Sep 2026 10:00:00 +0200",
+        "Message-ID": "<m@b.com>",
+      },
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: new Uint8Array([1]),
+          contentId: "logo@b",
+          disposition: "inline",
+        },
+      ],
+    });
+
+    expect(result).toEqual({ id: "rs-1", error: null });
+    const payload = send.mock.calls[0][0];
+    expect(payload.headers).toEqual({ "Message-ID": "<m@b.com>" });
+    expect(payload.attachments).toEqual([
+      {
+        filename: "logo.png",
+        content: "AQ==",
+        contentType: "image/png",
+        contentId: "logo@b",
+      },
+    ]);
+  });
+
+  it("Postmark and Resend send a text-only message without an HTML body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ErrorCode: 0, MessageID: "pm-1" }), {
+        status: 200,
+      }),
+    );
+    const postmark = new PostmarkSender(
+      "pm_test",
+      fetchMock as unknown as typeof fetch,
+    );
+    await postmark.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "",
+      text: "plain",
+    });
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as RequestInit).body as string,
+    );
+    expect(body.HtmlBody).toBeUndefined();
+    expect(body.TextBody).toBe("plain");
+
+    const resend = new ResendSender("re_test");
+    const send = vi
+      .fn()
+      .mockResolvedValue({ data: { id: "rs-1" }, error: null });
+    (
+      resend as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+    await resend.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "",
+      text: "plain",
+    });
+    expect("html" in send.mock.calls[0][0]).toBe(false);
+    expect(send.mock.calls[0][0].text).toBe("plain");
+  });
+
+  it("Bavimail: escaped text when html is empty, and is_inline for inline parts", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ attachments: [{ id: "att-1" }] }), {
+          status: 201,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "bm-1" }), { status: 201 }),
+      );
+    const sender = new BavimailSender(
+      "bm_test",
+      "alias-uuid",
+      fetchMock as unknown as typeof fetch,
+    );
+    await sender.send({
+      from: "a@b.com",
+      to: "c@d.com",
+      subject: "s",
+      html: "",
+      text: "1 < 2 & 3 > 2",
+      attachments: [
+        {
+          filename: "logo.png",
+          contentType: "image/png",
+          content: new Uint8Array([1]),
+          contentId: "logo@b",
+          disposition: "inline",
+        },
+      ],
+    });
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body.body).toBe(
+      '<pre style="white-space:pre-wrap">1 &lt; 2 &amp; 3 &gt; 2</pre>',
+    );
+    expect(body.attachments).toEqual([
+      { attachment_id: "att-1", is_inline: true },
+    ]);
+  });
+});
+
+describe("several To and Bcc", () => {
+  const params = {
+    from: "Mine <mine@x.com>",
+    to: "Ann <ann@x.com>",
+    additionalTo: ["Bob <bob@x.com>", "carl@x.com"],
+    cc: ["dee@x.com"],
+    bcc: ["Eve <eve@x.com>"],
+    subject: "s",
+    html: "<p>h</p>",
+  };
+
+  it("each provider says what it can deliver", () => {
+    expect(
+      createEmailSender({
+        EMAIL: { send: async () => ({ messageId: "x" }) },
+      } as unknown as CloudflareBindings).recipientSupport?.(),
+    ).toEqual({ multipleTo: true, bcc: true });
+    expect(new ResendSender("re_test").recipientSupport?.()).toEqual({
+      multipleTo: true,
+      bcc: true,
+    });
+    expect(new PostmarkSender("pm_test").recipientSupport?.()).toEqual({
+      multipleTo: true,
+      bcc: true,
+    });
+    expect(
+      new BavimailSender("bm", "alias", vi.fn()).recipientSupport?.(),
+    ).toEqual({ multipleTo: false, bcc: false });
+  });
+
+  it("Cloudflare: every To and the Bcc are recipients", async () => {
+    const binding = { send: vi.fn().mockResolvedValue({ messageId: "cf" }) };
+    await createEmailSender({
+      EMAIL: binding,
+    } as unknown as CloudflareBindings).send(params);
+    const sent = binding.send.mock.calls[0][0];
+    expect(sent.to).toEqual([
+      { email: "ann@x.com", name: "Ann" },
+      { email: "bob@x.com", name: "Bob" },
+      "carl@x.com",
+    ]);
+    expect(sent.cc).toEqual(["dee@x.com"]);
+    expect(sent.bcc).toEqual([{ email: "eve@x.com", name: "Eve" }]);
+  });
+
+  it("Resend: to is a list, bcc is passed", async () => {
+    const sender = new ResendSender("re_test");
+    const send = vi.fn().mockResolvedValue({ data: { id: "rs" }, error: null });
+    (
+      sender as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+    await sender.send(params);
+    const payload = send.mock.calls[0][0];
+    expect(payload.to).toEqual([
+      "Ann <ann@x.com>",
+      "Bob <bob@x.com>",
+      "carl@x.com",
+    ]);
+    expect(payload.bcc).toEqual(["Eve <eve@x.com>"]);
+  });
+
+  it("Postmark: To and Bcc are comma-separated lists", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ MessageID: "pm", ErrorCode: 0 }), {
+        status: 200,
+      }),
+    );
+    await new PostmarkSender(
+      "pm_test",
+      fetchMock as unknown as typeof fetch,
+    ).send(params);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.To).toBe("Ann <ann@x.com>,Bob <bob@x.com>,carl@x.com");
+    expect(body.Bcc).toBe("Eve <eve@x.com>");
+  });
+
+  it("Bavimail: refuses rather than dropping recipients, without calling the API", async () => {
+    const fetchMock = vi.fn();
+    const result = await new BavimailSender(
+      "bm",
+      "alias",
+      fetchMock as unknown as typeof fetch,
+    ).send(params);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.id).toBeNull();
+    expect(result.error?.transient).toBe(false);
+  });
+});
+
+describe("Resend idempotency keys", () => {
+  function resend(response: unknown = { data: { id: "rs" }, error: null }) {
+    const sender = new ResendSender("re_test");
+    const send = vi.fn().mockResolvedValue(response);
+    (
+      sender as unknown as { client: { emails: { send: typeof send } } }
+    ).client.emails.send = send;
+    return { sender, send };
+  }
+  const params = {
+    from: "a@b.com",
+    to: "c@d.com",
+    subject: "s",
+    html: "<p>h</p>",
+  };
+
+  it("passes the send's idempotency key to Resend", async () => {
+    const { sender, send } = resend();
+    await sender.send({ ...params, idempotencyKey: "saasmail-outbox-ob1" });
+    expect(send.mock.calls[0][1]).toEqual({
+      idempotencyKey: "saasmail-outbox-ob1",
+    });
+  });
+
+  it("sends no options without a key", async () => {
+    const { sender, send } = resend();
+    await sender.send(params);
+    expect(send.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("retries a concurrent request with the same key, and never resends one Resend saw with another payload", async () => {
+    const concurrent = await resend({
+      data: null,
+      error: {
+        name: "concurrent_idempotent_requests",
+        message:
+          "Another request with the same idempotency key is in progress. It is safe to retry this request later.",
+        statusCode: 409,
+      },
+    }).sender.send({ ...params, idempotencyKey: "k" });
+    expect(concurrent.error?.transient).toBe(true);
+
+    const reused = await resend({
+      data: null,
+      error: {
+        name: "invalid_idempotent_request",
+        message:
+          "This idempotency key has already been used on a request that had a different payload.",
+        statusCode: 409,
+      },
+    }).sender.send({ ...params, idempotencyKey: "k" });
+    expect(reused.error?.transient).toBe(false);
   });
 });

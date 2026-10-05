@@ -9,6 +9,7 @@ const sent: SendEmailParams[] = [];
 const fakeSender = {
   provider: "none" as const,
   maxAttachmentBytes: () => 25_000_000,
+  maxMessageBytes: () => 25_000_000,
   send: vi.fn(async (params: SendEmailParams) => {
     sent.push(params);
     return { id: "fake-msg-id", error: null };
@@ -299,5 +300,36 @@ describe("sendWithSuppressionCheck", () => {
     expect(call.text).toMatch(
       /Unsubscribe: https:\/\/mail\.example\.com\/unsubscribe\?token=/,
     );
+  });
+
+  it("transactional send: quoted display names on To and Cc", async () => {
+    await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender: fakeSender,
+      from: "test@host",
+      to: "john@example.com",
+      toName: "Doe, John",
+      cc: [{ email: "jane@example.com", name: "Doe, Jane" }],
+      subject: "s",
+      html: "<p>x</p>",
+      transactional: true,
+    });
+    expect(sent[0].to).toBe('"Doe, John" <john@example.com>');
+    expect(sent[0].cc).toEqual(['"Doe, Jane" <jane@example.com>']);
+  });
+
+  it("marketing send ignores toName and keeps the bare address", async () => {
+    await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender: fakeSender,
+      from: "test@host",
+      to: "john@example.com",
+      toName: "John",
+      subject: "s",
+      html: "<p>x</p>",
+    });
+    expect(sent[0].to).toBe("john@example.com");
   });
 });

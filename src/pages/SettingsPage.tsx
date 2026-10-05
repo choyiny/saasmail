@@ -14,6 +14,13 @@ import {
 } from "@/lib/signatures";
 import { useSession } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
+import {
+  readDefaultView,
+  writeDefaultView,
+  type DefaultView,
+} from "@/lib/default-view";
+import SendingSettings from "@/components/SendingSettings";
+import DataExports from "@/components/DataExports";
 
 interface Subscription {
   id: string;
@@ -30,12 +37,14 @@ export default function SettingsPage() {
     <PageContainer>
       <PageHeader
         title="Settings"
-        subtitle="Manage notifications, display preferences, and (admin only) app branding."
+        subtitle="Manage notifications, display preferences, mailbox exports, and (admin only) mail imports, backups, sending and app branding."
       />
 
       <div className="max-w-3xl space-y-8">
         <NotificationsSection />
         <DisplayPreferencesSection />
+        <DataExports showImports={isAdmin} />
+        {isAdmin && <SendingSettings />}
         {isAdmin && <AppBrandingSection />}
       </div>
     </PageContainer>
@@ -75,7 +84,7 @@ function NotificationsSection() {
     setBusy(true);
     try {
       const result = await enablePush();
-      if (!result.ok) {
+      if ("reason" in result) {
         setError(result.reason);
         return;
       }
@@ -207,6 +216,9 @@ function DisplayPreferencesSection() {
   const [hideSignatures, setHideSignatures] = useState(() =>
     readHideSignatures(),
   );
+  const [defaultView, setDefaultView] = useState<DefaultView>(() =>
+    readDefaultView(),
+  );
 
   // Stay in sync with other tabs (cross-tab) AND with the in-tab event the
   // signatures lib dispatches.
@@ -233,11 +245,42 @@ function DisplayPreferencesSection() {
     writeHideSignatures(next);
   }
 
+  function changeDefaultView(value: DefaultView) {
+    setDefaultView(value);
+    writeDefaultView(value);
+  }
+
   return (
     <section className="space-y-3">
       <h2 className="text-base font-semibold text-text-primary">
         Display preferences
       </h2>
+
+      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-text-primary">
+              Default home view
+            </h3>
+            <p className="mt-1 text-xs font-light text-text-secondary">
+              Choose what opens when you visit the app root. Deep links are
+              never redirected.
+            </p>
+          </div>
+          <select
+            aria-label="Default home view"
+            data-testid="default-view-select"
+            value={defaultView}
+            onChange={(event) =>
+              changeDefaultView(event.target.value as DefaultView)
+            }
+            className="h-9 shrink-0 rounded-[6px] border border-border bg-bg-subtle px-2 text-xs text-text-primary"
+          >
+            <option value="customers">Customers</option>
+            <option value="mailbox">Mailbox</option>
+          </select>
+        </div>
+      </div>
 
       <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
         <div className="flex items-start justify-between gap-4">

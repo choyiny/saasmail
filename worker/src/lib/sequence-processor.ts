@@ -1,9 +1,9 @@
-import { drizzle } from "drizzle-orm/d1";
+import { threadKeyForNewMessage } from "./messages/thread-key";
 import { eq, and, lte } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { createEmailSender, type EmailSender } from "./email-sender";
 import { isDemoMode } from "./is-dev";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { sequenceEmails } from "../db/sequence-emails.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { emailTemplates } from "../db/email-templates.schema";
@@ -16,7 +16,7 @@ import {
   type TemplateVariables,
 } from "./interpolate";
 import { formatFromAddress } from "./format-from-address";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
 import { sendViaOutbox } from "./outbox";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
@@ -34,7 +34,7 @@ export async function handleScheduled(env: CloudflareBindings): Promise<void> {
     console.log("[demo] Skipping scheduled sequence dispatch");
     return;
   }
-  const db = drizzle(env.DB, { schema });
+  const db = createDb(env);
   const now = Math.floor(Date.now() / 1000);
 
   // Find pending emails that are due
@@ -67,33 +67,6 @@ export async function handleScheduled(env: CloudflareBindings): Promise<void> {
 /**
  * Queue consumer: process a batch of sequence email messages.
  */
-export async function handleQueueBatch(
-  batch: MessageBatch<SequenceEmailMessage>,
-  env: CloudflareBindings,
-): Promise<void> {
-  if (isDemoMode(env)) {
-    // No queue binding exists in demo, so this should never fire — ack
-    // anything that somehow lands here so it doesn't infinitely retry.
-    for (const msg of batch.messages) msg.ack();
-    return;
-  }
-  const db = drizzle(env.DB, { schema });
-  const sender = createEmailSender(env);
-
-  for (const msg of batch.messages) {
-    try {
-      await processSequenceEmail(db, sender, env, msg.body.sequenceEmailId);
-      msg.ack();
-    } catch (err) {
-      console.error(
-        `Failed to process sequence email ${msg.body.sequenceEmailId}:`,
-        err,
-      );
-      msg.retry();
-    }
-  }
-}
-
 /**
  * Mark a step terminally failed and settle the enrollment.
  *
@@ -148,7 +121,10 @@ export async function processSequenceEmail(
   if (enrollmentRows.length === 0) return;
   const enrollment = enrollmentRows[0];
 
-  const fromAddress = enrollment.fromAddress;
+  // Enrollment rows created before canonicalization may still carry casing.
+  // Normalize on read so every downstream outbox/sent write is scoped to the
+  // same canonical inbox key even before migration 0051 has run.
+  const fromAddress = enrollment.fromAddress.trim().toLowerCase();
 
   if (enrollment.status !== "active") {
     // Enrollment was cancelled while queued — mark email as cancelled
@@ -173,20 +149,28 @@ export async function processSequenceEmail(
   if (existingOutboxRows.length > 0) {
     const outboxRow = existingOutboxRows[0];
     const repairNow = Math.floor(Date.now() / 1000);
+    const repairMessageId: string | null = outboxRow.headers
+      ? (JSON.parse(outboxRow.headers)["Message-ID"] ?? null)
+      : null;
     await db
       .insert(sentEmails)
       .values({
         id: outboxRow.sentEmailId,
         personId: enrollment.personId,
-        fromAddress: outboxRow.fromAddress,
+        fromAddress,
         toAddress: outboxRow.toAddress,
         subject: outboxRow.subject,
         bodyHtml: outboxRow.bodyHtml ?? null,
         bodyText: outboxRow.bodyText ?? null,
-        messageId: outboxRow.headers
-          ? (JSON.parse(outboxRow.headers)["Message-ID"] ?? null)
-          : null,
+        messageId: repairMessageId,
+        // Each sequence step is its own thread in a headers-mode inbox.
+        threadKey: await threadKeyForNewMessage(db, {
+          inbox: fromAddress,
+          messageId: repairMessageId,
+        }),
         status: "retrying" as const,
+        sequenceId: enrollment.sequenceId,
+        sequenceEnrollmentId: enrollment.id,
         sentAt: repairNow,
         createdAt: repairNow,
       })
@@ -304,6 +288,7 @@ export async function processSequenceEmail(
     // Store sent email record. The helper may have mutated the body to
     // interpolate {{unsubscribe_url}} or auto-append a footer — record
     // exactly what was on the wire, not the pre-helper template render.
+    const storedMessageId = deliveredMessageId(messageId, result);
     await db.insert(sentEmails).values({
       id: sentId,
       personId: person.id,
@@ -312,9 +297,15 @@ export async function processSequenceEmail(
       subject: renderedSubject,
       bodyHtml: sendResult.renderedHtml ?? renderedHtml,
       bodyText: sendResult.renderedText ?? null,
-      messageId,
+      messageId: storedMessageId,
+      threadKey: await threadKeyForNewMessage(db, {
+        inbox: fromAddress,
+        messageId: storedMessageId,
+      }),
       resendId: result.id,
       status: outcome,
+      sequenceId: enrollment.sequenceId,
+      sequenceEnrollmentId: enrollment.id,
       sentAt: now,
       createdAt: now,
     });

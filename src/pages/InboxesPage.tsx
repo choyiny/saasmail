@@ -1,6 +1,7 @@
 import { useSession } from "@/lib/auth-client";
 import { Navigate } from "react-router-dom";
 import AdminInboxTable from "@/components/AdminInboxTable";
+import UnknownRecipientsSetting from "@/components/UnknownRecipientsSetting";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 
 export default function InboxesPage() {
@@ -15,6 +16,7 @@ export default function InboxesPage() {
         subtitle="Set display names, choose chat or thread mode, forward mail onward, and assign member access."
       />
       <AdminInboxTable />
+      <UnknownRecipientsSetting />
     </PageContainer>
   );
 }
