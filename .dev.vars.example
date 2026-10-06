@@ -24,3 +24,15 @@ DEMO_MODE=1
 # with: openssl rand -hex 32. Set in prod via:
 #   wrangler secret put UNSUBSCRIBE_SECRET
 UNSUBSCRIBE_SECRET=replace-with-output-of-openssl-rand-hex-32
+
+# Gmail integration (docs/gmail.md). OAuth client credentials from an
+# Internal consent screen in your own Workspace organisation.
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+
+# Encrypts stored Gmail refresh tokens and signs the OAuth state parameter.
+# Exactly 32 random bytes, base64-encoded. Generate with:
+#   openssl rand -base64 32
+# Never rotate this without reconnecting every mailbox — stored tokens
+# become permanently undecryptable.
+TOKEN_ENCRYPTION_KEY=
