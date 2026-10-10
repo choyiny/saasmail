@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "8.5.0",
-    "@better-auth/oauth-provider": "^1.6.28",
+    "@better-auth/oauth-provider": "^1.7.0",
     "@better-auth/passkey": "^1.6.28",
     "@codemirror/lang-html": "^6.4.12",
     "@codemirror/state": "^6.7.1",
