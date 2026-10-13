@@ -18,12 +18,14 @@ import {
   ListOrdered,
   LogOut,
   Mail,
+  Megaphone,
   Menu as MenuIcon,
   Monitor,
   Moon,
   Pencil,
   Send,
   Settings,
+  ShieldAlert,
   ShieldBan,
   Sun,
   Users,
@@ -109,11 +111,14 @@ function useAppItems() {
     { to: "/sequences", label: "Sequences", icon: ListOrdered },
     { to: "/outbox", label: "Outbox", icon: Send },
     { to: "/api-keys", label: "API keys", icon: Key },
+    { to: "/lists", label: "Lists", icon: Users },
+    { to: "/campaigns", label: "Campaigns", icon: Megaphone },
     ...(isAdmin
       ? [
           { to: "/inboxes", label: "Inboxes", icon: InboxIcon },
           { to: "/admin/users", label: "Users", icon: Users },
           { to: "/admin/suppressions", label: "Suppressions", icon: Ban },
+          { to: "/admin/contacts", label: "Contact data", icon: ShieldAlert },
         ]
       : []),
     { to: "/blocklist", label: "Blocklist", icon: ShieldBan },
@@ -438,6 +443,9 @@ const PAGE_TITLES: Array<[string, string]> = [
   ["/admin/users", "Users"],
   ["/admin/suppressions", "Suppressions"],
   ["/blocklist", "Blocklist"],
+  ["/lists", "Lists"],
+  ["/campaigns", "Campaigns"],
+  ["/admin/contacts", "Contact data"],
   ["/settings", "Settings"],
 ];
 

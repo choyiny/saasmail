@@ -322,6 +322,9 @@ const PAGE_TITLES: Array<[string, string]> = [
   ["/admin/users", "Users"],
   ["/admin/suppressions", "Suppressions"],
   ["/blocklist", "Blocklist"],
+  ["/lists", "Lists"],
+  ["/campaigns", "Campaigns"],
+  ["/admin/contacts", "Contact data"],
   ["/settings", "Settings"],
 ];
 

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, FileText, Pencil, Trash2, Hash } from "lucide-react";
+import { Plus, FileText, Pencil, Trash2, Hash, Blocks } from "lucide-react";
 import { fetchTemplates, deleteTemplate } from "@/lib/api";
 import type { EmailTemplate } from "@/lib/api";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
@@ -55,10 +55,22 @@ export default function TemplatesPage() {
         title="Email templates"
         subtitle="Reusable HTML emails with {{variable}} interpolation. Send from the app or the API."
         action={
-          <Button onClick={() => navigate("/templates/new")}>
-            <Plus />
-            New template
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Two entry points rather than a format switch inside the editor:
+                converting HTML to blocks is refused by the API (the parse would
+                be lossy), so the choice belongs at creation time. */}
+            <Button
+              variant="outline"
+              onClick={() => navigate("/templates/new?format=block")}
+            >
+              <Blocks />
+              New block template
+            </Button>
+            <Button onClick={() => navigate("/templates/new")}>
+              <Plus />
+              New template
+            </Button>
+          </div>
         }
       />
 

@@ -165,6 +165,16 @@ export default function MessageBubble({
             Retrying
           </span>
         )}
+        {isSent && email.campaignId && (
+          <span
+            data-testid="message-campaign-badge"
+            title="Part of a newsletter campaign, not a message written to this person."
+            className="inline-flex shrink-0 items-center rounded-[5px] bg-violet/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: "#7c5cfc" }}
+          >
+            Campaign
+          </span>
+        )}
         <span className="tabular ml-auto shrink-0 text-xs text-text-tertiary">
           {dateStr} {timeStr}
         </span>

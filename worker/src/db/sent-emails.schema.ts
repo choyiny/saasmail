@@ -53,6 +53,11 @@ export const sentEmails = sqliteTable(
      * Unique per mailbox, like the Gmail id above, for the same reason.
      */
     outlookMessageId: text("outlook_message_id"),
+    /**
+     * FK campaigns.id — null for every non-campaign send. Lets a campaign send
+     * appear in the recipient's timeline without any new query logic.
+     */
+    campaignId: text("campaign_id"),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },

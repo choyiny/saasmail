@@ -12,9 +12,11 @@ import {
   Keyboard,
   ListOrdered,
   LogOut,
+  Megaphone,
   Search,
   Send,
   Settings,
+  ShieldAlert,
   ShieldBan,
   Users,
   X,
@@ -47,11 +49,18 @@ export function useAppLinks() {
       { label: "Sequences", path: "/sequences", icon: ListOrdered },
       { label: "Outbox", path: "/outbox", icon: Send },
       { label: "API keys", path: "/api-keys", icon: Key },
+      { label: "Lists", path: "/lists", icon: Users },
+      { label: "Campaigns", path: "/campaigns", icon: Megaphone },
       ...(isAdmin
         ? [
             { label: "Inboxes", path: "/inboxes", icon: InboxIcon },
             { label: "Users", path: "/admin/users", icon: Users },
             { label: "Suppressions", path: "/admin/suppressions", icon: Ban },
+            {
+              label: "Contact data",
+              path: "/admin/contacts",
+              icon: ShieldAlert,
+            },
           ]
         : []),
       { label: "Blocklist", path: "/blocklist", icon: ShieldBan },

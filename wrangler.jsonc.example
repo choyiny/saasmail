@@ -113,7 +113,15 @@
     // Written by `yarn saasmail install` so `/.well-known/saasmail` can report
     // which installation this is. Leave blank when deploying by hand.
     "SAASMAIL_INSTALLATION": "",
-    "SAASMAIL_VERSION": ""
+    "SAASMAIL_VERSION": "",
+
+    /* newsletters */
+    // Refuses to start a campaign that would push the sending identity past
+    // this many messages in 24 hours. Unset by default: the check is skipped
+    // entirely, so nobody is committed to configuring it. Set it to your
+    // provider's actual daily quota and a blast that would blow through the
+    // limit is refused up front rather than half-delivered.
+    "PROVIDER_DAILY_SEND_LIMIT": ""
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".
