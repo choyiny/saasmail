@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
 export const senderIdentities = sqliteTable("sender_identities", {
   email: text("email").primaryKey(),
@@ -18,6 +18,7 @@ export const senderIdentities = sqliteTable("sender_identities", {
    * Email Sending uses different IPs and DKIM-signs for our own domain.
    */
   forwardTo: text("forward_to"),
+  spamThreshold: real("spam_threshold"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

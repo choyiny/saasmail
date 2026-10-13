@@ -42,6 +42,7 @@ interface ComposeModalProps {
   open: boolean;
   onClose: () => void;
   prefill?: ComposePrefill | null;
+  contextKey?: string;
 }
 
 /**
@@ -53,6 +54,7 @@ export default function ComposeModal({
   open,
   onClose,
   prefill,
+  contextKey = "compose",
 }: ComposeModalProps) {
   const [to, setTo] = useState("");
   const [fromAddress, setFromAddress] = useState("");
@@ -167,7 +169,7 @@ export default function ComposeModal({
       (prefill.cc && prefill.cc.length > 0))
   );
   const { clear: clearDraft } = useDraftAutosave({
-    contextKey: "compose",
+    contextKey,
     enabled: open,
     isEmpty: composeIsEmpty,
     restore: open && !hasPrefill,

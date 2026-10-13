@@ -54,8 +54,10 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT UNIQUE, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, conversation_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
-    `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, conversation_id TEXT, campaign_id TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, conversation_id TEXT, campaign_id TEXT, sequence_id TEXT, sequence_enrollment_id TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_person_sent_idx ON sent_emails(person_id, sent_at)`,
+    `CREATE INDEX IF NOT EXISTS sent_emails_from_sent_idx ON sent_emails(from_address, sent_at)`,
+    `CREATE INDEX IF NOT EXISTS sent_emails_sequence_sent_idx ON sent_emails(sequence_id, sent_at)`,
     `CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, email_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'inbound', filename TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, content_id TEXT, created_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, format TEXT NOT NULL DEFAULT 'html', body_json TEXT, from_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS newsletter_assets (id TEXT PRIMARY KEY, r2_key TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`,
@@ -67,9 +69,28 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS enrollments_person_status_idx ON sequence_enrollments(person_id, status)`,
     `CREATE TABLE IF NOT EXISTS sequence_emails (id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL, step_order INTEGER NOT NULL, template_slug TEXT NOT NULL, scheduled_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', sent_at INTEGER, sent_email_id TEXT)`,
     `CREATE INDEX IF NOT EXISTS seq_emails_status_scheduled_idx ON sequence_emails(status, scheduled_at)`,
-    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, spam_threshold REAL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS inbox_permissions (user_id TEXT NOT NULL, email TEXT NOT NULL, created_at INTEGER NOT NULL, created_by TEXT, PRIMARY KEY(user_id, email), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)`,
     `CREATE INDEX IF NOT EXISTS inbox_permissions_email_idx ON inbox_permissions(email)`,
+    `CREATE TABLE IF NOT EXISTS message_user_state (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, message_kind TEXT NOT NULL, message_id TEXT NOT NULL, seen_at INTEGER, starred_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, message_kind, message_id))`,
+    `CREATE INDEX IF NOT EXISTS message_user_state_user_starred_idx ON message_user_state(user_id, starred_at)`,
+    `CREATE TABLE IF NOT EXISTS mailbox_message_state (inbox TEXT NOT NULL, message_kind TEXT NOT NULL, message_id TEXT NOT NULL, archived_at INTEGER, spam_at INTEGER, trashed_at INTEGER, updated_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(message_kind, message_id))`,
+    `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_trashed_idx ON mailbox_message_state(inbox, trashed_at)`,
+    `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_spam_idx ON mailbox_message_state(inbox, spam_at)`,
+    `CREATE INDEX IF NOT EXISTS mailbox_message_state_inbox_archived_idx ON mailbox_message_state(inbox, archived_at)`,
+    `CREATE TABLE IF NOT EXISTS mailboxes (id TEXT PRIMARY KEY NOT NULL, inbox TEXT NOT NULL, name TEXT NOT NULL, role TEXT, parent_id TEXT REFERENCES mailboxes(id) ON DELETE CASCADE, sort_order INTEGER NOT NULL DEFAULT 0, created_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS mailboxes_inbox_parent_name_unique ON mailboxes(inbox, parent_id, name)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS mailboxes_root_name_unique ON mailboxes(inbox, name) WHERE parent_id IS NULL`,
+    `CREATE TABLE IF NOT EXISTS message_mailboxes (message_kind TEXT NOT NULL, message_id TEXT NOT NULL, mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE, added_by TEXT, added_at INTEGER NOT NULL, PRIMARY KEY(message_kind, message_id, mailbox_id))`,
+    `CREATE INDEX IF NOT EXISTS message_mailboxes_mailbox_added_idx ON message_mailboxes(mailbox_id, added_at)`,
+    `CREATE TABLE IF NOT EXISTS inbox_conversation_state (inbox TEXT NOT NULL, conversation_key TEXT NOT NULL, snoozed_until INTEGER, snoozed_by TEXT REFERENCES users(id) ON DELETE SET NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(inbox, conversation_key))`,
+    `CREATE INDEX IF NOT EXISTS inbox_conversation_state_inbox_snoozed_idx ON inbox_conversation_state(inbox, snoozed_until)`,
+    `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_insert BEFORE INSERT ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS message_user_state_kind_update BEFORE UPDATE OF message_kind ON message_user_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS mailbox_message_state_kind_insert BEFORE INSERT ON mailbox_message_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS mailbox_message_state_kind_update BEFORE UPDATE OF message_kind ON mailbox_message_state WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS message_mailboxes_kind_insert BEFORE INSERT ON message_mailboxes WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
+    `CREATE TRIGGER IF NOT EXISTS message_mailboxes_kind_update BEFORE UPDATE OF message_kind ON message_mailboxes WHEN NEW.message_kind NOT IN ('received', 'sent') BEGIN SELECT RAISE(ABORT, 'invalid message_kind'); END`,
     `CREATE TABLE IF NOT EXISTS push_subscriptions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, endpoint TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, user_agent TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS push_subscriptions_endpoint_idx ON push_subscriptions(endpoint)`,
     `CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT, updated_at INTEGER NOT NULL, updated_by TEXT)`,
@@ -241,6 +262,79 @@ export async function createTestEmail(
   return email;
 }
 
+/** Create a test sent email. */
+export async function createTestSentEmail(
+  opts: {
+    id?: string;
+    personId?: string | null;
+    fromAddress?: string;
+    toAddress?: string;
+    subject?: string;
+    bodyHtml?: string | null;
+    bodyText?: string | null;
+    inReplyTo?: string | null;
+    messageId?: string | null;
+    status?: string;
+    cc?: string | null;
+    conversationId?: string | null;
+    campaignId?: string | null;
+    sentAt?: number;
+  } = {},
+) {
+  const db = getDb();
+  const now = opts.sentAt ?? Math.floor(Date.now() / 1000);
+  const email = {
+    id: opts.id ?? "sent-email-1",
+    personId: opts.personId ?? null,
+    fromAddress: opts.fromAddress ?? "inbox@saasmail.test",
+    toAddress: opts.toAddress ?? "alice@example.com",
+    subject: opts.subject ?? "Test Subject",
+    bodyHtml: opts.bodyHtml ?? "<p>Hello</p>",
+    bodyText: opts.bodyText ?? "Hello",
+    inReplyTo: opts.inReplyTo ?? null,
+    messageId: opts.messageId ?? null,
+    status: opts.status ?? "sent",
+    cc: opts.cc ?? null,
+    conversationId: opts.conversationId ?? null,
+    campaignId: opts.campaignId ?? null,
+    sentAt: now,
+    createdAt: now,
+  };
+  await db.insert(sentEmails).values(email);
+  return email;
+}
+
+/** Create a test attachment for an inbound or sent message. */
+export async function createTestAttachment(
+  opts: {
+    id?: string;
+    emailId?: string;
+    kind?: "inbound" | "sent";
+    filename?: string;
+    contentType?: string;
+    size?: number;
+    r2Key?: string;
+    contentId?: string | null;
+    createdAt?: number;
+  } = {},
+) {
+  const db = getDb();
+  const createdAt = opts.createdAt ?? Math.floor(Date.now() / 1000);
+  const attachment = {
+    id: opts.id ?? "attachment-1",
+    emailId: opts.emailId ?? "email-1",
+    kind: opts.kind ?? "inbound",
+    filename: opts.filename ?? "file.txt",
+    contentType: opts.contentType ?? "text/plain",
+    size: opts.size ?? 1,
+    r2Key: opts.r2Key ?? "attachments/file.txt",
+    contentId: opts.contentId ?? null,
+    createdAt,
+  };
+  await db.insert(attachments).values(attachment);
+  return attachment;
+}
+
 /** Create a test email template. */
 export async function createTestTemplate(
   opts: {
@@ -313,6 +407,11 @@ export function buildSendForm(
 export async function cleanDb() {
   const db = env.DB;
   await db.exec(`
+    DELETE FROM inbox_conversation_state;
+    DELETE FROM message_mailboxes;
+    DELETE FROM mailboxes;
+    DELETE FROM mailbox_message_state;
+    DELETE FROM message_user_state;
     DELETE FROM campaign_unsubscribe_attributions;
     DELETE FROM campaign_events;
     DELETE FROM campaign_links;

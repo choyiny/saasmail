@@ -8,6 +8,14 @@ export interface ActionDeps {
   fetchPeople: (params: { personId?: string; limit?: number }) => Promise<any>;
   fetchEmail: (id: string) => Promise<any>;
   markEmailRead: (id: string, isRead: boolean) => Promise<void>;
+  setMessageState?: (data: {
+    refs: string[];
+    seen?: boolean;
+    starred?: boolean;
+    archived?: boolean;
+    spam?: boolean;
+    snoozeUntil?: number | null;
+  }) => Promise<any>;
   enrollPerson: (
     sequenceId: string,
     data: {
@@ -24,9 +32,10 @@ export interface ActionDeps {
   }) => Promise<any>;
   fetchTemplate: (slug: string) => Promise<any>;
   renderTemplate: (tpl: string, vars: Record<string, unknown>) => string;
-  invalidate: () => void;
   /** Force the inbox people-list to refetch (see lib/inbox-events). */
   refreshInbox: () => void;
+  /** Force the conventional mail list to refetch (see lib/mail-events). */
+  refreshMail: () => void;
   /** Publish the agent's plan to the Agent Plan tab (see lib/agent-plan). */
   showPlan: (plan: AgentPlan) => void;
 }
@@ -190,7 +199,8 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
       },
       execute: async (args) => {
         await deps.markEmailRead(args.emailId, true);
-        deps.invalidate();
+        deps.refreshInbox();
+        deps.refreshMail();
         return okJson({ emailId: args.emailId, isRead: true });
       },
     },
@@ -204,8 +214,50 @@ export function createActionTools(deps: ActionDeps): WebMcpToolDescriptor[] {
       },
       execute: async (args) => {
         await deps.markEmailRead(args.emailId, false);
-        deps.invalidate();
+        deps.refreshInbox();
+        deps.refreshMail();
         return okJson({ emailId: args.emailId, isRead: false });
+      },
+    },
+    {
+      name: "set_message_state",
+      description:
+        "Set seen, starred, archived, spam, or reversible snooze state on messages. This tool cannot trash or delete messages.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          refs: {
+            type: "array",
+            items: { type: "string" },
+            maxItems: 500,
+          },
+          seen: { type: "boolean" },
+          starred: { type: "boolean" },
+          archived: { type: "boolean" },
+          spam: { type: "boolean" },
+          snoozeUntil: {
+            type: ["number", "null"],
+            description:
+              "Unix timestamp in seconds to snooze until, or null to clear snooze.",
+          },
+        },
+        required: ["refs"],
+      },
+      execute: async (args) => {
+        if (!deps.setMessageState) {
+          return fail("Message state updates are unavailable.");
+        }
+        const result = await deps.setMessageState({
+          refs: args.refs,
+          seen: args.seen,
+          starred: args.starred,
+          archived: args.archived,
+          spam: args.spam,
+          snoozeUntil: args.snoozeUntil,
+        });
+        deps.refreshInbox();
+        deps.refreshMail();
+        return okJson(result);
       },
     },
     {

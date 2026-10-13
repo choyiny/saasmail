@@ -15,6 +15,7 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const { webmcpEnabled } = useBranding();
   const [composeOpen, setComposeOpen] = useState(false);
+  const [composeContextKey, setComposeContextKey] = useState("compose");
   // Optional seed values for the compose drawer — populated when the user
   // opts into the "full compose" flow from inside a chat thread.
   const [composePrefill, setComposePrefill] = useState<ComposePrefill | null>(
@@ -22,14 +23,19 @@ export default function DashboardLayout() {
   );
   const reduced = useReducedAnimations();
 
-  const openCompose = useCallback((prefill?: ComposePrefill) => {
-    setComposePrefill(prefill ?? null);
-    setComposeOpen(true);
-  }, []);
+  const openCompose = useCallback(
+    (prefill?: ComposePrefill, contextKey = "compose") => {
+      setComposePrefill(prefill ?? null);
+      setComposeContextKey(contextKey);
+      setComposeOpen(true);
+    },
+    [],
+  );
 
   const closeCompose = useCallback(() => {
     setComposeOpen(false);
     setComposePrefill(null);
+    setComposeContextKey("compose");
   }, []);
 
   return (
@@ -66,6 +72,7 @@ export default function DashboardLayout() {
           open={composeOpen}
           onClose={closeCompose}
           prefill={composePrefill}
+          contextKey={composeContextKey}
         />
 
         <Toaster />

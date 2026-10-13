@@ -29,6 +29,11 @@ import { campaignRecipients } from "./campaign-recipients.schema";
 import { campaignLinks } from "./campaign-links.schema";
 import { campaignEvents } from "./campaign-events.schema";
 import { campaignUnsubscribeAttributions } from "./campaign-unsubscribe-attributions.schema";
+import { messageUserState } from "./message-user-state.schema";
+import { mailboxMessageState } from "./mailbox-message-state.schema";
+import { mailboxes } from "./mailboxes.schema";
+import { messageMailboxes } from "./message-mailboxes.schema";
+import { inboxConversationState } from "./inbox-conversation-state.schema";
 
 export const schema = {
   ...authSchema,
@@ -62,4 +67,9 @@ export const schema = {
   campaignEvents,
   campaignUnsubscribeAttributions,
   newsletterAssets,
+  messageUserState,
+  mailboxMessageState,
+  mailboxes,
+  messageMailboxes,
+  inboxConversationState,
 } as const;

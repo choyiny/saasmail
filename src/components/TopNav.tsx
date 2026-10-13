@@ -42,7 +42,8 @@ interface NavItem {
 // Top-level nav: just the daily-driver tabs. Admin/settings stuff lives
 // in the user dropdown so the nav stays scannable.
 const PRIMARY_NAV: NavItem[] = [
-  { label: "Inbox", path: "/", icon: Mail, end: true },
+  { label: "Inbox", path: "/", icon: InboxIcon, end: true },
+  { label: "Mail", path: "/mail", icon: Mail },
   { label: "Templates", path: "/templates", icon: FileText },
   { label: "Sequences", path: "/sequences", icon: ListOrdered },
   { label: "Lists", path: "/lists", icon: Users },

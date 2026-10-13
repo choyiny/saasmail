@@ -18,17 +18,18 @@ Everything that used to live in one very long README. Start at
 
 ## Features
 
-| Page                                            | What's in it                                                                 |
-| ----------------------------------------------- | ---------------------------------------------------------------------------- |
-| [Inboxes and timelines](inboxes.md)             | One timeline per customer, team permissions, thread-vs-chat mode, forwarding |
-| [Email templates](templates.md)                 | The `{{variable}}` grammar, sections, escaping, and the send contract        |
-| [Sequences](sequences.md)                       | Multi-step drip campaigns and how they're scheduled                          |
-| [Newsletters](newsletters.md)                   | Lists, subscribe forms, campaigns, tracking, and retention                   |
-| [Suppressions and unsubscribe](suppressions.md) | The suppression list, RFC 8058 one-click, and the `transactional` flag       |
-| [Users and API keys](users-and-api-keys.md)     | Invites, roles, passkeys, and `sk_…` keys                                    |
-| [MCP server](mcp.md)                            | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation   |
-| [WebMCP](webmcp.md)                             | In-page agent access, the safety model, and the 24 tools                     |
-| [Webhooks](webhooks.md)                         | `message.received`, the payload, and signature verification                  |
+| Page                                            | What's in it                                                                  |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| [Inboxes and timelines](inboxes.md)             | One timeline per customer, team permissions, thread-vs-chat mode, forwarding  |
+| [Mailbox state](mailbox-state.md)               | Seen/starred state, archive/junk/trash, custom folders, APIs, and agent tools |
+| [Email templates](templates.md)                 | The `{{variable}}` grammar, sections, escaping, and the send contract         |
+| [Sequences](sequences.md)                       | Multi-step drip campaigns and how they're scheduled                           |
+| [Newsletters](newsletters.md)                   | Lists, subscribe forms, campaigns, tracking, and retention                    |
+| [Suppressions and unsubscribe](suppressions.md) | The suppression list, RFC 8058 one-click, and the `transactional` flag        |
+| [Users and API keys](users-and-api-keys.md)     | Invites, roles, passkeys, and `sk_…` keys                                     |
+| [MCP server](mcp.md)                            | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation    |
+| [WebMCP](webmcp.md)                             | In-page agent access, the safety model, and the 26 tools                      |
+| [Webhooks](webhooks.md)                         | `message.received`, the payload, and signature verification                   |
 
 ## Elsewhere in the repo
 

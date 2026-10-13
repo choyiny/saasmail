@@ -123,8 +123,10 @@ emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
   }
 
   const allowed = c.get("allowedInboxes")!;
-  if (fromAddress != null) {
-    assertInboxAllowed(allowed, fromAddress);
+  const canonicalFromAddress =
+    fromAddress == null ? null : fromAddress.trim().toLowerCase();
+  if (canonicalFromAddress != null) {
+    assertInboxAllowed(allowed, canonicalFromAddress);
   } else if (!allowed.isAdmin) {
     // Members cannot create global (null) templates.
     return c.json({ error: "from_address is required for members" }, 403);
@@ -139,7 +141,7 @@ emailTemplatesRouter.openapi(createTemplateRoute, async (c) => {
     bodyHtml: resolved.bodyHtml,
     format: resolved.format,
     bodyJson: resolved.bodyJson,
-    fromAddress: fromAddress ?? null,
+    fromAddress: canonicalFromAddress,
     createdAt: now,
     updatedAt: now,
   };
@@ -272,8 +274,14 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
   }
 
   const allowed = c.get("allowedInboxes")!;
-  if (updates.fromAddress !== undefined && updates.fromAddress !== null) {
-    assertInboxAllowed(allowed, updates.fromAddress);
+  const canonicalFromAddress =
+    updates.fromAddress === undefined
+      ? undefined
+      : updates.fromAddress === null
+        ? null
+        : updates.fromAddress.trim().toLowerCase();
+  if (canonicalFromAddress !== undefined && canonicalFromAddress !== null) {
+    assertInboxAllowed(allowed, canonicalFromAddress);
   }
 
   // Resolve the body against the row as it exists: this is where a format
@@ -294,11 +302,20 @@ emailTemplatesRouter.openapi(updateTemplateRoute, async (c) => {
     return c.json({ error: parseError }, 400);
   }
 
-  const { format: _f, bodyHtml: _h, bodyJson: _j, ...rest } = updates;
+  const {
+    format: _f,
+    bodyHtml: _h,
+    bodyJson: _j,
+    fromAddress: _from,
+    ...rest
+  } = updates;
   await db
     .update(emailTemplates)
     .set({
       ...rest,
+      ...(canonicalFromAddress !== undefined
+        ? { fromAddress: canonicalFromAddress }
+        : {}),
       format: resolved.format,
       bodyHtml: resolved.bodyHtml,
       bodyJson: resolved.bodyJson,

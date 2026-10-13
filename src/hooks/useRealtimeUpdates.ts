@@ -9,8 +9,12 @@ const MAX_RECONNECT_MS = 60_000;
 // immediately closes with an explicit code.
 const TERMINAL_CLOSE_CODES = new Set([1008, 4401, 4403]);
 
+export interface RealtimeEmailReceived {
+  inbox?: string;
+}
+
 export function useRealtimeUpdates(
-  onEmailReceived: () => void,
+  onEmailReceived: (event: RealtimeEmailReceived) => void,
   onShouldPromptPush?: () => void,
 ) {
   // Keep the latest callback in a ref so we don't bake a stale closure into
@@ -52,7 +56,9 @@ export function useRealtimeUpdates(
         try {
           const data = JSON.parse(event.data);
           if (data.type === "email_received") {
-            callbackRef.current();
+            callbackRef.current({
+              inbox: typeof data.inbox === "string" ? data.inbox : undefined,
+            });
             promptRef.current?.();
           }
         } catch {}

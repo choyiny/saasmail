@@ -31,6 +31,8 @@ describe("WebMcpTools", () => {
     render(wrap(<WebMcpTools enabled={true} />));
     await new Promise((r) => setTimeout(r, 0));
     expect(names).toContain("search_emails");
+    expect(names).toContain("list_messages");
+    expect(names).toContain("set_message_state");
     expect(names).toContain("compose_email");
     expect(names.length).toBe(WEBMCP_TOOL_COUNT);
     // No duplicate tool names.

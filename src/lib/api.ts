@@ -120,7 +120,16 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!res.ok) {
-    throw new Error(`API error: ${res.status}`);
+    let message = `API error: ${res.status}`;
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (typeof body.error === "string" && body.error.trim()) {
+        message = body.error;
+      }
+    } catch {
+      // Keep the status fallback when the server did not return JSON.
+    }
+    throw new Error(message);
   }
   return res.json();
 }
@@ -296,6 +305,206 @@ export async function searchEmails(params: {
   if (params.page) qs.set("page", String(params.page));
   if (params.limit) qs.set("limit", String(params.limit));
   return apiFetch(`/api/emails/search?${qs}`);
+}
+
+// Mirrors the worker's UnifiedMessage + state response from GET /api/messages.
+// Kept local rather than imported through `@worker/*` because worker message
+// modules pull server-only dependencies into the frontend typecheck.
+export interface MailAddress {
+  email: string;
+  name?: string | null;
+}
+
+export interface MailMessageState {
+  seen: boolean;
+  starredAt: number | null;
+  archivedAt: number | null;
+  spamAt: number | null;
+  trashedAt: number | null;
+  mailboxIds: string[];
+  conversationKey: string | null;
+  snoozedUntil: number | null;
+}
+
+export interface MailMessage {
+  ref: string;
+  direction: "inbound" | "outbound";
+  inbox: string;
+  personId: string | null;
+  conversationId: string | null;
+  messageId: string | null;
+  inReplyTo: string | null;
+  from: MailAddress | null;
+  to: MailAddress;
+  cc: MailAddress[];
+  subject: string | null;
+  bodyText: string | null;
+  bodyHtml: string | null;
+  occurredAt: number;
+  isRead: boolean | null;
+  source: {
+    campaignId: string | null;
+    sequenceId: string | null;
+    sequenceEnrollmentId: string | null;
+  };
+  delivery: { status: string } | null;
+  attachmentCount?: number;
+  state: MailMessageState;
+}
+
+export interface MessageListResult {
+  messages: MailMessage[];
+  nextCursor: string | null;
+}
+
+export async function fetchMessages(params?: {
+  inbox?: string;
+  folder?: "inbox" | "sent" | "archive" | "junk" | "trash" | "snoozed";
+  mailboxId?: string;
+  starred?: boolean;
+  unseen?: boolean;
+  includeTrashed?: boolean;
+  includeSpam?: boolean;
+  personId?: string;
+  q?: string;
+  cursor?: string;
+  limit?: number;
+  excludeCampaignSends?: boolean;
+}): Promise<MessageListResult> {
+  const qs = new URLSearchParams();
+  if (params?.inbox) qs.set("inbox", params.inbox);
+  if (params?.folder) qs.set("folder", params.folder);
+  if (params?.mailboxId) qs.set("mailboxId", params.mailboxId);
+  if (params?.starred !== undefined) qs.set("starred", String(params.starred));
+  if (params?.unseen !== undefined) qs.set("unseen", String(params.unseen));
+  if (params?.includeTrashed !== undefined) {
+    qs.set("includeTrashed", String(params.includeTrashed));
+  }
+  if (params?.includeSpam !== undefined) {
+    qs.set("includeSpam", String(params.includeSpam));
+  }
+  if (params?.personId) qs.set("personId", params.personId);
+  if (params?.q) qs.set("q", params.q);
+  if (params?.cursor) qs.set("cursor", params.cursor);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.excludeCampaignSends !== undefined) {
+    qs.set("excludeCampaignSends", String(params.excludeCampaignSends));
+  }
+  return apiFetch(`/api/messages?${qs}`);
+}
+
+export interface Mailbox {
+  id: string;
+  inbox: string;
+  name: string;
+  role: string | null;
+  parentId: string | null;
+  sortOrder: number;
+  createdBy: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export async function fetchMailboxes(inbox: string): Promise<Mailbox[]> {
+  const qs = new URLSearchParams({ inbox });
+  const result = await apiFetch<{ mailboxes: Mailbox[] }>(
+    `/api/mailboxes?${qs}`,
+  );
+  return result.mailboxes;
+}
+
+export async function createMailbox(data: {
+  inbox: string;
+  name: string;
+  parentId?: string | null;
+}): Promise<Mailbox> {
+  return apiFetch("/api/mailboxes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function renameMailbox(
+  id: string,
+  name: string,
+): Promise<Mailbox> {
+  return apiFetch(`/api/mailboxes/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function deleteMailbox(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/api/mailboxes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function setMailboxMembership(data: {
+  refs: string[];
+  add?: string[];
+  remove?: string[];
+}): Promise<{ success: boolean }> {
+  return apiFetch("/api/messages/mailbox-membership", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function snoozeMessages(
+  refs: string[],
+  until: number | null,
+): Promise<{ conversations: number }> {
+  return apiFetch("/api/messages/snooze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refs, until }),
+  });
+}
+
+export async function setMessageState(data: {
+  refs: string[];
+  seen?: boolean;
+  starred?: boolean;
+  archived?: boolean;
+  spam?: boolean;
+  trashed?: boolean;
+  snoozeUntil?: number | null;
+}): Promise<{ success: boolean }> {
+  if (data.seen !== undefined || data.starred !== undefined) {
+    await apiFetch("/api/messages/user-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refs: data.refs,
+        seen: data.seen,
+        starred: data.starred,
+      }),
+    });
+  }
+  if (
+    data.archived !== undefined ||
+    data.spam !== undefined ||
+    data.trashed !== undefined
+  ) {
+    await apiFetch("/api/messages/mailbox-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refs: data.refs,
+        archived: data.archived,
+        spam: data.spam,
+        trashed: data.trashed,
+      }),
+    });
+  }
+  if (data.snoozeUntil !== undefined) {
+    await snoozeMessages(data.refs, data.snoozeUntil);
+  }
+  return { success: true };
 }
 
 export async function markEmailRead(
@@ -511,6 +720,16 @@ export interface Draft {
   updatedAt: number;
 }
 
+export interface DraftListItem {
+  id: string;
+  contextKey: string;
+  fromAddress: string | null;
+  toAddress: string | null;
+  subject: string | null;
+  replyToEmailId: string | null;
+  updatedAt: number;
+}
+
 export interface DraftInput {
   contextKey: string;
   fromAddress?: string;
@@ -520,6 +739,19 @@ export interface DraftInput {
   bodyHtml?: string;
   bodyText?: string;
   replyToEmailId?: string | null;
+}
+
+export async function fetchDraftList(params?: {
+  inbox?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ drafts: DraftListItem[] }> {
+  const qs = new URLSearchParams();
+  if (params?.inbox) qs.set("inbox", params.inbox);
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return apiFetch(`/api/drafts/list${query ? `?${query}` : ""}`);
 }
 
 export async function fetchDraft(contextKey: string): Promise<Draft | null> {
@@ -831,6 +1063,8 @@ export interface AdminInbox {
   signatureHtml: string | null;
   /** Destination address for per-inbox forwarding; null = forwarding off. */
   forwardTo: string | null;
+  /** SpamAssassin-style X-Spam-Score cutoff; null = automatic filing off. */
+  spamThreshold: number | null;
   assignedUserIds: string[];
 }
 
@@ -857,6 +1091,7 @@ export async function updateInboxSettings(
     displayMode?: InboxDisplayMode;
     signatureHtml?: string | null;
     forwardTo?: string | null;
+    spamThreshold?: number | null;
   },
 ): Promise<{
   email: string;
@@ -864,6 +1099,7 @@ export async function updateInboxSettings(
   displayMode: InboxDisplayMode;
   signatureHtml: string | null;
   forwardTo: string | null;
+  spamThreshold: number | null;
 }> {
   return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
     method: "PATCH",
