@@ -11,7 +11,10 @@ import {
   Users,
   Ban,
   ShieldBan,
+  ShieldAlert,
   Send,
+  Megaphone,
+  ClipboardList,
   Menu,
   User,
   LogOut,
@@ -39,9 +42,12 @@ interface NavItem {
 // Top-level nav: just the daily-driver tabs. Admin/settings stuff lives
 // in the user dropdown so the nav stays scannable.
 const PRIMARY_NAV: NavItem[] = [
-  { label: "Inbox", path: "/", icon: Mail, end: true },
+  { label: "Inbox", path: "/", icon: InboxIcon, end: true },
+  { label: "Mail", path: "/mail", icon: Mail },
   { label: "Templates", path: "/templates", icon: FileText },
   { label: "Sequences", path: "/sequences", icon: ListOrdered },
+  { label: "Lists", path: "/lists", icon: Users },
+  { label: "Campaigns", path: "/campaigns", icon: Megaphone },
 ];
 
 export default function TopNav() {
@@ -204,8 +210,22 @@ export default function TopNav() {
                       <Ban className="h-4 w-4" />
                       Suppressions
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => navigate("/admin/contacts")}
+                      className="cursor-pointer"
+                    >
+                      <ShieldAlert className="h-4 w-4" />
+                      Contact data
+                    </DropdownMenuItem>
                   </>
                 )}
+                <DropdownMenuItem
+                  onClick={() => navigate("/subscribe-forms")}
+                  className="cursor-pointer"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  Subscribe forms
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => navigate("/blocklist")}
                   className="cursor-pointer"
@@ -340,8 +360,22 @@ export default function TopNav() {
                     <Ban className="h-4 w-4" />
                     Suppressions
                   </button>
+                  <button
+                    onClick={() => navigate("/admin/contacts")}
+                    className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+                  >
+                    <ShieldAlert className="h-4 w-4" />
+                    Contact data
+                  </button>
                 </>
               )}
+              <button
+                onClick={() => navigate("/subscribe-forms")}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+              >
+                <ClipboardList className="h-4 w-4" />
+                Subscribe forms
+              </button>
               <button
                 onClick={() => navigate("/blocklist")}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"

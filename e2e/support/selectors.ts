@@ -22,6 +22,14 @@ export const TEST_IDS = {
   sequenceStepRow: "sequence-step-row",
   enrollmentRow: "enrollment-row",
 
+  // Newsletters
+  listRow: "list-row",
+  memberRow: "member-row",
+  formRow: "form-row",
+  campaignRow: "campaign-row",
+  campaignStatus: "campaign-status",
+  campaignSend: "campaign-send",
+
   // Templates
   templateRow: "template-row",
 
@@ -44,6 +52,17 @@ export const TEST_IDS = {
   // Reply
   replySendButton: "reply-send-button",
   replyComposer: "reply-composer",
+
+  // Mailbox
+  mailMessageRow: "mail-message-row",
+  mailReadingPane: "mail-reading-pane",
+  mailReadingStar: "mail-reading-star",
+  mailReadingArchive: "mail-reading-archive",
+  mailReadingTrash: "mail-reading-trash",
+  mailCreateFolderInput: "mail-create-folder-input",
+  mailCreateFolderButton: "mail-create-folder-button",
+  mailMoveFolder: "mail-move-folder",
+  mailBulkArchive: "mail-bulk-archive",
 
   // API keys
   apiKeyRow: "api-key-row",

@@ -5,6 +5,7 @@ import { emails } from "./emails.schema";
 import { sentEmails } from "./sent-emails.schema";
 import { attachments } from "./attachments.schema";
 import { emailTemplates } from "./email-templates.schema";
+import { newsletterAssets } from "./newsletter-assets.schema";
 import { apiKeys } from "./api-keys.schema";
 import { sequences } from "./sequences.schema";
 import { sequenceEnrollments } from "./sequence-enrollments.schema";
@@ -17,6 +18,22 @@ import { suppressions } from "./suppressions.schema";
 import { blocklist } from "./blocklist.schema";
 import { outboxEmails } from "./outbox-emails.schema";
 import { drafts } from "./drafts.schema";
+import { asyncJobs } from "./async-jobs.schema";
+import { contacts } from "./contacts.schema";
+import { lists } from "./lists.schema";
+import { listMembers } from "./list-members.schema";
+import { subscribeForms } from "./subscribe-forms.schema";
+import { subscribeAttempts } from "./subscribe-attempts.schema";
+import { campaigns } from "./campaigns.schema";
+import { campaignRecipients } from "./campaign-recipients.schema";
+import { campaignLinks } from "./campaign-links.schema";
+import { campaignEvents } from "./campaign-events.schema";
+import { campaignUnsubscribeAttributions } from "./campaign-unsubscribe-attributions.schema";
+import { messageUserState } from "./message-user-state.schema";
+import { mailboxMessageState } from "./mailbox-message-state.schema";
+import { mailboxes } from "./mailboxes.schema";
+import { messageMailboxes } from "./message-mailboxes.schema";
+import { inboxConversationState } from "./inbox-conversation-state.schema";
 
 export const schema = {
   ...authSchema,
@@ -38,4 +55,21 @@ export const schema = {
   blocklist,
   outboxEmails,
   drafts,
+  asyncJobs,
+  contacts,
+  lists,
+  listMembers,
+  subscribeForms,
+  subscribeAttempts,
+  campaigns,
+  campaignRecipients,
+  campaignLinks,
+  campaignEvents,
+  campaignUnsubscribeAttributions,
+  newsletterAssets,
+  messageUserState,
+  mailboxMessageState,
+  mailboxes,
+  messageMailboxes,
+  inboxConversationState,
 } as const;

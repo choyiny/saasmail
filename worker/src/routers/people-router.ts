@@ -14,6 +14,11 @@ import {
 } from "../lib/queries/people";
 import type { Variables } from "../variables";
 import { isInboxAllowed } from "../lib/inbox-permissions";
+import { deleteMessageState } from "../lib/messages/state";
+import {
+  collectPersonGroupConversations,
+  deletePersonConversationState,
+} from "../lib/messages/conversation-state";
 
 export const peopleRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -710,6 +715,25 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
     return c.json({ error: "Person not found" }, 404);
   }
 
+  const groupConversations = await collectPersonGroupConversations(db, id);
+
+  const received = await db
+    .select({ id: emails.id })
+    .from(emails)
+    .where(eq(emails.personId, id));
+  const sent = await db
+    .select({ id: sentEmails.id })
+    .from(sentEmails)
+    .where(eq(sentEmails.personId, id));
+
+  await deleteMessageState(db, [
+    ...received.map((message) => ({
+      kind: "received" as const,
+      id: message.id,
+    })),
+    ...sent.map((message) => ({ kind: "sent" as const, id: message.id })),
+  ]);
+
   // Delete R2 attachments for all received emails belonging to this person
   const atts = await db
     .select({ r2Key: attachments.r2Key })
@@ -734,6 +758,7 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
     );
   await db.delete(emails).where(eq(emails.personId, id));
   await db.delete(sentEmails).where(eq(sentEmails.personId, id));
+  await deletePersonConversationState(db, id, groupConversations);
   await db.delete(people).where(eq(people.id, id));
 
   return c.json({ success: true }, 200);
