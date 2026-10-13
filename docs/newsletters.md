@@ -154,7 +154,7 @@ snapshot, not just live templates. Assets accumulate; budget R2 accordingly.
 Two admin-only operations answer subject requests:
 
 - `GET /api/contacts/{email}/export` — everything the newsletter tables hold for that address.
-- `POST /api/contacts/{email}/erase` — replaces the address with a keyed one-way pseudonym across `contacts`, `list_members`, `campaign_events` and `campaign_recipients`, and deletes the attempt digests. The rows themselves stay: they are the evidence that a suppression or a consent actually happened.
+- `POST /api/contacts/{email}/erase` — replaces the address with a keyed one-way pseudonym across `contacts`, `list_members`, `campaign_events` and `campaign_recipients`, and in the [audit log](audit-log.md)'s list member and campaign test-send events, and deletes the attempt digests. The rows themselves stay: they are the evidence that a suppression or a consent actually happened. Mail and its audit events keep the address.
 
 The pseudonym is a keyed HMAC rather than a bare digest. Email addresses are low-entropy, so a plain SHA-256 is reversible with a dictionary and would not be erasure at all.
 

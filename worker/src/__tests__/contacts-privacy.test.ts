@@ -23,6 +23,10 @@ import {
 } from "../lib/newsletter-retention";
 import { people } from "../db/people.schema";
 import { runNewsletterMaintenance } from "../lib/newsletter-cron";
+import { auditEvents } from "../db/audit-events.schema";
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { auditListMember } from "../lib/audit/crm-events";
+import { recordAudit } from "../lib/audit/record";
 
 beforeAll(applyMigrations);
 beforeEach(cleanDb);
@@ -246,6 +250,70 @@ describe("POST /api/contacts/:email/erase", () => {
       memberships: 0,
       events: 0,
     });
+  });
+
+  it("rewrites the address in the newsletter audit events only", async () => {
+    const apiKey = await adminKey();
+    await seedSubject();
+    const db = getDb();
+    await auditListMember(db, "added", {
+      listId: "list-1",
+      listName: "Weekly",
+      memberId: "m-1",
+      email: "Subject@Example.com",
+    });
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.mailSent,
+      targetType: "campaign",
+      targetId: "camp-1",
+      inbox: "news@example.com",
+      summary: `Sent a test of the campaign 'Weekly' to ${EMAIL} from news@example.com`,
+      details: { to: EMAIL, test: true },
+    });
+    // Mail keeps the address, like the mail it describes, and a longer
+    // address that contains this one belongs to someone else.
+    await recordAudit(db, {
+      action: AUDIT_ACTIONS.mailSent,
+      targetType: "message",
+      targetId: "s-1",
+      inbox: "news@example.com",
+      summary: `Sent a message to ${EMAIL} from news@example.com`,
+      details: { to: EMAIL },
+    });
+    await auditListMember(db, "added", {
+      listId: "list-1",
+      listName: "Weekly",
+      memberId: "m-2",
+      email: `not${EMAIL}`,
+    });
+
+    const res = await erase(apiKey);
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).auditEvents).toBe(2);
+
+    const [contact] = await db.select().from(contacts);
+    const token = contact.email;
+    const rows = await db.select().from(auditEvents);
+    const byTarget = (id: string, memberId?: string) =>
+      rows.find(
+        (r) =>
+          r.targetId === id &&
+          (memberId === undefined ||
+            JSON.parse(r.details ?? "{}").memberId === memberId),
+      )!;
+
+    const member = byTarget("list-1", "m-1");
+    expect(member.summary).toBe(`Added ${token} to 'Weekly'`);
+    expect(JSON.parse(member.details!)).toEqual({
+      memberId: "m-1",
+      email: token,
+    });
+    const testSend = byTarget("camp-1");
+    expect(testSend.summary).not.toContain(EMAIL);
+    expect(JSON.parse(testSend.details!).to).toBe(token);
+
+    expect(byTarget("s-1").summary).toContain(EMAIL);
+    expect(byTarget("list-1", "m-2").summary).toContain(`not${EMAIL}`);
   });
 
   it("keeps the address out of the audit log lines", async () => {

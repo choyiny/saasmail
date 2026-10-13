@@ -3,6 +3,8 @@ import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 /**
  * Who did what, append-only. Written best-effort by `recordAudit`
  * (worker/src/lib/audit/record.ts) and pruned after the retention period.
+ * The one rewrite: erasing a newsletter subject replaces their address with
+ * its pseudonym (worker/src/lib/audit/erase.ts).
  */
 export const auditEvents = sqliteTable(
   "audit_events",

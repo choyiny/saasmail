@@ -8,6 +8,7 @@ import { lists } from "../db/lists.schema";
 import { subscribeAttempts } from "../db/subscribe-attempts.schema";
 import { json200Response } from "../lib/helpers";
 import { hashEmail } from "../lib/subscribe-abuse";
+import { eraseAddressFromNewsletterAudit } from "../lib/audit/erase";
 import type { Variables } from "../variables";
 
 export const contactsRouter = new OpenAPIHono<{
@@ -130,7 +131,7 @@ const eraseRoute = createRoute({
   path: "/{email}/erase",
   tags: ["Contacts"],
   description:
-    "Replace an address with a one-way pseudonym everywhere the newsletter tables hold it, keeping the delivery and consent rows themselves. Admin only.",
+    "Replace an address with a one-way pseudonym everywhere the newsletter tables hold it, and in the audit events for list members and campaign test sends, keeping the rows themselves. Admin only.",
   request: { params: z.object({ email: z.string() }) },
   responses: {
     ...json200Response(
@@ -141,6 +142,7 @@ const eraseRoute = createRoute({
         events: z.number(),
         recipients: z.number(),
         attempts: z.number(),
+        auditEvents: z.number(),
       }),
       "Rows rewritten",
     ),
@@ -171,8 +173,8 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     .set({ email: token })
     .where(eq(sql`lower(${campaignEvents.email})`, email));
 
-  // Not named in the spec's erase list, but a delivery row holds the address
-  // in the clear too — leaving it would make the erasure cosmetic.
+  // A delivery row holds the address in the clear too — leaving it would make
+  // the erasure cosmetic.
   const recipientResult = await db
     .update(campaignRecipients)
     .set({ email: token })
@@ -183,6 +185,10 @@ contactsRouter.openapi(eraseRoute, async (c) => {
   const attemptResult = await db
     .delete(subscribeAttempts)
     .where(eq(subscribeAttempts.emailHash, await hashEmail(email)));
+
+  // Adding or removing a member, and a campaign test send, name the address in
+  // the audit log.
+  const auditCount = await eraseAddressFromNewsletterAudit(db, email, token);
 
   const changed = (r: any) => Number(r?.meta?.changes ?? 0);
 
@@ -197,5 +203,6 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     events: changed(eventResult),
     recipients: changed(recipientResult),
     attempts: changed(attemptResult),
+    auditEvents: auditCount,
   });
 });

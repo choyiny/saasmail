@@ -248,6 +248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Erasing a newsletter subject also clears their address from the audit log.** Their list member and campaign test-send events now name them by the erasure pseudonym, and the erase response counts them as `auditEvents`.
+
 - **Templates scoped to another inbox stay unreadable through newsletters.** A member could seed a campaign from, or set as a list's confirmation mail, a template scoped to an inbox they can't use, and so read its content. Both now answer `404 Template not found`, the same as `GET /api/email-templates/{slug}`.
 
 - **Contact export and erase no longer write the address to the logs.** Their `[audit]` lines name the subject by its erasure pseudonym, so an erased address doesn't survive in the worker logs.

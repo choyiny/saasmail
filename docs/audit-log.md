@@ -78,6 +78,14 @@ not in it, is not an event.
 Recording is best effort: if the log cannot be written, the action still
 succeeds and the failure goes to the Worker's logs.
 
+## Erasure
+
+Events are never edited, with one exception. Erasing a newsletter subject
+(`POST /api/contacts/{email}/erase`, see [Newsletters](newsletters.md)) replaces
+their address with its pseudonym in `list.member_added`,
+`list.member_removed` and campaign test-send `mail.sent` events. Other events,
+like the mail they describe, keep the address.
+
 ## Retention
 
 Events are kept for 180 days and then deleted by the hourly maintenance, at most
