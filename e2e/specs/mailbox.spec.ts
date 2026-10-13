@@ -171,6 +171,9 @@ test.describe.serial("conventional mailbox", () => {
     await expect(page.locator("#compose-subject")).toHaveValue(
       "Mailbox draft resume",
     );
+    await expect(
+      page.getByTestId("compose-metadata").locator("select"),
+    ).toHaveValue("support@e2e.test");
     await page.getByRole("button", { name: "Close" }).click();
 
     page.once("dialog", (dialog) => dialog.accept());
