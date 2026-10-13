@@ -191,6 +191,7 @@ export async function listPersonEmails(
       fromAddress: sentEmails.fromAddress,
       toAddress: sentEmails.toAddress,
       status: sentEmails.status,
+      campaignId: sentEmails.campaignId,
     })
     .from(sentEmails)
     .where(and(...sentConditions))
@@ -219,6 +220,7 @@ export async function listPersonEmails(
       cc: parseCc(e.cc),
       timestamp: e.timestamp,
       status: null,
+      campaignId: null,
     })),
     ...sent.map((e) => ({
       id: e.id,
@@ -234,6 +236,9 @@ export async function listPersonEmails(
       cc: parseCc(e.cc),
       timestamp: e.timestamp,
       status: e.status,
+      // Lets the timeline mark a message as campaign mail rather than a reply
+      // someone actually wrote to this person.
+      campaignId: e.campaignId ?? null,
     })),
   ].sort((a, b) => b.timestamp - a.timestamp);
 

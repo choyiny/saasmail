@@ -68,6 +68,10 @@ export const EmailSchema = z.object({
         "provider failure, will be retried), or 'failed' (the provider " +
         "rejected it). Null for received messages.",
     }),
+  campaignId: z.string().nullable().optional().openapi({
+    description:
+      "The campaign this message was part of, when it was a campaign send. Null or absent for ordinary sent mail and for received messages.",
+  }),
   attachmentCount: z.number().optional().openapi({
     description:
       "Number of attachments on this message. Set on list endpoints; may be omitted on GET /api/emails/{id}.",
