@@ -7,10 +7,12 @@ import { listMembers } from "../db/list-members.schema";
 import { contacts } from "../db/contacts.schema";
 import { asyncJobs } from "../db/async-jobs.schema";
 import { campaigns } from "../db/campaigns.schema";
+import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import {
   assertInboxAllowed,
   inboxFilter,
+  isInboxAllowed,
   type AllowedInboxes,
 } from "../lib/inbox-permissions";
 import { findOrCreateContact, sanitizeContactName } from "../lib/contacts";
@@ -149,6 +151,31 @@ async function loadListForCaller(
 }
 
 /**
+ * Whether the caller may use this template as the list's opt-in confirmation.
+ *
+ * The confirmation mail hands the template's content to whoever subscribes, so
+ * a template scoped to an inbox the caller cannot use is refused exactly like
+ * one that does not exist, as `GET /api/email-templates/{slug}` does.
+ */
+async function canUseConfirmationTemplate(
+  db: Variables["db"],
+  allowed: AllowedInboxes,
+  slug: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ fromAddress: emailTemplates.fromAddress })
+    .from(emailTemplates)
+    .where(eq(emailTemplates.slug, slug))
+    .limit(1);
+  const template = rows[0];
+  if (!template) return false;
+  return (
+    template.fromAddress === null ||
+    isInboxAllowed(allowed, template.fromAddress)
+  );
+}
+
+/**
  * Whether any campaign has ever targeted this list.
  *
  * A delivered campaign's audit trail references the list, so once one exists
@@ -274,6 +301,10 @@ const createListRoute = createRoute({
       description: "Sending identity not allowed",
       content: { "application/json": { schema: ErrorSchema } },
     },
+    404: {
+      description: "Confirmation template not found",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
   },
 });
 
@@ -284,6 +315,16 @@ listsRouter.openapi(createListRoute, async (c) => {
   const fromAddress = body.fromAddress.trim().toLowerCase();
 
   assertInboxAllowed(allowed, fromAddress);
+  if (
+    body.confirmationTemplateSlug &&
+    !(await canUseConfirmationTemplate(
+      db,
+      allowed,
+      body.confirmationTemplateSlug,
+    ))
+  ) {
+    return c.json({ error: "Template not found" }, 404);
+  }
 
   const ts = now();
   const row = {
@@ -436,6 +477,16 @@ listsRouter.openapi(updateListRoute, async (c) => {
     patch.doubleOptIn = body.doubleOptIn ? 1 : 0;
   }
   if (body.confirmationTemplateSlug !== undefined) {
+    if (
+      body.confirmationTemplateSlug !== null &&
+      !(await canUseConfirmationTemplate(
+        db,
+        allowed,
+        body.confirmationTemplateSlug,
+      ))
+    ) {
+      return c.json({ error: "Template not found" }, 404);
+    }
     patch.confirmationTemplateSlug = body.confirmationTemplateSlug;
   }
 

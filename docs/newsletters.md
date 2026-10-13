@@ -42,6 +42,8 @@ CSV export is formula-injection-safe: a cell starting `=`, `+`, `-` or `@` (incl
 
 With **double opt-in** on, a submission creates a `pending` member and mails a confirmation link; `GET /subscribe/confirm/{token}` promotes it to `subscribed`. An expired confirmation answers `410` so the page can offer a fresh signup rather than a dead end.
 
+A list's `confirmationTemplateSlug` replaces the built-in confirmation mail. The caller must be able to read that template: one scoped to another inbox is refused with `404`, like an unknown slug.
+
 ## Campaigns
 
 **A campaign owns its content.** `bodyHtml` — and `bodyJson` when the campaign
@@ -53,6 +55,10 @@ template's content is **copied in** once, and the campaign owns it from then on.
 Editing or deleting that template afterwards cannot reach back into the
 campaign. `templateSlug` is kept only as provenance and is never read when
 rendering.
+
+A member can start from a template only when they can read it: one scoped to
+an inbox they are not on answers `404`, as `GET /api/email-templates/{slug}`
+does.
 
 That split is what makes templates useful in both places. A newsletter needs its
 own words every time, so a campaign that could only point at a template forced

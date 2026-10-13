@@ -115,13 +115,14 @@ export default function ComposeModal({
       fetchStats().then((stats) => {
         setRecipients(stats.recipients);
         setSenderIdentities(stats.senderIdentities ?? []);
-        // Prefill `from` wins; otherwise keep whatever was sticky from
-        // last open; finally fall back to the first inbox.
+        // Prefill `from` wins; otherwise keep whatever is already set (sticky
+        // from last open, or a restored draft's sender that landed before
+        // this response); finally fall back to the first inbox.
         const want = prefill?.from;
         if (want && stats.recipients.includes(want)) {
           setFromAddress(want);
-        } else if (!fromAddress && stats.recipients.length > 0) {
-          setFromAddress(stats.recipients[0]);
+        } else if (stats.recipients.length > 0) {
+          setFromAddress((current) => current || stats.recipients[0]);
         }
       });
       // Apply any seeded values up front. Fields the caller didn't

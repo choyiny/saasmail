@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import {
   applyMigrations,
@@ -246,6 +246,33 @@ describe("POST /api/contacts/:email/erase", () => {
       memberships: 0,
       events: 0,
     });
+  });
+
+  it("keeps the address out of the audit log lines", async () => {
+    const apiKey = await adminKey();
+    await seedSubject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      await authFetch(`/api/contacts/${encodeURIComponent(EMAIL)}/export`, {
+        apiKey,
+      });
+      const res = await erase(apiKey);
+      expect(res.status).toBe(200);
+
+      // An erasure that wrote the address to the logs would not be one. Both
+      // lines name the subject by its pseudonym, so they can still be matched.
+      const lines = log.mock.calls
+        .map((args) => args.join(" "))
+        .filter((line) => line.startsWith("[audit] contact"));
+      expect(lines).toHaveLength(2);
+      for (const line of lines) expect(line).not.toContain(EMAIL);
+      const [contact] = await getDb().select().from(contacts);
+      for (const line of lines) {
+        expect(line).toContain(`subject=${contact.email}`);
+      }
+    } finally {
+      log.mockRestore();
+    }
   });
 
   it("is refused to a non-admin", async () => {

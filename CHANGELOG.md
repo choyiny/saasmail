@@ -248,6 +248,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Templates scoped to another inbox stay unreadable through newsletters.** A member could seed a campaign from, or set as a list's confirmation mail, a template scoped to an inbox they can't use, and so read its content. Both now answer `404 Template not found`, the same as `GET /api/email-templates/{slug}`.
+
+- **Contact export and erase no longer write the address to the logs.** Their `[audit]` lines name the subject by its erasure pseudonym, so an erased address doesn't survive in the worker logs.
+
+- **Resuming a draft keeps its sender.** Opening a draft from the Drafts folder could switch From to the first inbox, and autosave then saved that back into the draft.
+
 - **A password alone opens nothing but passkey setup.** In production a session from a password sign-in, before the account has a passkey, was already refused on `/api`, but better-auth's own endpoints answered it: such a session could impersonate a member (admin accounts), list and change users, change the account's email or password, or grant an MCP client, with the password alone. Those endpoints now refuse it too (`403 PASSKEY_REQUIRED`); signing in and out, reading the session and registering a passkey still work. Registering an account's first passkey now ends its other sessions and OAuth grants, and an MCP access token minted before that first passkey is refused, so a session or grant someone opened with a leaked password in that window does not turn into full access when the real user registers. A refused password sign-in for an account that has a passkey now counts against the sign-in rate limit.
 
 - **Members see and change only their own inboxes' mail.** A conversation or a sender with mail in both a granted and a private inbox leaked the private inbox to a member: marking the conversation (or the person, with a private `recipient`) read changed the private rows too, and the People list and detail counted the private inbox's address, counts, recency, drafts and attachments. Each is now scoped to the member's inboxes; person detail returns counts and timestamps over visible mail only and finds contacts a member has only written to. Admins are unchanged.

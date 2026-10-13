@@ -100,8 +100,16 @@ contactsRouter.openapi(exportRoute, async (c) => {
     return c.json({ error: "No record of this address" }, 404);
   }
 
+  // Logs name the subject by its erasure pseudonym, never the address: an
+  // erasure would not be one if the address stayed in the logs. The same
+  // subject gets the same pseudonym, so its export and erase lines still match.
+  // Export does not otherwise need the secret, so a missing one only blanks
+  // the pseudonym here rather than failing the request.
+  const subject = c.env.UNSUBSCRIBE_SECRET
+    ? await erasureToken(email, c.env.UNSUBSCRIBE_SECRET)
+    : "unavailable";
   console.log(
-    `[audit] contact export email=${email} operator=${c.get("user")?.id ?? "unknown"} at=${Math.floor(Date.now() / 1000)}`,
+    `[audit] contact export subject=${subject} operator=${c.get("user")?.id ?? "unknown"} at=${Math.floor(Date.now() / 1000)}`,
   );
 
   return c.json({
@@ -179,7 +187,7 @@ contactsRouter.openapi(eraseRoute, async (c) => {
   const changed = (r: any) => Number(r?.meta?.changes ?? 0);
 
   console.log(
-    `[audit] contact erase email=${email} operator=${c.get("user")?.id ?? "unknown"} at=${now}`,
+    `[audit] contact erase subject=${token} operator=${c.get("user")?.id ?? "unknown"} at=${now}`,
   );
 
   return c.json({

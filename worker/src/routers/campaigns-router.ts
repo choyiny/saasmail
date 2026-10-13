@@ -22,6 +22,7 @@ import { json200Response, json201Response } from "../lib/helpers";
 import {
   assertInboxAllowed,
   inboxFilter,
+  isInboxAllowed,
   type AllowedInboxes,
 } from "../lib/inbox-permissions";
 import {
@@ -327,7 +328,15 @@ campaignsRouter.openapi(createCampaignRoute, async (c) => {
       .where(eq(emailTemplates.slug, body.templateSlug))
       .limit(1);
     const template = rows[0];
-    if (!template) return c.json({ error: "Template not found" }, 404);
+    // A template scoped to an inbox the caller cannot use is as unreadable
+    // here as through GET /api/email-templates/{slug}.
+    if (
+      !template ||
+      (template.fromAddress !== null &&
+        !isInboxAllowed(allowed, template.fromAddress))
+    ) {
+      return c.json({ error: "Template not found" }, 404);
+    }
     seeded = {
       format: template.format,
       bodyHtml: template.bodyHtml,

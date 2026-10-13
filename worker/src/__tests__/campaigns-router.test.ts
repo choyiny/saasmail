@@ -232,6 +232,59 @@ describe("campaigns CRUD", () => {
     expect(res.status).toBe(403);
   });
 
+  it("seeds only from a template the caller can read", async () => {
+    await adminKey();
+    await seedListAndTemplate();
+    const t = ts();
+    await getDb()
+      .insert(emailTemplates)
+      .values([
+        {
+          id: "tpl-other",
+          slug: "other-inbox",
+          name: "Other inbox",
+          subject: "Private",
+          bodyHtml: "<p>Not yours</p>",
+          fromAddress: "other@example.com",
+          createdAt: t,
+          updatedAt: t,
+        },
+        {
+          id: "tpl-own",
+          slug: "own-inbox",
+          name: "Own inbox",
+          subject: "Mine",
+          bodyHtml: "<p>Yours</p>",
+          fromAddress: FROM,
+          createdAt: t,
+          updatedAt: t,
+        },
+      ]);
+    const { apiKey } = await createTestUser({
+      id: "u-m1",
+      role: "member",
+      email: "m1@example.com",
+    });
+    await getDb().insert(inboxPermissions).values({
+      userId: "u-m1",
+      email: FROM,
+      createdAt: t,
+      createdBy: "u-admin",
+    });
+
+    // Same answer as GET /api/email-templates/{slug}: the template's content
+    // must not be readable through a campaign seeded from it.
+    const refused = await createCampaign(apiKey, {
+      templateSlug: "other-inbox",
+    });
+    expect(refused.res.status).toBe(404);
+    expect(await getDb().select().from(campaigns)).toHaveLength(0);
+
+    const own = await createCampaign(apiKey, { templateSlug: "own-inbox" });
+    expect(own.res.status).toBe(201);
+    expect(own.body.bodyHtml).toBe("<p>Yours</p>");
+  });
+
   it("edits a draft and refuses to edit anything else", async () => {
     const apiKey = await adminKey();
     await seedListAndTemplate();
