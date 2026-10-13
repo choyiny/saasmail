@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, FileText, Pencil, Trash2, Hash } from "lucide-react";
+import { Plus, FileText, Pencil, Trash2, Hash, Blocks } from "lucide-react";
 import { fetchTemplates, deleteTemplate } from "@/lib/api";
 import type { EmailTemplate } from "@/lib/api";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
@@ -54,13 +54,25 @@ export default function TemplatesPage() {
         title="Email Templates"
         subtitle="Reusable HTML email templates with {{variable}} interpolation. Send via the UI or API."
         action={
-          <button
-            onClick={() => navigate("/templates/new")}
-            className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
-          >
-            <Plus size={14} />
-            New template
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Two entry points rather than a format switch inside the editor:
+                converting HTML to blocks is refused by the API (the parse would
+                be lossy), so the choice belongs at creation time. */}
+            <button
+              onClick={() => navigate("/templates/new?format=block")}
+              className="inline-flex items-center gap-1.5 rounded-[8px] border border-border bg-card px-4 py-2 text-sm font-medium text-text-secondary shadow-sm transition-colors hover:bg-bg-muted hover:text-text-primary"
+            >
+              <Blocks size={14} />
+              New block template
+            </button>
+            <button
+              onClick={() => navigate("/templates/new")}
+              className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
+            >
+              <Plus size={14} />
+              New template
+            </button>
+          </div>
         }
       />
 

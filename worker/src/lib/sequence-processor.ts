@@ -67,33 +67,6 @@ export async function handleScheduled(env: CloudflareBindings): Promise<void> {
 /**
  * Queue consumer: process a batch of sequence email messages.
  */
-export async function handleQueueBatch(
-  batch: MessageBatch<SequenceEmailMessage>,
-  env: CloudflareBindings,
-): Promise<void> {
-  if (isDemoMode(env)) {
-    // No queue binding exists in demo, so this should never fire — ack
-    // anything that somehow lands here so it doesn't infinitely retry.
-    for (const msg of batch.messages) msg.ack();
-    return;
-  }
-  const db = drizzle(env.DB, { schema });
-  const sender = createEmailSender(env);
-
-  for (const msg of batch.messages) {
-    try {
-      await processSequenceEmail(db, sender, env, msg.body.sequenceEmailId);
-      msg.ack();
-    } catch (err) {
-      console.error(
-        `Failed to process sequence email ${msg.body.sequenceEmailId}:`,
-        err,
-      );
-      msg.retry();
-    }
-  }
-}
-
 /**
  * Mark a step terminally failed and settle the enrollment.
  *

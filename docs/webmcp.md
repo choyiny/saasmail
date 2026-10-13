@@ -48,6 +48,10 @@ same tools still register.
   no send or delete tool: `compose_email`, `compose_from_template`, and
   `reply_email` produce drafts the signed-in user reviews and sends by hand —
   the agent cannot dispatch or destroy mail on its own.
+- **Newsletters are read-only.** An agent can report on lists and campaigns
+  but cannot create, edit, schedule or send one. A campaign send is
+  irreversible and reaches thousands of strangers at once, which is exactly
+  the capability that should stay behind a human click.
 - **Watchable.** A bottom-right activity popup surfaces each tool call as it
   runs (running → done/error), so the agent's work is visible rather than
   happening on an idle screen.
@@ -58,7 +62,7 @@ same tools still register.
 
 ## Tool list
 
-**20 total: 12 read, 8 action.** Read tools return data through the same `/api`
+**24 total: 16 read, 8 action.** Read tools return data through the same `/api`
 client the UI already uses. Action tools drive the real UI — they navigate, open
 the compose drawer pre-filled, save a reply draft into the inbox Drafts filter,
 enroll a contact and switch to the Sequenced view, or render the agent's live
@@ -69,7 +73,9 @@ enroll contacts by criteria).
 
 Read: `get_playbook`, `whoami`, `list_inboxes`, `list_conversations`,
 `list_contacts`, `get_contact`, `list_emails`, `read_email`, `search_emails`,
-`list_templates`, `get_template`, `list_sequences`.
+`list_templates`, `get_template`, `list_sequences`,
+`list_newsletter_lists`, `get_newsletter_list`, `list_campaigns`,
+`get_campaign_stats`.
 
 Action: `open_contact`, `compose_email`, `compose_from_template`,
 `reply_email`, `mark_read`, `mark_unread`, `enroll_in_sequence`,

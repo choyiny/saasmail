@@ -246,6 +246,20 @@
       "when": 1788062708146,
       "tag": "0034_closed_krista_starr",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1788622787422,
+      "tag": "0035_newsletter_module",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1788622898280,
+      "tag": "0036_newsletter_custom_indexes",
+      "breakpoints": true
     }
   ]
 }
