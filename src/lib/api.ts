@@ -1387,21 +1387,19 @@ export async function cancelOutboxItem(
   return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
 }
 
-// --- Newsletters: lists, members, subscribe forms, campaigns -----------------
+// --- Newsletters: lists, members, campaigns ----------------------------------
 
 export interface SubscriberList {
   id: string;
   name: string;
   description: string | null;
   fromAddress: string;
-  doubleOptIn: boolean;
-  confirmationTemplateSlug: string | null;
   archivedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
 
-export type MemberStatus = "pending" | "subscribed" | "unsubscribed";
+export type MemberStatus = "subscribed" | "unsubscribed";
 
 export interface ListMember {
   id: string;
@@ -1410,11 +1408,10 @@ export interface ListMember {
   email: string;
   name: string | null;
   status: MemberStatus;
-  source: "form" | "api" | "import";
-  consentSource: "form" | "api" | "import";
+  source: "api" | "import";
+  consentSource: "api" | "import";
   consentAt: number | null;
   subscribedAt: number | null;
-  confirmedAt: number | null;
   unsubscribedAt: number | null;
   createdAt: number;
 }
@@ -1427,25 +1424,6 @@ export interface ImportJob {
   importedCount: number;
   skippedCount: number;
   errors: Array<{ row: number; reason: string }>;
-}
-
-export interface SubscribeForm {
-  id: string;
-  listId: string;
-  name: string;
-  showNameField: boolean;
-  nameRequired: boolean;
-  successMessage: string;
-  redirectUrl: string | null;
-  allowedOrigins: string | null;
-  /**
-   * Copy-paste markup, built server-side. It carries the honeypot field the
-   * public subscribe endpoint checks by name, so it must never be rebuilt on
-   * the client. Present on create and on the single-form read.
-   */
-  embedSnippet?: string;
-  createdAt: number;
-  updatedAt: number;
 }
 
 export type CampaignStatus =
@@ -1520,8 +1498,6 @@ export async function createList(body: {
   name: string;
   description?: string | null;
   fromAddress: string;
-  doubleOptIn?: boolean;
-  confirmationTemplateSlug?: string | null;
 }): Promise<SubscriberList> {
   return apiFetch("/api/lists", {
     method: "POST",
@@ -1536,8 +1512,6 @@ export async function updateList(
     name: string;
     description: string | null;
     fromAddress: string;
-    doubleOptIn: boolean;
-    confirmationTemplateSlug: string | null;
   }>,
 ): Promise<SubscriberList> {
   return apiFetch(`/api/lists/${id}`, {
@@ -1615,54 +1589,6 @@ export async function cancelImportJob(
   await apiFetch(`/api/lists/${id}/members/import/${jobId}`, {
     method: "DELETE",
   });
-}
-
-export async function fetchSubscribeForms(): Promise<{
-  items: SubscribeForm[];
-}> {
-  return apiFetch("/api/subscribe-forms");
-}
-
-export async function fetchSubscribeForm(id: string): Promise<SubscribeForm> {
-  return apiFetch(`/api/subscribe-forms/${id}`);
-}
-
-export async function createSubscribeForm(body: {
-  listId: string;
-  name: string;
-  showNameField?: boolean;
-  nameRequired?: boolean;
-  successMessage?: string;
-  redirectUrl?: string | null;
-  allowedOrigins?: string | null;
-}): Promise<SubscribeForm> {
-  return apiFetch("/api/subscribe-forms", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function updateSubscribeForm(
-  id: string,
-  body: Partial<{
-    name: string;
-    showNameField: boolean;
-    nameRequired: boolean;
-    successMessage: string;
-    redirectUrl: string | null;
-    allowedOrigins: string | null;
-  }>,
-): Promise<SubscribeForm> {
-  return apiFetch(`/api/subscribe-forms/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-export async function deleteSubscribeForm(id: string): Promise<void> {
-  await apiFetch(`/api/subscribe-forms/${id}`, { method: "DELETE" });
 }
 
 export async function fetchCampaigns(): Promise<{
@@ -1782,7 +1708,6 @@ export async function eraseContact(email: string): Promise<{
   memberships: number;
   events: number;
   recipients: number;
-  attempts: number;
 }> {
   return apiFetch(`/api/contacts/${encodeURIComponent(email)}/erase`, {
     method: "POST",

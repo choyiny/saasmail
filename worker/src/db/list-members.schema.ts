@@ -29,25 +29,19 @@ export const listMembers = sqliteTable(
     /** Denormalized from contacts.email for fast lookup. */
     email: text("email").notNull(),
     status: text("status", {
-      enum: ["pending", "subscribed", "unsubscribed"],
+      enum: ["subscribed", "unsubscribed"],
     })
       .notNull()
-      .default("pending"),
-    source: text("source", { enum: ["form", "api", "import"] }).notNull(),
-    /** FK subscribe_forms.id — NULL unless source = 'form'. */
-    formId: text("form_id"),
-    /** CF-Connecting-IP at submission. Nulled by cron after 30 days. */
-    submittedIp: text("submitted_ip"),
+      .default("subscribed"),
+    source: text("source", { enum: ["api", "import"] }).notNull(),
     /** Provenance for compliance export; mirrors `source` at capture time. */
     consentSource: text("consent_source", {
-      enum: ["form", "api", "import"],
+      enum: ["api", "import"],
     }).notNull(),
     consentAt: integer("consent_at"),
     /** FK async_jobs.id — set when source = 'import'. */
     importJobId: text("import_job_id"),
     subscribedAt: integer("subscribed_at"),
-    /** Double opt-in confirmation timestamp. */
-    confirmedAt: integer("confirmed_at"),
     unsubscribedAt: integer("unsubscribed_at"),
     unsubscribeReason: text("unsubscribe_reason"),
     createdAt: integer("created_at").notNull(),

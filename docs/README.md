@@ -27,7 +27,7 @@ Everything that used to live in one very long README. Start at
 | [Outlook integration](outlook.md)                 | The same for Microsoft 365 and outlook.com mailboxes, over Microsoft Graph                             |
 | [Email templates](templates.md)                   | The `{{variable}}` grammar, sections, escaping, and the send contract                                  |
 | [Sequences](sequences.md)                         | Multi-step drip campaigns and how they're scheduled                                                    |
-| [Newsletters](newsletters.md)                     | Lists, subscribe forms, campaigns, tracking, and retention                                             |
+| [Newsletters](newsletters.md)                     | Lists, campaigns, tracking, and retention                                                              |
 | [Suppressions and unsubscribe](suppressions.md)   | The suppression list, RFC 8058 one-click, and the `transactional` flag                                 |
 | [Users and API keys](users-and-api-keys.md)       | Invites, roles, passkeys, and `sk_…` keys                                                              |
 | [MCP server](mcp.md)                              | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation                             |

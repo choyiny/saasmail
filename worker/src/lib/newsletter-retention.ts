@@ -11,32 +11,9 @@ type Db = DrizzleD1Database<any>;
  * engagement events on a large instance is exactly the statement that times
  * out and then never succeeds on any subsequent tick either.
  */
-export const IP_RETENTION_SECONDS = 30 * 24 * 3600;
 export const EVENT_RETENTION_SECONDS = 13 * 30 * 24 * 3600;
 
 const BATCH = 500;
-
-/**
- * Clear the submission IP from memberships older than the window.
- *
- * The membership row stays — it is the consent record, and deleting it would
- * destroy the answer to "why do we have this address?". Only the raw IP goes.
- */
-export async function purgeExpiredMemberIps(
-  db: Db,
-  now: number,
-): Promise<number> {
-  const cutoff = now - IP_RETENTION_SECONDS;
-  const result = await db.run(sql`
-    UPDATE list_members SET submitted_ip = NULL
-    WHERE id IN (
-      SELECT id FROM list_members
-      WHERE submitted_ip IS NOT NULL AND created_at < ${cutoff}
-      LIMIT ${BATCH}
-    )
-  `);
-  return Number(result.meta?.changes ?? 0);
-}
 
 /** Drop engagement events past the window, one bounded batch per tick. */
 export async function purgeExpiredCampaignEvents(

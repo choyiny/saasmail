@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Archive, ChevronLeft } from "lucide-react";
-import { fetchList, updateList, type SubscriberList } from "@/lib/api";
+import { fetchList, type SubscriberList } from "@/lib/api";
 import { PageContainer } from "@/components/PageHeader";
 import ListMembersTable from "@/components/ListMembersTable";
 
@@ -9,7 +9,6 @@ export default function ListDetailPage() {
   const { id = "" } = useParams();
   const [list, setList] = useState<SubscriberList | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetchList(id)
@@ -17,16 +16,6 @@ export default function ListDetailPage() {
       .catch(() => setList(null))
       .finally(() => setLoading(false));
   }, [id]);
-
-  async function toggleDoubleOptIn() {
-    if (!list) return;
-    setSaving(true);
-    try {
-      setList(await updateList(id, { doubleOptIn: !list.doubleOptIn }));
-    } finally {
-      setSaving(false);
-    }
-  }
 
   if (loading) {
     return (
@@ -74,13 +63,6 @@ export default function ListDetailPage() {
             {list.fromAddress}
           </p>
         </div>
-        <button
-          onClick={toggleDoubleOptIn}
-          disabled={saving || list.archivedAt !== null}
-          className="rounded-[6px] px-3 py-2 text-xs font-medium text-text-secondary ring-1 ring-border hover:bg-bg-muted disabled:opacity-50"
-        >
-          {list.doubleOptIn ? "Double opt-in: on" : "Double opt-in: off"}
-        </button>
       </div>
 
       {list.archivedAt !== null && (

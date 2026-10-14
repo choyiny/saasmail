@@ -27,8 +27,6 @@ import { asyncJobs } from "./async-jobs.schema";
 import { contacts } from "./contacts.schema";
 import { lists } from "./lists.schema";
 import { listMembers } from "./list-members.schema";
-import { subscribeForms } from "./subscribe-forms.schema";
-import { subscribeAttempts } from "./subscribe-attempts.schema";
 import { campaigns } from "./campaigns.schema";
 import { campaignRecipients } from "./campaign-recipients.schema";
 import { campaignLinks } from "./campaign-links.schema";
@@ -65,8 +63,6 @@ export const schema = {
   contacts,
   lists,
   listMembers,
-  subscribeForms,
-  subscribeAttempts,
   campaigns,
   campaignRecipients,
   campaignLinks,

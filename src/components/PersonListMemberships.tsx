@@ -4,7 +4,6 @@ import { fetchListMemberships, type ListMembershipSummary } from "@/lib/api";
 
 const STATUS_STYLE: Record<ListMembershipSummary["status"], string> = {
   subscribed: "bg-emerald-500/10 text-emerald-700",
-  pending: "bg-amber-500/10 text-amber-700",
   unsubscribed: "bg-bg-muted text-text-tertiary",
 };
 

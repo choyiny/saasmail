@@ -144,8 +144,8 @@ unsubscribeRouter.openapi(unsubscribeRoute, async (c) => {
 // token performed. Idempotent — undoing something already undone succeeds.
 //
 // v2 undo is time-boxed (see RESUBSCRIBE_UNDO_WINDOW_SECONDS): past the
-// window this answers 410, and the way back onto the list is a fresh opt-in
-// through the public form.
+// window this answers 410, and only a member of the team can add the address
+// back.
 
 const undoRoute = createRoute({
   method: "post",

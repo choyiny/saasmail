@@ -4,7 +4,7 @@
 
 ![Newsletter campaign preview](screenshots/newsletter-editor.jpg)
 
-Lists, subscribe forms, and campaigns — bulk marketing mail, kept deliberately separate from the transactional and sequence paths that share the same worker.
+Lists and campaigns — bulk marketing mail, kept deliberately separate from the transactional and sequence paths that share the same worker.
 
 ## Contacts are not people
 
@@ -30,19 +30,11 @@ Two rules hold everywhere:
 
 CSV export is formula-injection-safe: a cell starting `=`, `+`, `-` or `@` (including behind leading control characters) is prefixed so a spreadsheet renders it as text instead of executing it.
 
-## Subscribe forms
+## Adding subscribers
 
-`POST /subscribe/{formId}` is public and unauthenticated — it is a form on someone else's website. Three controls sit in front of it:
+Only an authenticated member of your team can put an address on a list: one at a time from the list page, in bulk with a CSV import, or through `POST /api/lists/{id}/members`. Each records its `consentSource` and `consentAt`. saasmail has no public signup endpoint — nothing lets an anonymous caller add an address to a list or make the instance send mail to an address they choose.
 
-- a **honeypot** field that real users never fill in,
-- **rate limiting** backed by `subscribe_attempts`, per form+email and per IP,
-- an **origin check** that fails closed when a form declares allowed origins.
-
-`subscribe_attempts` stores a SHA-256 digest of the address, never the address, and is swept hourly after 24 hours.
-
-With **double opt-in** on, a submission creates a `pending` member and mails a confirmation link; `GET /subscribe/confirm/{token}` promotes it to `subscribed`. An expired confirmation answers `410` so the page can offer a fresh signup rather than a dead end.
-
-A list's `confirmationTemplateSlug` replaces the built-in confirmation mail. The caller must be able to read that template: one scoped to another inbox is refused with `404`, like an unknown slug.
+To take signups on your own website, post them from your backend to `POST /api/lists/{id}/members` with an [API key](users-and-api-keys.md). Keep the key on the server, and do any bot protection and confirmation you need before calling it.
 
 ## Campaigns
 
@@ -98,13 +90,13 @@ Campaign mail carries a **v2** token naming the list, the campaign and the conta
 
 The same URL appears in the body, the footer fallback and both `List-Unsubscribe*` headers, including after an outbox retry, so one click means one thing.
 
-Re-subscribing with the undo button works for **7 days** after unsubscribing. Past that the endpoint answers `410` and the way back is a fresh opt-in through the form — a token lives in an email forever, and without a window anyone holding a forwarded copy could re-subscribe an address indefinitely.
+Re-subscribing with the undo button works for **7 days** after unsubscribing. Past that the endpoint answers `410` and only a member of your team can add the address back — a token lives in an email forever, and without a window anyone holding a forwarded copy could re-subscribe an address indefinitely.
 
 ## Open and click tracking
 
 Every recipient gets their own pixel and their own opaque redirect URLs. A click token carries a **link id, never a URL**: HMAC protects integrity, not confidentiality, so a URL inside a token is readable by anyone holding the link — and campaign links can themselves carry signed or passwordless parameters.
 
-Four token purposes (subscribe-confirm, unsubscribe, open, click) use four keys derived from `UNSUBSCRIBE_SECRET`, so a token that leaks from one context cannot be replayed against another. That matters most for the pixel, which travels through image caches and proxy logs.
+Three token purposes (unsubscribe, open, click) use three keys derived from `UNSUBSCRIBE_SECRET`, so a token that leaks from one context cannot be replayed against another. That matters most for the pixel, which travels through image caches and proxy logs.
 
 The **text part is not link-rewritten**. Opaque redirect URLs in plain text read as phishing to filters and humans alike, and a text-only reader cannot load a pixel to correlate with anyway.
 
@@ -134,14 +126,12 @@ An instance deployed before the unsubscribe feature existed will not have it.
 
 ## Privacy and retention
 
-| Data                       | Window                                            |
-| -------------------------- | ------------------------------------------------- |
-| `subscribe_attempts`       | 24 hours                                          |
-| `list_members.submittedIp` | 30 days, then nulled — the membership row is kept |
-| Re-subscribe undo          | 7 days from `unsubscribedAt`                      |
-| `campaign_events`          | 13 months                                         |
-| Newsletter images          | Kept indefinitely — see below                     |
-| Delivery/consent rows      | Kept until the contact is explicitly erased       |
+| Data                  | Window                                      |
+| --------------------- | ------------------------------------------- |
+| Re-subscribe undo     | 7 days from `unsubscribedAt`                |
+| `campaign_events`     | 13 months                                   |
+| Newsletter images     | Kept indefinitely — see below               |
+| Delivery/consent rows | Kept until the contact is explicitly erased |
 
 Every sweep is a bounded batch on the hourly cron: one tick removes at most one batch and the next continues, because an unbounded delete over thirteen months of events is the statement that times out and then never succeeds on any later tick either.
 
@@ -154,7 +144,7 @@ snapshot, not just live templates. Assets accumulate; budget R2 accordingly.
 Two admin-only operations answer subject requests:
 
 - `GET /api/contacts/{email}/export` — everything the newsletter tables hold for that address.
-- `POST /api/contacts/{email}/erase` — replaces the address with a keyed one-way pseudonym across `contacts`, `list_members`, `campaign_events` and `campaign_recipients`, and deletes the attempt digests. The rows themselves stay: they are the evidence that a suppression or a consent actually happened.
+- `POST /api/contacts/{email}/erase` — replaces the address with a keyed one-way pseudonym across `contacts`, `list_members`, `campaign_events` and `campaign_recipients`. The rows themselves stay: they are the evidence that a suppression or a consent actually happened.
 
 The pseudonym is a keyed HMAC rather than a bare digest. Email addresses are low-entropy, so a plain SHA-256 is reversible with a dictionary and would not be erasure at all.
 
