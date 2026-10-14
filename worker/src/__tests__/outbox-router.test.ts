@@ -16,6 +16,7 @@ async function seedRow(
   opts: {
     fromAddress?: string;
     status?: string;
+    sentStatus?: "sent" | "retrying";
     /** Offset in seconds from now (negative = older). */
     createdAtOffset?: number;
   } = {},
@@ -29,7 +30,7 @@ async function seedRow(
     fromAddress: opts.fromAddress ?? "me@saasmail.test",
     toAddress: "to@example.com",
     subject: "Hi",
-    status: "retrying",
+    status: opts.sentStatus ?? "retrying",
     sentAt: createdAt,
     createdAt,
   });
@@ -305,5 +306,55 @@ describe("outbox router", () => {
       (env as any).RESEND_API_KEY = savedKey;
       (env as any).EMAIL = savedEmail;
     }
+  });
+  /**
+   * `bookkeeping_pending` marks a campaign email the provider has already
+   * accepted, held until the campaign records it. Its `nextRetryAt` is never
+   * pushed forward, so after an hour the due-time guards alone would let
+   * Retry send it a second time and Cancel mark a delivered email failed.
+   */
+  describe("rows the provider already accepted", () => {
+    async function seedAccepted() {
+      await seedRow("ob-held", {
+        status: "bookkeeping_pending",
+        sentStatus: "sent",
+      });
+    }
+
+    it("leaves them out of the list", async () => {
+      await seedAccepted();
+      await seedRow("ob-1");
+      const res = await authFetch("/api/outbox", { apiKey });
+      const body = (await res.json()) as { items: Array<{ id: string }> };
+      expect(body.items.map((i) => i.id)).toEqual(["ob-1"]);
+    });
+
+    it("refuses to retry them", async () => {
+      await seedAccepted();
+      const res = await authFetch("/api/outbox/ob-held/retry", {
+        apiKey,
+        method: "POST",
+      });
+      expect(res.status).toBe(409);
+      const rows = await getDb().select().from(outboxEmails);
+      expect(rows[0].status).toBe("bookkeeping_pending");
+      expect(rows[0].attempts).toBe(1); // no second send was attempted
+    });
+
+    it("refuses to cancel them, and leaves the sent email sent", async () => {
+      await seedAccepted();
+      const res = await authFetch("/api/outbox/ob-held", {
+        apiKey,
+        method: "DELETE",
+      });
+      expect(res.status).toBe(409);
+      const db = getDb();
+      expect(await db.select().from(outboxEmails)).toHaveLength(1);
+      const sent = await db
+        .select()
+        .from(sentEmails)
+        .where(eq(sentEmails.id, "sent-ob-held"));
+      expect(sent[0].status).toBe("sent");
+    });
   });
 });
