@@ -7,8 +7,8 @@ import { contacts } from "../db/contacts.schema";
  * Strip characters that must never reach a rendered template or a mail header.
  *
  * `contacts.name` is the first template-variable source in this codebase fed by
- * unauthenticated bulk input (the public subscribe form and CSV import), rather
- * than by an authenticated API caller. CR/LF in a personalization value is a
+ * bulk third-party input (CSV import, and member adds relayed from a signup form
+ * on someone's own site), rather than typed by the operator. CR/LF in a personalization value is a
  * header-injection vector, and other C0 controls corrupt rendered output.
  *
  * HTML escaping is *not* done here — `lib/interpolate.ts` already escapes by

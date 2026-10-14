@@ -17,9 +17,6 @@ export const lists = sqliteTable(
     description: text("description"),
     /** Bare lowercase inbox address — FK sender_identities.from_address. */
     fromAddress: text("from_address").notNull(),
-    doubleOptIn: integer("double_opt_in").notNull().default(0),
-    /** Optional email_templates.slug for the opt-in confirmation mail. */
-    confirmationTemplateSlug: text("confirmation_template_slug"),
     /** Set instead of deleting once the list has campaign history. */
     archivedAt: integer("archived_at"),
     createdAt: integer("created_at").notNull(),

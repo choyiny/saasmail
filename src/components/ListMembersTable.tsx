@@ -15,14 +15,12 @@ import {
 
 const STATUS_STYLE: Record<MemberStatus, string> = {
   subscribed: "bg-emerald-500/10 text-emerald-700",
-  pending: "bg-amber-500/10 text-amber-700",
   unsubscribed: "bg-bg-muted text-text-tertiary",
 };
 
 const FILTERS: Array<{ label: string; value: MemberStatus | "all" }> = [
   { label: "All", value: "all" },
   { label: "Subscribed", value: "subscribed" },
-  { label: "Pending", value: "pending" },
   { label: "Unsubscribed", value: "unsubscribed" },
 ];
 

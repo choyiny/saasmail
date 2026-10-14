@@ -13,7 +13,7 @@ type Db = DrizzleD1Database<any>;
  * The undo button exists for the misclick, not as a permanent re-entry point:
  * a token lives in an email forever, so without a window anyone holding a
  * forwarded copy could re-subscribe an address indefinitely. After it closes,
- * coming back requires a fresh opt-in through the public form.
+ * only a member of the team can add the address back.
  */
 export const RESUBSCRIBE_UNDO_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 

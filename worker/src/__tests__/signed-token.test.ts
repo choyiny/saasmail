@@ -6,40 +6,38 @@ const SECRET = "test-secret-do-not-use-in-prod";
 
 describe("signPayload / verifyPayload", () => {
   it("round-trips a payload within its domain", async () => {
-    const token = await signPayload({ a: 1 }, SECRET, "subscribe-confirm");
-    expect(await verifyPayload(token, SECRET, "subscribe-confirm")).toEqual({
+    const token = await signPayload({ a: 1 }, SECRET, "unsubscribe");
+    expect(await verifyPayload(token, SECRET, "unsubscribe")).toEqual({
       a: 1,
     });
   });
 
   it("rejects a tampered signature", async () => {
-    const token = await signPayload({ a: 1 }, SECRET, "subscribe-confirm");
+    const token = await signPayload({ a: 1 }, SECRET, "unsubscribe");
     const [payload, sig] = token.split(".");
     const flipped = sig[0] === "A" ? "B" : "A";
     const tampered = `${payload}.${flipped}${sig.slice(1)}`;
-    expect(
-      await verifyPayload(tampered, SECRET, "subscribe-confirm"),
-    ).toBeNull();
+    expect(await verifyPayload(tampered, SECRET, "unsubscribe")).toBeNull();
   });
 
   it("rejects a tampered payload", async () => {
-    const token = await signPayload({ a: 1 }, SECRET, "subscribe-confirm");
+    const token = await signPayload({ a: 1 }, SECRET, "unsubscribe");
     const sig = token.split(".")[1];
     const forged = `${btoa('{"a":2}').replace(/=/g, "")}.${sig}`;
-    expect(await verifyPayload(forged, SECRET, "subscribe-confirm")).toBeNull();
+    expect(await verifyPayload(forged, SECRET, "unsubscribe")).toBeNull();
   });
 
   it("rejects the wrong secret", async () => {
-    const token = await signPayload({ a: 1 }, SECRET, "subscribe-confirm");
+    const token = await signPayload({ a: 1 }, SECRET, "unsubscribe");
     expect(
-      await verifyPayload(token, "other-secret", "subscribe-confirm"),
+      await verifyPayload(token, "other-secret", "unsubscribe"),
     ).toBeNull();
   });
 
   it.each(["", "nodot", "a.b.c", "!!.??"])(
     "rejects the malformed token %j",
     async (bad) => {
-      expect(await verifyPayload(bad, SECRET, "subscribe-confirm")).toBeNull();
+      expect(await verifyPayload(bad, SECRET, "unsubscribe")).toBeNull();
     },
   );
 
@@ -51,7 +49,7 @@ describe("signPayload / verifyPayload", () => {
    */
   it("rejects a token replayed against a different domain", async () => {
     const token = await signPayload({ a: 1 }, SECRET, "track-open");
-    expect(await verifyPayload(token, SECRET, "subscribe-confirm")).toBeNull();
+    expect(await verifyPayload(token, SECRET, "unsubscribe")).toBeNull();
     expect(await verifyPayload(token, SECRET, "track-click")).toBeNull();
     expect(await verifyPayload(token, SECRET, "track-open")).toEqual({ a: 1 });
   });
@@ -75,40 +73,20 @@ describe("signPayload / verifyPayload", () => {
       const token = await signPayload(
         { a: 1, exp: future },
         SECRET,
-        "subscribe-confirm",
+        "unsubscribe",
       );
-      expect(
-        await verifyPayload(token, SECRET, "subscribe-confirm"),
-      ).toMatchObject({ a: 1 });
+      expect(await verifyPayload(token, SECRET, "unsubscribe")).toMatchObject({
+        a: 1,
+      });
     });
 
     it("rejects an expired token", async () => {
       const token = await signPayload(
         { a: 1, exp: past },
         SECRET,
-        "subscribe-confirm",
+        "unsubscribe",
       );
-      expect(
-        await verifyPayload(token, SECRET, "subscribe-confirm"),
-      ).toBeNull();
-    });
-
-    it("reports expiry distinctly so the caller can return 410 rather than 400", async () => {
-      const token = await signPayload(
-        { a: 1, exp: past },
-        SECRET,
-        "subscribe-confirm",
-      );
-      expect(
-        await verifyPayload(token, SECRET, "subscribe-confirm", {
-          detailed: true,
-        }),
-      ).toEqual({ status: "expired" });
-      expect(
-        await verifyPayload("garbage", SECRET, "subscribe-confirm", {
-          detailed: true,
-        }),
-      ).toEqual({ status: "invalid" });
+      expect(await verifyPayload(token, SECRET, "unsubscribe")).toBeNull();
     });
 
     it("treats a token with no exp as non-expiring", async () => {
