@@ -14,24 +14,46 @@ import {
 } from "./newsletter-retention";
 
 /**
- * Hourly newsletter housekeeping.
+ * True for the cron tick at the top of an hour.
+ *
+ * The cron runs every 15 minutes. The retention sweeps below have no reason to
+ * run that often, so they keep their hourly cadence by running on the `:00`
+ * tick only. This relies on the schedule including minute 0, which both the
+ * shipped 15-minute schedule and a plain hourly one do.
+ */
+export function isTopOfHourTick(scheduledTime: number): boolean {
+  return new Date(scheduledTime).getUTCMinutes() === 0;
+}
+
+/**
+ * Newsletter housekeeping, run from every cron tick.
  *
  * One entry point taking `env`, matching `processOutbox(env)` /
  * `handleScheduled(env)` so `index.ts` does not need to know how a db client is
  * built. Each task is caught independently: a failure in one sweep must not
  * prevent the others, and none of them may ever prevent mail from going out.
+ *
+ * The campaign pass runs on every tick: it fires scheduled campaigns and
+ * finishes held bookkeeping, both of which are better done sooner. The
+ * retention sweeps run on the top-of-hour tick only (`isTopOfHourTick`).
+ *
+ * @param scheduledTime the tick's `ScheduledEvent.scheduledTime`, in ms.
  */
 export async function runNewsletterMaintenance(
   env: CloudflareBindings,
+  scheduledTime: number,
 ): Promise<void> {
   const db = drizzle(env.DB, { schema });
   const now = Math.floor(Date.now() / 1000);
 
-  await purgeFinishedImports(db, env, now).catch((err) =>
-    console.error("[cron] finished-import purge failed:", err),
-  );
   await runCampaignPass(db, env, now).catch((err) =>
     console.error("[cron] campaign pass failed:", err),
+  );
+
+  if (!isTopOfHourTick(scheduledTime)) return;
+
+  await purgeFinishedImports(db, env, now).catch((err) =>
+    console.error("[cron] finished-import purge failed:", err),
   );
   await purgeExpiredCampaignEvents(db, now).catch((err) =>
     console.error("[cron] campaign-event purge failed:", err),
@@ -47,7 +69,7 @@ export const STALL_SECONDS = 24 * 3600;
 export const OVERDUE_SECONDS = 24 * 3600;
 
 /**
- * The hourly campaign pass, in order.
+ * The campaign pass, run on every cron tick, in order.
  *
  * Reconciliation runs *before* the sweeps: a campaign whose last recipient is
  * only waiting on bookkeeping is finished, and would otherwise be marked

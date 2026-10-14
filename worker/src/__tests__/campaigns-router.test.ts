@@ -27,7 +27,10 @@ import {
   type CampaignStatus,
 } from "../lib/campaign-states";
 import { beginCampaignSend } from "../routers/campaigns-router";
-import { runCampaignPass } from "../lib/newsletter-cron";
+import {
+  runCampaignPass,
+  runNewsletterMaintenance,
+} from "../lib/newsletter-cron";
 
 beforeAll(applyMigrations);
 beforeEach(cleanDb);
@@ -649,7 +652,7 @@ describe("preview and test-send", () => {
   });
 });
 
-describe("hourly campaign pass", () => {
+describe("campaign pass", () => {
   async function seedCampaign(status: string, extra: object = {}) {
     const t = ts();
     await getDb()
@@ -674,6 +677,19 @@ describe("hourly campaign pass", () => {
     await seedCampaign("scheduled", { scheduledAt: ts() - 60 });
 
     await runCampaignPass(getDb(), cfEnv(), ts());
+
+    const c = (
+      await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
+    )[0];
+    expect(c.status).toBe("preparing");
+  });
+
+  // Only the retention sweeps wait for the top of the hour.
+  it("runs on every cron tick, not just the hourly one", async () => {
+    await seedListAndTemplate(1);
+    await seedCampaign("scheduled", { scheduledAt: ts() - 60 });
+
+    await runNewsletterMaintenance(cfEnv(), Date.UTC(2026, 9, 14, 23, 15));
 
     const c = (
       await getDb().select().from(campaigns).where(eq(campaigns.id, "camp-x"))
