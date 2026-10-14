@@ -607,7 +607,7 @@ describe("send router — Gmail reply routing", () => {
     let refreshAttempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("oauth2.googleapis.com")) {
+      if (new URL(url).host === "oauth2.googleapis.com") {
         refreshAttempts++;
         return new Response(JSON.stringify({ error: "invalid_grant" }), {
           status: 400,
@@ -678,7 +678,7 @@ describe("send router — Gmail reply routing", () => {
     let sendAttempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("oauth2.googleapis.com")) {
+      if (new URL(url).host === "oauth2.googleapis.com") {
         return new Response(
           JSON.stringify({ access_token: "fresh-at", expires_in: 3600 }),
           { status: 200, headers: { "content-type": "application/json" } },
@@ -798,7 +798,7 @@ describe("send router — Gmail reply routing", () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("oauth2.googleapis.com")) {
+      if (new URL(url).host === "oauth2.googleapis.com") {
         // One failed request to Google's token endpoint. This is a transient
         // blip, not a verdict about which transport this inbox uses.
         return new Response("upstream unavailable", { status: 503 });
