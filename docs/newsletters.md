@@ -76,7 +76,7 @@ A campaign moves through a small, explicit state machine. Anything not listed is
 
 **Fan-out is resumable.** The coordinator enqueues one page of recipients at a time and only advances its cursor after both the inserts and the queue publish succeed. A duplicate queue delivery is harmless: each recipient is claimed with a single atomic `UPDATE … RETURNING`, so a second delivery finds nothing to claim and stops.
 
-**A crash between "provider accepted" and "we wrote it down" self-heals.** The outbox row is held in `bookkeeping_pending` rather than deleted, and the hourly pass finishes the bookkeeping. It never re-sends: the retry path only ever looks at `pending` rows.
+**A crash between "provider accepted" and "we wrote it down" self-heals.** The outbox row is held in `bookkeeping_pending` rather than deleted, and the hourly pass finishes the bookkeeping. It never re-sends: the hourly retry only picks up `pending` rows, and the Outbox page does not list held rows — its Retry and Cancel answer `409` for anything other than a `pending` or `failed` row.
 
 A campaign that finishes with permanently-rejected recipients ends in `completed_with_failures`, not `sent`. `POST /retry` re-attempts only the recoverable ones.
 
