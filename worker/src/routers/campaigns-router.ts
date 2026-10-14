@@ -166,7 +166,7 @@ function transitionError(action: CampaignAction, status: string) {
  * Live-computed stats.
  *
  * Read from the ledgers rather than the cached `stats*` columns, which are
- * advisory and may lag the hourly rollup. `statsTargeted` is the one exception:
+ * advisory and may lag the cron's rollup. `statsTargeted` is the one exception:
  * it is written once at fan-out start and is authoritative.
  */
 async function liveStats(
@@ -715,7 +715,7 @@ const scheduleRoute = createRoute({
   path: "/{id}/schedule",
   tags: ["Campaigns"],
   description:
-    "Schedule a send. Granularity is the hourly cron window, so a campaign scheduled for 12:01 goes out at the next tick — up to ~59 minutes later.",
+    "Schedule a send. Granularity is the 15-minute cron window, so a campaign scheduled for 12:01 goes out at the next tick — up to ~14 minutes later.",
   request: {
     params: z.object({ id: z.string() }),
     body: {

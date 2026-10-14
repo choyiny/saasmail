@@ -493,7 +493,7 @@ describe("sendCampaignRecipient", () => {
       "retrying",
     );
     const [row] = await getDb().select().from(outboxEmails);
-    // Due now, as the hourly processor would find it.
+    // Due now, as the cron processor would find it.
     await getDb()
       .update(outboxEmails)
       .set({ nextRetryAt: now() - 1 })
