@@ -48,9 +48,7 @@ import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
 import { listsRouter } from "./routers/lists-router";
-import { subscribeFormsRouter } from "./routers/subscribe-forms-router";
 import { campaignsRouter } from "./routers/campaigns-router";
-import { publicSubscribeRouter } from "./routers/public-subscribe-router";
 import { newsletterAssetsRouter } from "./routers/newsletter-assets-router";
 import { publicAssetsRouter } from "./routers/public-assets-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
@@ -261,13 +259,6 @@ app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
 app.route("/api/lists", listsRouter);
-
-// Subscribe forms are admin-only per the Authorization Matrix: a form is a
-// public write surface onto a list, so creating one is a higher bar than
-// editing the list itself.
-app.use("/api/subscribe-forms", requireAdmin);
-app.use("/api/subscribe-forms/*", requireAdmin);
-app.route("/api/subscribe-forms", subscribeFormsRouter);
 app.route("/api/campaigns", campaignsRouter);
 app.route("/api/newsletter-assets", newsletterAssetsRouter);
 
@@ -309,11 +300,6 @@ app.route("/api/unsubscribe", unsubscribeRouter);
 // RFC 8058 one-click POSTs from mail clients like Fastmail / Gmail / Apple Mail.
 // GET requests don't match the router and fall through to the SPA assets handler.
 app.route("/unsubscribe", unsubscribeRouter);
-
-// Public subscribe endpoints — no auth at all. Mounted outside `/api` so the
-// session/passkey/inbox middleware (scoped to `/api/*`) never applies, matching
-// the `/unsubscribe` precedent above.
-app.route("/subscribe", publicSubscribeRouter);
 
 // Open pixel and click redirect. Must be reachable by anyone holding a valid
 // token — the requests come from mail clients and image proxies, which carry

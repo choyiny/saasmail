@@ -14,7 +14,6 @@ import {
   ShieldAlert,
   Send,
   Megaphone,
-  ClipboardList,
   Menu,
   User,
   LogOut,
@@ -219,13 +218,6 @@ export default function TopNav() {
                   </>
                 )}
                 <DropdownMenuItem
-                  onClick={() => navigate("/subscribe-forms")}
-                  className="cursor-pointer"
-                >
-                  <ClipboardList className="h-4 w-4" />
-                  Subscribe forms
-                </DropdownMenuItem>
-                <DropdownMenuItem
                   onClick={() => navigate("/blocklist")}
                   className="cursor-pointer"
                 >
@@ -368,13 +360,6 @@ export default function TopNav() {
                   </button>
                 </>
               )}
-              <button
-                onClick={() => navigate("/subscribe-forms")}
-                className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
-              >
-                <ClipboardList className="h-4 w-4" />
-                Subscribe forms
-              </button>
               <button
                 onClick={() => navigate("/blocklist")}
                 className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"

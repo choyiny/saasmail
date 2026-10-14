@@ -27,7 +27,6 @@ export default function ListsPage() {
     name: "",
     description: "",
     fromAddress: "",
-    doubleOptIn: true,
   });
 
   useEffect(() => {
@@ -46,7 +45,6 @@ export default function ListsPage() {
         name: form.name.trim(),
         description: form.description.trim() || null,
         fromAddress: form.fromAddress.trim(),
-        doubleOptIn: form.doubleOptIn,
       });
       setLists((prev) => [created, ...prev]);
       setOpen(false);
@@ -54,7 +52,6 @@ export default function ListsPage() {
         name: "",
         description: "",
         fromAddress: "",
-        doubleOptIn: true,
       });
     } catch {
       setError("Could not create the list. Check the from address and retry.");
@@ -140,25 +137,6 @@ export default function ListsPage() {
                     className="w-full rounded-[6px] border border-border bg-card px-3 py-2 text-sm"
                   />
                 </label>
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={form.doubleOptIn}
-                    onChange={(e) =>
-                      setForm({ ...form, doubleOptIn: e.target.checked })
-                    }
-                    className="mt-0.5"
-                  />
-                  <span className="text-xs text-text-secondary">
-                    <span className="font-medium text-text-primary">
-                      Double opt-in
-                    </span>
-                    <br />
-                    Form signups stay pending until the subscriber confirms by
-                    email. Recommended — it is what keeps a typo'd or
-                    maliciously-entered address off your list.
-                  </span>
-                </label>
                 {error && <p className="text-xs text-red-600">{error}</p>}
                 <button
                   type="submit"
@@ -223,14 +201,6 @@ export default function ListsPage() {
                           <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-bg-muted px-2 py-0.5 text-[10px] font-medium text-text-tertiary">
                             <Archive size={9} />
                             archived
-                          </span>
-                        )}
-                        {list.doubleOptIn && (
-                          <span
-                            className="inline-flex shrink-0 items-center rounded-full bg-violet/10 px-2 py-0.5 text-[10px] font-medium"
-                            style={{ color: "#7c5cfc" }}
-                          >
-                            double opt-in
                           </span>
                         )}
                       </div>

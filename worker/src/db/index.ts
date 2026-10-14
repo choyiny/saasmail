@@ -24,8 +24,6 @@ export * from "./async-jobs.schema";
 export * from "./contacts.schema";
 export * from "./lists.schema";
 export * from "./list-members.schema";
-export * from "./subscribe-forms.schema";
-export * from "./subscribe-attempts.schema";
 export * from "./campaigns.schema";
 export * from "./campaign-recipients.schema";
 export * from "./campaign-links.schema";

@@ -5,9 +5,7 @@ import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { contacts } from "../db/contacts.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
-import { subscribeAttempts } from "../db/subscribe-attempts.schema";
 import { json200Response } from "../lib/helpers";
-import { hashEmail } from "../lib/subscribe-abuse";
 import type { Variables } from "../variables";
 
 export const contactsRouter = new OpenAPIHono<{
@@ -140,7 +138,6 @@ const eraseRoute = createRoute({
         memberships: z.number(),
         events: z.number(),
         recipients: z.number(),
-        attempts: z.number(),
       }),
       "Rows rewritten",
     ),
@@ -163,7 +160,7 @@ contactsRouter.openapi(eraseRoute, async (c) => {
 
   const memberResult = await db
     .update(listMembers)
-    .set({ email: token, submittedIp: null })
+    .set({ email: token })
     .where(eq(sql`lower(${listMembers.email})`, email));
 
   const eventResult = await db
@@ -178,12 +175,6 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     .set({ email: token })
     .where(eq(sql`lower(${campaignRecipients.email})`, email));
 
-  // Attempts never stored the address, only its digest — so this is a delete,
-  // not a rewrite.
-  const attemptResult = await db
-    .delete(subscribeAttempts)
-    .where(eq(subscribeAttempts.emailHash, await hashEmail(email)));
-
   const changed = (r: any) => Number(r?.meta?.changes ?? 0);
 
   console.log(
@@ -196,6 +187,5 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     memberships: changed(memberResult),
     events: changed(eventResult),
     recipients: changed(recipientResult),
-    attempts: changed(attemptResult),
   });
 });

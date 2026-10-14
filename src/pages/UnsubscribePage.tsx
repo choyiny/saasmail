@@ -186,8 +186,8 @@ export default function UnsubscribePage() {
                 <span className="font-medium text-text-primary">
                   {state.email}
                 </span>{" "}
-                unsubscribed too long ago for one-click undo. You can sign up
-                again through the sender's subscribe form.
+                unsubscribed too long ago for one-click undo. To get back on the
+                list, ask the sender to add you again.
               </p>
             </>
           )}

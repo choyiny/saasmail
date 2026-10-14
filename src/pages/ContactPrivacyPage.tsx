@@ -60,7 +60,7 @@ export default function ContactPrivacyPage() {
     try {
       const result = await eraseContact(record.email);
       setStatus(
-        `Erased. Rewrote ${result.contacts} contact, ${result.memberships} membership, ${result.events} event and ${result.recipients} delivery rows; deleted ${result.attempts} signup attempts.`,
+        `Erased. Rewrote ${result.contacts} contact, ${result.memberships} membership, ${result.events} event and ${result.recipients} delivery rows.`,
       );
       setRecord(null);
       setEmail("");
