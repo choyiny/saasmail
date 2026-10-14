@@ -371,9 +371,10 @@ export default {
       handleScheduled(env)
         .catch((err) => console.error("[cron] sequence dispatch failed:", err))
         .then(() => processOutbox(env))
-        // Newsletter retention sweep. Chained after the delivery work and
-        // separately caught so a cleanup failure can never stop mail going out.
-        .then(() => runNewsletterMaintenance(env)),
+        // Newsletter campaign pass and retention sweeps. Chained after the
+        // delivery work and separately caught so a cleanup failure can never
+        // stop mail going out.
+        .then(() => runNewsletterMaintenance(env, event.scheduledTime)),
     );
     // Isolated from sequence dispatch / outbox processing above: a Gmail
     // sync failure must not be able to break either. `syncAllGmailAccounts`

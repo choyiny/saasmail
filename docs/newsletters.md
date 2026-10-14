@@ -76,13 +76,13 @@ A campaign moves through a small, explicit state machine. Anything not listed is
 
 **Fan-out is resumable.** The coordinator enqueues one page of recipients at a time and only advances its cursor after both the inserts and the queue publish succeed. A duplicate queue delivery is harmless: each recipient is claimed with a single atomic `UPDATE … RETURNING`, so a second delivery finds nothing to claim and stops.
 
-**A crash between "provider accepted" and "we wrote it down" self-heals.** The outbox row is held in `bookkeeping_pending` rather than deleted, and the hourly pass finishes the bookkeeping. It never re-sends: the hourly retry only picks up `pending` rows, and the Outbox page does not list held rows — its Retry and Cancel answer `409` for anything other than a `pending` or `failed` row.
+**A crash between "provider accepted" and "we wrote it down" self-heals.** The outbox row is held in `bookkeeping_pending` rather than deleted, and the next cron tick, at most 15 minutes later, finishes the bookkeeping. It never re-sends: the cron retry only picks up `pending` rows, and the Outbox page does not list held rows — its Retry and Cancel answer `409` for anything other than a `pending` or `failed` row.
 
 A campaign that finishes with permanently-rejected recipients ends in `completed_with_failures`, not `sent`. `POST /retry` re-attempts only the recoverable ones.
 
 ### Scheduling
 
-A scheduled campaign fires on the next hourly tick. More than 24 hours late it moves to `overdue` instead — visible and re-sendable with one click, rather than silently blasting a list on a schedule everyone has forgotten. Scheduling in the past is refused with `422`; a mistyped date should not send.
+A scheduled campaign fires on the next cron tick, at most 15 minutes after its time. More than 24 hours late it moves to `overdue` instead — visible and re-sendable with one click, rather than silently blasting a list on a schedule everyone has forgotten. Scheduling in the past is refused with `422`; a mistyped date should not send.
 
 ## Unsubscribe
 
@@ -133,7 +133,7 @@ An instance deployed before the unsubscribe feature existed will not have it.
 | Newsletter images     | Kept indefinitely — see below               |
 | Delivery/consent rows | Kept until the contact is explicitly erased |
 
-Every sweep is a bounded batch on the hourly cron: one tick removes at most one batch and the next continues, because an unbounded delete over thirteen months of events is the statement that times out and then never succeeds on any later tick either.
+Every sweep is a bounded batch on the top-of-hour cron tick (the campaign pass runs every 15 minutes, the sweeps once an hour): one tick removes at most one batch and the next continues, because an unbounded delete over thirteen months of events is the statement that times out and then never succeeds on any later tick either.
 
 **Newsletter images are never garbage-collected.** An image referenced by a
 sent campaign has to outlive the template that introduced it — the campaign's

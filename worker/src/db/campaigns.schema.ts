@@ -6,7 +6,7 @@ import type { BlockDocument } from "../lib/blocks/schema";
  *
  * **Stats are not the source of truth.** Only `statsTargeted` is written once
  * and trusted; every other `stats*` column is an advisory cache refreshed by
- * the hourly rollup or computed live on read. Completion is decided from
+ * the cron's rollup or computed live on read. Completion is decided from
  * `campaign_recipients` terminal states, never from counters reaching equality
  * — a counter race would either strand a finished campaign in `sending` or
  * declare it done early.
@@ -127,7 +127,7 @@ export const campaigns = sqliteTable(
   (table) => [
     index("campaigns_list_idx").on(table.listId),
     index("campaigns_from_address_idx").on(table.fromAddress),
-    // The hourly pass scans by status and schedule.
+    // The campaign pass scans by status and schedule.
     index("campaigns_status_scheduled_idx").on(table.status, table.scheduledAt),
   ],
 );

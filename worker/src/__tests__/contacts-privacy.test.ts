@@ -327,12 +327,11 @@ describe("contact → person backfill", () => {
 });
 
 describe("the hourly pass actually runs the sweeps", () => {
-  /**
-   * Wiring, not logic. A sweep that exists but is never called from the cron
-   * entry point is indistinguishable from one that was never written — and the
-   * worker's typecheck does not cover this file's call path.
-   */
-  it("drops old events and backfills through runNewsletterMaintenance", async () => {
+  /** Scheduled times of a top-of-hour cron tick and the one after it. */
+  const TOP_OF_HOUR = Date.UTC(2026, 9, 14, 23, 0);
+  const QUARTER_PAST = Date.UTC(2026, 9, 14, 23, 15);
+
+  async function seedSweepable() {
     const old = ts() - EVENT_RETENTION_SECONDS - 60;
     await seedSubject(EMAIL, old);
     await getDb().insert(people).values({
@@ -343,10 +342,35 @@ describe("the hourly pass actually runs the sweeps", () => {
       createdAt: ts(),
       updatedAt: ts(),
     });
+  }
 
-    await runNewsletterMaintenance(env as unknown as CloudflareBindings);
+  /**
+   * Wiring, not logic. A sweep that exists but is never called from the cron
+   * entry point is indistinguishable from one that was never written — and the
+   * worker's typecheck does not cover this file's call path.
+   */
+  it("drops old events and backfills through runNewsletterMaintenance", async () => {
+    await seedSweepable();
+
+    await runNewsletterMaintenance(
+      env as unknown as CloudflareBindings,
+      TOP_OF_HOUR,
+    );
 
     expect(await getDb().select().from(campaignEvents)).toHaveLength(0);
     expect((await getDb().select().from(contacts))[0].personId).toBe("p-1");
+  });
+
+  // The cron runs every 15 minutes; the sweeps keep their hourly cadence.
+  it("leaves the sweeps for the top-of-hour tick", async () => {
+    await seedSweepable();
+
+    await runNewsletterMaintenance(
+      env as unknown as CloudflareBindings,
+      QUARTER_PAST,
+    );
+
+    expect(await getDb().select().from(campaignEvents)).not.toHaveLength(0);
+    expect((await getDb().select().from(contacts))[0].personId).toBeNull();
   });
 });

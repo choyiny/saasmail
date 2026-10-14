@@ -23,7 +23,7 @@ const MAX_LIMIT = 100;
  * has accepted them, until the campaign has recorded the send. Those are
  * delivered mail: retrying one would send it twice, and cancelling one would
  * mark a delivered email failed. They stay invisible here and the campaign's
- * hourly reconciliation releases them.
+ * reconciliation releases them on the next cron tick.
  */
 const ACTIONABLE_STATUSES = ["pending", "failed"] as const;
 
