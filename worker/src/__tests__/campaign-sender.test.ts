@@ -23,6 +23,8 @@ import {
   snapshotCampaign,
 } from "../lib/campaign-sender";
 import { htmlToText } from "../lib/html-to-text";
+import { attemptOutboxRow } from "../lib/outbox";
+import { verifyUnsubscribeToken } from "../lib/unsubscribe-token";
 import type {
   EmailSender,
   SendEmailParams,
@@ -54,6 +56,10 @@ function fakeSender(result: SendEmailResult): EmailSender & {
 }
 
 const OK: SendEmailResult = { id: "prov-1", error: null };
+const TRANSIENT: SendEmailResult = {
+  id: null,
+  error: { message: "quota exceeded", transient: true },
+};
 const PERMANENT: SendEmailResult = {
   id: null,
   error: { message: "invalid recipient", transient: false },
@@ -472,6 +478,53 @@ describe("sendCampaignRecipient", () => {
     // Same URL in the header and the body, so one click means one thing.
     const url = header!.slice(1, -1);
     expect(sender.calls[0].html).toContain(url);
+  });
+
+  /**
+   * The retry runs from the stored outbox row, not from the campaign, so the
+   * per-list link has to survive that round-trip. If it does not, the retry
+   * mints a v1 token and an unsubscribe click suppresses the reader from all
+   * mail instead of removing them from this one list.
+   */
+  it("keeps the per-list v2 link when the outbox retries the send", async () => {
+    const id = await fanOut();
+    const results = [TRANSIENT, OK];
+    const sender = fakeSender(OK);
+    sender.send = async (params: SendEmailParams) => {
+      sender.calls.push(params);
+      return results.shift()!;
+    };
+
+    expect(await sendCampaignRecipient(getDb(), cfEnv(), sender, id)).toBe(
+      "retrying",
+    );
+    const [row] = await getDb().select().from(outboxEmails);
+    // Due now, as the hourly processor would find it.
+    await getDb()
+      .update(outboxEmails)
+      .set({ nextRetryAt: now() - 1 })
+      .where(eq(outboxEmails.id, row.id));
+
+    expect(await attemptOutboxRow(getDb(), cfEnv(), sender, row.id)).toBe(
+      "sent",
+    );
+    expect(sender.calls).toHaveLength(2);
+
+    const [first, retry] = sender.calls;
+    const url = retry.headers!["List-Unsubscribe"]!.slice(1, -1);
+    expect(url).toBe(first.headers!["List-Unsubscribe"]!.slice(1, -1));
+    expect(retry.html).toContain(url);
+
+    const token = new URL(url).searchParams.get("token")!;
+    const verified = await verifyUnsubscribeToken(
+      token,
+      cfEnv().UNSUBSCRIBE_SECRET,
+    );
+    expect(verified).toMatchObject({
+      version: 2,
+      listId: LIST,
+      campaignId: CAMPAIGN,
+    });
   });
 
   it("links to an existing correspondent without creating one", async () => {

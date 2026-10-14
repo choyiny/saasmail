@@ -112,6 +112,41 @@ describe("sendViaOutbox — campaign sends", () => {
     expect(rows[0].status).toBe("pending");
   });
 
+  it("stores the caller's unsubscribe URL with the row, so a retry can reuse it", async () => {
+    const url = "https://mail.example.com/unsubscribe?token=v2-token";
+    await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender: fakeSender(TRANSIENT),
+      sentEmailId: "se-1",
+      campaignRecipientId: "cr-1",
+      ...baseParams,
+      headers: { "Message-ID": "<m1@saasmail.test>" },
+      unsubscribeContext: { url },
+    });
+
+    const [row] = await outboxRows();
+    expect(JSON.parse(row.headers!)).toEqual({
+      "Message-ID": "<m1@saasmail.test>",
+      "List-Unsubscribe": `<${url}>`,
+    });
+  });
+
+  it("stores no unsubscribe header for a transactional send", async () => {
+    await sendViaOutbox({
+      db: getDb(),
+      env: env as unknown as CloudflareBindings,
+      sender: fakeSender(TRANSIENT),
+      sentEmailId: "se-1",
+      ...baseParams,
+      transactional: true,
+      unsubscribeContext: { url: "https://mail.example.com/unsubscribe?t=x" },
+    });
+
+    const [row] = await outboxRows();
+    expect(row.headers).toBeNull();
+  });
+
   it("finalizeOutboxRow removes a held row once bookkeeping is committed", async () => {
     const sender = fakeSender(OK);
     const { outboxId } = await sendViaOutbox({

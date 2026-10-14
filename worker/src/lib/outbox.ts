@@ -101,8 +101,9 @@ export interface OutboxSendParams {
   retryOnFailure?: boolean;
   /**
    * Caller-minted unsubscribe URL (campaigns use a per-list v2 token). Passed
-   * straight through; the retry path recovers it from the stored
-   * `List-Unsubscribe` header instead, so both attempts carry the same link.
+   * straight through, and also written into the row's stored headers as
+   * `List-Unsubscribe`: the retry path recovers it from there, so both
+   * attempts carry the same link.
    */
   unsubscribeContext?: { url: string };
 }
@@ -165,6 +166,14 @@ export async function sendViaOutbox(
     campaignRecipientId: campaignRecipientId ?? null,
   });
 
+  // A retry re-sends from this row alone. Without the URL stored here it would
+  // mint a fresh v1 token, turning a one-list unsubscribe into a global one.
+  // Transactional mail carries no unsubscribe header, so nothing is stored.
+  const storedHeaders =
+    unsubscribeContext && transactional !== true
+      ? { ...headers, "List-Unsubscribe": `<${unsubscribeContext.url}>` }
+      : headers;
+
   await db.insert(outboxEmails).values({
     id: outboxId,
     sentEmailId,
@@ -182,7 +191,7 @@ export async function sendViaOutbox(
     subject,
     bodyHtml: html ?? null,
     bodyText: text ?? null,
-    headers: headers ? JSON.stringify(headers) : null,
+    headers: storedHeaders ? JSON.stringify(storedHeaders) : null,
     transactional: transactional === true ? 1 : 0,
     status: "pending",
     attempts: 0,

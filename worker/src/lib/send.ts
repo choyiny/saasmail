@@ -79,9 +79,9 @@ const UNSUB_PLACEHOLDER = /\{\{unsubscribe_url\}\}/g;
 /**
  * Pull the URL back out of a stored `List-Unsubscribe: <url>` header.
  *
- * The outbox persists the wire headers so a retry reproduces the original
- * message; this is what lets the retry reuse the same unsubscribe link rather
- * than minting a new one, the same way it reuses the original Message-ID.
+ * The outbox stores a caller-supplied unsubscribe URL in this header on the
+ * row, next to the original Message-ID. This is what lets a retry reuse the
+ * same unsubscribe link rather than minting a new one.
  */
 function readListUnsubscribeHeader(
   headers: Record<string, string> | undefined,

@@ -248,6 +248,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A retried campaign email keeps its per-list unsubscribe link.** The outbox row didn't store the campaign's v2 unsubscribe URL, so a send that failed once and went out on retry carried a fresh global (v1) link: clicking it suppressed the reader from all mail instead of removing them from that one list. The row now stores the URL, and the retry sends the same link as the first attempt.
+
 - **Erasing a newsletter subject also clears their address from the audit log.** Their list member and campaign test-send events now name them by the erasure pseudonym, and the erase response counts them as `auditEvents`.
 
 - **Templates scoped to another inbox stay unreadable through newsletters.** A member could seed a campaign from, or set as a list's confirmation mail, a template scoped to an inbox they can't use, and so read its content. Both now answer `404 Template not found`, the same as `GET /api/email-templates/{slug}`.
