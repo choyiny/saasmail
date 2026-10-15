@@ -12,6 +12,7 @@ import { GmailApiError, listSendAs } from "../lib/gmail/api";
 import { GoogleAuthError } from "../lib/gmail/oauth";
 import { getAccessToken } from "../lib/gmail/token";
 import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
+import { ensureBackfillJobs } from "../lib/gmail/backfill-job";
 import type { Variables } from "../variables";
 
 type InboxesEnv = CloudflareBindings & {
@@ -549,6 +550,15 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     });
 
   if (mappingChanged) await clearGmailThreadIds(db, [email]);
+
+  // A mailbox is usually connected before any inbox is mapped to it, so this
+  // is the moment its import can actually run. Start it now rather than at
+  // the next cron tick; the cron starts it anyway if this does not.
+  // Best effort: the mapping is already saved, and must not be reported as
+  // failed because a job did not start.
+  if (mappingChanged && nextGmailAccountId) {
+    await ensureBackfillJobs(db, c.env, nextGmailAccountId).catch(() => {});
+  }
 
   return c.json(
     {

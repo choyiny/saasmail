@@ -1,0 +1,1 @@
+ALTER TABLE `gmail_accounts` ADD `backfill_job_id` text;

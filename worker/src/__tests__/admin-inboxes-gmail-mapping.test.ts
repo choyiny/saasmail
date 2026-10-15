@@ -28,6 +28,7 @@ import { eq } from "drizzle-orm";
 const KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 const SEND_AS_URL =
   "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs";
+const MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages?";
 
 beforeAll(async () => {
   await applyMigrations();
@@ -53,6 +54,9 @@ async function seedGmailAccount(overrides: Record<string, unknown> = {}) {
       // the mapping makes: a stub that fires proves the guard ran.
       accessToken: "cached-at",
       expiresAt: now + 3600,
+      // Already imported, so mapping does not start a real import job in the
+      // background of every test. The one test about that job clears it.
+      backfillCompletedAt: now,
       createdAt: now,
       updatedAt: now,
       ...overrides,
@@ -86,7 +90,12 @@ type SendAsReply =
  * Stub fetch for the sendAs lookup. Any other URL throws, so a test can never
  * pass on a request that never reached the guard it claims to exercise.
  */
-function stubSendAs(reply: SendAsReply) {
+function stubSendAs(
+  reply: SendAsReply,
+  // Also answer the import job's listing with an empty mailbox, for the test
+  // that lets a real job start.
+  opts: { emptyMailbox?: boolean } = {},
+) {
   const fn = vi.fn(async (input: RequestInfo | URL) => {
     const url =
       typeof input === "string"
@@ -94,6 +103,12 @@ function stubSendAs(reply: SendAsReply) {
         : input instanceof URL
           ? input.toString()
           : input.url;
+    if (opts.emptyMailbox && url.startsWith(MESSAGES_URL)) {
+      return new Response(JSON.stringify({ resultSizeEstimate: 0 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
     if (!url.startsWith(SEND_AS_URL)) {
       throw new Error(`unexpected fetch in test: ${url}`);
     }
@@ -158,6 +173,26 @@ describe("admin inboxes router — Gmail mapping", () => {
     const rows = await rowsFor("a@x.com");
     expect(rows[0].source).toBe("gmail");
     expect(rows[0].gmailAccountId).toBe("acct-1");
+  });
+
+  it("starts the mailbox's import job as soon as an inbox is mapped to it", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    // Mapping is what makes a mailbox importable: until then the job would
+    // stop at once. So it starts here, not at the next cron tick.
+    await seedGmailAccount({ backfillCompletedAt: null });
+    stubSendAs({ addresses: ["a@x.com"] }, { emptyMailbox: true });
+
+    const res = await patchInbox(apiKey, "a@x.com", {
+      source: "gmail",
+      gmailAccountId: "acct-1",
+    });
+    expect(res.status).toBe(200);
+
+    const [account] = await getDb()
+      .select({ jobId: gmailAccounts.backfillJobId })
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.id, "acct-1"));
+    expect(account.jobId).toMatch(/^gmail-backfill-acct-1-\d+$/);
   });
 
   it("accepts a mapping whose sendAs entry differs only in case and spacing", async () => {

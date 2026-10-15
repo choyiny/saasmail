@@ -49,6 +49,16 @@
   "triggers": {
     "crons": ["*/15 * * * *"]
   },
+  // The one-off Gmail import (worker/src/lib/gmail/backfill-job.ts). Created on
+  // deploy; nothing to provision. Without it the import still runs, slower,
+  // inside the cron sync's budget.
+  "workflows": [
+    {
+      "name": "saasmail-gmail-backfill",
+      "binding": "GMAIL_BACKFILL",
+      "class_name": "GmailBackfillWorkflow"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

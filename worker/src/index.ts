@@ -34,6 +34,7 @@ import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
 import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { processOutbox } from "./lib/outbox";
 import { syncAllGmailAccounts } from "./lib/gmail/sync";
+import { ensureBackfillJobs } from "./lib/gmail/backfill-job";
 import { drizzle } from "drizzle-orm/d1";
 import { schema } from "./db/schema";
 import { notificationsRouter } from "./routers/notifications-router";
@@ -45,6 +46,7 @@ import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
+export { GmailBackfillWorkflow } from "./lib/gmail/backfill-job";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
@@ -357,6 +359,8 @@ export default {
       (async () => {
         const db = drizzle(env.DB, { schema });
         await syncAllGmailAccounts(db, env, ctx);
+        // After the sync, so an account it just found unmapped is skipped.
+        await ensureBackfillJobs(db, env);
       })().catch((err) =>
         // The message only, never the error object. This frame begins with
         // `getAccessToken`, whose last act is a D1 UPDATE binding the

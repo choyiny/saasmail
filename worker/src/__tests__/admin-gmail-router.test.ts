@@ -367,6 +367,7 @@ describe("GET /api/admin/gmail/callback", () => {
         backfillOffset: 7,
         backfillCount: 120,
         backfillCompletedAt: now - 3600,
+        backfillJobId: "gmail-backfill-acct-old-1",
         connectedBy: userId,
         createdAt: now,
         updatedAt: now,
@@ -389,6 +390,8 @@ describe("GET /api/admin/gmail/callback", () => {
     expect(row.backfillOffset).toBe(0);
     expect(row.backfillCount).toBe(0);
     expect(row.backfillCompletedAt).toBeNull();
+    // Released, so the old job stops at its next chunk.
+    expect(row.backfillJobId).toBeNull();
 
     const res = await authFetch("/api/admin/gmail", { apiKey });
     const body = (await res.json()) as {

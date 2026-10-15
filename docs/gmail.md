@@ -26,8 +26,8 @@ controls are unchanged and still usable directly — see
   minutes to appear after it lands in Gmail — there is no push path in this
   release.
 - **The last year is imported once.** Connecting a mailbox seeds the live
-  sync at the mailbox's current position, then imports the previous 365 days
-  in the background, newest first, quietly — see
+  sync at the mailbox's current position, then a separate background job
+  imports the previous 365 days, newest first, quietly — see
   [The one-year import](#the-one-year-import).
 - **One mailbox can back several inboxes.** Map the account's own address and
   any of its "Send mail as" aliases (say `choyin@` and `hello@`) to the same
@@ -249,15 +249,17 @@ check its mapping first.
 Every newly connected mailbox, and every reconnected one, imports its last
 365 days once. The import:
 
-- **runs on the cron**, in the budget each tick leaves after live mail (50
-  messages per mailbox per tick, live mail first). That is at most 4,800
-  messages a day on the 15-minute cron, or 1,200 on an hourly one, so a busy
-  mailbox's year takes days to drain. The mailbox row shows "Importing the
+- **runs as its own job**, a Cloudflare Workflow (`GMAIL_BACKFILL`) separate
+  from the 15-minute sync, which keeps its 50-message budget for live mail.
+  The job imports 25 messages per step, back to back, and after 250 hands
+  the mailbox to a fresh instance of itself, so no single run grows with the
+  mailbox. It starts when an inbox is first mapped to the mailbox; each cron
+  tick restarts it if it has stopped. The mailbox row shows "Importing the
   last year — N messages so far", then "Imported the last year (N
   messages)";
 - **goes newest first**: Gmail lists the window from the most recent message
-  back, so the last few weeks are on the timeline after the first ticks and
-  the older history fills in behind them;
+  back, so the last few weeks are on the timeline first and the older
+  history fills in behind them;
 - **is quiet**: imported mail is stored as already read, at the time Gmail
   received it, and fires no push notification, webhook or forward, and
   cancels no sequence. Sent mail from the window is mirrored onto timelines
@@ -269,7 +271,18 @@ Every newly connected mailbox, and every reconnected one, imports its last
   import is underway can shift its paging by one, and an old message may be
   missed. Nothing is ever duplicated;
 - **stalls on a message that throws**, recording `message_failed:<id>` like
-  the live sync does, and retries it on the next tick.
+  the live sync does. The job stops there, and the next cron tick starts a new
+  one that retries the message. A Gmail outage is retried within the job
+  first;
+- **has one owner at a time**: a reconnect or disconnect stops a running job
+  at its next step, so two jobs never walk the same mailbox.
+
+The `workflows` block in `wrangler.jsonc.example` declares the job, and
+deploying creates it — there is nothing to provision. A `wrangler.jsonc` from
+before it was added still works: without the binding, the cron sync imports in
+whatever budget live mail leaves each tick (at most 4,800 messages a day on the
+15-minute cron, 1,200 on an hourly one), which takes days for a busy mailbox.
+Add the block to get the job.
 
 Spam and Trash are not imported. Mailboxes connected before the import
 existed import their last year on the first tick after upgrading. A mailbox

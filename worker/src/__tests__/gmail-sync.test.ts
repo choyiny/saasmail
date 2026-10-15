@@ -18,8 +18,15 @@ import { encryptSecret } from "../lib/crypto";
 import {
   syncAccount,
   syncAllGmailAccounts,
+  runBackfillChunk,
   MAX_MESSAGES_PER_RUN,
 } from "../lib/gmail/sync";
+import {
+  ensureBackfillJobs,
+  runBackfillJob,
+  CHUNK_SIZE,
+  CHUNKS_PER_JOB,
+} from "../lib/gmail/backfill-job";
 import { BACKFILL_WINDOW_SECONDS } from "../lib/gmail/backfill";
 import { getDb, applyMigrations, cleanDb } from "./helpers";
 
@@ -1712,7 +1719,9 @@ describe("syncAccount — several inboxes on one Google mailbox", () => {
   });
 });
 
-describe("syncAccount — the one-year backfill", () => {
+describe("the one-year import job", () => {
+  const JOB = "job-1";
+
   function spyCtx() {
     const waitUntil = vi.fn();
     const ctx = {
@@ -1738,9 +1747,62 @@ describe("syncAccount — the one-year backfill", () => {
     return messages;
   }
 
+  /** One step of the job: up to `budget` messages, as job `jobId`. */
+  function chunk(
+    budget = MAX_MESSAGES_PER_RUN,
+    ctx: ExecutionContext = fakeCtx(),
+    jobId = JOB,
+  ) {
+    return runBackfillChunk(
+      getDb(),
+      env as unknown as CloudflareBindings,
+      ctx,
+      CFG,
+      "acct-1",
+      jobId,
+      budget,
+    );
+  }
+
+  /** A stand-in for the Workflow binding: records creates, answers status. */
+  function fakeWorkflow(statuses: Record<string, string> = {}) {
+    const created: Array<{ id: string; params: unknown }> = [];
+    const binding = {
+      create: async (opts: { id: string; params: unknown }) => {
+        created.push(opts);
+        statuses[opts.id] = "queued";
+        return { id: opts.id };
+      },
+      get: async (id: string) => {
+        if (!(id in statuses)) throw new Error("instance.not_found");
+        return { status: async () => ({ status: statuses[id] }) };
+      },
+    };
+    return { created, binding };
+  }
+
+  function envWith(binding: unknown): CloudflareBindings {
+    return {
+      ...(env as unknown as CloudflareBindings),
+      GMAIL_BACKFILL: binding,
+    } as unknown as CloudflareBindings;
+  }
+
+  function envWithout(): CloudflareBindings {
+    return envWith(undefined);
+  }
+
+  async function ownJob(jobId: string | null = JOB) {
+    await getDb()
+      .update(gmailAccounts)
+      .set({ backfillJobId: jobId })
+      .where(eq(gmailAccounts.id, "acct-1"));
+  }
+
   beforeEach(async () => {
     await seedAccount("9000", { emailAddress: "choyin@acme.dev" });
     await seedInbox("choyin@acme.dev", null);
+    await ownJob();
   });
 
   it("imports the window quietly: read, at its own time, with no live side effects", async () => {
@@ -1753,9 +1815,9 @@ describe("syncAccount — the one-year backfill", () => {
     const { ctx, waitUntil } = spyCtx();
     const before = Math.floor(Date.now() / 1000);
 
-    const res = await run(ctx);
+    const res = await chunk(MAX_MESSAGES_PER_RUN, ctx);
 
-    expect(res.backfilled).toBe(2);
+    expect(res).toEqual({ status: "done", handled: 2 });
     const rows = await getDb().select().from(emails);
     expect(rows).toHaveLength(2);
     for (const row of rows) {
@@ -1798,7 +1860,7 @@ describe("syncAccount — the one-year backfill", () => {
       messages: oldMessages(["b1"]),
     });
 
-    await run();
+    await chunk();
 
     expect(listQueries[0]).toBe("after:1670000000 before:1692000000");
     const row = await account();
@@ -1807,42 +1869,21 @@ describe("syncAccount — the one-year backfill", () => {
     expect(row.backfillCompletedAt).not.toBeNull();
   });
 
-  it("drains across runs within the per-run budget and skips nothing", async () => {
+  it("resumes chunk after chunk over the same window and skips nothing", async () => {
     const ids = Array.from({ length: 130 }, (_, i) => `b${i}`);
     const listQueries: string[] = [];
     stubGmail({ listIds: ids, listQueries, messages: oldMessages(ids) });
 
-    const first = await run();
-    expect(first.backfilled).toBe(MAX_MESSAGES_PER_RUN);
-    let row = await account();
-    expect(row.backfillCompletedAt).toBeNull();
-    expect(row.backfillCount).toBe(MAX_MESSAGES_PER_RUN);
+    expect(await chunk(50)).toEqual({ status: "continue", handled: 50 });
+    expect(await chunk(50)).toEqual({ status: "continue", handled: 50 });
+    expect(await chunk(50)).toEqual({ status: "done", handled: 30 });
 
-    await run();
-    await run();
-    row = await account();
+    const row = await account();
     expect(row.backfillCompletedAt).not.toBeNull();
     expect(row.backfillCount).toBe(130);
     expect(await getDb().select().from(emails)).toHaveLength(130);
-    // Every run asked for the SAME window.
+    // Every chunk asked for the SAME window.
     expect(new Set(listQueries).size).toBe(1);
-  });
-
-  it("gives live mail the budget first", async () => {
-    const live = Array.from(
-      { length: MAX_MESSAGES_PER_RUN - 10 },
-      (_, i) => `l${i}`,
-    );
-    stubGmail({
-      historyIds: live,
-      listIds: ["b1", "b2", "b3"],
-      messages: { ...oldMessages(live), ...oldMessages(["b1", "b2", "b3"]) },
-    });
-
-    const res = await run();
-
-    expect(res.ingested).toBe(live.length);
-    expect(res.backfilled).toBe(3);
   });
 
   it("does not import a message twice when live sync already has it", async () => {
@@ -1853,6 +1894,7 @@ describe("syncAccount — the one-year backfill", () => {
     });
 
     await run();
+    await chunk();
 
     const rows = await getDb().select().from(emails);
     expect(rows).toHaveLength(1);
@@ -1865,22 +1907,38 @@ describe("syncAccount — the one-year backfill", () => {
     const listQueries: string[] = [];
     stubGmail({ listIds: ["b1"], listQueries, messages: oldMessages(["b1"]) });
 
-    const res = await run();
-
-    expect(res.backfilled).toBe(0);
+    expect(await chunk()).toEqual({
+      status: "stopped",
+      handled: 0,
+      reason: "complete",
+    });
     expect(listQueries).toHaveLength(0);
   });
 
-  it("stops at a failing message and retries it next run", async () => {
+  it("does nothing as a job that no longer owns the account", async () => {
+    const listQueries: string[] = [];
+    stubGmail({ listIds: ["b1"], listQueries, messages: oldMessages(["b1"]) });
+
+    expect(await chunk(50, fakeCtx(), "an-older-job")).toEqual({
+      status: "stopped",
+      handled: 0,
+      reason: "superseded",
+    });
+    expect(listQueries).toHaveLength(0);
+  });
+
+  it("stops at a failing message, keeping its place for the next job", async () => {
     stubGmail({
       listIds: ["b1", "bad", "b2"],
       messages: oldMessages(["b1", "b2"]),
       failMessageIds: ["bad"],
     });
 
-    const res = await run();
-
-    expect(res.failed).toBe(1);
+    expect(await chunk()).toEqual({
+      status: "stopped",
+      handled: 1,
+      reason: "failed",
+    });
     const row = await account();
     expect(row.lastError).toBe("message_failed:bad");
     expect(row.backfillCompletedAt).toBeNull();
@@ -1893,9 +1951,187 @@ describe("syncAccount — the one-year backfill", () => {
     const listQueries: string[] = [];
     stubGmail({ listIds: ["b1"], listQueries, messages: oldMessages(["b1"]) });
 
-    await run();
-
+    expect((await chunk()).status).toBe("stopped");
     expect(listQueries).toHaveLength(0);
     expect((await account()).lastError).toBe("no_personal_inbox");
+  });
+
+  describe("the cron sync", () => {
+    it("leaves the import to the job when the Workflow is bound", async () => {
+      const listQueries: string[] = [];
+      stubGmail({
+        listIds: ["b1"],
+        listQueries,
+        messages: oldMessages(["b1"]),
+      });
+      const res = await syncAccount(
+        getDb(),
+        await account(),
+        envWith(fakeWorkflow().binding),
+        fakeCtx(),
+        CFG,
+      );
+      expect(res.backfilled).toBe(0);
+      expect(listQueries).toHaveLength(0);
+    });
+
+    it("imports inline, after live mail, on a config without the Workflow", async () => {
+      const live = Array.from(
+        { length: MAX_MESSAGES_PER_RUN - 10 },
+        (_, i) => `l${i}`,
+      );
+      stubGmail({
+        historyIds: live,
+        listIds: ["b1", "b2", "b3"],
+        messages: { ...oldMessages(live), ...oldMessages(["b1", "b2", "b3"]) },
+      });
+
+      const res = await syncAccount(
+        getDb(),
+        await account(),
+        envWithout(),
+        fakeCtx(),
+        CFG,
+      );
+
+      expect(res.ingested).toBe(live.length);
+      expect(res.backfilled).toBe(3);
+    });
+  });
+
+  describe("ensureBackfillJobs", () => {
+    it("starts a job for a mailbox with none and records it as the owner", async () => {
+      await ownJob(null);
+      const { created, binding } = fakeWorkflow();
+
+      await ensureBackfillJobs(getDb(), envWith(binding));
+
+      expect(created).toHaveLength(1);
+      expect(created[0].params).toEqual({ accountId: "acct-1" });
+      expect((await account()).backfillJobId).toBe(created[0].id);
+    });
+
+    it("leaves a live job alone", async () => {
+      const { created, binding } = fakeWorkflow({ [JOB]: "running" });
+      await ensureBackfillJobs(getDb(), envWith(binding));
+      expect(created).toHaveLength(0);
+      expect((await account()).backfillJobId).toBe(JOB);
+    });
+
+    it("replaces a job that ended without finishing, or that never existed", async () => {
+      for (const statuses of [
+        { [JOB]: "errored" },
+        { [JOB]: "complete" },
+        {},
+      ]) {
+        await ownJob();
+        const { created, binding } = fakeWorkflow(statuses);
+        await ensureBackfillJobs(getDb(), envWith(binding));
+        expect(created).toHaveLength(1);
+        expect((await account()).backfillJobId).toBe(created[0].id);
+      }
+    });
+
+    it("skips finished imports and unmapped mailboxes", async () => {
+      await ownJob(null);
+      await getDb()
+        .update(gmailAccounts)
+        .set({ lastError: "no_personal_inbox" });
+      const { created, binding } = fakeWorkflow();
+      await ensureBackfillJobs(getDb(), envWith(binding));
+      expect(created).toHaveLength(0);
+
+      await getDb().update(gmailAccounts).set({ lastError: null });
+      await markBackfillDone();
+      await ensureBackfillJobs(getDb(), envWith(binding));
+      expect(created).toHaveLength(0);
+    });
+
+    it("is a no-op without the Workflow binding", async () => {
+      await ownJob(null);
+      await ensureBackfillJobs(getDb(), envWithout());
+      expect((await account()).backfillJobId).toBeNull();
+    });
+  });
+
+  describe("runBackfillJob", () => {
+    /** Runs every step inline, recording the step names. */
+    function fakeStep() {
+      const names: string[] = [];
+      const step = {
+        do: async (
+          name: string,
+          cfgOrFn: unknown,
+          fn?: () => Promise<unknown>,
+        ) => {
+          names.push(name);
+          return (fn ?? (cfgOrFn as () => Promise<unknown>))();
+        },
+        sleep: async () => {},
+      };
+      return { names, step };
+    }
+
+    function runJob(binding: unknown) {
+      const { names, step } = fakeStep();
+      const result = runBackfillJob(
+        envWith(binding),
+        fakeCtx(),
+        step as never,
+        "acct-1",
+        JOB,
+      );
+      return { names, result };
+    }
+
+    it("pages until the window is exhausted, then ends", async () => {
+      const ids = Array.from({ length: CHUNK_SIZE * 2 + 5 }, (_, i) => `b${i}`);
+      stubGmail({ listIds: ids, messages: oldMessages(ids) });
+      const { created, binding } = fakeWorkflow();
+
+      const { names, result } = runJob(binding);
+
+      expect(await result).toEqual({ status: "done", handled: 5 });
+      expect(names).toEqual(["chunk 0", "chunk 1", "chunk 2"]);
+      expect(created).toHaveLength(0);
+      expect(await getDb().select().from(emails)).toHaveLength(ids.length);
+    });
+
+    it("hands the account to a successor after its last chunk", async () => {
+      const ids = Array.from(
+        { length: CHUNK_SIZE * CHUNKS_PER_JOB + 1 },
+        (_, i) => `b${i}`,
+      );
+      stubGmail({ listIds: ids, messages: oldMessages(ids) });
+      const { created, binding } = fakeWorkflow();
+
+      const { names, result } = runJob(binding);
+      const out = (await result) as { status: string; successor: string };
+
+      expect(out.status).toBe("handed_off");
+      expect(names.at(-1)).toBe("hand off");
+      expect(created).toHaveLength(1);
+      expect(out.successor).toBe(created[0].id);
+      expect((await account()).backfillJobId).toBe(created[0].id);
+      expect((await account()).backfillCompletedAt).toBeNull();
+    });
+
+    it("stops at once when a reconnect has taken the account away", async () => {
+      await ownJob(null);
+      const listQueries: string[] = [];
+      stubGmail({
+        listIds: ["b1"],
+        listQueries,
+        messages: oldMessages(["b1"]),
+      });
+      const { created, binding } = fakeWorkflow();
+
+      const { names, result } = runJob(binding);
+
+      expect(await result).toMatchObject({ reason: "superseded" });
+      expect(names).toEqual(["chunk 0"]);
+      expect(listQueries).toHaveLength(0);
+      expect(created).toHaveLength(0);
+    });
   });
 });

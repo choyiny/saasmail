@@ -51,7 +51,7 @@ export async function backfillAccount(
   accessToken: string,
   budget: number,
   handle: HandleMessage,
-): Promise<{ handled: number; failed: number }> {
+): Promise<{ handled: number; failed: number; done: boolean }> {
   const now = Math.floor(Date.now() / 1000);
   const until = account.backfillUntil ?? now;
   const since = account.backfillSince ?? until - BACKFILL_WINDOW_SECONDS;
@@ -87,7 +87,7 @@ export async function backfillAccount(
     while (offset < page.ids.length) {
       if (handled >= budget) {
         await save({});
-        return { handled, failed: 0 };
+        return { handled, failed: 0, done: false };
       }
       const messageId = page.ids[offset];
       try {
@@ -100,7 +100,7 @@ export async function backfillAccount(
           `Gmail backfill failed on message ${messageId} for ${account.emailAddress}: ${reason}`,
         );
         await save({ lastError: `${MESSAGE_FAILED_PREFIX}${messageId}` });
-        return { handled, failed: 1 };
+        return { handled, failed: 1, done: false };
       }
       handled++;
       offset++;
@@ -111,7 +111,7 @@ export async function backfillAccount(
       console.log(
         `Gmail backfill for ${account.emailAddress} finished: ${account.backfillCount + handled} messages from the last year.`,
       );
-      return { handled, failed: 0 };
+      return { handled, failed: 0, done: true };
     }
     pageToken = page.nextPageToken;
     offset = 0;

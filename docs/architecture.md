@@ -12,22 +12,23 @@ operate.
 
 ## Stack
 
-| Layer               | Technology                                                                |
-| ------------------- | ------------------------------------------------------------------------- |
-| **Receive email**   | Cloudflare Email Workers                                                  |
-| **Send email**      | Cloudflare Email Sending, Resend, Bavimail, or Postmark                   |
-| **Runtime**         | Cloudflare Workers + Hono                                                 |
-| **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.0)                                   |
-| **Database**        | Cloudflare D1 (SQLite)                                                    |
-| **File storage**    | Cloudflare R2 (attachments)                                               |
-| **Queue**           | Cloudflare Queues (sequence processing)                                   |
-| **Realtime + Push** | Durable Object (`NotificationsHub`, one per user) — WebSockets + Web Push |
-| **Web Push**        | VAPID + `aes128gcm` payload encryption (RFC 8291), implemented in-worker  |
-| **Service Worker**  | `public/sw.js` — receives push events, renders OS notifications           |
-| **Cron**            | Every 15 minutes: sequence scheduling, outbox retries, Gmail mailbox sync |
-| **Frontend**        | React + Tailwind CSS + TipTap editor                                      |
-| **ORM**             | Drizzle                                                                   |
-| **Auth**            | BetterAuth with passkey support                                           |
+| Layer               | Technology                                                                       |
+| ------------------- | -------------------------------------------------------------------------------- |
+| **Receive email**   | Cloudflare Email Workers                                                         |
+| **Send email**      | Cloudflare Email Sending, Resend, Bavimail, or Postmark                          |
+| **Runtime**         | Cloudflare Workers + Hono                                                        |
+| **API**             | Zod + `@hono/zod-openapi` (OpenAPI 3.0)                                          |
+| **Database**        | Cloudflare D1 (SQLite)                                                           |
+| **File storage**    | Cloudflare R2 (attachments)                                                      |
+| **Queue**           | Cloudflare Queues (sequence processing)                                          |
+| **Realtime + Push** | Durable Object (`NotificationsHub`, one per user) — WebSockets + Web Push        |
+| **Gmail import**    | Workflow (`GmailBackfillWorkflow`) — the one-off import of a mailbox's last year |
+| **Web Push**        | VAPID + `aes128gcm` payload encryption (RFC 8291), implemented in-worker         |
+| **Service Worker**  | `public/sw.js` — receives push events, renders OS notifications                  |
+| **Cron**            | Every 15 minutes: sequence scheduling, outbox retries, Gmail mailbox sync        |
+| **Frontend**        | React + Tailwind CSS + TipTap editor                                             |
+| **ORM**             | Drizzle                                                                          |
+| **Auth**            | BetterAuth with passkey support                                                  |
 
 ## Realtime, push, and queues
 

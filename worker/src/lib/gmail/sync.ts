@@ -778,20 +778,20 @@ async function processMessage(
 }
 
 /**
- * Poll one connected mailbox: new mail since the history cursor first, then,
- * while the one-year import is still pending, as much of it as the rest of
- * this run's message budget allows.
+ * What syncing one mailbox needs, whichever path is running: a live access
+ * token, the inboxes it feeds, and the handler that files a message into
+ * them. Null when no inbox is mapped, after recording that on the row.
  *
- * Throws on an unrecoverable per-account failure (a revoked grant, a Gmail
- * outage). Callers must isolate it — see `syncAllGmailAccounts`.
+ * Throws when the grant cannot produce a token; getAccessToken has already
+ * recorded `lastError`, so the caller's per-account boundary handles it.
  */
-export async function syncAccount(
+async function prepareAccount(
   db: DrizzleD1Database<typeof schema>,
   account: GmailAccountRow,
   env: CloudflareBindings,
   ctx: ExecutionContext,
   cfg: GmailAuthConfig,
-): Promise<SyncResult> {
+): Promise<{ accessToken: string; handle: HandleMessage } | null> {
   // A revoked grant throws here. getAccessToken has already recorded
   // `lastError` on the row, so let it propagate to the per-account boundary
   // rather than swallowing it into a zero-count "success".
@@ -837,14 +837,7 @@ export async function syncAccount(
       // cursor stays exactly where it was.
       .set({ lastError: NO_PERSONAL_INBOX_ERROR, updatedAt: nowSeconds() })
       .where(eq(gmailAccounts.id, account.id));
-    return {
-      ingested: 0,
-      mirrored: 0,
-      skipped: 0,
-      reseeded: false,
-      failed: 0,
-      backfilled: 0,
-    };
+    return null;
   }
 
   /**
@@ -865,6 +858,40 @@ export async function syncAccount(
       messageId,
       historical,
     );
+  return { accessToken, handle };
+}
+
+/**
+ * Poll one connected mailbox for new mail since the history cursor.
+ *
+ * The one-year import runs as its own job (`./backfill-job`) wherever the
+ * `GMAIL_BACKFILL` Workflow is bound. A deployment whose wrangler config
+ * predates that binding still imports here instead, in whatever budget live
+ * mail leaves each run — slower, but an upgrade that skips the config change
+ * keeps working.
+ *
+ * Throws on an unrecoverable per-account failure (a revoked grant, a Gmail
+ * outage). Callers must isolate it — see `syncAllGmailAccounts`.
+ */
+export async function syncAccount(
+  db: DrizzleD1Database<typeof schema>,
+  account: GmailAccountRow,
+  env: CloudflareBindings,
+  ctx: ExecutionContext,
+  cfg: GmailAuthConfig,
+): Promise<SyncResult> {
+  const prepared = await prepareAccount(db, account, env, ctx, cfg);
+  if (!prepared) {
+    return {
+      ingested: 0,
+      mirrored: 0,
+      skipped: 0,
+      reseeded: false,
+      failed: 0,
+      backfilled: 0,
+    };
+  }
+  const { accessToken, handle } = prepared;
 
   const result = await syncHistory(db, account, accessToken, handle);
 
@@ -874,6 +901,7 @@ export async function syncAccount(
   const remaining =
     MAX_MESSAGES_PER_RUN - (result.ingested + result.mirrored + result.skipped);
   if (
+    !hasBackfillJob(env) &&
     account.backfillCompletedAt === null &&
     result.failed === 0 &&
     remaining > 0
@@ -889,6 +917,72 @@ export async function syncAccount(
     result.failed += backfill.failed;
   }
   return result;
+}
+
+/** Whether this deployment binds the backfill Workflow. */
+export function hasBackfillJob(env: CloudflareBindings): boolean {
+  return Boolean(env.GMAIL_BACKFILL);
+}
+
+export type BackfillChunkResult =
+  /** More to import: run another chunk. */
+  | { status: "continue"; handled: number }
+  /** The window is exhausted. */
+  | { status: "done"; handled: number }
+  /**
+   * Stop this job; the cron starts a fresh one later. The account is gone,
+   * already imported, owned by a newer job, has no inbox mapped, or stopped
+   * on a message that threw (recorded as `message_failed:<id>`).
+   */
+  | {
+      status: "stopped";
+      handled: number;
+      reason: "gone" | "complete" | "superseded" | "no_inbox" | "failed";
+    };
+
+/**
+ * One unit of the backfill job: import up to `budget` messages for the
+ * account, resuming exactly where the last chunk stopped.
+ *
+ * Re-reads the row every time, so a reconnect (which resets the import and
+ * clears `backfillJobId`) or a disconnect stops an older job at its next
+ * chunk instead of letting two walk the same mailbox.
+ */
+export async function runBackfillChunk(
+  db: DrizzleD1Database<typeof schema>,
+  env: CloudflareBindings,
+  ctx: ExecutionContext,
+  cfg: GmailAuthConfig,
+  accountId: string,
+  jobId: string,
+  budget: number,
+): Promise<BackfillChunkResult> {
+  const [account] = await db
+    .select()
+    .from(gmailAccounts)
+    .where(eq(gmailAccounts.id, accountId));
+  if (!account) return { status: "stopped", handled: 0, reason: "gone" };
+  if (account.backfillJobId !== jobId) {
+    return { status: "stopped", handled: 0, reason: "superseded" };
+  }
+  if (account.backfillCompletedAt !== null) {
+    return { status: "stopped", handled: 0, reason: "complete" };
+  }
+
+  const prepared = await prepareAccount(db, account, env, ctx, cfg);
+  if (!prepared) {
+    return { status: "stopped", handled: 0, reason: "no_inbox" };
+  }
+
+  const { handled, failed, done } = await backfillAccount(
+    db,
+    account,
+    prepared.accessToken,
+    budget,
+    prepared.handle,
+  );
+  if (failed > 0) return { status: "stopped", handled, reason: "failed" };
+  return { status: done ? "done" : "continue", handled };
 }
 
 /**
@@ -1092,11 +1186,10 @@ async function syncHistory(
  * stop the others, so every account runs under Promise.allSettled and its
  * rejection is logged rather than propagated.
  */
-export async function syncAllGmailAccounts(
-  db: DrizzleD1Database<typeof schema>,
+/** The OAuth and encryption secrets, or null when Gmail is not configured. */
+export function gmailAuthConfig(
   env: CloudflareBindings,
-  ctx: ExecutionContext,
-): Promise<void> {
+): GmailAuthConfig | null {
   const gmailEnv = env as CloudflareBindings & {
     GOOGLE_OAUTH_CLIENT_ID?: string;
     GOOGLE_OAUTH_CLIENT_SECRET?: string;
@@ -1105,12 +1198,20 @@ export async function syncAllGmailAccounts(
   const clientId = gmailEnv.GOOGLE_OAUTH_CLIENT_ID;
   const clientSecret = gmailEnv.GOOGLE_OAUTH_CLIENT_SECRET;
   const encryptionKey = gmailEnv.TOKEN_ENCRYPTION_KEY;
+  if (!clientId || !clientSecret || !encryptionKey) return null;
+  return { clientId, clientSecret, encryptionKey };
+}
 
+export async function syncAllGmailAccounts(
+  db: DrizzleD1Database<typeof schema>,
+  env: CloudflareBindings,
+  ctx: ExecutionContext,
+): Promise<void> {
   // Gmail sync is optional. An instance that never configured it must not log
   // an error on every cron tick.
-  if (!clientId || !clientSecret || !encryptionKey) return;
+  const cfg = gmailAuthConfig(env);
+  if (!cfg) return;
 
-  const cfg: GmailAuthConfig = { clientId, clientSecret, encryptionKey };
   const accounts = await db.select().from(gmailAccounts);
   if (accounts.length === 0) return;
 

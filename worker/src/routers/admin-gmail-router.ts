@@ -260,6 +260,9 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
           backfillOffset: 0,
           backfillCount: 0,
           backfillCompletedAt: null,
+          // Any job still running stops at its next chunk, and the next
+          // cron tick starts a new one over the reset window.
+          backfillJobId: null,
           connectedBy,
           updatedAt: now,
         },

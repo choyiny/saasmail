@@ -23,6 +23,8 @@ declare namespace Cloudflare {
 		/** Secret: set via `wrangler secret put BETTER_AUTH_SECRET`. Signs sessions and protects the OAuth signing keys in `jwkss`. Not emitted by `wrangler types`; added manually. */
 		BETTER_AUTH_SECRET: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;
+		/** Optional: a wrangler config from before the Gmail import job has no `workflows` block, and the import then runs inside the cron sync instead. Marked optional by hand. */
+		GMAIL_BACKFILL?: Workflow<Parameters<import("./worker/src/index").GmailBackfillWorkflow['run']>[0]['payload']>;
 	}
 }
 interface Env extends Cloudflare.Env {}
