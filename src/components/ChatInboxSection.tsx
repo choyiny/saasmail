@@ -14,6 +14,9 @@ import type { Email } from "@/lib/api";
 import { fetchDraft } from "@/lib/api";
 import type { ThreadInboxGroup } from "@/components/ThreadInboxSection";
 import ChatQuickReply from "@/components/ChatQuickReply";
+import ImageAttachments, {
+  splitAttachments,
+} from "@/components/ImageAttachments";
 import CcChips, { RosterDiffNotice } from "@/components/CcChips";
 import { rosterOf, diffRosters } from "@/lib/roster";
 import type { ComposePrefill } from "@/pages/ComposeModal";
@@ -181,7 +184,8 @@ function Bubble({
     minute: "2-digit",
   });
 
-  const downloadable = (email.attachments ?? []).filter((a) => !a.contentId);
+  // Image attachments preview as thumbnails; the rest stay download chips.
+  const { images, files: downloadable } = splitAttachments(email.attachments);
 
   function handleClick() {
     if (isUnread) onMarkRead(email);
@@ -275,6 +279,14 @@ function Bubble({
           />
         </div>
       )}
+
+      <ImageAttachments
+        images={images}
+        size="sm"
+        className={`mt-1.5 max-w-[85%] sm:max-w-[78%] ${
+          isSent ? "justify-end" : "justify-start"
+        }`}
+      />
 
       {downloadable.length > 0 && (
         <div

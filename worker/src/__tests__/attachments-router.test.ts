@@ -25,7 +25,10 @@ describe("attachments router", () => {
     ({ apiKey } = await createTestUser());
   });
 
-  async function createTestAttachment(filename = "test.pdf") {
+  async function createTestAttachment(
+    filename = "test.pdf",
+    contentType = "application/pdf",
+  ) {
     const db = getDb();
     await createTestPerson({ id: "s1", email: "a@test.com" });
     await createTestEmail({ id: "e1", personId: "s1" });
@@ -33,14 +36,14 @@ describe("attachments router", () => {
     const content = new TextEncoder().encode("Hello PDF");
     const r2Key = "attachments/e1/test.pdf";
     await env.R2.put(r2Key, content, {
-      httpMetadata: { contentType: "application/pdf" },
+      httpMetadata: { contentType },
     });
 
     await db.insert(attachments).values({
       id: "att-1",
       emailId: "e1",
       filename,
-      contentType: "application/pdf",
+      contentType,
       size: content.byteLength,
       r2Key,
       contentId: null,
@@ -102,15 +105,52 @@ describe("attachments router", () => {
   });
 
   describe("GET /api/attachments/:id/inline", () => {
-    it("serves attachment inline with cache headers", async () => {
-      await createTestAttachment();
+    it("serves a raster image inline with cache headers", async () => {
+      await createTestAttachment("photo.png", "image/png");
 
       const res = await authFetch("/api/attachments/att-1/inline", {
         apiKey,
       });
       expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("image/png");
       expect(res.headers.get("Content-Disposition")).toBe("inline");
       expect(res.headers.get("Cache-Control")).toContain("immutable");
+    });
+
+    // The Content-Type is the sender's. Anything that could execute when
+    // opened on our origin must download instead of rendering.
+    it.each([
+      ["evil.svg", "image/svg+xml"],
+      ["evil.html", "text/html"],
+      ["report.pdf", "application/pdf"],
+    ])(
+      "serves %s (%s) as a download, not inline",
+      async (filename, contentType) => {
+        await createTestAttachment(filename, contentType);
+
+        const res = await authFetch("/api/attachments/att-1/inline", {
+          apiKey,
+        });
+        expect(res.status).toBe(200);
+        expect(res.headers.get("Content-Disposition")).toMatch(/^attachment;/);
+        expect(res.headers.get("Content-Disposition")).toContain(filename);
+      },
+    );
+
+    it("sandboxes and pins the type on both routes", async () => {
+      await createTestAttachment("evil.svg", "image/svg+xml");
+
+      for (const path of [
+        "/api/attachments/att-1",
+        "/api/attachments/att-1/inline",
+      ]) {
+        const res = await authFetch(path, { apiKey });
+        expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+        expect(res.headers.get("Content-Security-Policy")).toContain("sandbox");
+        expect(res.headers.get("Content-Security-Policy")).toContain(
+          "default-src 'none'",
+        );
+      }
     });
 
     it("returns 404 for missing attachment", async () => {

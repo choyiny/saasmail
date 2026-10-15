@@ -23,6 +23,9 @@ import {
   trayContentClass,
 } from "@/components/Tray";
 import ThreadMessage from "@/components/ThreadMessage";
+import ImageAttachments, {
+  splitAttachments,
+} from "@/components/ImageAttachments";
 import {
   fetchPersonEmails,
   fetchStats,
@@ -169,7 +172,8 @@ export default function EmailHtmlModal({
   if (!email) return null;
 
   const isSent = email.type === "sent";
-  const downloadable = (email.attachments ?? []).filter((a) => !a.contentId);
+  const { images, files: downloadable } = splitAttachments(email.attachments);
+  const attachmentCount = images.length + downloadable.length;
   // `override` reflects an in-place edit before the parent refetches. Inline
   // From/To editing is offered for SENT messages (the contact-form case);
   // received messages re-attribute via the per-message Reassign action.
@@ -404,12 +408,16 @@ export default function EmailHtmlModal({
           </div>
 
           {/* Attachments */}
-          {downloadable.length > 0 && (
+          {attachmentCount > 0 && (
             <div className="shrink-0 border-b border-border bg-card px-4 py-2.5 sm:px-5">
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
-                {downloadable.length} attachment
-                {downloadable.length !== 1 ? "s" : ""}
+                {attachmentCount} attachment
+                {attachmentCount !== 1 ? "s" : ""}
               </p>
+              <ImageAttachments
+                images={images}
+                className={downloadable.length > 0 ? "mb-2" : undefined}
+              />
               <ul className="space-y-1.5">
                 {downloadable.map((att) => (
                   <li key={att.id}>
