@@ -941,6 +941,16 @@ export interface GmailAccount {
    * columns in seconds, not milliseconds; render them accordingly.
    */
   lastGapAt: number | null;
+  /**
+   * The one-off import of the last three months: "pending" until it starts,
+   * "running" while it pages through, "done" at the end. `count` is messages
+   * handled so far; `completedAt` is unix **seconds**.
+   */
+  backfill: {
+    status: "pending" | "running" | "done";
+    count: number;
+    completedAt: number | null;
+  };
   /** Unix **seconds** of the connection, like the two fields above. */
   createdAt: number;
   /**

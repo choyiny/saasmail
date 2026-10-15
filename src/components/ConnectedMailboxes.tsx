@@ -20,7 +20,6 @@ import { navigateExternal } from "@/lib/navigate-external";
 // place that reads them. Imported, not re-typed — the module is
 // dependency-free and bundles for the browser, like `@worker/lib/interpolate`.
 import {
-  AMBIGUOUS_INBOX_MAPPING_ERROR,
   HISTORY_GAP_ERROR,
   MESSAGE_FAILED_PREFIX,
   NO_PERSONAL_INBOX_ERROR,
@@ -45,7 +44,6 @@ const SYNC_INTERVAL_LABEL = "every 15 minutes";
 const NON_AUTH_ERRORS = new Set<string>([
   HISTORY_GAP_ERROR,
   NO_PERSONAL_INBOX_ERROR,
-  AMBIGUOUS_INBOX_MAPPING_ERROR,
 ]);
 
 /**
@@ -74,10 +72,7 @@ function nonAuthGuidance(lastError: string): string {
     return "Sync re-seeded from the present after Gmail expired the history cursor. The next successful sync clears this.";
   }
   if (lastError === NO_PERSONAL_INBOX_ERROR) {
-    return "No inbox is mapped to this mailbox's personal mail, so nothing can be routed. Map one below — reconnecting will not help.";
-  }
-  if (lastError === AMBIGUOUS_INBOX_MAPPING_ERROR) {
-    return "More than one inbox is mapped to this mailbox's personal mail. Leave exactly one — reconnecting will not help.";
+    return "No inbox is mapped to this mailbox, so nothing can be routed. Map one below — reconnecting will not help.";
   }
   if (lastError.startsWith(SYNC_FAILED_PREFIX)) {
     return `The last sync could not run — nothing since has arrived. Sync retries ${SYNC_INTERVAL_LABEL}, and reconnecting will not help. Gmail said:`;
@@ -444,9 +439,9 @@ export default function ConnectedMailboxes({
             No Google mailbox connected
           </p>
           <p className="mx-auto max-w-lg text-xs font-light text-text-tertiary">
-            Connecting a mailbox lets saasmail read its new mail and send as
-            that address. It does not backfill: mail already in Gmail is never
-            pulled in, so the timeline starts empty and fills going forward.
+            Connecting a mailbox lets saasmail read its mail and send as that
+            address. New mail syncs going forward, and the last 3 months are
+            imported once in the background.
           </p>
         </div>
       )}
@@ -567,6 +562,25 @@ export default function ConnectedMailboxes({
                         : nonAuthGuidance(account.lastError)}{" "}
                       <span className="font-mono">{account.lastError}</span>
                     </div>
+                  )}
+
+                  {account.backfill.status !== "done" ? (
+                    <p
+                      className="mt-2 text-xs font-light text-text-tertiary"
+                      data-testid={`gmail-backfill-${account.id}`}
+                    >
+                      {account.backfill.status === "pending"
+                        ? "Importing the last 3 months starts with the next sync."
+                        : `Importing the last 3 months — ${account.backfill.count} messages so far.`}
+                    </p>
+                  ) : (
+                    <p
+                      className="mt-2 text-xs font-light text-text-tertiary"
+                      data-testid={`gmail-backfill-${account.id}`}
+                    >
+                      Imported the last 3 months ({account.backfill.count}{" "}
+                      messages).
+                    </p>
                   )}
 
                   {account.lastGapAt !== null && (

@@ -45,6 +45,22 @@ export const gmailAccounts = sqliteTable("gmail_accounts", {
    * /inboxes renders it as the amber "Sync gap" notice.
    */
   lastGapAt: integer("last_gap_at"),
+  /**
+   * The one-off import of the last three months (lib/gmail/backfill.ts).
+   *
+   * Pending while `backfillCompletedAt` is null — which is how every new row
+   * starts, and what a reconnect resets it to so the import refills the gap
+   * the reconnect just made. `backfillUntil` pins the window's upper edge on
+   * the first run (null = not started), so paging is stable across ticks;
+   * the window is the BACKFILL_WINDOW_SECONDS before it. `backfillPageToken`
+   * and `backfillOffset` are where the next run resumes inside the listing.
+   */
+  backfillUntil: integer("backfill_until"),
+  backfillPageToken: text("backfill_page_token"),
+  backfillOffset: integer("backfill_offset").notNull().default(0),
+  /** Messages the import has handled so far — shown as progress. */
+  backfillCount: integer("backfill_count").notNull().default(0),
+  backfillCompletedAt: integer("backfill_completed_at"),
   connectedBy: text("connected_by"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),

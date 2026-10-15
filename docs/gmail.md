@@ -25,12 +25,15 @@ controls are unchanged and still usable directly — see
   mailbox's history and ingests anything new. A message can take up to 15
   minutes to appear after it lands in Gmail — there is no push path in this
   release.
-- **The first sync does not backfill.** Connecting a mailbox seeds the sync
-  cursor at the mailbox's current position; it does not import anything that
-  was already there. A newly connected mailbox shows an empty timeline that
-  fills going forward only. This is expected, not a bug.
-- **Personal mailboxes only.** One Gmail account maps to exactly one saasmail
-  inbox. Google Group addresses are rejected — see
+- **The last three months are imported once.** Connecting a mailbox seeds
+  the live sync at the mailbox's current position, then imports the previous
+  90 days in the background, quietly — see
+  [The three-month import](#the-three-month-import).
+- **One mailbox can back several inboxes.** Map the account's own address and
+  any of its "Send mail as" aliases (say `choyin@` and `hello@`) to the same
+  mailbox, and each message lands in the inbox it was addressed to — see
+  [Several inboxes on one mailbox](#several-inboxes-on-one-mailbox). Google
+  Group addresses are still rejected — see
   [Google Groups aren't mailboxes](#google-groups-arent-mailboxes) below.
 - **Replies now travel both ways for a mapped inbox.** A reply typed in
   saasmail to a Gmail-mapped inbox sends through that mailbox's real Gmail
@@ -130,8 +133,9 @@ tick. Those are in
 ## Connecting a mailbox
 
 **Connected Google mailboxes** sits at the top of the **Inboxes** page. With
-nothing connected it explains that connecting does not backfill; otherwise it
-lists each connected mailbox with its address and when it last synced, plus
+nothing connected it explains how connecting works; otherwise it lists each
+connected mailbox with its address, when it last synced and how far the
+three-month import has got, plus
 **Disconnect** and — only when that mailbox has an error a fresh grant could
 fix — **Reconnect**.
 
@@ -194,8 +198,6 @@ change nothing:
 
 - `no_personal_inbox` — no saasmail inbox is mapped to this mailbox yet. Map
   one (below).
-- `ambiguous_inbox_mapping` — more than one saasmail inbox is mapped to this
-  mailbox, and the engine refuses to pick. Leave exactly one.
 - `history_gap` — sync already recovered by re-seeding from the present; the
   next successful sync clears this. Mail from inside the gap is gone — see
   [Sync gaps](#sync-gaps).
@@ -229,16 +231,74 @@ mailbox's credentials and reset _its_ sync cursor.
 A successful reconnect replaces the mailbox's stored credentials, clears
 `lastError`, and re-seeds the sync cursor at the mailbox's _current_ position
 — so mail that arrived while the mailbox was broken is not fetched
-afterwards, exactly as a first connection does not backfill. Because that
-mail is unrecoverable, **a reconnect records a sync gap** (`lastGapAt`) and
-the mailbox's row shows the amber notice from then on. It does not clear an
-earlier gap either; see below.
+afterwards by the live sync. **A reconnect records a sync gap** (`lastGapAt`)
+and the mailbox's row shows the amber notice from then on; it does not clear
+an earlier gap either (see below). A reconnect also **restarts the
+three-month import**, which picks the missed mail back up as long as it falls
+inside the window. Everything already on the timeline is skipped by the
+per-inbox dedupe.
 
-While a mailbox is unmapped or ambiguously mapped, sync is _paused_ rather
-than lossy: the engine does not fetch or consume any history for the account,
-so the mail stays in Gmail and sync resumes exactly where it left off once
-exactly one saasmail inbox is mapped to it. If sync looks stuck on a mailbox,
+While no inbox is mapped to a mailbox, sync is _paused_ rather than lossy:
+the engine does not fetch or consume any history for the account, and the
+import does not start, so the mail stays in Gmail and sync resumes exactly
+where it left off once an inbox is mapped. If sync looks stuck on a mailbox,
 check its mapping first.
+
+## The three-month import
+
+Every newly connected mailbox, and every reconnected one, imports its last
+90 days once. The import:
+
+- **runs on the cron**, in the budget each tick leaves after live mail (50
+  messages per mailbox per tick, live mail first), so a few thousand messages
+  take a few hours to drain. The mailbox row shows "Importing the last 3
+  months — N messages so far", then "Imported the last 3 months (N
+  messages)";
+- **is quiet**: imported mail is stored as already read, at the time Gmail
+  received it, and fires no push notification, webhook or forward, and
+  cancels no sequence. Sent mail from the window is mirrored onto timelines
+  the same way;
+- **covers a fixed window**, pinned when it starts, so mail arriving during
+  the import belongs to the live sync. A message both of them see is stored
+  once;
+- **is best effort about deletions**: a message deleted from Gmail while the
+  import is underway can shift its paging by one, and an old message may be
+  missed. Nothing is ever duplicated;
+- **stalls on a message that throws**, recording `message_failed:<id>` like
+  the live sync does, and retries it on the next tick.
+
+Spam and Trash are not imported. Mailboxes connected before this release
+import their last three months on the first tick after upgrading.
+
+## Several inboxes on one mailbox
+
+A Google mailbox can feed more than one saasmail inbox. Every address you
+map has to be one the account can send as (see
+[A mapping is verified before it is saved](#a-mapping-is-verified-before-it-is-saved)),
+which in practice means the account's own address plus its aliases. Each
+message is routed like this:
+
+1. **Every mapped inbox named on the message's `To:` or `Cc:` gets a copy.**
+   Mail to `hello@` lands in `hello@`; mail to both lands in both, as two
+   deliveries.
+2. **Mail that names none of them** (a Bcc, a mailing list, a forward) goes to
+   the inbox at the account's own address if that is mapped, or to the only
+   mapped inbox if there is just one.
+3. **Otherwise it is skipped**: with only `hello@` and `sales@` mapped to
+   `choyin@`'s mailbox, mail sent to `choyin@` themselves is not either
+   alias's to claim. Skipping is not a stall, and the cursor moves on.
+
+Mail sent from Gmail is mirrored under the inbox its `From:` address names,
+so a reply sent as `hello@` lands on `hello@`'s timeline.
+
+`To:` and `Cc:` are written by the sender, and that is acceptable here
+precisely because every mapped address is a real, deliverable alias of the
+same mailbox. A sender who writes `To: hello@` while mailing `choyin@` gets
+exactly what they would by mailing `hello@` directly. A forged header only
+ever moves the forger's own message, and only between inboxes your team
+already reads. It can't redirect anyone else's mail. `Delivered-To` is not
+used: for alias mail Gmail stamps it with the primary address, so it can't
+tell the aliases apart.
 
 ### Disconnecting
 
@@ -572,11 +632,11 @@ came in on. The only signals available on the message itself for that —
 `List-ID` and the `Delivered-To` header — are both attacker-controlled: an
 outside sender can set `List-ID` directly, and can forge `Delivered-To` by
 sending a second copy of that header, which collapses with Gmail's real one
-under last-wins parsing. Either would let an attacker choose which of your
-customers' timelines their message lands on. Security review couldn't close
-that gap, so group routing was pulled rather than shipped weakened, and a
-personal mailbox now maps 1:1 to exactly one saasmail inbox, with no
-header-based routing at all — see `worker/src/lib/gmail/route-inbox.ts`.
+under last-wins parsing. Security review couldn't close that gap, so group
+routing was pulled rather than shipped weakened. Aliases of a single mailbox
+are routed by `To:`/`Cc:` instead, which is safe for a narrower reason: see
+[Several inboxes on one mailbox](#several-inboxes-on-one-mailbox) and
+`worker/src/lib/gmail/route-inbox.ts`.
 
 If you need a shared inbox synced today, there is no supported way to do it
 through Gmail. A trustworthy way to key group routing on something a sender

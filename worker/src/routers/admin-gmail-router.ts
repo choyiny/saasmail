@@ -52,6 +52,16 @@ const AccountSchema = z.object({
   // happened. Mail from inside that gap could not be recovered; see the doc
   // comment on gmail_accounts.last_gap_at.
   lastGapAt: z.number().nullable(),
+  /**
+   * The one-off import of the last three months. `status` is "pending" until
+   * it has started, "running" while it pages through the window, and "done"
+   * once it has reached the end; `count` is how many messages it has handled.
+   */
+  backfill: z.object({
+    status: z.enum(["pending", "running", "done"]),
+    count: z.number(),
+    completedAt: z.number().nullable(),
+  }),
   createdAt: z.number(),
   /**
    * The admin who last connected or reconnected this mailbox, resolved from
@@ -241,6 +251,14 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
           historyId: profile.historyId,
           lastError: null,
           lastGapAt: now,
+          // Import the last three months again. It is what refills the gap
+          // the line above records, as far as three months reaches, and the
+          // per-inbox dedupe makes everything already here a no-op.
+          backfillUntil: null,
+          backfillPageToken: null,
+          backfillOffset: 0,
+          backfillCount: 0,
+          backfillCompletedAt: null,
           connectedBy,
           updatedAt: now,
         },
@@ -283,6 +301,9 @@ adminGmailRouter.openapi(listRoute, async (c) => {
       lastSyncedAt: gmailAccounts.lastSyncedAt,
       lastError: gmailAccounts.lastError,
       lastGapAt: gmailAccounts.lastGapAt,
+      backfillUntil: gmailAccounts.backfillUntil,
+      backfillCount: gmailAccounts.backfillCount,
+      backfillCompletedAt: gmailAccounts.backfillCompletedAt,
       createdAt: gmailAccounts.createdAt,
       connectedById: gmailAccounts.connectedBy,
       // Left join: `connected_by` carries no foreign key, so the admin who
@@ -295,8 +316,26 @@ adminGmailRouter.openapi(listRoute, async (c) => {
     .leftJoin(users, eq(users.id, gmailAccounts.connectedBy));
   return c.json({
     accounts: rows.map(
-      ({ connectedById, connectedByName, connectedByEmail, ...account }) => ({
+      ({
+        connectedById,
+        connectedByName,
+        connectedByEmail,
+        backfillUntil,
+        backfillCount,
+        backfillCompletedAt,
+        ...account
+      }) => ({
         ...account,
+        backfill: {
+          status:
+            backfillCompletedAt !== null
+              ? ("done" as const)
+              : backfillUntil !== null
+                ? ("running" as const)
+                : ("pending" as const),
+          count: backfillCount,
+          completedAt: backfillCompletedAt,
+        },
         connectedBy:
           connectedById === null
             ? null

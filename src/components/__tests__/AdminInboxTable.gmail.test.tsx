@@ -54,6 +54,7 @@ const gmailAccount = (
   lastSyncedAt: null,
   lastError: null,
   lastGapAt: null,
+  backfill: { status: "done", count: 0, completedAt: null },
   // Unix seconds, like the worker writes — not milliseconds.
   createdAt: 1_700_000_000,
   connectedBy: null,

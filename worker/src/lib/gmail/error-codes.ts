@@ -20,11 +20,11 @@
  */
 export const HISTORY_GAP_ERROR = "history_gap";
 
-/** No inbox is mapped to this mailbox's personal mail, so nothing can route. */
+/**
+ * No inbox is mapped to this mailbox, so nothing can route. (The name
+ * predates alias routing; the stored value is kept so old rows still read.)
+ */
 export const NO_PERSONAL_INBOX_ERROR = "no_personal_inbox";
-
-/** More than one inbox is mapped to it, and guessing is worse than stalling. */
-export const AMBIGUOUS_INBOX_MAPPING_ERROR = "ambiguous_inbox_mapping";
 
 /**
  * One message could not be ingested: `message_failed:<gmail message id>`.

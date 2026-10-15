@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One Google mailbox can feed several inboxes.** Map an account's own address and its "Send mail as" aliases (say `choyin@` and `hello@`) to the same connected mailbox, and each message lands in the inbox named on its `To:`/`Cc:` line. Mail naming none of them goes to the account's own inbox. Replies sent from Gmail as an alias are mirrored under that alias. This used to stall sync with `ambiguous_inbox_mapping`, and that error no longer exists. See [Several inboxes on one mailbox](docs/gmail.md#several-inboxes-on-one-mailbox).
+- **Connecting a Google mailbox imports its last three months.** The import runs in the background on the 15-minute cron, after live mail, and is quiet: imported mail is stored read, at its original time, with no push notifications, webhooks, forwards or sequence cancellations. Reconnecting restarts it, which refills the gap a reconnect leaves. Mailboxes that are already connected run it once after upgrading. `GET /api/admin/gmail` returns its progress as `backfill`. See [The three-month import](docs/gmail.md#the-three-month-import).
+
 ### Changed
 
 - **A Gmail-mapped inbox whose Google grant cannot produce a token now refuses the reply instead of rerouting it.** It used to fall back to the configured provider, which was dishonest in both directions: on a Gmail-only install there is no provider, so the outbox marked the row failed while the API answered `201` and the composer cleared the draft — nothing sent, the user told it was; on an install with Resend or Postmark the reply left a real Workspace address through a service that domain's SPF/DKIM does not authorise, failing DMARC and retrying every 15 minutes. The reply is now refused with a `502`, nothing is written and nothing is queued, and the composer keeps the draft. An inbox that is **not** Gmail-mapped — including every inbox when the OAuth secrets are unset — still uses the configured provider exactly as before. **If you were relying on the old fallback, this is a behaviour change.** See [A broken grant refuses the reply](docs/gmail.md#a-broken-grant-refuses-the-reply-it-does-not-reroute-it).

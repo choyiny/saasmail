@@ -352,6 +352,55 @@ describe("GET /api/admin/gmail/callback", () => {
     );
   });
 
+  it("restarts the three-month import on reconnect, to refill the gap", async () => {
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-old",
+        emailAddress: "collector@xyspace.dev",
+        refreshTokenEncrypted: "stale-sealed",
+        historyId: "1",
+        backfillUntil: now - 86_400,
+        backfillPageToken: "tok",
+        backfillOffset: 7,
+        backfillCount: 120,
+        backfillCompletedAt: now - 3600,
+        connectedBy: userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    stubGoogle({
+      access_token: "at-2",
+      refresh_token: "rt-new",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const [row] = await getDb().select().from(gmailAccounts);
+    expect(row.backfillUntil).toBeNull();
+    expect(row.backfillPageToken).toBeNull();
+    expect(row.backfillOffset).toBe(0);
+    expect(row.backfillCount).toBe(0);
+    expect(row.backfillCompletedAt).toBeNull();
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    const body = (await res.json()) as {
+      accounts: Array<{ backfill: { status: string; count: number } }>;
+    };
+    expect(body.accounts[0].backfill).toEqual({
+      status: "pending",
+      count: 0,
+      completedAt: null,
+    });
+  });
+
   it("records no sync gap on a first connection", async () => {
     // Nothing was skipped: there was no earlier cursor to jump past. An
     // unconditional stamp would put a permanent "mail was lost" notice on

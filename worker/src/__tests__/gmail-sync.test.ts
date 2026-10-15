@@ -13,12 +13,14 @@ import { gmailAccounts } from "../db/gmail-accounts.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { people } from "../db/people.schema";
 import { encryptSecret } from "../lib/crypto";
 import {
   syncAccount,
   syncAllGmailAccounts,
   MAX_MESSAGES_PER_RUN,
 } from "../lib/gmail/sync";
+import { BACKFILL_WINDOW_SECONDS } from "../lib/gmail/backfill";
 import { getDb, applyMigrations, cleanDb } from "./helpers";
 
 const KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
@@ -62,7 +64,14 @@ function stubGmail(opts: {
   historyIds?: string[];
   /** Explicit history records, when a test cares about record boundaries. */
   records?: Array<{ id: string; messageIds: string[] }>;
-  messages?: Record<string, { raw: string; labelIds?: string[] }>;
+  messages?: Record<
+    string,
+    { raw: string; labelIds?: string[]; internalDate?: string }
+  >;
+  /** What `messages.list` (the backfill) returns, newest first. */
+  listIds?: string[];
+  /** Every `messages.list` query string, for asserting the window. */
+  listQueries?: string[];
   historyStatus?: number;
   profileHistoryId?: string;
   /** Refresh token the token endpoint rejects, as a revoked grant would be. */
@@ -172,6 +181,18 @@ function stubGmail(opts: {
           historyId: head,
         });
       }
+      if (new URL(url).pathname.endsWith("/users/me/messages")) {
+        const query = new URL(url).searchParams;
+        opts.listQueries?.push(query.get("q") ?? "");
+        const size = Number(query.get("maxResults") ?? "100");
+        const offset = Number(query.get("pageToken") ?? "0");
+        const ids = opts.listIds ?? [];
+        const more = offset + size < ids.length;
+        return json({
+          messages: ids.slice(offset, offset + size).map((id) => ({ id })),
+          ...(more ? { nextPageToken: String(offset + size) } : {}),
+        });
+      }
       if (url.includes("/users/me/messages/")) {
         const id = decodeURIComponent(url.split("/messages/")[1].split("?")[0]);
         if (opts.failMessageIds?.includes(id)) {
@@ -184,6 +205,7 @@ function stubGmail(opts: {
           threadId: `t-${id}`,
           labelIds: msg.labelIds ?? ["INBOX"],
           raw: b64url(msg.raw),
+          ...(msg.internalDate ? { internalDate: msg.internalDate } : {}),
         });
       }
       return json({}, 200);
@@ -946,32 +968,6 @@ describe("syncAccount — an unusable inbox mapping stalls", () => {
     expect(row.lastError).toBe("no_personal_inbox");
   });
 
-  it("consumes no history when two inboxes claim the same account", async () => {
-    await seedAccount();
-    // Reachable today: the admin PATCH does not enforce one inbox per Gmail
-    // account, and resolvePersonalInbox refuses to pick between them.
-    await seedInbox("support@acme.dev", null);
-    await seedInbox("sales@acme.dev", null);
-    stubGmail(oneMessage);
-
-    const res = await syncAccount(
-      getDb(),
-      await account(),
-      env as unknown as CloudflareBindings,
-      fakeCtx(),
-      CFG,
-    );
-
-    expect(res.ingested).toBe(0);
-    expect(await getDb().select().from(emails)).toHaveLength(0);
-
-    const row = await account();
-    expect(row.historyId).toBe("9000");
-    // Distinguished from the none case: the operator must remove a mapping,
-    // not add one.
-    expect(row.lastError).toBe("ambiguous_inbox_mapping");
-  });
-
   it("does not seed a cursor for an unconfigured account", async () => {
     await seedAccount(null);
     await seedInbox("support@acme.dev", "team@acme.dev");
@@ -1553,5 +1549,331 @@ describe("syncAllGmailAccounts", () => {
         errorSpy.mockRestore();
       }
     });
+  });
+});
+
+/** A received message with an explicit To: line, for alias routing. */
+function addressed(opts: {
+  from: string;
+  to: string;
+  messageId: string;
+  cc?: string;
+}) {
+  return [
+    `From: ${opts.from}`,
+    `To: ${opts.to}`,
+    ...(opts.cc ? [`Cc: ${opts.cc}`] : []),
+    `Delivered-To: choyin@acme.dev`,
+    `Message-ID: ${opts.messageId}`,
+    `Subject: Alias subject`,
+    `Content-Type: text/plain; charset=utf-8`,
+    ``,
+    `body text`,
+  ].join("\r\n");
+}
+
+async function markBackfillDone() {
+  await getDb()
+    .update(gmailAccounts)
+    .set({ backfillCompletedAt: 1 })
+    .where(eq(gmailAccounts.id, "acct-1"));
+}
+
+async function run(ctx: ExecutionContext = fakeCtx()) {
+  return syncAccount(
+    getDb(),
+    await account(),
+    env as unknown as CloudflareBindings,
+    ctx,
+    CFG,
+  );
+}
+
+async function inboxOf(messageId: string) {
+  const rows = await getDb()
+    .select({ recipient: emails.recipient })
+    .from(emails)
+    .where(eq(emails.messageId, messageId));
+  return rows.map((r) => r.recipient).sort();
+}
+
+describe("syncAccount — several inboxes on one Google mailbox", () => {
+  beforeEach(async () => {
+    await seedAccount("9000", { emailAddress: "choyin@acme.dev" });
+    await markBackfillDone();
+  });
+
+  it("routes alias mail to the alias's inbox and the rest to the account's own", async () => {
+    await seedInbox("hello@acme.dev", null);
+    await seedInbox("choyin@acme.dev", null);
+    stubGmail({
+      historyIds: ["m1", "m2", "m3", "m4"],
+      messages: {
+        m1: {
+          raw: addressed({
+            from: "jane@example.com",
+            to: "Hello <hello@acme.dev>",
+            messageId: "<a1@example.com>",
+          }),
+        },
+        m2: {
+          raw: addressed({
+            from: "jane@example.com",
+            to: "choyin@acme.dev",
+            messageId: "<a2@example.com>",
+          }),
+        },
+        m3: {
+          // Bcc'd, or a list: names neither inbox.
+          raw: addressed({
+            from: "news@lists.dev",
+            to: "subscribers@lists.dev",
+            messageId: "<a3@example.com>",
+          }),
+        },
+        m4: {
+          raw: addressed({
+            from: "jane@example.com",
+            to: "hello@acme.dev",
+            cc: "choyin@acme.dev",
+            messageId: "<a4@example.com>",
+          }),
+        },
+      },
+    });
+
+    const res = await run();
+
+    expect(res.failed).toBe(0);
+    expect(await inboxOf("<a1@example.com>")).toEqual(["hello@acme.dev"]);
+    expect(await inboxOf("<a2@example.com>")).toEqual(["choyin@acme.dev"]);
+    expect(await inboxOf("<a3@example.com>")).toEqual(["choyin@acme.dev"]);
+    // Named on both lines: one delivery per inbox.
+    expect(await inboxOf("<a4@example.com>")).toEqual([
+      "choyin@acme.dev",
+      "hello@acme.dev",
+    ]);
+    const row = await account();
+    expect(row.lastError).toBeNull();
+    expect(row.historyId).toBe("9100");
+  });
+
+  it("files a reply sent from an alias under the alias's inbox", async () => {
+    await seedInbox("hello@acme.dev", null);
+    await seedInbox("choyin@acme.dev", null);
+    stubGmail({
+      historyIds: ["s1"],
+      messages: {
+        s1: {
+          labelIds: ["SENT"],
+          raw: [
+            `From: Hello <hello@acme.dev>`,
+            `To: jane@example.com`,
+            `Message-ID: <s1@acme.dev>`,
+            `Subject: Re: hi`,
+            `Content-Type: text/plain; charset=utf-8`,
+            ``,
+            `reply`,
+          ].join("\r\n"),
+        },
+      },
+    });
+
+    await run();
+
+    const sent = await getDb().select().from(sentEmails);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].fromAddress).toBe("hello@acme.dev");
+  });
+
+  it("skips mail that names no alias when only aliases are mapped, without stalling", async () => {
+    await seedInbox("hello@acme.dev", null);
+    await seedInbox("sales@acme.dev", null);
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          raw: addressed({
+            from: "jane@example.com",
+            to: "choyin@acme.dev",
+            messageId: "<p1@example.com>",
+          }),
+        },
+      },
+    });
+
+    const res = await run();
+
+    expect(res.skipped).toBe(1);
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+    const row = await account();
+    expect(row.lastError).toBeNull();
+    expect(row.historyId).toBe("9100");
+  });
+});
+
+describe("syncAccount — the three-month backfill", () => {
+  function spyCtx() {
+    const waitUntil = vi.fn();
+    const ctx = {
+      waitUntil,
+      passThroughOnException: () => {},
+      props: {},
+    } as unknown as ExecutionContext;
+    return { ctx, waitUntil };
+  }
+
+  function oldMessages(ids: string[], internalDate = "1700000000000") {
+    const messages: Record<string, { raw: string; internalDate: string }> = {};
+    for (const id of ids) {
+      messages[id] = {
+        internalDate,
+        raw: addressed({
+          from: `${id}@example.com`,
+          to: "choyin@acme.dev",
+          messageId: `<${id}@example.com>`,
+        }),
+      };
+    }
+    return messages;
+  }
+
+  beforeEach(async () => {
+    await seedAccount("9000", { emailAddress: "choyin@acme.dev" });
+    await seedInbox("choyin@acme.dev", null);
+  });
+
+  it("imports the window quietly: read, at its own time, with no live side effects", async () => {
+    const listQueries: string[] = [];
+    stubGmail({
+      listIds: ["b1", "b2"],
+      listQueries,
+      messages: oldMessages(["b1", "b2"]),
+    });
+    const { ctx, waitUntil } = spyCtx();
+    const before = Math.floor(Date.now() / 1000);
+
+    const res = await run(ctx);
+
+    expect(res.backfilled).toBe(2);
+    const rows = await getDb().select().from(emails);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.isRead).toBe(1);
+      // Gmail's internalDate, not the import time.
+      expect(row.receivedAt).toBe(1_700_000_000);
+      expect(row.recipient).toBe("choyin@acme.dev");
+    }
+    // No push fan-out, webhook or forward was scheduled.
+    expect(waitUntil).not.toHaveBeenCalled();
+    const person = await getDb()
+      .select()
+      .from(people)
+      .where(eq(people.email, "b1@example.com"));
+    expect(person[0].unreadCount).toBe(0);
+
+    // A pinned three-month window.
+    const match = listQueries[0].match(/^after:(\d+) before:(\d+)$/);
+    expect(match).not.toBeNull();
+    const [after, until] = [Number(match![1]), Number(match![2])];
+    expect(until - after).toBe(BACKFILL_WINDOW_SECONDS);
+    expect(until).toBeGreaterThanOrEqual(before);
+
+    const row = await account();
+    expect(row.backfillCompletedAt).not.toBeNull();
+    expect(row.backfillCount).toBe(2);
+    expect(row.lastError).toBeNull();
+  });
+
+  it("drains across runs within the per-run budget and skips nothing", async () => {
+    const ids = Array.from({ length: 130 }, (_, i) => `b${i}`);
+    const listQueries: string[] = [];
+    stubGmail({ listIds: ids, listQueries, messages: oldMessages(ids) });
+
+    const first = await run();
+    expect(first.backfilled).toBe(MAX_MESSAGES_PER_RUN);
+    let row = await account();
+    expect(row.backfillCompletedAt).toBeNull();
+    expect(row.backfillCount).toBe(MAX_MESSAGES_PER_RUN);
+
+    await run();
+    await run();
+    row = await account();
+    expect(row.backfillCompletedAt).not.toBeNull();
+    expect(row.backfillCount).toBe(130);
+    expect(await getDb().select().from(emails)).toHaveLength(130);
+    // Every run asked for the SAME window.
+    expect(new Set(listQueries).size).toBe(1);
+  });
+
+  it("gives live mail the budget first", async () => {
+    const live = Array.from(
+      { length: MAX_MESSAGES_PER_RUN - 10 },
+      (_, i) => `l${i}`,
+    );
+    stubGmail({
+      historyIds: live,
+      listIds: ["b1", "b2", "b3"],
+      messages: { ...oldMessages(live), ...oldMessages(["b1", "b2", "b3"]) },
+    });
+
+    const res = await run();
+
+    expect(res.ingested).toBe(live.length);
+    expect(res.backfilled).toBe(3);
+  });
+
+  it("does not import a message twice when live sync already has it", async () => {
+    stubGmail({
+      historyIds: ["x1"],
+      listIds: ["x1"],
+      messages: oldMessages(["x1"]),
+    });
+
+    await run();
+
+    const rows = await getDb().select().from(emails);
+    expect(rows).toHaveLength(1);
+    // The live copy won: it is unread.
+    expect(rows[0].isRead).toBe(0);
+  });
+
+  it("does nothing once the import has finished", async () => {
+    await markBackfillDone();
+    const listQueries: string[] = [];
+    stubGmail({ listIds: ["b1"], listQueries, messages: oldMessages(["b1"]) });
+
+    const res = await run();
+
+    expect(res.backfilled).toBe(0);
+    expect(listQueries).toHaveLength(0);
+  });
+
+  it("stops at a failing message and retries it next run", async () => {
+    stubGmail({
+      listIds: ["b1", "bad", "b2"],
+      messages: oldMessages(["b1", "b2"]),
+      failMessageIds: ["bad"],
+    });
+
+    const res = await run();
+
+    expect(res.failed).toBe(1);
+    const row = await account();
+    expect(row.lastError).toBe("message_failed:bad");
+    expect(row.backfillCompletedAt).toBeNull();
+    expect(row.backfillOffset).toBe(1);
+    expect(await getDb().select().from(emails)).toHaveLength(1);
+  });
+
+  it("waits for an inbox to be mapped before importing", async () => {
+    await getDb().delete(senderIdentities);
+    const listQueries: string[] = [];
+    stubGmail({ listIds: ["b1"], listQueries, messages: oldMessages(["b1"]) });
+
+    await run();
+
+    expect(listQueries).toHaveLength(0);
+    expect((await account()).lastError).toBe("no_personal_inbox");
   });
 });

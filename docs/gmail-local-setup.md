@@ -215,8 +215,9 @@ mapped to it records `lastError = no_personal_inbox` on its first run — which
 is correct, harmless behaviour (no history is consumed, no mail is lost) but
 means a brand-new mailbox's first visible state is a red error box.
 
-Map **exactly one** inbox to a mailbox. Two is `ambiguous_inbox_mapping`, and
-sync stalls rather than guessing.
+You can map several inboxes to one mailbox: the account's own address and its
+send-as aliases. Each message goes to the inbox named on its `To:`/`Cc:` line
+— see [Several inboxes on one mailbox](gmail.md#several-inboxes-on-one-mailbox).
 
 The mapping is verified against what the connected account can actually send
 as, before it is saved. The three refusals and what each needs are in
@@ -249,21 +250,21 @@ wrangler d1 execute saasmail-db --local --command \
 
 ## Step 7 — When it is not working
 
-| Symptom                                                    | Look at                                                                                                                                                                                             |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Connect a Google mailbox** errors, "not configured"      | `/connect` answered `503` — one of the three Gmail secrets is missing from `.dev.vars`. Restart `yarn dev` after adding them                                                                        |
-| Google shows `redirect_uri_mismatch`                       | `BASE_URL` does not match a registered redirect URI, character for character. Check `localhost` vs `127.0.0.1` and the port too                                                                     |
-| Google sends you to your production host                   | `BASE_URL` in `wrangler.jsonc` is still the deployed URL                                                                                                                                            |
-| Back at `/inboxes?gmail=error`                             | Terminal, `[gmail] OAuth callback failed:` — a wrong-length `TOKEN_ENCRYPTION_KEY`, a state older than ten minutes, or Google returning no refresh token                                            |
-| `?gmail=wrong_account`                                     | A Reconnect granted a different Google account. Nothing was written                                                                                                                                 |
-| `?gmail=wrong_admin`                                       | The consent flow was started by another admin. Restart it yourself                                                                                                                                  |
-| The callback 403s                                          | `DISABLE_PASSKEY_GATE=true` is missing and your admin has no passkey                                                                                                                                |
-| The mailbox list says "Couldn't load…"                     | A real `401`/`403` from the API — check you are signed in as an admin                                                                                                                               |
-| `lastError: no_personal_inbox` / `ambiguous_inbox_mapping` | The mapping, not the grant. Reconnect will not help — map exactly one inbox                                                                                                                         |
-| `lastError: sync_failed:<code>`                            | The run failed before syncing anything. `http_401`/`http_403` mean the credential was refused — reconnect. Everything else (`http_500`, `rate_limited`, `unknown`) resolves itself or needs the log |
-| `lastError: history_gap` + amber notice                    | The cursor expired and was re-seeded. Mail inside the window is gone; the notice never clears                                                                                                       |
-| `lastError: message_failed:<id>`                           | One message threw. The cursor is parked before it and retries every tick; open that id in Gmail                                                                                                     |
-| Nothing ever appears                                       | Did the cron actually run? Is the inbox mapped? Is `lastSyncedAt` moving?                                                                                                                           |
+| Symptom                                               | Look at                                                                                                                                                                                             |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Connect a Google mailbox** errors, "not configured" | `/connect` answered `503` — one of the three Gmail secrets is missing from `.dev.vars`. Restart `yarn dev` after adding them                                                                        |
+| Google shows `redirect_uri_mismatch`                  | `BASE_URL` does not match a registered redirect URI, character for character. Check `localhost` vs `127.0.0.1` and the port too                                                                     |
+| Google sends you to your production host              | `BASE_URL` in `wrangler.jsonc` is still the deployed URL                                                                                                                                            |
+| Back at `/inboxes?gmail=error`                        | Terminal, `[gmail] OAuth callback failed:` — a wrong-length `TOKEN_ENCRYPTION_KEY`, a state older than ten minutes, or Google returning no refresh token                                            |
+| `?gmail=wrong_account`                                | A Reconnect granted a different Google account. Nothing was written                                                                                                                                 |
+| `?gmail=wrong_admin`                                  | The consent flow was started by another admin. Restart it yourself                                                                                                                                  |
+| The callback 403s                                     | `DISABLE_PASSKEY_GATE=true` is missing and your admin has no passkey                                                                                                                                |
+| The mailbox list says "Couldn't load…"                | A real `401`/`403` from the API — check you are signed in as an admin                                                                                                                               |
+| `lastError: no_personal_inbox`                        | The mapping, not the grant. Reconnect will not help — map an inbox                                                                                                                                  |
+| `lastError: sync_failed:<code>`                       | The run failed before syncing anything. `http_401`/`http_403` mean the credential was refused — reconnect. Everything else (`http_500`, `rate_limited`, `unknown`) resolves itself or needs the log |
+| `lastError: history_gap` + amber notice               | The cursor expired and was re-seeded. Mail inside the window is gone; the notice never clears                                                                                                       |
+| `lastError: message_failed:<id>`                      | One message threw. The cursor is parked before it and retries every tick; open that id in Gmail                                                                                                     |
+| Nothing ever appears                                  | Did the cron actually run? Is the inbox mapped? Is `lastSyncedAt` moving?                                                                                                                           |
 
 Log lines worth grepping in the `yarn dev` terminal (or `wrangler tail` for a
 deployed instance): `[gmail] OAuth callback failed:`, `Gmail sync for `,

@@ -47,6 +47,7 @@ const account = (over: Partial<GmailAccount> = {}): GmailAccount => ({
   lastSyncedAt: minutesAgo(5),
   lastError: null,
   lastGapAt: null,
+  backfill: { status: "done", count: 0, completedAt: null },
   createdAt: minutesAgo(60 * 24),
   connectedBy: { id: "user_1", name: "Jane Ops", email: "jane@example.com" },
   ...over,
@@ -319,9 +320,9 @@ describe("ConnectedMailboxes", () => {
     renderAt();
 
     const empty = await screen.findByTestId("gmail-empty-state");
-    // Connecting does not backfill — say so, or it gets filed as a bug.
-    expect(empty.textContent).toMatch(/backfill/i);
+    // Say how far back connecting reaches, or a short timeline gets filed as a bug.
     expect(empty.textContent).toMatch(/going forward/i);
+    expect(empty.textContent).toMatch(/last 3 months/i);
     expect(
       screen.getByRole("button", { name: /connect a google mailbox/i }),
     ).toBeTruthy();
@@ -521,7 +522,6 @@ describe("ConnectedMailboxes — starting the consent flow", () => {
 
   it.each([
     "no_personal_inbox",
-    "ambiguous_inbox_mapping",
     "history_gap",
     "message_failed:18c2f0a1b2c3",
     // The sync engine records these when a whole run threw. A Gmail 5xx, a
@@ -545,12 +545,11 @@ describe("ConnectedMailboxes — starting the consent flow", () => {
 
   /**
    * Hiding Reconnect is only half the fix: what replaces it is the operator's
-   * only instruction, and each of these four codes needs a *different* one.
+   * only instruction, and each of these codes needs a *different* one.
    * Without these, deleting `nonAuthGuidance` outright leaves the suite green.
    */
   it.each([
     ["no_personal_inbox", /map one below/i, /no inbox is mapped/i],
-    ["ambiguous_inbox_mapping", /leave exactly one/i, /more than one inbox/i],
     ["history_gap", /re-seeded from the present/i, /next successful sync/i],
     ["message_failed:18c2f0a1b2c3", /the next run retries it/i, /cursor/i],
     [
@@ -700,5 +699,28 @@ describe("ConnectedMailboxes — a reconnect names its mailbox", () => {
       expect(screen.getByTestId("location-search").textContent).toBe("?q=ops"),
     );
     expect(screen.getByTestId("gmail-wrong-account")).toBeTruthy();
+  });
+});
+
+describe("ConnectedMailboxes — three-month import", () => {
+  it.each([
+    [
+      { status: "pending" as const, count: 0, completedAt: null },
+      /starts with the next sync/i,
+    ],
+    [
+      { status: "running" as const, count: 42, completedAt: null },
+      /42 messages so far/i,
+    ],
+    [
+      { status: "done" as const, count: 310, completedAt: 1_700_000_000 },
+      /imported the last 3 months \(310/i,
+    ],
+  ])("shows the import's progress (%o)", async (backfill, text) => {
+    mFetch.mockResolvedValue([account({ backfill })]);
+    renderAt();
+
+    const line = await screen.findByTestId("gmail-backfill-acct_1");
+    expect(line.textContent).toMatch(text);
   });
 });

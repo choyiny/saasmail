@@ -162,6 +162,14 @@ function base64UrlToArrayBuffer(b64url: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+export type GmailMessage = {
+  raw: ArrayBuffer;
+  labelIds: string[];
+  threadId: string;
+  /** When Gmail received it, unix seconds. Null if Gmail omitted it. */
+  internalDate: number | null;
+};
+
 /**
  * Fetch one message as raw RFC822 bytes — the same shape Cloudflare's Email
  * Worker receives, which is what lets both sources share one parser.
@@ -172,7 +180,7 @@ function base64UrlToArrayBuffer(b64url: string): ArrayBuffer {
 export async function getMessage(
   accessToken: string,
   id: string,
-): Promise<{ raw: ArrayBuffer; labelIds: string[]; threadId: string } | null> {
+): Promise<GmailMessage | null> {
   const url = new URL(`${BASE}/messages/${encodeURIComponent(id)}`);
   url.searchParams.set("format", "raw");
 
@@ -194,5 +202,58 @@ export async function getMessage(
     raw: base64UrlToArrayBuffer(payload.raw ?? ""),
     labelIds: Array.isArray(payload.labelIds) ? payload.labelIds : [],
     threadId: typeof payload.threadId === "string" ? payload.threadId : "",
+    internalDate: parseInternalDate(payload.internalDate),
+  };
+}
+
+/**
+ * Gmail's `internalDate` (epoch MILLISECONDS, sent as a string) as unix
+ * seconds, or null. It is when Gmail accepted the message, set by Google rather
+ * than the sender, which makes it the right timestamp for mail imported long
+ * after it arrived.
+ */
+function parseInternalDate(value: unknown): number | null {
+  const ms = typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return Math.floor(ms / 1000);
+}
+
+/**
+ * One page of message ids matching a Gmail search, newest first.
+ *
+ * Used by the backfill, which walks a fixed `after:`/`before:` window. Spam
+ * and Trash are excluded by Gmail's default (`includeSpamTrash=false`).
+ */
+export async function listMessages(
+  accessToken: string,
+  opts: { q: string; pageToken?: string | null; maxResults: number },
+): Promise<{ ids: string[]; nextPageToken: string | null }> {
+  const url = new URL(`${BASE}/messages`);
+  url.searchParams.set("q", opts.q);
+  url.searchParams.set("maxResults", String(opts.maxResults));
+  if (opts.pageToken) url.searchParams.set("pageToken", opts.pageToken);
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    throw new GmailApiError(
+      res.status,
+      classify(res.status, false),
+      `Gmail messages.list returned ${res.status}`,
+    );
+  }
+
+  const payload = (await readJson(res)) ?? {};
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  const ids: string[] = [];
+  for (const m of messages) {
+    if (typeof m?.id === "string") ids.push(m.id);
+  }
+  return {
+    ids,
+    nextPageToken:
+      typeof payload.nextPageToken === "string" ? payload.nextPageToken : null,
   };
 }

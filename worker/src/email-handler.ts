@@ -60,6 +60,18 @@ export type IngestOutcome =
    */
   | { status: "duplicate"; emailId: string };
 
+export type IngestOptions = {
+  /**
+   * Set when importing old mail (the Gmail backfill). The message is stored
+   * already read, at its own `receivedAt`, and NONE of the live side effects
+   * run: no push notification, no webhook, no forward, no sequence
+   * cancellation. Replaying three months of those would page the team for
+   * mail they have already handled, re-forward it all, and stop sequences
+   * because of a reply someone sent weeks before they were enrolled.
+   */
+  historical?: { receivedAt: number };
+};
+
 /**
  * Store an already-parsed inbound message and run every side effect that
  * follows: blocklist, dedupe, person matching, conversation grouping,
@@ -76,8 +88,12 @@ export async function ingestParsedEmail(
   parsed: ParsedEmail,
   env: CloudflareBindings,
   ctx: ExecutionContext,
+  opts: IngestOptions = {},
 ): Promise<IngestOutcome> {
   const now = Math.floor(Date.now() / 1000);
+  const historical = opts.historical ?? null;
+  /** When the message arrived: now for live mail, its own time for imports. */
+  const receivedAt = historical?.receivedAt ?? now;
 
   // Canonicalize inbox addresses to lowercase before storage so casing
   // variants of the same recipient don't fork into separate group-row
@@ -134,8 +150,8 @@ export async function ingestParsedEmail(
       id: personId,
       email: fromAddressCanonical,
       name: parsed.from.name || null,
-      lastEmailAt: now,
-      unreadCount: 1,
+      lastEmailAt: receivedAt,
+      unreadCount: historical ? 0 : 1,
       totalCount: 1,
       createdAt: now,
       updatedAt: now,
@@ -146,8 +162,14 @@ export async function ingestParsedEmail(
         ...(senderAuthenticated
           ? { name: sql`COALESCE(${parsed.from.name || null}, ${people.name})` }
           : {}),
-        lastEmailAt: now,
-        unreadCount: sql`${people.unreadCount} + 1`,
+        // An imported message is older than whatever is already there, so it
+        // must not drag `lastEmailAt` backwards or add to the unread badge.
+        lastEmailAt: historical
+          ? sql`MAX(${people.lastEmailAt}, ${receivedAt})`
+          : now,
+        unreadCount: historical
+          ? people.unreadCount
+          : sql`${people.unreadCount} + 1`,
         totalCount: sql`${people.totalCount} + 1`,
         updatedAt: now,
       },
@@ -275,10 +297,10 @@ export async function ingestParsedEmail(
     dkim: parsed.auth.dkim,
     dmarc: parsed.auth.dmarc,
     spamScore: parsed.spamScore,
-    isRead: 0,
+    isRead: historical ? 1 : 0,
     cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
     conversationId,
-    receivedAt: now,
+    receivedAt,
     createdAt: now,
   });
 
@@ -302,6 +324,13 @@ export async function ingestParsedEmail(
       contentId: att.contentId,
       createdAt: now,
     });
+  }
+
+  if (historical) {
+    console.log(
+      `Imported email from ${fromAddressCanonical} to ${recipientCanonical} (historical; no notifications)`,
+    );
+    return { status: "stored", emailId };
   }
 
   // Notify connected WebSocket clients about the new email (per-user DOs).
