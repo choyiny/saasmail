@@ -27,7 +27,8 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
 - `vars.VAPID_PUBLIC_KEY` / `vars.VAPID_SUBJECT` — public VAPID config for
   browser push notifications. Generate with `yarn vapid:generate` and store
   the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank
-  to disable push.
+  to disable push. A notification shows the sender as its title and the
+  subject followed by the first lines of the message as its body.
 
 To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used as both the favicon and the in-app logo. The `/saasmail-onboarding` skill will do this for you interactively.
 

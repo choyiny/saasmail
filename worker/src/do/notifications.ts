@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { schema } from "../db/schema";
 import { pushSubscriptions } from "../db/push-subscriptions.schema";
 import { sendPush, type PushPayload, type VapidConfig } from "../lib/web-push";
+import { pushBody } from "../lib/push-preview";
 
 export class NotificationsHub implements DurableObject {
   ctx: DurableObjectState;
@@ -123,7 +124,8 @@ export class NotificationsHub implements DurableObject {
     };
     const pushPayload: PushPayload = {
       title: payload.senderName || "New email",
-      body: payload.subject || payload.bodyPreview || "",
+      // Subject, then the first lines of the message, like a mail app.
+      body: pushBody(payload.subject ?? "", payload.bodyPreview ?? ""),
       tag: `thread:${payload.threadId}`,
       icon: "/saasmail-logo.png",
       badge: "/saasmail-logo.png",
