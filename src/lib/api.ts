@@ -942,7 +942,7 @@ export interface GmailAccount {
    */
   lastGapAt: number | null;
   /**
-   * The one-off import of the last three months: "pending" until it starts,
+   * The one-off import of the last year: "pending" until it starts,
    * "running" while it pages through, "done" at the end. `count` is messages
    * handled so far; `completedAt` is unix **seconds**.
    */

@@ -105,7 +105,7 @@ export type SyncResult = {
   reseeded: boolean;
   /** Messages that threw. At most one per phase — a failure stops it. */
   failed: number;
-  /** Messages the three-month import handled this run. */
+  /** Messages the one-year import handled this run. */
   backfilled: number;
 };
 
@@ -779,7 +779,7 @@ async function processMessage(
 
 /**
  * Poll one connected mailbox: new mail since the history cursor first, then,
- * while the three-month import is still pending, as much of it as the rest of
+ * while the one-year import is still pending, as much of it as the rest of
  * this run's message budget allows.
  *
  * Throws on an unrecoverable per-account failure (a revoked grant, a Gmail

@@ -65,7 +65,7 @@ export type IngestOptions = {
    * Set when importing old mail (the Gmail backfill). The message is stored
    * already read, at its own `receivedAt`, and NONE of the live side effects
    * run: no push notification, no webhook, no forward, no sequence
-   * cancellation. Replaying three months of those would page the team for
+   * cancellation. Replaying a year of those would page the team for
    * mail they have already handled, re-forward it all, and stop sequences
    * because of a reply someone sent weeks before they were enrolled.
    */

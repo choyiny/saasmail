@@ -352,7 +352,7 @@ describe("GET /api/admin/gmail/callback", () => {
     );
   });
 
-  it("restarts the three-month import on reconnect, to refill the gap", async () => {
+  it("restarts the one-year import on reconnect, to refill the gap", async () => {
     const { userId, apiKey } = await createTestUser({ role: "admin" });
     const now = Math.floor(Date.now() / 1000);
     await getDb()

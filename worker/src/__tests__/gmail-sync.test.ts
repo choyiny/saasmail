@@ -1712,7 +1712,7 @@ describe("syncAccount — several inboxes on one Google mailbox", () => {
   });
 });
 
-describe("syncAccount — the three-month backfill", () => {
+describe("syncAccount — the one-year backfill", () => {
   function spyCtx() {
     const waitUntil = vi.fn();
     const ctx = {
@@ -1772,7 +1772,7 @@ describe("syncAccount — the three-month backfill", () => {
       .where(eq(people.email, "b1@example.com"));
     expect(person[0].unreadCount).toBe(0);
 
-    // A pinned three-month window.
+    // A pinned one-year window.
     const match = listQueries[0].match(/^after:(\d+) before:(\d+)$/);
     expect(match).not.toBeNull();
     const [after, until] = [Number(match![1]), Number(match![2])];
@@ -1783,6 +1783,28 @@ describe("syncAccount — the three-month backfill", () => {
     expect(row.backfillCompletedAt).not.toBeNull();
     expect(row.backfillCount).toBe(2);
     expect(row.lastError).toBeNull();
+  });
+
+  it("keeps a pinned window narrower than a year (the one-year migration)", async () => {
+    // A mailbox that had already imported three months is moved onto the
+    // older nine: the window ends where the old one began.
+    await getDb()
+      .update(gmailAccounts)
+      .set({ backfillUntil: 1_692_000_000, backfillSince: 1_670_000_000 });
+    const listQueries: string[] = [];
+    stubGmail({
+      listIds: ["b1"],
+      listQueries,
+      messages: oldMessages(["b1"]),
+    });
+
+    await run();
+
+    expect(listQueries[0]).toBe("after:1670000000 before:1692000000");
+    const row = await account();
+    expect(row.backfillSince).toBe(1_670_000_000);
+    expect(row.backfillUntil).toBe(1_692_000_000);
+    expect(row.backfillCompletedAt).not.toBeNull();
   });
 
   it("drains across runs within the per-run budget and skips nothing", async () => {

@@ -440,8 +440,8 @@ export default function ConnectedMailboxes({
           </p>
           <p className="mx-auto max-w-lg text-xs font-light text-text-tertiary">
             Connecting a mailbox lets saasmail read its mail and send as that
-            address. New mail syncs going forward, and the last 3 months are
-            imported once in the background.
+            address. New mail syncs going forward, and the last year is imported
+            once in the background.
           </p>
         </div>
       )}
@@ -570,15 +570,15 @@ export default function ConnectedMailboxes({
                       data-testid={`gmail-backfill-${account.id}`}
                     >
                       {account.backfill.status === "pending"
-                        ? "Importing the last 3 months starts with the next sync."
-                        : `Importing the last 3 months — ${account.backfill.count} messages so far.`}
+                        ? "Importing the last year starts with the next sync."
+                        : `Importing the last year — ${account.backfill.count} messages so far.`}
                     </p>
                   ) : (
                     <p
                       className="mt-2 text-xs font-light text-text-tertiary"
                       data-testid={`gmail-backfill-${account.id}`}
                     >
-                      Imported the last 3 months ({account.backfill.count}{" "}
+                      Imported the last year ({account.backfill.count}{" "}
                       messages).
                     </p>
                   )}

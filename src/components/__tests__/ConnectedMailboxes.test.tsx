@@ -322,7 +322,7 @@ describe("ConnectedMailboxes", () => {
     const empty = await screen.findByTestId("gmail-empty-state");
     // Say how far back connecting reaches, or a short timeline gets filed as a bug.
     expect(empty.textContent).toMatch(/going forward/i);
-    expect(empty.textContent).toMatch(/last 3 months/i);
+    expect(empty.textContent).toMatch(/last year/i);
     expect(
       screen.getByRole("button", { name: /connect a google mailbox/i }),
     ).toBeTruthy();
@@ -702,7 +702,7 @@ describe("ConnectedMailboxes — a reconnect names its mailbox", () => {
   });
 });
 
-describe("ConnectedMailboxes — three-month import", () => {
+describe("ConnectedMailboxes — one-year import", () => {
   it.each([
     [
       { status: "pending" as const, count: 0, completedAt: null },
@@ -714,7 +714,7 @@ describe("ConnectedMailboxes — three-month import", () => {
     ],
     [
       { status: "done" as const, count: 310, completedAt: 1_700_000_000 },
-      /imported the last 3 months \(310/i,
+      /imported the last year \(310/i,
     ],
   ])("shows the import's progress (%o)", async (backfill, text) => {
     mFetch.mockResolvedValue([account({ backfill })]);

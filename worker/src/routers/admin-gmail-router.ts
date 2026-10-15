@@ -53,7 +53,7 @@ const AccountSchema = z.object({
   // comment on gmail_accounts.last_gap_at.
   lastGapAt: z.number().nullable(),
   /**
-   * The one-off import of the last three months. `status` is "pending" until
+   * The one-off import of the last year. `status` is "pending" until
    * it has started, "running" while it pages through the window, and "done"
    * once it has reached the end; `count` is how many messages it has handled.
    */
@@ -251,10 +251,11 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
           historyId: profile.historyId,
           lastError: null,
           lastGapAt: now,
-          // Import the last three months again. It is what refills the gap
-          // the line above records, as far as three months reaches, and the
+          // Import the last year again. It is what refills the gap the line
+          // above records, as far as a year reaches, and the
           // per-inbox dedupe makes everything already here a no-op.
           backfillUntil: null,
+          backfillSince: null,
           backfillPageToken: null,
           backfillOffset: 0,
           backfillCount: 0,

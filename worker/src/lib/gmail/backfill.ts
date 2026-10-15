@@ -6,8 +6,8 @@ import { listMessages } from "./api";
 import { MESSAGE_FAILED_PREFIX } from "./error-codes";
 import type { GmailAccountRow, HandleMessage } from "./sync";
 
-/** How far back the import reaches: three months. */
-export const BACKFILL_WINDOW_SECONDS = 90 * 24 * 60 * 60;
+/** How far back the import reaches: one year. */
+export const BACKFILL_WINDOW_SECONDS = 365 * 24 * 60 * 60;
 
 /**
  * Fixed, because a resume point is (page token, offset into that page), and
@@ -16,7 +16,7 @@ export const BACKFILL_WINDOW_SECONDS = 90 * 24 * 60 * 60;
 export const BACKFILL_PAGE_SIZE = 100;
 
 /**
- * Import the mailbox's last three months, a budget's worth per call.
+ * Import the mailbox's last year, a budget's worth per call.
  *
  * Connecting a mailbox only syncs mail from that moment on (the history cursor
  * starts at the head), which leaves every existing conversation without its
@@ -25,8 +25,10 @@ export const BACKFILL_PAGE_SIZE = 100;
  * at its own time, with no notifications, webhooks, forwards or sequence
  * cancellations.
  *
- * THE WINDOW IS PINNED on the first run (`backfillUntil`), so pages stay stable
- * across ticks: new mail falls outside `before:` and cannot shift them. Mail
+ * THE WINDOW IS PINNED on the first run (`backfillUntil`, `backfillSince`), so
+ * pages stay stable across ticks: new mail falls outside `before:` and cannot
+ * shift them. Gmail lists newest first, so the recent months land first and
+ * the history fills in backwards from there. Mail
  * at or after that instant belongs to the history sync. Where the two overlap
  * — the seconds between seeding the cursor and starting the import — the
  * per-inbox dedupe makes the second sighting a no-op.
@@ -52,7 +54,7 @@ export async function backfillAccount(
 ): Promise<{ handled: number; failed: number }> {
   const now = Math.floor(Date.now() / 1000);
   const until = account.backfillUntil ?? now;
-  const since = until - BACKFILL_WINDOW_SECONDS;
+  const since = account.backfillSince ?? until - BACKFILL_WINDOW_SECONDS;
   const q = `after:${since} before:${until}`;
 
   let pageToken = account.backfillPageToken;
@@ -65,6 +67,7 @@ export async function backfillAccount(
       .update(gmailAccounts)
       .set({
         backfillUntil: until,
+        backfillSince: since,
         backfillPageToken: pageToken,
         backfillOffset: offset,
         backfillCount: account.backfillCount + handled,
@@ -106,7 +109,7 @@ export async function backfillAccount(
     if (!page.nextPageToken) {
       await save({ backfillCompletedAt: Math.floor(Date.now() / 1000) });
       console.log(
-        `Gmail backfill for ${account.emailAddress} finished: ${account.backfillCount + handled} messages from the last three months.`,
+        `Gmail backfill for ${account.emailAddress} finished: ${account.backfillCount + handled} messages from the last year.`,
       );
       return { handled, failed: 0 };
     }

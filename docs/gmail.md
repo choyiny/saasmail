@@ -25,10 +25,10 @@ controls are unchanged and still usable directly — see
   mailbox's history and ingests anything new. A message can take up to 15
   minutes to appear after it lands in Gmail — there is no push path in this
   release.
-- **The last three months are imported once.** Connecting a mailbox seeds
-  the live sync at the mailbox's current position, then imports the previous
-  90 days in the background, quietly — see
-  [The three-month import](#the-three-month-import).
+- **The last year is imported once.** Connecting a mailbox seeds the live
+  sync at the mailbox's current position, then imports the previous 365 days
+  in the background, newest first, quietly — see
+  [The one-year import](#the-one-year-import).
 - **One mailbox can back several inboxes.** Map the account's own address and
   any of its "Send mail as" aliases (say `choyin@` and `hello@`) to the same
   mailbox, and each message lands in the inbox it was addressed to — see
@@ -135,7 +135,7 @@ tick. Those are in
 **Connected Google mailboxes** sits at the top of the **Inboxes** page. With
 nothing connected it explains how connecting works; otherwise it lists each
 connected mailbox with its address, when it last synced and how far the
-three-month import has got, plus
+one-year import has got, plus
 **Disconnect** and — only when that mailbox has an error a fresh grant could
 fix — **Reconnect**.
 
@@ -234,7 +234,7 @@ A successful reconnect replaces the mailbox's stored credentials, clears
 afterwards by the live sync. **A reconnect records a sync gap** (`lastGapAt`)
 and the mailbox's row shows the amber notice from then on; it does not clear
 an earlier gap either (see below). A reconnect also **restarts the
-three-month import**, which picks the missed mail back up as long as it falls
+one-year import**, which picks the missed mail back up as long as it falls
 inside the window. Everything already on the timeline is skipped by the
 per-inbox dedupe.
 
@@ -244,16 +244,20 @@ import does not start, so the mail stays in Gmail and sync resumes exactly
 where it left off once an inbox is mapped. If sync looks stuck on a mailbox,
 check its mapping first.
 
-## The three-month import
+## The one-year import
 
 Every newly connected mailbox, and every reconnected one, imports its last
-90 days once. The import:
+365 days once. The import:
 
 - **runs on the cron**, in the budget each tick leaves after live mail (50
-  messages per mailbox per tick, live mail first), so a few thousand messages
-  take a few hours to drain. The mailbox row shows "Importing the last 3
-  months — N messages so far", then "Imported the last 3 months (N
+  messages per mailbox per tick, live mail first). That is at most 4,800
+  messages a day on the 15-minute cron, or 1,200 on an hourly one, so a busy
+  mailbox's year takes days to drain. The mailbox row shows "Importing the
+  last year — N messages so far", then "Imported the last year (N
   messages)";
+- **goes newest first**: Gmail lists the window from the most recent message
+  back, so the last few weeks are on the timeline after the first ticks and
+  the older history fills in behind them;
 - **is quiet**: imported mail is stored as already read, at the time Gmail
   received it, and fires no push notification, webhook or forward, and
   cancels no sequence. Sent mail from the window is mirrored onto timelines
@@ -267,8 +271,11 @@ Every newly connected mailbox, and every reconnected one, imports its last
 - **stalls on a message that throws**, recording `message_failed:<id>` like
   the live sync does, and retries it on the next tick.
 
-Spam and Trash are not imported. Mailboxes connected before this release
-import their last three months on the first tick after upgrading.
+Spam and Trash are not imported. Mailboxes connected before the import
+existed import their last year on the first tick after upgrading. A mailbox
+that already imported the three months an earlier build covered imports only
+the nine months before them, and one still part-way through restarts over the
+whole year; what it already has is skipped by the dedupe.
 
 ## Several inboxes on one mailbox
 
