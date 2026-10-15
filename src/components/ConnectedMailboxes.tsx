@@ -12,8 +12,11 @@ import {
 } from "lucide-react";
 import {
   disconnectGmailAccount,
+  disconnectOutlookAccount,
   fetchGmailAccounts,
+  fetchOutlookAccounts,
   startGmailConnect,
+  startOutlookConnect,
   type GmailAccount,
 } from "@/lib/api";
 import { navigateExternal } from "@/lib/navigate-external";
@@ -29,6 +32,37 @@ import {
 
 /** How often the backend cron sweeps every connected mailbox. */
 const SYNC_INTERVAL_LABEL = "every 15 minutes";
+
+type Provider = "google" | "microsoft";
+
+/**
+ * Everything that differs between the Google and Microsoft sections. The
+ * rest — sync health, Reconnect, the import bar — is the same component.
+ */
+const PROVIDERS = {
+  google: {
+    /** The company, for "Connect a Google mailbox" and the settings panel. */
+    label: "Google",
+    /** The mail service, for what it "said" or "expired". */
+    service: "Gmail",
+    /** Query param the OAuth callback redirects back with, and test-id prefix. */
+    key: "gmail",
+    fetch: fetchGmailAccounts,
+    disconnect: disconnectGmailAccount,
+    startConnect: startGmailConnect,
+    revokeHint: "remove it from third-party access in your Google account.",
+  },
+  microsoft: {
+    label: "Microsoft",
+    service: "Outlook",
+    key: "outlook",
+    fetch: fetchOutlookAccounts,
+    disconnect: disconnectOutlookAccount,
+    startConnect: startOutlookConnect,
+    revokeHint:
+      "remove saasmail under Apps at myaccount.microsoft.com, or in Microsoft Entra for a work account.",
+  },
+} as const;
 
 /**
  * `lastError` values a fresh grant cannot fix, so Reconnect is not offered
@@ -68,15 +102,15 @@ function isReconnectable(lastError: string): boolean {
 }
 
 /** What to do instead, for the errors Reconnect cannot fix. */
-function nonAuthGuidance(lastError: string): string {
+function nonAuthGuidance(lastError: string, service: string): string {
   if (lastError === HISTORY_GAP_ERROR) {
-    return "Sync re-seeded from the present after Gmail expired the history cursor. The next successful sync clears this.";
+    return `Sync re-seeded from the present after ${service} expired the history cursor. The next successful sync clears this.`;
   }
   if (lastError === NO_PERSONAL_INBOX_ERROR) {
     return "No inbox is mapped to this mailbox, so nothing can be routed. Map one below — reconnecting will not help.";
   }
   if (lastError.startsWith(SYNC_FAILED_PREFIX)) {
-    return `The last sync could not run — nothing since has arrived. Sync retries ${SYNC_INTERVAL_LABEL}, and reconnecting will not help. Gmail said:`;
+    return `The last sync could not run — nothing since has arrived. Sync retries ${SYNC_INTERVAL_LABEL}, and reconnecting will not help. ${service} said:`;
   }
   return "A message failed to sync. The cursor did not move, so the next run retries it — reconnecting will not help.";
 }
@@ -142,6 +176,8 @@ function connectedByLabel(account: GmailAccount): string {
 }
 
 interface ConnectedMailboxesProps {
+  /** Which provider's mailboxes this section lists. Google by default. */
+  provider?: Provider;
   /**
    * Called when the set of connected mailboxes has changed, so the rest of
    * the page can re-read it. Optional: this section works standalone.
@@ -158,8 +194,10 @@ interface ConnectedMailboxesProps {
  * mailbox has stopped syncing, and a history gap means mail is gone for good.
  */
 export default function ConnectedMailboxes({
+  provider = "google",
   onMailboxesChanged,
 }: ConnectedMailboxesProps = {}) {
+  const ui = PROVIDERS[provider];
   const [accounts, setAccounts] = useState<GmailAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -189,7 +227,7 @@ export default function ConnectedMailboxes({
   const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    const outcome = searchParams.get("gmail");
+    const outcome = searchParams.get(ui.key);
     if (
       outcome !== "connected" &&
       outcome !== "error" &&
@@ -199,8 +237,8 @@ export default function ConnectedMailboxes({
       return;
     }
     if (outcome === "wrong_account") {
-      const expected = mailboxParam(searchParams.get("gmail_expected"));
-      const granted = mailboxParam(searchParams.get("gmail_granted"));
+      const expected = mailboxParam(searchParams.get(`${ui.key}_expected`));
+      const granted = mailboxParam(searchParams.get(`${ui.key}_granted`));
       // The callback always sends both, and both are addresses. Anything
       // else means the URL was hand-made, and a red admin banner must not
       // read back whatever a link put in it — nor say "you were reconnecting
@@ -217,18 +255,18 @@ export default function ConnectedMailboxes({
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev);
-        next.delete("gmail");
-        next.delete("gmail_expected");
-        next.delete("gmail_granted");
+        next.delete(ui.key);
+        next.delete(`${ui.key}_expected`);
+        next.delete(`${ui.key}_granted`);
         return next;
       },
       { replace: true },
     );
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, ui.key]);
 
   useEffect(() => {
     let cancelled = false;
-    fetchGmailAccounts()
+    ui.fetch()
       .then((rows) => {
         if (!cancelled) setAccounts(rows);
       })
@@ -247,7 +285,7 @@ export default function ConnectedMailboxes({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ui]);
 
   // While an import is under way, refresh the list so its bar moves. Quietly:
   // a failed refresh keeps the last good rows rather than flashing an error.
@@ -255,12 +293,12 @@ export default function ConnectedMailboxes({
   useEffect(() => {
     if (!importing) return;
     const timer = setInterval(() => {
-      fetchGmailAccounts()
+      ui.fetch()
         .then(setAccounts)
         .catch(() => {});
     }, BACKFILL_POLL_MS);
     return () => clearInterval(timer);
-  }, [importing]);
+  }, [importing, ui]);
 
   /**
    * The connect endpoint answers `{ authUrl }` with a 200 rather than
@@ -281,13 +319,13 @@ export default function ConnectedMailboxes({
     setConnectResult(null);
     setConnectError(null);
     try {
-      const { authUrl } = await startGmailConnect(reconnectFor);
+      const { authUrl } = await ui.startConnect(reconnectFor);
       navigateExternal(authUrl);
     } catch (err) {
       setConnectError(
         err instanceof Error
           ? err.message
-          : "Couldn't start the Google consent flow.",
+          : `Couldn't start the ${ui.label} consent flow.`,
       );
       setConnecting(false);
     }
@@ -299,7 +337,7 @@ export default function ConnectedMailboxes({
     setDisconnectingId(account.id);
     setDisconnectError(null);
     try {
-      await disconnectGmailAccount(account.id);
+      await ui.disconnect(account.id);
       setAccounts((prev) => prev.filter((a) => a.id !== account.id));
       setConfirmingId(null);
       // Disconnecting also unmaps every inbox that read from this mailbox,
@@ -317,11 +355,18 @@ export default function ConnectedMailboxes({
   }
 
   return (
-    <section className="mb-6 space-y-3" data-testid="connected-mailboxes">
+    <section
+      className="mb-6 space-y-3"
+      data-testid={
+        provider === "google"
+          ? "connected-mailboxes"
+          : `connected-mailboxes-${provider}`
+      }
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-text-primary">
-            Connected Google mailboxes
+            Connected {ui.label} mailboxes
           </h2>
           <p className="mt-0.5 text-xs font-light text-text-tertiary">
             Mail is pulled from each connected mailbox {SYNC_INTERVAL_LABEL}, so
@@ -335,7 +380,7 @@ export default function ConnectedMailboxes({
           // mailbox called "[object Object]".
           onClick={() => handleStartConnect()}
           disabled={connecting}
-          data-testid="gmail-connect-button"
+          data-testid={`${ui.key}-connect-button`}
           className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[6px] bg-text-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:opacity-50"
         >
           {connecting ? (
@@ -343,22 +388,22 @@ export default function ConnectedMailboxes({
           ) : (
             <Plus size={14} />
           )}
-          Connect a Google mailbox
+          Connect a {ui.label} mailbox
         </button>
       </div>
 
-      <ProviderSettingsPanel provider="google" />
+      <ProviderSettingsPanel provider={provider} />
 
       {(connectResult === "error" || connectError !== null) && (
         <div
-          data-testid="gmail-connect-error"
+          data-testid={`${ui.key}-connect-error`}
           className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
         >
           <AlertTriangle size={14} className="mt-px shrink-0" />
           {connectError !== null ? (
             <span>
               <span className="font-medium">
-                Couldn&apos;t start the Google consent flow.
+                Couldn&apos;t start the {ui.label} consent flow.
               </span>{" "}
               {connectError}
             </span>
@@ -377,7 +422,7 @@ export default function ConnectedMailboxes({
 
       {connectResult === "wrong_account" && wrongAccount !== null && (
         <div
-          data-testid="gmail-wrong-account"
+          data-testid={`${ui.key}-wrong-account`}
           className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
         >
           <AlertTriangle size={14} className="mt-px shrink-0" />
@@ -390,16 +435,16 @@ export default function ConnectedMailboxes({
             granted access as{" "}
             <span className="font-mono">{wrongAccount.granted}</span>. Saving it
             would have replaced the wrong mailbox&apos;s credentials and skipped
-            its unsynced mail, so it was refused. Sign in to Google as{" "}
+            its unsynced mail, so it was refused. Sign in to {ui.label} as{" "}
             <span className="font-mono">{wrongAccount.expected}</span> — or pick
-            it at Google&apos;s account chooser — and try again.
+            it at {ui.label}&apos;s account chooser — and try again.
           </span>
         </div>
       )}
 
       {connectResult === "wrong_admin" && (
         <div
-          data-testid="gmail-wrong-admin"
+          data-testid={`${ui.key}-wrong-admin`}
           className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
         >
           <AlertTriangle size={14} className="mt-px shrink-0" />
@@ -417,7 +462,7 @@ export default function ConnectedMailboxes({
 
       {connectResult === "connected" && (
         <div
-          data-testid="gmail-connect-success"
+          data-testid={`${ui.key}-connect-success`}
           className="flex gap-2 rounded-[8px] bg-emerald-500/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-400"
         >
           <CheckCircle2 size={14} className="mt-px shrink-0" />
@@ -435,7 +480,7 @@ export default function ConnectedMailboxes({
 
       {!loading && loadError && (
         <div
-          data-testid="gmail-load-error"
+          data-testid={`${ui.key}-load-error`}
           className="rounded-[8px] bg-card p-4 text-sm text-destructive ring-1 ring-border"
         >
           Couldn&apos;t load the connected mailboxes ({loadError}). This is not
@@ -445,14 +490,14 @@ export default function ConnectedMailboxes({
 
       {!loading && !loadError && accounts.length === 0 && (
         <div
-          data-testid="gmail-empty-state"
+          data-testid={`${ui.key}-empty-state`}
           className="rounded-[8px] bg-card p-10 text-center ring-1 ring-border"
         >
           <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet/10">
             <Mail size={20} style={{ color: "#7c5cfc" }} />
           </span>
           <p className="mb-1 text-sm font-medium text-text-primary">
-            No Google mailbox connected
+            No {ui.label} mailbox connected
           </p>
           <p className="mx-auto max-w-lg text-xs font-light text-text-tertiary">
             Connecting a mailbox lets saasmail read its mail and send as that
@@ -476,7 +521,7 @@ export default function ConnectedMailboxes({
               return (
                 <li
                   key={account.id}
-                  data-testid={`gmail-account-${account.id}`}
+                  data-testid={`${ui.key}-account-${account.id}`}
                   className="px-4 py-3"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -485,7 +530,7 @@ export default function ConnectedMailboxes({
                         {account.emailAddress}
                       </div>
                       <div
-                        data-testid={`gmail-synced-${account.id}`}
+                        data-testid={`${ui.key}-synced-${account.id}`}
                         className="mt-0.5 text-xs font-light text-text-tertiary"
                       >
                         {account.lastSyncedAt === null
@@ -493,7 +538,7 @@ export default function ConnectedMailboxes({
                           : `Synced ${relativeTime(account.lastSyncedAt)}`}
                       </div>
                       <div
-                        data-testid={`gmail-provenance-${account.id}`}
+                        data-testid={`${ui.key}-provenance-${account.id}`}
                         className="mt-0.5 text-xs font-light text-text-tertiary"
                       >
                         {connectedByLabel(account)}
@@ -509,7 +554,7 @@ export default function ConnectedMailboxes({
                               handleStartConnect(account.emailAddress)
                             }
                             disabled={connecting}
-                            data-testid={`gmail-reconnect-${account.id}`}
+                            data-testid={`${ui.key}-reconnect-${account.id}`}
                             className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-black/[0.03] disabled:opacity-50"
                           >
                             {connecting ? (
@@ -526,7 +571,7 @@ export default function ConnectedMailboxes({
                             type="button"
                             onClick={() => handleDisconnect(account)}
                             disabled={busy}
-                            data-testid={`gmail-confirm-disconnect-${account.id}`}
+                            data-testid={`${ui.key}-confirm-disconnect-${account.id}`}
                             className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-destructive px-3 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                           >
                             {busy && (
@@ -538,7 +583,7 @@ export default function ConnectedMailboxes({
                             type="button"
                             onClick={() => setConfirmingId(null)}
                             disabled={busy}
-                            data-testid={`gmail-cancel-disconnect-${account.id}`}
+                            data-testid={`${ui.key}-cancel-disconnect-${account.id}`}
                             className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-black/[0.03] hover:text-text-primary disabled:opacity-50"
                           >
                             <X size={12} />
@@ -549,7 +594,7 @@ export default function ConnectedMailboxes({
                         <button
                           type="button"
                           onClick={() => setConfirmingId(account.id)}
-                          data-testid={`gmail-disconnect-${account.id}`}
+                          data-testid={`${ui.key}-disconnect-${account.id}`}
                           className="inline-flex h-8 items-center rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-black/[0.03]"
                         >
                           Disconnect
@@ -563,8 +608,8 @@ export default function ConnectedMailboxes({
                       This deletes the stored credentials for this mailbox and
                       stops it syncing. Mail already synced stays; nothing new
                       arrives. It does <span className="font-medium">not</span>{" "}
-                      revoke saasmail&apos;s access at Google — to do that,
-                      remove it from third-party access in your Google account.
+                      revoke saasmail&apos;s access at {ui.label} — to do that,{" "}
+                      {ui.revokeHint}
                     </p>
                   )}
 
@@ -574,13 +619,14 @@ export default function ConnectedMailboxes({
                         This mailbox has stopped syncing.
                       </span>{" "}
                       {isReconnectable(account.lastError)
-                        ? "It will not resume until you reconnect it. Google said:"
-                        : nonAuthGuidance(account.lastError)}{" "}
+                        ? `It will not resume until you reconnect it. ${ui.label} said:`
+                        : nonAuthGuidance(account.lastError, ui.service)}{" "}
                       <span className="font-mono">{account.lastError}</span>
                     </div>
                   )}
 
                   <BackfillProgress
+                    testIdPrefix={ui.key}
                     account={account}
                     importingNow={
                       accounts.find(
@@ -599,10 +645,10 @@ export default function ConnectedMailboxes({
                           Sync gap {relativeTime(account.lastGapAt)}.
                         </span>{" "}
                         The sync cursor was re-seeded from the present — either
-                        Gmail expired it, or this mailbox was reconnected. Mail
-                        that arrived before that point and had not been fetched
-                        yet was never synced and cannot be recovered here — it
-                        is still in Gmail.
+                        {` ${ui.service} `}expired it, or this mailbox was
+                        reconnected. Mail that arrived before that point and had
+                        not been fetched yet was never synced and cannot be
+                        recovered here — it is still in {ui.service}.
                       </span>
                     </div>
                   )}
@@ -634,15 +680,17 @@ function shortDate(unixSeconds: number): string {
  * pending one names the mailbox it is waiting for.
  */
 function BackfillProgress({
+  testIdPrefix,
   account,
   importingNow,
 }: {
+  testIdPrefix: string;
   account: GmailAccount;
   /** Another mailbox whose import currently has the turn, if any. */
   importingNow: GmailAccount | null;
 }) {
   const { backfill } = account;
-  const testId = `gmail-backfill-${account.id}`;
+  const testId = `${testIdPrefix}-backfill-${account.id}`;
 
   if (backfill.status === "done") {
     return (

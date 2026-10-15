@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   render,
   screen,
@@ -11,6 +11,7 @@ import {
   fetchAdminInboxes,
   fetchAdminUsers,
   fetchGmailAccounts,
+  fetchOutlookAccounts,
   updateInboxSettings,
   type AdminInbox,
   type GmailAccount,
@@ -20,6 +21,8 @@ vi.mock("@/lib/api", () => ({
   fetchAdminInboxes: vi.fn(),
   fetchAdminUsers: vi.fn(),
   fetchGmailAccounts: vi.fn(),
+  // No Outlook mailboxes in these tests; the Outlook ones live below.
+  fetchOutlookAccounts: vi.fn(() => Promise.resolve([])),
   updateInboxSettings: vi.fn(),
   updateInboxAssignments: vi.fn(),
   createInbox: vi.fn(),
@@ -45,6 +48,7 @@ const inbox = (over: Partial<AdminInbox> & { email: string }): AdminInbox => ({
   assignedUserIds: [],
   source: "cloudflare",
   gmailAccountId: null,
+  outlookAccountId: null,
   ...over,
 });
 
@@ -157,6 +161,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
       forwardTo: null,
       source: "gmail",
       gmailAccountId: ACCT_DESK.id,
+      outlookAccountId: null,
     });
     render(<AdminInboxTable />);
 
@@ -188,6 +193,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
       forwardTo: null,
       source: "cloudflare",
       gmailAccountId: null,
+      outlookAccountId: null,
     });
     render(<AdminInboxTable />);
 
@@ -244,9 +250,9 @@ describe("AdminInboxTable — Gmail source mapping", () => {
     expect(labels).not.toContain(ACCT_OPS.emailAddress);
     expect(labels).not.toContain(ACCT_DESK.emailAddress);
     expect(select.disabled).toBe(true);
-    expect(
-      labels.some((l) => /connect a google mailbox first/i.test(l ?? "")),
-    ).toBe(true);
+    expect(labels.some((l) => /connect a mailbox first/i.test(l ?? ""))).toBe(
+      true,
+    );
   });
 });
 
@@ -383,5 +389,73 @@ describe("AdminInboxTable — a mapping we could not verify", () => {
     const values = Array.from(after.options).map((o) => o.value);
     expect(values.filter((v) => v === ACCT_DESK.id)).toHaveLength(1);
     expect(new Set(values).size).toBe(values.length);
+  });
+});
+
+describe("AdminInboxTable — Outlook mailboxes", () => {
+  const mOutlook = vi.mocked(fetchOutlookAccounts);
+  const OUTLOOK = gmailAccount({
+    id: "ol_jane",
+    emailAddress: "jane@contoso.com",
+  });
+
+  afterEach(() => {
+    mOutlook.mockReset().mockResolvedValue([]);
+  });
+
+  it("offers both providers' mailboxes, grouped, and maps an inbox to Outlook", async () => {
+    seed();
+    mOutlook.mockResolvedValue([OUTLOOK]);
+    mUpdate.mockResolvedValue({
+      email: SUPPORT,
+      displayName: null,
+      displayMode: "chat",
+      signatureHtml: null,
+      forwardTo: null,
+      source: "outlook",
+      gmailAccountId: null,
+      outlookAccountId: OUTLOOK.id,
+    });
+    render(<AdminInboxTable />);
+
+    const select = await sourceSelectFor(SUPPORT);
+    await waitFor(() =>
+      expect(
+        Array.from(select.querySelectorAll("optgroup")).map((g) => g.label),
+      ).toEqual(["Google", "Microsoft"]),
+    );
+
+    fireEvent.change(select, { target: { value: `outlook:${OUTLOOK.id}` } });
+
+    await waitFor(() => expect(mUpdate).toHaveBeenCalledTimes(1));
+    expect(mUpdate).toHaveBeenCalledWith(SUPPORT, {
+      source: "outlook",
+      outlookAccountId: OUTLOOK.id,
+    });
+    await waitFor(async () =>
+      expect(selectedLabel(await sourceSelectFor(SUPPORT))).toBe(
+        "jane@contoso.com",
+      ),
+    );
+  });
+
+  it("shows an inbox already mapped to Outlook by its mailbox address", async () => {
+    seed({
+      inboxes: [
+        inbox({
+          email: SUPPORT,
+          source: "outlook",
+          outlookAccountId: OUTLOOK.id,
+        }),
+      ],
+    });
+    mOutlook.mockResolvedValue([OUTLOOK]);
+    render(<AdminInboxTable />);
+
+    await waitFor(async () =>
+      expect(selectedLabel(await sourceSelectFor(SUPPORT))).toBe(
+        "jane@contoso.com",
+      ),
+    );
   });
 });

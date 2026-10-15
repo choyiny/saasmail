@@ -8,6 +8,9 @@ import {
   fetchGmailAccounts,
   disconnectGmailAccount,
   startGmailConnect,
+  fetchOutlookAccounts,
+  disconnectOutlookAccount,
+  startOutlookConnect,
   type GmailAccount,
 } from "@/lib/api";
 import { navigateExternal } from "@/lib/navigate-external";
@@ -16,6 +19,9 @@ vi.mock("@/lib/api", () => ({
   fetchGmailAccounts: vi.fn(),
   disconnectGmailAccount: vi.fn(),
   startGmailConnect: vi.fn(),
+  fetchOutlookAccounts: vi.fn(),
+  disconnectOutlookAccount: vi.fn(),
+  startOutlookConnect: vi.fn(),
   // The Google settings panel loads its own state; these tests are about
   // the mailbox list, so it stays empty and closed.
   fetchIntegrations: vi.fn(() => new Promise(() => {})),
@@ -817,5 +823,85 @@ describe("ConnectedMailboxes — one-year import", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("ConnectedMailboxes — Microsoft", () => {
+  const mOutlook = vi.mocked(fetchOutlookAccounts);
+  const mOutlookConnect = vi.mocked(startOutlookConnect);
+  const mOutlookDisconnect = vi.mocked(disconnectOutlookAccount);
+
+  function renderMicrosoft(path = "/inboxes") {
+    return render(
+      <MemoryRouter initialEntries={[path]}>
+        <LocationProbe />
+        <Routes>
+          <Route
+            path="/inboxes"
+            element={<ConnectedMailboxes provider="microsoft" />}
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  beforeEach(() => {
+    mOutlook.mockReset();
+    mOutlookConnect.mockReset();
+    mOutlookDisconnect.mockReset();
+  });
+
+  it("lists Outlook mailboxes from the Outlook API, not Gmail's", async () => {
+    mOutlook.mockResolvedValue([
+      account({ id: "ol_1", emailAddress: "jane@contoso.com" }),
+    ]);
+    renderMicrosoft();
+
+    expect(
+      await screen.findByText("Connected Microsoft mailboxes"),
+    ).toBeTruthy();
+    expect(await screen.findByTestId("outlook-account-ol_1")).toBeTruthy();
+    expect(screen.getByText("jane@contoso.com")).toBeTruthy();
+    expect(mFetch).not.toHaveBeenCalled();
+  });
+
+  it("starts the Microsoft sign-in from its own connect button", async () => {
+    mOutlook.mockResolvedValue([]);
+    mOutlookConnect.mockResolvedValue({
+      authUrl:
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?x=1",
+    });
+    renderMicrosoft();
+
+    fireEvent.click(await screen.findByTestId("outlook-connect-button"));
+
+    await waitFor(() =>
+      expect(mNavigate).toHaveBeenCalledWith(
+        "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?x=1",
+      ),
+    );
+    expect(mStartConnect).not.toHaveBeenCalled();
+  });
+
+  it("reads the ?outlook= callback result, and leaves ?gmail= to the Google section", async () => {
+    mOutlook.mockResolvedValue([]);
+    renderMicrosoft("/inboxes?outlook=connected&gmail=error");
+
+    expect(await screen.findByTestId("outlook-connect-success")).toBeTruthy();
+    expect(screen.queryByTestId("outlook-connect-error")).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByTestId("location-search").textContent).toBe(
+        "?gmail=error",
+      ),
+    );
+  });
+
+  it("names Microsoft in the wrong-account banner", async () => {
+    mOutlook.mockResolvedValue([]);
+    renderMicrosoft(
+      "/inboxes?outlook=wrong_account&outlook_expected=a%40contoso.com&outlook_granted=b%40contoso.com",
+    );
+    const banner = await screen.findByTestId("outlook-wrong-account");
+    expect(banner.textContent).toMatch(/Sign in to Microsoft as/);
   });
 });

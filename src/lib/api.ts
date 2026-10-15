@@ -834,9 +834,11 @@ export interface AdminInbox {
   forwardTo: string | null;
   assignedUserIds: string[];
   /** Where this inbox's mail comes from. */
-  source: "cloudflare" | "gmail";
+  source: "cloudflare" | "gmail" | "outlook";
   /** Connected mailbox id when source is "gmail"; null otherwise. */
   gmailAccountId: string | null;
+  /** Connected mailbox id when source is "outlook"; null otherwise. */
+  outlookAccountId: string | null;
 }
 
 export async function fetchAdminInboxes(): Promise<AdminInbox[]> {
@@ -852,7 +854,9 @@ export async function createInbox(data: {
   email: string;
   displayName?: string | null;
   displayMode?: InboxDisplayMode;
-}): Promise<Omit<AdminInbox, "source" | "gmailAccountId">> {
+}): Promise<
+  Omit<AdminInbox, "source" | "gmailAccountId" | "outlookAccountId">
+> {
   return apiFetch("/api/admin/inboxes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -867,9 +871,11 @@ export async function updateInboxSettings(
     displayMode?: InboxDisplayMode;
     signatureHtml?: string | null;
     forwardTo?: string | null;
-    source?: "cloudflare" | "gmail";
+    source?: "cloudflare" | "gmail" | "outlook";
     /** Pass null to clear the mapping; omit to leave it unchanged. */
     gmailAccountId?: string | null;
+    /** Same, for an Outlook mailbox. */
+    outlookAccountId?: string | null;
   },
 ): Promise<{
   email: string;
@@ -877,8 +883,9 @@ export async function updateInboxSettings(
   displayMode: InboxDisplayMode;
   signatureHtml: string | null;
   forwardTo: string | null;
-  source: "cloudflare" | "gmail";
+  source: "cloudflare" | "gmail" | "outlook";
   gmailAccountId: string | null;
+  outlookAccountId: string | null;
 }> {
   // The failure body is the whole point here: a rejected Gmail mapping answers
   // with the one sentence that tells the operator how to fix it ("add it under
@@ -1016,6 +1023,36 @@ export async function startGmailConnect(
 ): Promise<{ authUrl: string }> {
   const qs = email ? `?email=${encodeURIComponent(email)}` : "";
   return apiFetch<{ authUrl: string }>(`/api/admin/gmail/connect${qs}`);
+}
+
+// --- Outlook (Microsoft Graph) ---
+
+/** A connected Outlook mailbox. The same shape as `GmailAccount`. */
+export type OutlookAccount = GmailAccount;
+
+export async function fetchOutlookAccounts(): Promise<OutlookAccount[]> {
+  // No trailing slash, for the reason given on `fetchGmailAccounts`.
+  const res = await apiFetch<{ accounts: OutlookAccount[] }>(
+    "/api/admin/outlook",
+  );
+  return res.accounts;
+}
+
+export async function disconnectOutlookAccount(
+  id: string,
+): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(
+    `/api/admin/outlook/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** The Microsoft sign-in URL to send the admin to; see `startGmailConnect`. */
+export async function startOutlookConnect(
+  email?: string,
+): Promise<{ authUrl: string }> {
+  const qs = email ? `?email=${encodeURIComponent(email)}` : "";
+  return apiFetch<{ authUrl: string }>(`/api/admin/outlook/connect${qs}`);
 }
 
 // --- Suppressions ---

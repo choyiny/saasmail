@@ -20,10 +20,11 @@ export const senderIdentities = sqliteTable("sender_identities", {
   forwardTo: text("forward_to"),
   /**
    * Where this inbox's mail comes from. "cloudflare" = Email Routing delivers
-   * to the Worker; "gmail" = a connected Google mailbox is polled for it.
+   * to the Worker; "gmail" = a connected Google mailbox is polled for it;
+   * "outlook" = a connected Microsoft mailbox is.
    * Existing rows default to "cloudflare", which is what they have always been.
    */
-  source: text("source", { enum: ["cloudflare", "gmail"] })
+  source: text("source", { enum: ["cloudflare", "gmail", "outlook"] })
     .notNull()
     .default("cloudflare"),
   /** FK to gmail_accounts.id. Null unless source = "gmail". */
@@ -34,6 +35,8 @@ export const senderIdentities = sqliteTable("sender_identities", {
    * mailbox" — take everything it receives.
    */
   gmailGroupAddress: text("gmail_group_address"),
+  /** FK to outlook_accounts.id. Null unless source = "outlook". */
+  outlookAccountId: text("outlook_account_id"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

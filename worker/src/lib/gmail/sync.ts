@@ -127,7 +127,7 @@ export type SyncResult = {
  * already writes that same value before rethrowing, and Reconnect is the
  * right offer for it.
  */
-function syncFailureCode(err: unknown): string {
+export function syncFailureCode(err: unknown): string {
   if (err instanceof GoogleAuthError) return err.code;
   if (err instanceof GmailApiError) return `${SYNC_FAILED_PREFIX}${err.code}`;
   return `${SYNC_FAILED_PREFIX}unknown`;
@@ -396,11 +396,17 @@ function parseDateHeader(raw: string | undefined): number | null {
  * failure — it never stops the run. Anything genuinely wrong throws, and the
  * caller treats that exactly as it treats a failed inbound ingest.
  */
-async function mirrorSentMessage(
+export async function mirrorSentMessage(
   db: DrizzleD1Database<typeof schema>,
   opts: {
-    gmailMessageId: string;
-    gmailThreadId: string;
+    /**
+     * The provider's ids for the message. Gmail's message id is the echo key;
+     * Outlook's sendMail returns no id, so for Outlook the RFC Message-ID
+     * saasmail wrote is checked as well (see below).
+     */
+    ids:
+      | { provider: "gmail"; messageId: string; threadId: string }
+      | { provider: "outlook"; messageId: string };
     /** Parsed once by the caller, which needed From: to pick `inbox`. */
     parsed: ParsedEmail;
     /** The mapped inbox this message was sent from — see `resolveSentInbox`. */
@@ -410,8 +416,9 @@ async function mirrorSentMessage(
     historical: boolean;
   },
 ): Promise<boolean> {
-  const { gmailMessageId, gmailThreadId, parsed, inbox, internalDomains } =
-    opts;
+  const { ids, parsed, inbox, internalDomains } = opts;
+  const gmailMessageId = ids.messageId;
+  const label = ids.provider === "gmail" ? "Gmail" : "Outlook";
 
   // ECHO SUPPRESSION. saasmail now sends replies THROUGH Gmail, and Gmail
   // files those in the same mailbox's Sent folder, so they come straight back
@@ -444,12 +451,31 @@ async function mirrorSentMessage(
     .from(sentEmails)
     .where(
       and(
-        eq(sentEmails.gmailMessageId, gmailMessageId),
+        ids.provider === "gmail"
+          ? eq(sentEmails.gmailMessageId, ids.messageId)
+          : eq(sentEmails.outlookMessageId, ids.messageId),
         eq(sentEmails.fromAddress, inbox),
       ),
     )
     .limit(1);
   if (echo.length > 0) return false;
+
+  // Outlook's sendMail answers 202 with no id, so a reply saasmail sent has
+  // no Outlook id on its row to match. It does carry the Message-ID saasmail
+  // wrote, which Exchange keeps — so that is the echo key there.
+  if (ids.provider === "outlook" && parsed.messageId) {
+    const ours = await db
+      .select({ id: sentEmails.id })
+      .from(sentEmails)
+      .where(
+        and(
+          eq(sentEmails.messageId, parsed.messageId),
+          eq(sentEmails.fromAddress, inbox),
+        ),
+      )
+      .limit(1);
+    if (ours.length > 0) return false;
+  }
 
   // The counterparty of a SENT message is its RECIPIENT, not its sender —
   // the sender is us.
@@ -481,8 +507,8 @@ async function mirrorSentMessage(
     // them looking for a fault that is not there.
     console.warn(
       recipientHeader === null
-        ? `Gmail sync for ${inbox}: sent message ${gmailMessageId} has no To:, Cc: or Bcc: header at all, so it has no counterparty; not mirrored.`
-        : `Gmail sync for ${inbox}: sent message ${gmailMessageId} yielded no usable counterparty from its first recipient header (${JSON.stringify(recipientHeader.slice(0, 120))}) — it names nobody, or its first-written recipient is not an address we can file mail under. Not mirrored, and deliberately not guessing at a later recipient.`,
+        ? `${label} sync for ${inbox}: sent message ${gmailMessageId} has no To:, Cc: or Bcc: header at all, so it has no counterparty; not mirrored.`
+        : `${label} sync for ${inbox}: sent message ${gmailMessageId} yielded no usable counterparty from its first recipient header (${JSON.stringify(recipientHeader.slice(0, 120))}) — it names nobody, or its first-written recipient is not an address we can file mail under. Not mirrored, and deliberately not guessing at a later recipient.`,
     );
     return false;
   }
@@ -542,8 +568,9 @@ async function mirrorSentMessage(
       status: "sent",
       cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
       conversationId,
-      gmailMessageId,
-      gmailThreadId: gmailThreadId || null,
+      ...(ids.provider === "gmail"
+        ? { gmailMessageId: ids.messageId, gmailThreadId: ids.threadId || null }
+        : { outlookMessageId: ids.messageId }),
       // `sentAt` orders the timeline, so it is the message's own time.
       // `createdAt` is when this row appeared here, which is now.
       sentAt,
@@ -554,7 +581,7 @@ async function mirrorSentMessage(
 
   if (inserted.length === 0) {
     console.log(
-      `Gmail sync for ${inbox}: sent message ${gmailMessageId} is already on the timeline; not mirrored again.`,
+      `${label} sync for ${inbox}: sent message ${gmailMessageId} is already on the timeline; not mirrored again.`,
     );
     return false;
   }
@@ -587,7 +614,7 @@ async function mirrorSentMessage(
       await cancelSequencesForPerson(db, personId);
     } catch (err) {
       console.error(
-        `Gmail sync for ${inbox}: mirrored sent message ${gmailMessageId}, but cancelling sequences for ${toAddress} failed; that person may keep receiving automated follow-ups:`,
+        `${label} sync for ${inbox}: mirrored sent message ${gmailMessageId}, but cancelling sequences for ${toAddress} failed; that person may keep receiving automated follow-ups:`,
         err,
       );
     }
@@ -658,7 +685,7 @@ export type HandleMessage = (
 const SKIPPED: MessageOutcome = { ingested: 0, mirrored: 0, skipped: 1 };
 
 /** Every address on a raw To:/Cc: header, lowercased. Empty when absent. */
-function headerAddresses(raw: string | null): string[] {
+export function headerAddresses(raw: string | null): string[] {
   if (!raw) return [];
   return addressParser(raw, { flatten: true })
     .map((entry) => entry.address?.trim().toLowerCase() ?? "")
@@ -718,8 +745,7 @@ async function processMessage(
       return { ...SKIPPED, at };
     }
     const didMirror = await mirrorSentMessage(db, {
-      gmailMessageId: messageId,
-      gmailThreadId: message.threadId,
+      ids: { provider: "gmail", messageId, threadId: message.threadId },
       parsed,
       inbox,
       internalDomains: await mc.getInternalDomains(),
@@ -1232,14 +1258,14 @@ export async function syncAllGmailAccounts(
   db: DrizzleD1Database<typeof schema>,
   env: CloudflareBindings,
   ctx: ExecutionContext,
-): Promise<void> {
+): Promise<{ importTaken: boolean }> {
   // Gmail sync is optional. An instance that never configured it must not log
   // an error on every cron tick.
   const cfg = await gmailAuthConfig(db, env);
-  if (!cfg) return;
+  if (!cfg) return { importTaken: false };
 
   const accounts = await db.select().from(gmailAccounts);
-  if (accounts.length === 0) return;
+  if (accounts.length === 0) return { importTaken: false };
 
   // Without the job, the import runs inline — but still for one mailbox at
   // a time: the oldest unfinished one, healthy before failing.
@@ -1307,4 +1333,8 @@ export async function syncAllGmailAccounts(
       );
     }
   }
+
+  // Tells the Outlook sync whether the inline import's single turn is
+  // already spent this tick (only meaningful without the import job).
+  return { importTaken: !hasBackfillJob(env) && importTurn !== undefined };
 }

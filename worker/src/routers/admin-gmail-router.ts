@@ -38,7 +38,7 @@ async function config(db: DrizzleD1Database<typeof schema>, env: GmailEnv) {
 }
 
 /** Share of the import window already walked, by date. See AccountSchema. */
-function backfillProgress(
+export function backfillProgress(
   completedAt: number | null,
   until: number | null,
   since: number | null,
@@ -50,7 +50,7 @@ function backfillProgress(
   return Math.min(1, Math.max(0, (until - reached) / (until - since)));
 }
 
-const AccountSchema = z.object({
+export const AccountSchema = z.object({
   id: z.string(),
   emailAddress: z.string(),
   lastSyncedAt: z.number().nullable(),

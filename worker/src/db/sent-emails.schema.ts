@@ -48,6 +48,11 @@ export const sentEmails = sqliteTable(
      * shares the same id, so it is NOT unique here.
      */
     gmailThreadId: text("gmail_thread_id"),
+    /**
+     * Graph's immutable id for a Sent Items message mirrored from Outlook.
+     * Unique per mailbox, like the Gmail id above, for the same reason.
+     */
+    outlookMessageId: text("outlook_message_id"),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },
@@ -84,6 +89,10 @@ export const sentEmails = sqliteTable(
      */
     uniqueIndex("sent_emails_gmail_message_from_unique").on(
       table.gmailMessageId,
+      table.fromAddress,
+    ),
+    uniqueIndex("sent_emails_outlook_message_from_unique").on(
+      table.outlookMessageId,
       table.fromAddress,
     ),
   ],

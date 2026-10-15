@@ -7,7 +7,8 @@ import PageHeader, { PageContainer } from "@/components/PageHeader";
 
 export default function InboxesPage() {
   const { data: session } = useSession();
-  // Bumped whenever the section above connects or disconnects a mailbox. The
+  // Bumped whenever a section above (Google or Microsoft) connects or
+  // disconnects a mailbox. The
   // table below lists those mailboxes in its Source control and a disconnect
   // unmaps inboxes server-side, so without this the table keeps showing a
   // mailbox that is gone — or omitting one that was just added — until the
@@ -23,6 +24,11 @@ export default function InboxesPage() {
         subtitle="Set display names, choose chat or thread mode, forward mail onward, and assign member access."
       />
       <ConnectedMailboxes
+        provider="google"
+        onMailboxesChanged={() => setGmailVersion((v) => v + 1)}
+      />
+      <ConnectedMailboxes
+        provider="microsoft"
         onMailboxesChanged={() => setGmailVersion((v) => v + 1)}
       />
       <AdminInboxTable gmailVersion={gmailVersion} />
