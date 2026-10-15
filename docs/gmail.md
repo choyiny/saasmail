@@ -254,9 +254,19 @@ Every newly connected mailbox, and every reconnected one, imports its last
   The job imports 25 messages per step, back to back, and after 250 hands
   the mailbox to a fresh instance of itself, so no single run grows with the
   mailbox. It starts when an inbox is first mapped to the mailbox; each cron
-  tick restarts it if it has stopped. The mailbox row shows "Importing the
-  last year — N messages so far", then "Imported the last year (N
-  messages)";
+  tick restarts it if it has stopped;
+- **runs one mailbox at a time**. Only one import job runs across the whole
+  install; other mailboxes wait their turn, oldest connection first, and the
+  job that finishes one starts the next. Claiming the turn is a single
+  conditional write, so a cron tick and an inbox mapping cannot both start a
+  job. A mailbox stuck on a failing message is retried only when no healthy
+  one is waiting;
+- **shows its progress** on the mailbox row as a bar: how far back through
+  the year it has reached, by date — "back to Mar 12, 2026 · 1,240 messages ·
+  58%". Gmail gives no reliable total to count against, but the import walks
+  newest first, so the date it has reached is an honest measure. The page
+  refreshes itself every 10 seconds while an import runs. A mailbox waiting
+  for its turn names the one importing now;
 - **goes newest first**: Gmail lists the window from the most recent message
   back, so the last few weeks are on the timeline first and the older
   history fills in behind them;
@@ -274,14 +284,16 @@ Every newly connected mailbox, and every reconnected one, imports its last
   the live sync does. The job stops there, and the next cron tick starts a new
   one that retries the message. A Gmail outage is retried within the job
   first;
-- **has one owner at a time**: a reconnect or disconnect stops a running job
-  at its next step, so two jobs never walk the same mailbox.
+- **has one owner at a time**: a reconnect or disconnect terminates the job
+  holding the turn (and, as a backstop, any job the row no longer names stops
+  at its next step), then hands the turn on.
 
 The `workflows` block in `wrangler.jsonc.example` declares the job, and
 deploying creates it — there is nothing to provision. A `wrangler.jsonc` from
 before it was added still works: without the binding, the cron sync imports in
 whatever budget live mail leaves each tick (at most 4,800 messages a day on the
-15-minute cron, 1,200 on an hourly one), which takes days for a busy mailbox.
+15-minute cron, 1,200 on an hourly one), still one mailbox at a time, which
+takes days for a busy mailbox.
 Add the block to get the job.
 
 Spam and Trash are not imported. Mailboxes connected before the import

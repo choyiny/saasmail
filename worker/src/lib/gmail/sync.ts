@@ -637,6 +637,11 @@ export type MessageOutcome = {
   ingested: number;
   mirrored: number;
   skipped: number;
+  /**
+   * Gmail's `internalDate` (unix seconds) of the message handled, when it
+   * could be fetched. The import uses it to report how far back it has got.
+   */
+  at?: number | null;
 };
 
 /**
@@ -684,7 +689,9 @@ async function processMessage(
   // Deleted between the listing and this fetch. Ordinary, not a failure —
   // Gmail history is a log of what happened, not of what still exists.
   if (!message) return SKIPPED;
-  if (message.labelIds.some((label) => SKIP_LABELS.has(label))) return SKIPPED;
+  const at = message.internalDate ?? null;
+  if (message.labelIds.some((label) => SKIP_LABELS.has(label)))
+    return { ...SKIPPED, at };
 
   // Provisional envelope: the raw bytes carry the real addresses. For inbound
   // mail `parsed.to` decides the destination and is overwritten per inbox
@@ -707,7 +714,7 @@ async function processMessage(
       console.log(
         `Gmail sync for ${account.emailAddress}: sent message ${messageId} is from ${parsed.from.address}, which no inbox here is mapped to; not mirrored.`,
       );
-      return SKIPPED;
+      return { ...SKIPPED, at };
     }
     const didMirror = await mirrorSentMessage(db, {
       gmailMessageId: messageId,
@@ -717,7 +724,9 @@ async function processMessage(
       internalDomains: await mc.getInternalDomains(),
       historical,
     });
-    return didMirror ? { ingested: 0, mirrored: 1, skipped: 0 } : SKIPPED;
+    return didMirror
+      ? { ingested: 0, mirrored: 1, skipped: 0, at }
+      : { ...SKIPPED, at };
   }
 
   const targets = resolveInboundInboxes(inboxes, account.emailAddress, [
@@ -728,10 +737,10 @@ async function processMessage(
     console.log(
       `Gmail sync for ${account.emailAddress}: message ${messageId} names none of its mapped inboxes (${inboxes.join(", ")}) and the account's own address is not mapped; skipped.`,
     );
-    return SKIPPED;
+    return { ...SKIPPED, at };
   }
 
-  const receivedAt = message.internalDate ?? nowSeconds();
+  const receivedAt = at ?? nowSeconds();
   let stored = 0;
   for (const inbox of targets) {
     // The backfill and the history sync can both reach the same message. The
@@ -774,7 +783,9 @@ async function processMessage(
       })
       .where(eq(emails.id, outcome.emailId));
   }
-  return stored > 0 ? { ingested: 1, mirrored: 0, skipped: 0 } : SKIPPED;
+  return stored > 0
+    ? { ingested: 1, mirrored: 0, skipped: 0, at }
+    : { ...SKIPPED, at };
 }
 
 /**
@@ -879,6 +890,11 @@ export async function syncAccount(
   env: CloudflareBindings,
   ctx: ExecutionContext,
   cfg: GmailAuthConfig,
+  /**
+   * Whether this run may import inline (no `GMAIL_BACKFILL` binding). The
+   * cron gives the turn to one mailbox at a time, like the job does.
+   */
+  opts: { importTurn?: boolean } = {},
 ): Promise<SyncResult> {
   const prepared = await prepareAccount(db, account, env, ctx, cfg);
   if (!prepared) {
@@ -902,6 +918,7 @@ export async function syncAccount(
     MAX_MESSAGES_PER_RUN - (result.ingested + result.mirrored + result.skipped);
   if (
     !hasBackfillJob(env) &&
+    (opts.importTurn ?? true) &&
     account.backfillCompletedAt === null &&
     result.failed === 0 &&
     remaining > 0
@@ -1215,8 +1232,22 @@ export async function syncAllGmailAccounts(
   const accounts = await db.select().from(gmailAccounts);
   if (accounts.length === 0) return;
 
+  // Without the job, the import runs inline — but still for one mailbox at
+  // a time: the oldest unfinished one, healthy before failing.
+  const importTurn = accounts
+    .filter((a) => a.backfillCompletedAt === null)
+    .sort(
+      (a, b) =>
+        Number(a.lastError !== null) - Number(b.lastError !== null) ||
+        a.createdAt - b.createdAt,
+    )[0]?.id;
+
   const results = await Promise.allSettled(
-    accounts.map((account) => syncAccount(db, account, env, ctx, cfg)),
+    accounts.map((account) =>
+      syncAccount(db, account, env, ctx, cfg, {
+        importTurn: account.id === importTurn,
+      }),
+    ),
   );
 
   for (const [i, result] of results.entries()) {

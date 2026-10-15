@@ -316,6 +316,13 @@
       "when": 1792094509291,
       "tag": "0044_gmail_backfill_job",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1792095301295,
+      "tag": "0045_gmail_backfill_progress",
+      "breakpoints": true
     }
   ]
 }

@@ -248,6 +248,19 @@ export default function ConnectedMailboxes({
     };
   }, []);
 
+  // While an import is under way, refresh the list so its bar moves. Quietly:
+  // a failed refresh keeps the last good rows rather than flashing an error.
+  const importing = accounts.some((a) => a.backfill.status !== "done");
+  useEffect(() => {
+    if (!importing) return;
+    const timer = setInterval(() => {
+      fetchGmailAccounts()
+        .then(setAccounts)
+        .catch(() => {});
+    }, BACKFILL_POLL_MS);
+    return () => clearInterval(timer);
+  }, [importing]);
+
   /**
    * The connect endpoint answers `{ authUrl }` with a 200 rather than
    * redirecting, so the consent flow only starts if we navigate ourselves.
@@ -564,24 +577,16 @@ export default function ConnectedMailboxes({
                     </div>
                   )}
 
-                  {account.backfill.status !== "done" ? (
-                    <p
-                      className="mt-2 text-xs font-light text-text-tertiary"
-                      data-testid={`gmail-backfill-${account.id}`}
-                    >
-                      {account.backfill.status === "pending"
-                        ? "Importing the last year starts with the next sync."
-                        : `Importing the last year — ${account.backfill.count} messages so far.`}
-                    </p>
-                  ) : (
-                    <p
-                      className="mt-2 text-xs font-light text-text-tertiary"
-                      data-testid={`gmail-backfill-${account.id}`}
-                    >
-                      Imported the last year ({account.backfill.count}{" "}
-                      messages).
-                    </p>
-                  )}
+                  <BackfillProgress
+                    account={account}
+                    importingNow={
+                      accounts.find(
+                        (a) =>
+                          a.id !== account.id &&
+                          a.backfill.status === "running",
+                      ) ?? null
+                    }
+                  />
 
                   {account.lastGapAt !== null && (
                     <div className="mt-2 flex gap-2 rounded-[6px] bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
@@ -605,5 +610,88 @@ export default function ConnectedMailboxes({
         </div>
       )}
     </section>
+  );
+}
+
+/** How often the list refreshes while an import is under way. */
+export const BACKFILL_POLL_MS = 10_000;
+
+function shortDate(unixSeconds: number): string {
+  return new Date(unixSeconds * 1000).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/**
+ * The one-year import's state for one mailbox: a bar while it runs, measured
+ * by how far back in time it has reached (it walks newest first), and a
+ * line saying so before and after. Imports run one mailbox at a time, so a
+ * pending one names the mailbox it is waiting for.
+ */
+function BackfillProgress({
+  account,
+  importingNow,
+}: {
+  account: GmailAccount;
+  /** Another mailbox whose import currently has the turn, if any. */
+  importingNow: GmailAccount | null;
+}) {
+  const { backfill } = account;
+  const testId = `gmail-backfill-${account.id}`;
+
+  if (backfill.status === "done") {
+    return (
+      <p
+        className="mt-2 text-xs font-light text-text-tertiary"
+        data-testid={testId}
+      >
+        Imported the last year ({backfill.count.toLocaleString()} messages).
+      </p>
+    );
+  }
+
+  if (backfill.status === "pending") {
+    return (
+      <p
+        className="mt-2 text-xs font-light text-text-tertiary"
+        data-testid={testId}
+      >
+        {importingNow
+          ? `Importing the last year starts after ${importingNow.emailAddress} finishes — one mailbox at a time.`
+          : "Importing the last year starts shortly."}
+      </p>
+    );
+  }
+
+  const pct = Math.floor(backfill.progress * 100);
+  return (
+    <div className="mt-2" data-testid={testId}>
+      <div className="mb-1 flex items-baseline justify-between gap-3 text-xs font-light text-text-tertiary">
+        <span>
+          Importing the last year
+          {backfill.reachedAt !== null && (
+            <> — back to {shortDate(backfill.reachedAt)}</>
+          )}
+          {" · "}
+          {backfill.count.toLocaleString()} messages
+        </span>
+        <span className="tabular-nums">{pct}%</span>
+      </div>
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-bg-muted"
+        role="progressbar"
+        aria-label={`Importing ${account.emailAddress}`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+      >
+        <div
+          className="h-full rounded-full bg-violet transition-[width] duration-500 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
   );
 }

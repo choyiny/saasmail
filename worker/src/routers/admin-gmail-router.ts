@@ -8,6 +8,7 @@ import { encryptSecret } from "../lib/crypto";
 import { buildAuthUrl, exchangeCode, getProfile } from "../lib/gmail/oauth";
 import { signState, verifyState } from "../lib/gmail/state";
 import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
+import { ensureBackfillJobs, stopBackfillJob } from "../lib/gmail/backfill-job";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 
@@ -42,6 +43,19 @@ function config(env: GmailEnv) {
   };
 }
 
+/** Share of the import window already walked, by date. See AccountSchema. */
+function backfillProgress(
+  completedAt: number | null,
+  until: number | null,
+  since: number | null,
+  reached: number | null,
+): number {
+  if (completedAt !== null) return 1;
+  if (until === null || since === null || reached === null) return 0;
+  if (until <= since) return 0;
+  return Math.min(1, Math.max(0, (until - reached) / (until - since)));
+}
+
 const AccountSchema = z.object({
   id: z.string(),
   emailAddress: z.string(),
@@ -61,6 +75,14 @@ const AccountSchema = z.object({
     status: z.enum(["pending", "running", "done"]),
     count: z.number(),
     completedAt: z.number().nullable(),
+    /**
+     * How far through its window the import is, 0 to 1. Measured by date,
+     * not count: the import walks newest first, and Gmail gives no reliable
+     * total, so the oldest date reached is the honest measure. 1 when done.
+     */
+    progress: z.number(),
+    /** Gmail date (unix seconds) of the oldest message reached so far. */
+    reachedAt: z.number().nullable(),
   }),
   createdAt: z.number(),
   /**
@@ -218,6 +240,13 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
     const now = Math.floor(Date.now() / 1000);
     const db = c.get("db");
 
+    // A reconnect restarts the import, so the job running the old one has to
+    // stop — read its id before the upsert below clears it.
+    const [previous] = await db
+      .select({ jobId: gmailAccounts.backfillJobId })
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.emailAddress, mailbox));
+
     // Reconnecting an already-known mailbox replaces its credentials and
     // clears the error that prompted the reconnect. It also moves the history
     // cursor to the mailbox's current head, which is why `lastGapAt` is
@@ -260,6 +289,7 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
           backfillOffset: 0,
           backfillCount: 0,
           backfillCompletedAt: null,
+          backfillReached: null,
           // Any job still running stops at its next chunk, and the next
           // cron tick starts a new one over the reset window.
           backfillJobId: null,
@@ -267,6 +297,13 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
           updatedAt: now,
         },
       });
+
+    if (previous?.jobId) {
+      await stopBackfillJob(c.env, previous.jobId);
+      // The turn it held is free: start the next import (possibly this
+      // mailbox's own restart) now rather than at the next cron tick.
+      await ensureBackfillJobs(db, c.env).catch(() => {});
+    }
 
     return c.redirect(`${INBOXES_PATH}?gmail=connected`, 302);
   } catch (err) {
@@ -306,6 +343,8 @@ adminGmailRouter.openapi(listRoute, async (c) => {
       lastError: gmailAccounts.lastError,
       lastGapAt: gmailAccounts.lastGapAt,
       backfillUntil: gmailAccounts.backfillUntil,
+      backfillSince: gmailAccounts.backfillSince,
+      backfillReached: gmailAccounts.backfillReached,
       backfillCount: gmailAccounts.backfillCount,
       backfillCompletedAt: gmailAccounts.backfillCompletedAt,
       createdAt: gmailAccounts.createdAt,
@@ -325,6 +364,8 @@ adminGmailRouter.openapi(listRoute, async (c) => {
         connectedByName,
         connectedByEmail,
         backfillUntil,
+        backfillSince,
+        backfillReached,
         backfillCount,
         backfillCompletedAt,
         ...account
@@ -339,6 +380,13 @@ adminGmailRouter.openapi(listRoute, async (c) => {
                 : ("pending" as const),
           count: backfillCount,
           completedAt: backfillCompletedAt,
+          progress: backfillProgress(
+            backfillCompletedAt,
+            backfillUntil,
+            backfillSince,
+            backfillReached,
+          ),
+          reachedAt: backfillReached,
         },
         connectedBy:
           connectedById === null
@@ -378,7 +426,7 @@ adminGmailRouter.openapi(disconnectRoute, async (c) => {
   // an id that was never here tells an operator their mailbox is gone when
   // the one they meant is still connected and still syncing.
   const [account] = await db
-    .select({ id: gmailAccounts.id })
+    .select({ id: gmailAccounts.id, jobId: gmailAccounts.backfillJobId })
     .from(gmailAccounts)
     .where(eq(gmailAccounts.id, id))
     .limit(1);
@@ -421,6 +469,13 @@ adminGmailRouter.openapi(disconnectRoute, async (c) => {
     db,
     mapped.map((m) => m.email),
   );
+
+  // Its import, if one was running, goes with it — and frees the turn for
+  // the next mailbox waiting.
+  if (account.jobId) {
+    await stopBackfillJob(c.env, account.jobId);
+    await ensureBackfillJobs(db, c.env).catch(() => {});
+  }
 
   return c.json({ success: true });
 });

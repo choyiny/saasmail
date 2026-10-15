@@ -390,8 +390,9 @@ describe("GET /api/admin/gmail/callback", () => {
     expect(row.backfillOffset).toBe(0);
     expect(row.backfillCount).toBe(0);
     expect(row.backfillCompletedAt).toBeNull();
-    // Released, so the old job stops at its next chunk.
-    expect(row.backfillJobId).toBeNull();
+    // The old job lost its claim, and the restart got a job of its own.
+    expect(row.backfillJobId).not.toBe("gmail-backfill-acct-old-1");
+    expect(row.backfillJobId).toMatch(/^gmail-backfill-acct-old-\d+$/);
 
     const res = await authFetch("/api/admin/gmail", { apiKey });
     const body = (await res.json()) as {
@@ -401,6 +402,8 @@ describe("GET /api/admin/gmail/callback", () => {
       status: "pending",
       count: 0,
       completedAt: null,
+      progress: 0,
+      reachedAt: null,
     });
   });
 

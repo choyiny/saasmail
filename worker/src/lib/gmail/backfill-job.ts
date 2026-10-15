@@ -1,6 +1,6 @@
 import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { WorkflowEvent, WorkflowStep } from "cloudflare:workers";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../../db/schema";
 import { gmailAccounts } from "../../db/gmail-accounts.schema";
@@ -28,10 +28,14 @@ import {
  * mailbox's whole year is a chain of short instances rather than one long
  * one.
  *
- * Exactly one job owns an account at a time: `gmail_accounts.backfill_job_id`
- * names it, and a chunk run by any other instance stops without touching
- * anything. A reconnect clears the column; a hand-off moves it to the
- * successor.
+ * ONE IMPORT AT A TIME, across every mailbox. `gmail_accounts.backfill_job_id`
+ * names the job that owns a mailbox's import, and a job can only be claimed
+ * while no unfinished import holds one — in a single conditional UPDATE, so
+ * a cron tick and an inbox mapping racing each other cannot both win. Other
+ * mailboxes wait their turn; the job that finishes one starts the next. A
+ * chunk run by any instance the row does not name stops without touching
+ * anything, and a reconnect or disconnect both clears the claim and
+ * terminates the job holding it.
  *
  * Nothing here ever gives up on mail. A job that stops early — a message
  * that threw (recorded as `message_failed:<id>`), no inbox mapped yet, a
@@ -110,6 +114,13 @@ export async function runBackfillJob(
           CHUNK_SIZE,
         ),
     );
+    if (result.status === "done") {
+      // Finished, and so no longer holding the claim: hand the turn to the
+      // next mailbox now rather than at the next cron tick.
+      await step.do("start next", async () =>
+        ensureBackfillJobs(drizzle(env.DB, { schema }), env),
+      );
+    }
     if (result.status !== "continue") return result;
   }
 
@@ -156,19 +167,75 @@ async function handOff(
   return next;
 }
 
-/** Start a job for the account and record it as the owner. */
-async function startJob(
+/**
+ * Claim the import turn for `accountId` and start its job — only if no other
+ * unfinished import holds a claim. One statement, so it is atomic: of two
+ * callers racing, exactly one sees the NOT EXISTS hold. Returns the new job's
+ * id, or null when another import has the turn.
+ */
+async function claimAndStart(
   db: DrizzleD1Database<typeof schema>,
   env: CloudflareBindings,
   accountId: string,
-): Promise<string> {
+): Promise<string | null> {
   const id = newJobId(accountId);
-  await db
+  const claimed = await db
     .update(gmailAccounts)
     .set({ backfillJobId: id })
-    .where(eq(gmailAccounts.id, accountId));
-  await env.GMAIL_BACKFILL!.create({ id, params: { accountId } });
+    .where(
+      and(
+        eq(gmailAccounts.id, accountId),
+        isNull(gmailAccounts.backfillJobId),
+        isNull(gmailAccounts.backfillCompletedAt),
+        sql`NOT EXISTS (SELECT 1 FROM gmail_accounts AS other WHERE other.backfill_job_id IS NOT NULL AND other.backfill_completed_at IS NULL)`,
+      ),
+    )
+    .returning({ id: gmailAccounts.id });
+  if (claimed.length === 0) return null;
+  try {
+    await env.GMAIL_BACKFILL!.create({ id, params: { accountId } });
+  } catch (err) {
+    // Give the turn back, or it is held by an instance that never existed
+    // until the next tick notices.
+    await release(db, accountId, id);
+    throw err;
+  }
   return id;
+}
+
+/** Drop `jobId`'s claim on the account, if it still holds it. */
+async function release(
+  db: DrizzleD1Database<typeof schema>,
+  accountId: string,
+  jobId: string,
+): Promise<void> {
+  await db
+    .update(gmailAccounts)
+    .set({ backfillJobId: null })
+    .where(
+      and(
+        eq(gmailAccounts.id, accountId),
+        eq(gmailAccounts.backfillJobId, jobId),
+      ),
+    );
+}
+
+/**
+ * Stop a job whose claim was just taken away (a reconnect or disconnect), so
+ * it does not finish its current chunk alongside the next mailbox's job.
+ * Best effort: a job that outlives this still stops at its next chunk.
+ */
+export async function stopBackfillJob(
+  env: CloudflareBindings,
+  jobId: string | null,
+): Promise<void> {
+  if (!jobId || !hasBackfillJob(env)) return;
+  try {
+    const instance = await env.GMAIL_BACKFILL!.get(jobId);
+    await instance.terminate();
+  } catch {
+    // Already finished, or never existed.
+  }
 }
 
 /** Whether the instance named on the row is still going to make progress. */
@@ -188,21 +255,26 @@ async function isLive(
 }
 
 /**
- * Make sure every mailbox with an unfinished import has a live job.
+ * Give the import turn to the next mailbox, if no import holds it.
  *
- * Runs on every cron tick, after the live sync, and is the one place a
- * stopped job is restarted. Skips a mailbox with no inbox mapped — the live
- * sync has just recorded that, and a job would stop at once — so an unmapped
- * mailbox costs nothing until someone maps it. `accountId` narrows it to one
- * mailbox, for a caller that has just made it importable.
+ * Runs on every cron tick after the live sync, when a job finishes, and when
+ * an inbox is mapped. First it releases any claim whose job has died — a
+ * message that threw, an outage past the step's retries — and stops if a
+ * live job still holds one: one import at a time. Then it claims the next
+ * mailbox, healthy ones first and oldest connection first, so a mailbox
+ * stuck on a bad message is retried only when nothing else is waiting.
+ *
+ * A mailbox with no inbox mapped is skipped (the live sync has just recorded
+ * that, and its job would stop at once) — except `justMapped`, the one an
+ * inbox was mapped to a moment ago, before any sync could clear the error.
  *
  * A no-op on a deployment that does not bind `GMAIL_BACKFILL`: the cron sync
- * imports inline there instead.
+ * imports inline there instead, still one mailbox at a time.
  */
 export async function ensureBackfillJobs(
   db: DrizzleD1Database<typeof schema>,
   env: CloudflareBindings,
-  accountId?: string,
+  justMapped?: string,
 ): Promise<void> {
   if (!hasBackfillJob(env) || !gmailAuthConfig(env)) return;
 
@@ -214,23 +286,35 @@ export async function ensureBackfillJobs(
       lastError: gmailAccounts.lastError,
     })
     .from(gmailAccounts)
-    .where(
-      accountId
-        ? and(
-            eq(gmailAccounts.id, accountId),
-            isNull(gmailAccounts.backfillCompletedAt),
-          )
-        : isNull(gmailAccounts.backfillCompletedAt),
-    );
+    .where(isNull(gmailAccounts.backfillCompletedAt))
+    .orderBy(asc(gmailAccounts.createdAt));
 
   for (const account of pending) {
-    if (!accountId && account.lastError === NO_PERSONAL_INBOX_ERROR) continue;
-    if (await isLive(env, account.jobId)) continue;
+    if (!account.jobId) continue;
+    if (await isLive(env, account.jobId)) return;
+    await release(db, account.id, account.jobId);
+  }
+
+  const candidates = pending
+    .filter(
+      (a) => a.id === justMapped || a.lastError !== NO_PERSONAL_INBOX_ERROR,
+    )
+    .sort(
+      (a, b) =>
+        Number(b.id === justMapped) - Number(a.id === justMapped) ||
+        Number(a.lastError !== null) - Number(b.lastError !== null),
+    );
+
+  for (const account of candidates) {
     try {
-      const id = await startJob(db, env, account.id);
-      console.log(
-        `Gmail backfill for ${account.emailAddress}: started job ${id}.`,
-      );
+      const id = await claimAndStart(db, env, account.id);
+      if (id) {
+        console.log(
+          `Gmail backfill for ${account.emailAddress}: started job ${id}.`,
+        );
+      }
+      // Claimed, or someone else claimed first: either way the turn is taken.
+      return;
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unknown error";
       console.error(

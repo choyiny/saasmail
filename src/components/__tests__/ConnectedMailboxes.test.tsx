@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import ConnectedMailboxes from "@/components/ConnectedMailboxes";
+import ConnectedMailboxes, {
+  BACKFILL_POLL_MS,
+} from "@/components/ConnectedMailboxes";
 import {
   fetchGmailAccounts,
   disconnectGmailAccount,
@@ -47,7 +49,13 @@ const account = (over: Partial<GmailAccount> = {}): GmailAccount => ({
   lastSyncedAt: minutesAgo(5),
   lastError: null,
   lastGapAt: null,
-  backfill: { status: "done", count: 0, completedAt: null },
+  backfill: {
+    status: "done",
+    count: 0,
+    completedAt: null,
+    progress: 1,
+    reachedAt: null,
+  },
   createdAt: minutesAgo(60 * 24),
   connectedBy: { id: "user_1", name: "Jane Ops", email: "jane@example.com" },
   ...over,
@@ -703,24 +711,107 @@ describe("ConnectedMailboxes — a reconnect names its mailbox", () => {
 });
 
 describe("ConnectedMailboxes — one-year import", () => {
-  it.each([
-    [
-      { status: "pending" as const, count: 0, completedAt: null },
-      /starts with the next sync/i,
-    ],
-    [
-      { status: "running" as const, count: 42, completedAt: null },
-      /42 messages so far/i,
-    ],
-    [
-      { status: "done" as const, count: 310, completedAt: 1_700_000_000 },
-      /imported the last year \(310/i,
-    ],
-  ])("shows the import's progress (%o)", async (backfill, text) => {
-    mFetch.mockResolvedValue([account({ backfill })]);
+  const backfill = (
+    over: Partial<GmailAccount["backfill"]>,
+  ): GmailAccount["backfill"] => ({
+    status: "running",
+    count: 0,
+    completedAt: null,
+    progress: 0,
+    reachedAt: null,
+    ...over,
+  });
+
+  it("shows a bar measured by how far back the import has reached", async () => {
+    // 2026-03-12 12:00 UTC: midday, so no timezone moves it off the 12th.
+    const reachedAt = Date.UTC(2026, 2, 12, 12) / 1000;
+    mFetch.mockResolvedValue([
+      account({
+        backfill: backfill({ count: 1240, progress: 0.583, reachedAt }),
+      }),
+    ]);
     renderAt();
 
+    const block = await screen.findByTestId("gmail-backfill-acct_1");
+    expect(block.textContent).toMatch(/58%/);
+    expect(block.textContent).toMatch(/back to Mar 12, 2026/);
+    expect(block.textContent).toMatch(/1,240 messages/);
+    const bar = screen.getByRole("progressbar");
+    expect(bar.getAttribute("aria-valuenow")).toBe("58");
+    expect((bar.firstElementChild as HTMLElement).style.width).toBe("58%");
+  });
+
+  it("names the mailbox a waiting import is queued behind", async () => {
+    mFetch.mockResolvedValue([
+      account({
+        id: "acct_1",
+        emailAddress: "first@example.com",
+        backfill: backfill({ progress: 0.2 }),
+      }),
+      account({
+        id: "acct_2",
+        emailAddress: "second@example.com",
+        backfill: backfill({ status: "pending" }),
+      }),
+    ]);
+    renderAt();
+
+    const line = await screen.findByTestId("gmail-backfill-acct_2");
+    expect(line.textContent).toMatch(
+      /starts after first@example\.com finishes — one mailbox at a time/i,
+    );
+  });
+
+  it("says it starts shortly when nothing else is importing", async () => {
+    mFetch.mockResolvedValue([
+      account({ backfill: backfill({ status: "pending" }) }),
+    ]);
+    renderAt();
     const line = await screen.findByTestId("gmail-backfill-acct_1");
-    expect(line.textContent).toMatch(text);
+    expect(line.textContent).toMatch(/starts shortly/i);
+  });
+
+  it("says when it has finished", async () => {
+    mFetch.mockResolvedValue([
+      account({
+        backfill: backfill({
+          status: "done",
+          count: 310,
+          completedAt: 1_700_000_000,
+          progress: 1,
+        }),
+      }),
+    ]);
+    renderAt();
+    const line = await screen.findByTestId("gmail-backfill-acct_1");
+    expect(line.textContent).toMatch(/imported the last year \(310/i);
+  });
+
+  it("refreshes while an import runs, and stops once it is done", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mFetch.mockResolvedValueOnce([
+        account({ backfill: backfill({ progress: 0.1 }) }),
+      ]);
+      mFetch.mockResolvedValue([
+        account({ backfill: backfill({ status: "done", progress: 1 }) }),
+      ]);
+      renderAt();
+      await screen.findByRole("progressbar");
+      expect(mFetch).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(BACKFILL_POLL_MS);
+      await waitFor(() =>
+        expect(screen.getByTestId("gmail-backfill-acct_1").textContent).toMatch(
+          /imported the last year/i,
+        ),
+      );
+      expect(mFetch).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(BACKFILL_POLL_MS * 3);
+      expect(mFetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

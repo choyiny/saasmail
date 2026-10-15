@@ -1775,10 +1775,15 @@ describe("the one-year import job", () => {
       },
       get: async (id: string) => {
         if (!(id in statuses)) throw new Error("instance.not_found");
-        return { status: async () => ({ status: statuses[id] }) };
+        return {
+          status: async () => ({ status: statuses[id] }),
+          terminate: async () => {
+            statuses[id] = "terminated";
+          },
+        };
       },
     };
-    return { created, binding };
+    return { created, binding, statuses };
   }
 
   function envWith(binding: unknown): CloudflareBindings {
@@ -2000,6 +2005,28 @@ describe("the one-year import job", () => {
   });
 
   describe("ensureBackfillJobs", () => {
+    /** A second mailbox with an unfinished import, connected later. */
+    async function seedSecond(
+      over: Partial<typeof gmailAccounts.$inferInsert> = {},
+    ) {
+      await seedAccount("9000", {
+        id: "acct-2",
+        emailAddress: "second@acme.dev",
+      });
+      await getDb()
+        .update(gmailAccounts)
+        .set({ createdAt: (await account()).createdAt + 10, ...over })
+        .where(eq(gmailAccounts.id, "acct-2"));
+    }
+
+    async function jobOf(id: string) {
+      const [row] = await getDb()
+        .select({ jobId: gmailAccounts.backfillJobId })
+        .from(gmailAccounts)
+        .where(eq(gmailAccounts.id, id));
+      return row.jobId;
+    }
+
     it("starts a job for a mailbox with none and records it as the owner", async () => {
       await ownJob(null);
       const { created, binding } = fakeWorkflow();
@@ -2032,6 +2059,86 @@ describe("the one-year import job", () => {
       }
     });
 
+    it("runs one import at a time: a second mailbox waits for the live one", async () => {
+      await seedSecond();
+      const { created, binding } = fakeWorkflow({ [JOB]: "running" });
+
+      await ensureBackfillJobs(getDb(), envWith(binding));
+
+      expect(created).toHaveLength(0);
+      expect(await jobOf("acct-2")).toBeNull();
+    });
+
+    it("gives the turn to the next mailbox once the first is done", async () => {
+      await seedSecond();
+      await markBackfillDone();
+      const { created, binding } = fakeWorkflow({ [JOB]: "complete" });
+
+      await ensureBackfillJobs(getDb(), envWith(binding));
+
+      expect(created.map((c) => c.params)).toEqual([{ accountId: "acct-2" }]);
+      expect(await jobOf("acct-2")).toBe(created[0].id);
+    });
+
+    it("starts only one job when two callers race for the turn", async () => {
+      await ownJob(null);
+      await seedSecond();
+      const { created, binding } = fakeWorkflow();
+
+      await Promise.all([
+        ensureBackfillJobs(getDb(), envWith(binding)),
+        ensureBackfillJobs(getDb(), envWith(binding), "acct-2"),
+      ]);
+
+      expect(created).toHaveLength(1);
+      const holders = (
+        await getDb()
+          .select({ jobId: gmailAccounts.backfillJobId })
+          .from(gmailAccounts)
+      ).filter((r) => r.jobId !== null);
+      expect(holders).toHaveLength(1);
+    });
+
+    it("prefers a healthy mailbox over one stuck on a failing message", async () => {
+      await ownJob(null);
+      await getDb()
+        .update(gmailAccounts)
+        .set({ lastError: "message_failed:bad" })
+        .where(eq(gmailAccounts.id, "acct-1"));
+      await seedSecond();
+      const { created, binding } = fakeWorkflow();
+
+      await ensureBackfillJobs(getDb(), envWith(binding));
+
+      expect(created.map((c) => c.params)).toEqual([{ accountId: "acct-2" }]);
+    });
+
+    it("puts a mailbox that was just mapped first, even before a sync clears its error", async () => {
+      await ownJob(null);
+      await seedSecond({ lastError: "no_personal_inbox" });
+      const { created, binding } = fakeWorkflow();
+
+      await ensureBackfillJobs(getDb(), envWith(binding), "acct-2");
+
+      expect(created.map((c) => c.params)).toEqual([{ accountId: "acct-2" }]);
+    });
+
+    it("gives the turn back when the job cannot be created", async () => {
+      await ownJob(null);
+      const binding = {
+        create: async () => {
+          throw new Error("rate limited");
+        },
+        get: async () => {
+          throw new Error("instance.not_found");
+        },
+      };
+
+      await ensureBackfillJobs(getDb(), envWith(binding));
+
+      expect((await account()).backfillJobId).toBeNull();
+    });
+
     it("skips finished imports and unmapped mailboxes", async () => {
       await ownJob(null);
       await getDb()
@@ -2052,6 +2159,46 @@ describe("the one-year import job", () => {
       await ensureBackfillJobs(getDb(), envWithout());
       expect((await account()).backfillJobId).toBeNull();
     });
+  });
+
+  it("records the oldest date reached, for the progress bar", async () => {
+    stubGmail({
+      listIds: ["new", "old"],
+      messages: {
+        ...oldMessages(["new"], "1760000000000"),
+        ...oldMessages(["old"], "1750000000000"),
+      },
+    });
+
+    await chunk(1);
+    expect((await account()).backfillReached).toBe(1_760_000_000);
+    await chunk(1);
+    expect((await account()).backfillReached).toBe(1_750_000_000);
+  });
+
+  it("imports inline for one mailbox at a time without the Workflow", async () => {
+    await seedAccount("9000", {
+      id: "acct-2",
+      emailAddress: "second@acme.dev",
+    });
+    await getDb()
+      .update(gmailAccounts)
+      .set({ createdAt: (await account()).createdAt + 10 })
+      .where(eq(gmailAccounts.id, "acct-2"));
+    await seedInbox("second@acme.dev", null, "acct-2");
+    const listQueries: string[] = [];
+    stubGmail({ listIds: ["b1"], listQueries, messages: oldMessages(["b1"]) });
+
+    await syncAllGmailAccounts(getDb(), envWithout(), fakeCtx());
+
+    // Only the older mailbox took a turn.
+    expect(listQueries).toHaveLength(1);
+    expect((await account()).backfillCompletedAt).not.toBeNull();
+    const [second] = await getDb()
+      .select()
+      .from(gmailAccounts)
+      .where(eq(gmailAccounts.id, "acct-2"));
+    expect(second.backfillUntil).toBeNull();
   });
 
   describe("runBackfillJob", () => {
@@ -2092,7 +2239,8 @@ describe("the one-year import job", () => {
       const { names, result } = runJob(binding);
 
       expect(await result).toEqual({ status: "done", handled: 5 });
-      expect(names).toEqual(["chunk 0", "chunk 1", "chunk 2"]);
+      // Finishing hands the turn to the next mailbox straight away.
+      expect(names).toEqual(["chunk 0", "chunk 1", "chunk 2", "start next"]);
       expect(created).toHaveLength(0);
       expect(await getDb().select().from(emails)).toHaveLength(ids.length);
     });

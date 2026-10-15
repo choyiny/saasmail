@@ -60,6 +60,10 @@ export async function backfillAccount(
   let pageToken = account.backfillPageToken;
   let offset = account.backfillOffset;
   let handled = 0;
+  // The oldest message reached so far. Messages come newest first, so this is
+  // how far back into the window the import has got — the progress the UI
+  // shows, since Gmail offers no reliable total to count against.
+  let reached = account.backfillReached;
 
   /** Persist the resume point, and how far along the import is. */
   const save = async (patch: Partial<typeof gmailAccounts.$inferInsert>) => {
@@ -71,6 +75,7 @@ export async function backfillAccount(
         backfillPageToken: pageToken,
         backfillOffset: offset,
         backfillCount: account.backfillCount + handled,
+        backfillReached: reached,
         updatedAt: Math.floor(Date.now() / 1000),
         ...patch,
       })
@@ -91,7 +96,8 @@ export async function backfillAccount(
       }
       const messageId = page.ids[offset];
       try {
-        await handle(messageId, true);
+        const { at } = await handle(messageId, true);
+        if (at != null && (reached === null || at < reached)) reached = at;
       } catch (err) {
         // The message only, never the error object: a D1 error carries its
         // bound query parameters, which on this path include the access token.

@@ -66,6 +66,12 @@ export const gmailAccounts = sqliteTable("gmail_accounts", {
   backfillCount: integer("backfill_count").notNull().default(0),
   backfillCompletedAt: integer("backfill_completed_at"),
   /**
+   * Gmail date (unix seconds) of the oldest message the import has reached.
+   * The listing runs newest first, so its place between `backfillUntil` and
+   * `backfillSince` is the import's progress. Null until the first message.
+   */
+  backfillReached: integer("backfill_reached"),
+  /**
    * The Workflow instance that owns the import (lib/gmail/backfill-job.ts),
    * or null when none has been started. A job only works while this names
    * it, so a reconnect clearing it — or a hand-off to a successor — stops an

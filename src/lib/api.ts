@@ -944,12 +944,20 @@ export interface GmailAccount {
   /**
    * The one-off import of the last year: "pending" until it starts,
    * "running" while it pages through, "done" at the end. `count` is messages
-   * handled so far; `completedAt` is unix **seconds**.
+   * handled so far; `completedAt` is unix **seconds**. Imports run one
+   * mailbox at a time, so a "pending" one may be waiting for another.
    */
   backfill: {
     status: "pending" | "running" | "done";
     count: number;
     completedAt: number | null;
+    /**
+     * 0 to 1: how far back through its window the import has walked, by date
+     * (it goes newest first; Gmail gives no reliable total). 1 when done.
+     */
+    progress: number;
+    /** Unix **seconds**: Gmail date of the oldest message reached so far. */
+    reachedAt: number | null;
   };
   /** Unix **seconds** of the connection, like the two fields above. */
   createdAt: number;
