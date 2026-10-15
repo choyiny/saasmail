@@ -16,6 +16,10 @@ vi.mock("@/lib/api", () => ({
   fetchGmailAccounts: vi.fn(),
   disconnectGmailAccount: vi.fn(),
   startGmailConnect: vi.fn(),
+  // The Google settings panel loads its own state; these tests are about
+  // the mailbox list, so it stays empty and closed.
+  fetchIntegrations: vi.fn(() => new Promise(() => {})),
+  saveIntegration: vi.fn(),
 }));
 
 vi.mock("@/lib/navigate-external", () => ({

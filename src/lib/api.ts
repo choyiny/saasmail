@@ -1141,3 +1141,42 @@ export async function cancelOutboxItem(
 ): Promise<{ deleted: boolean }> {
   return apiFetch(`/api/outbox/${id}`, { method: "DELETE" });
 }
+
+/** A mailbox provider's OAuth app settings, as the admin UI sees them. */
+export interface ProviderSettings {
+  provider: "google" | "microsoft";
+  /** Usable now: settings present and TOKEN_ENCRYPTION_KEY set. */
+  configured: boolean;
+  /** "env" while Google's settings still come from wrangler vars. */
+  source: "database" | "env" | null;
+  clientId: string | null;
+  /** The secret itself is never sent back — only whether one is stored. */
+  hasClientSecret: boolean;
+  /** Microsoft only; null means any work, school or personal account. */
+  tenant: string | null;
+  /** The exact redirect URI to register with the provider. */
+  redirectUri: string;
+  /** Mailboxes whose grants belong to the current OAuth app. */
+  connectedMailboxes: number;
+  /** Unix **seconds**. */
+  updatedAt: number | null;
+}
+
+export async function fetchIntegrations(): Promise<{
+  encryptionKeyConfigured: boolean;
+  providers: ProviderSettings[];
+}> {
+  return apiFetch("/api/admin/integrations");
+}
+
+/** Omit `clientSecret` to keep the stored one. */
+export async function saveIntegration(
+  provider: ProviderSettings["provider"],
+  body: { clientId: string; clientSecret?: string; tenant?: string | null },
+): Promise<ProviderSettings> {
+  return apiFetch(`/api/admin/integrations/${provider}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}

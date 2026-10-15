@@ -643,7 +643,7 @@ describe("admin inboxes router — Gmail mapping", () => {
         });
         expect(res.status, `unset ${secret}`).toBe(503);
         const body = (await res.json()) as { error: string };
-        expect(body.error).toMatch(/not configured/i);
+        expect(body.error).toMatch(/not set up yet/i);
       } finally {
         bindings[secret] = saved;
       }

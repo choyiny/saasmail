@@ -10,14 +10,12 @@ import { signState, verifyState } from "../lib/gmail/state";
 import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
 import { ensureBackfillJobs, stopBackfillJob } from "../lib/gmail/backfill-job";
 import { json200Response } from "../lib/helpers";
+import { loadProviderConfig } from "../lib/oauth-providers";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+import type { schema } from "../db/schema";
 import type { Variables } from "../variables";
 
-type GmailEnv = CloudflareBindings & {
-  GOOGLE_OAUTH_CLIENT_ID?: string;
-  GOOGLE_OAUTH_CLIENT_SECRET?: string;
-  TOKEN_ENCRYPTION_KEY?: string;
-  BASE_URL?: string;
-};
+type GmailEnv = CloudflareBindings & { BASE_URL?: string };
 
 export const adminGmailRouter = new OpenAPIHono<{
   Bindings: GmailEnv;
@@ -28,19 +26,15 @@ export const adminGmailRouter = new OpenAPIHono<{
 // the SPA catch-all and the `?gmail=` result signal is lost.
 const INBOXES_PATH = "/inboxes";
 
-function config(env: GmailEnv) {
-  const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
-  const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;
-  const encryptionKey = env.TOKEN_ENCRYPTION_KEY;
-  if (!clientId || !clientSecret || !encryptionKey) return null;
-  const base = (env.BASE_URL ?? "").replace(/\/$/, "");
-  return {
-    clientId,
-    clientSecret,
-    encryptionKey,
-    base,
-    redirectUri: `${base}/api/admin/gmail/callback`,
-  };
+/** Where Google sends the admin back after consent. */
+export function gmailRedirectUri(env: { BASE_URL?: string }): string {
+  return `${(env.BASE_URL ?? "").replace(/\/$/, "")}/api/admin/gmail/callback`;
+}
+
+async function config(db: DrizzleD1Database<typeof schema>, env: GmailEnv) {
+  const cfg = await loadProviderConfig(db, env, "google");
+  if (!cfg) return null;
+  return { ...cfg, redirectUri: gmailRedirectUri(env) };
 }
 
 /** Share of the import window already walked, by date. See AccountSchema. */
@@ -125,9 +119,15 @@ const connectRoute = createRoute({
 });
 
 adminGmailRouter.openapi(connectRoute, async (c) => {
-  const cfg = config(c.env);
+  const cfg = await config(c.get("db"), c.env);
   if (!cfg) {
-    return c.json({ error: "Gmail integration is not configured" }, 503);
+    return c.json(
+      {
+        error:
+          "Google is not set up yet. Add its OAuth client ID and secret under Inboxes → Connected mailboxes → Google settings.",
+      },
+      503,
+    );
   }
   const { email } = c.req.valid("query");
   // Lowercased here and on the profile coming back, or a reconnect started
@@ -171,7 +171,7 @@ const callbackRoute = createRoute({
 });
 
 adminGmailRouter.openapi(callbackRoute, async (c) => {
-  const cfg = config(c.env);
+  const cfg = await config(c.get("db"), c.env);
   const { code, state } = c.req.valid("query");
   if (!cfg || !code || !state) {
     return c.redirect(`${INBOXES_PATH}?gmail=error`, 302);

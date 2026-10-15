@@ -85,19 +85,31 @@ tick. Those are in
    sends Google a relative redirect URI and Google answers with its own error
    page.
 
-4. Set three Worker secrets:
+4. Set the one Worker secret the integration needs:
 
    ```bash
-   wrangler secret put GOOGLE_OAUTH_CLIENT_ID
-   wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET
    # 32 random bytes, base64-encoded
    openssl rand -base64 32 | wrangler secret put TOKEN_ENCRYPTION_KEY
    ```
 
-   For local development these three go in `.dev.vars` instead, alongside
+   It encrypts everything the integration stores — the OAuth client secret
+   and every mailbox's refresh token — which is why it stays out of the
+   database. For local development it goes in `.dev.vars` instead, alongside
    `DISABLE_PASSKEY_GATE=true` — without that, the passkey gate refuses the
    OAuth callback like any other `/api/*` route and the mailbox is never
    stored. See [Gmail on a local instance](gmail-local-setup.md).
+
+   Then open **Inboxes → Connected mailboxes → Google settings**, paste the
+   client ID and client secret, and save. The panel shows the exact redirect
+   URI to register in step 3, with a copy button. The secret is stored
+   encrypted and never shown again; leave it blank on later edits to keep it.
+
+   Installs that set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`
+   as Worker secrets keep working: those are the fallback when nothing is
+   saved in the panel, and saving in the panel takes over from them. Changing
+   the client ID disconnects every connected mailbox in effect — their grants
+   belong to the old OAuth app — so each needs **Reconnect** afterwards; the
+   panel warns before you save.
 
    `TOKEN_ENCRYPTION_KEY` must be exactly 32 bytes before base64 encoding — the
    command above produces exactly that. A key of the wrong length does not stop
@@ -716,6 +728,11 @@ Never rotate `TOKEN_ENCRYPTION_KEY` without reconnecting every mailbox first.
 Every stored refresh token is sealed with this key, and changing it makes
 those tokens permanently undecryptable — there is no recovery path other than
 disconnecting and reconnecting each mailbox from scratch.
+
+The OAuth client secret saved under **Google settings** is sealed with the
+same key. After a rotation the panel shows Google as not set up — it does not
+fall back to the env vars, so the cause stays visible — and the fix is to
+paste the client secret in again.
 
 ---
 

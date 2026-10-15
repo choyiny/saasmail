@@ -64,17 +64,21 @@ that far.
 
 ## Step 2 — Secrets and env
 
-Three secrets, plus two `wrangler.jsonc` values that are easy to miss.
+One secret, two `wrangler.jsonc` values that are easy to miss, and the OAuth
+client entered in the app.
 
 ### `.dev.vars` (local) / `wrangler secret put` (deployed)
 
 ```bash
 # .dev.vars
-GOOGLE_OAUTH_CLIENT_ID=...apps.googleusercontent.com
-GOOGLE_OAUTH_CLIENT_SECRET=...
 TOKEN_ENCRYPTION_KEY=...          # openssl rand -base64 32
 DISABLE_PASSKEY_GATE=true
 ```
+
+Then, once the app is running, open **Inboxes → Connected mailboxes → Google
+settings** and paste the client ID and secret. (`GOOGLE_OAUTH_CLIENT_ID` and
+`GOOGLE_OAUTH_CLIENT_SECRET` in `.dev.vars` still work as a fallback when
+nothing is saved there.)
 
 `TOKEN_ENCRYPTION_KEY` must decode to **exactly 32 bytes** — `openssl rand
 -base64 32` produces exactly that, and anything else is rejected with
@@ -89,12 +93,10 @@ signing the OAuth `state`. Never rotate it without reconnecting every mailbox
 `/api/admin/gmail/callback`, which is one of those routes. You would complete
 consent and never get a mailbox.
 
-For a deployed instance the same three Gmail values go in as Worker secrets
-instead:
+For a deployed instance the key goes in as a Worker secret instead, and the
+client is entered on the deployed app's Inboxes page:
 
 ```bash
-wrangler secret put GOOGLE_OAUTH_CLIENT_ID
-wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET
 openssl rand -base64 32 | wrangler secret put TOKEN_ENCRYPTION_KEY
 ```
 
