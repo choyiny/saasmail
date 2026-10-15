@@ -21,12 +21,7 @@ import {
   runBackfillChunk,
   MAX_MESSAGES_PER_RUN,
 } from "../lib/gmail/sync";
-import {
-  ensureBackfillJobs,
-  runBackfillJob,
-  CHUNK_SIZE,
-  CHUNKS_PER_JOB,
-} from "../lib/gmail/backfill-job";
+import { ensureBackfillJobs, runBackfillJob } from "../lib/gmail/backfill-job";
 import { BACKFILL_WINDOW_SECONDS } from "../lib/gmail/backfill";
 import { getDb, applyMigrations, cleanDb } from "./helpers";
 
@@ -2219,6 +2214,10 @@ describe("the one-year import job", () => {
       return { names, step };
     }
 
+    // Small, so a test covers several chunks and a hand-off in a handful of
+    // messages — the real sizes made this test slow enough to time out on CI.
+    const SIZES = { chunkSize: 2, chunksPerJob: 3 };
+
     function runJob(binding: unknown) {
       const { names, step } = fakeStep();
       const result = runBackfillJob(
@@ -2227,18 +2226,22 @@ describe("the one-year import job", () => {
         step as never,
         "acct-1",
         JOB,
+        SIZES,
       );
       return { names, result };
     }
 
     it("pages until the window is exhausted, then ends", async () => {
-      const ids = Array.from({ length: CHUNK_SIZE * 2 + 5 }, (_, i) => `b${i}`);
+      const ids = Array.from(
+        { length: SIZES.chunkSize * 2 + 1 },
+        (_, i) => `b${i}`,
+      );
       stubGmail({ listIds: ids, messages: oldMessages(ids) });
       const { created, binding } = fakeWorkflow();
 
       const { names, result } = runJob(binding);
 
-      expect(await result).toEqual({ status: "done", handled: 5 });
+      expect(await result).toEqual({ status: "done", handled: 1 });
       // Finishing hands the turn to the next mailbox straight away.
       expect(names).toEqual(["chunk 0", "chunk 1", "chunk 2", "start next"]);
       expect(created).toHaveLength(0);
@@ -2247,7 +2250,7 @@ describe("the one-year import job", () => {
 
     it("hands the account to a successor after its last chunk", async () => {
       const ids = Array.from(
-        { length: CHUNK_SIZE * CHUNKS_PER_JOB + 1 },
+        { length: SIZES.chunkSize * SIZES.chunksPerJob + 1 },
         (_, i) => `b${i}`,
       );
       stubGmail({ listIds: ids, messages: oldMessages(ids) });

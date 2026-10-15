@@ -89,11 +89,16 @@ export async function runBackfillJob(
   step: JobStep,
   accountId: string,
   jobId: string,
+  /** Smaller sizes for tests, so a hand-off needs a few messages, not 251. */
+  sizes: { chunkSize: number; chunksPerJob: number } = {
+    chunkSize: CHUNK_SIZE,
+    chunksPerJob: CHUNKS_PER_JOB,
+  },
 ) {
   const cfg = gmailAuthConfig(env);
   if (!cfg) return { status: "stopped", reason: "not_configured" } as const;
 
-  for (let i = 0; i < CHUNKS_PER_JOB; i++) {
+  for (let i = 0; i < sizes.chunksPerJob; i++) {
     // A throw — Gmail down, a token refresh failing — is retried by the
     // step. It resumes from the last saved point; anything the failed
     // attempt stored before throwing is deduped on the way past.
@@ -111,7 +116,7 @@ export async function runBackfillJob(
           cfg,
           accountId,
           jobId,
-          CHUNK_SIZE,
+          sizes.chunkSize,
         ),
     );
     if (result.status === "done") {
