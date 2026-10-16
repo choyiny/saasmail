@@ -41,6 +41,8 @@ export const emails = sqliteTable(
     gmailMessageId: text("gmail_message_id"),
     /** Gmail's thread id, kept for reply threading in a later slice. */
     gmailThreadId: text("gmail_thread_id"),
+    /** Graph's immutable message id, for mail synced from Outlook. */
+    outlookMessageId: text("outlook_message_id"),
     receivedAt: integer("received_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },

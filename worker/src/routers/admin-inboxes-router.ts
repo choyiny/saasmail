@@ -14,6 +14,11 @@ import { getAccessToken } from "../lib/gmail/token";
 import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
 import { ensureBackfillJobs } from "../lib/gmail/backfill-job";
 import { gmailAuthConfig } from "../lib/gmail/sync";
+import { getOutlookAccessToken, outlookAuthConfig } from "../lib/outlook/token";
+import {
+  getProfile as getOutlookProfile,
+  MicrosoftAuthError,
+} from "../lib/outlook/oauth";
 import type { Variables } from "../variables";
 
 type InboxesEnv = CloudflareBindings & {
@@ -34,8 +39,9 @@ const InboxRowSchema = z.object({
   signatureHtml: z.string().nullable(),
   forwardTo: z.string().nullable(),
   assignedUserIds: z.array(z.string()),
-  source: z.enum(["cloudflare", "gmail"]),
+  source: z.enum(["cloudflare", "gmail", "outlook"]),
   gmailAccountId: z.string().nullable(),
+  outlookAccountId: z.string().nullable(),
 });
 
 const listInboxesRoute = createRoute({
@@ -58,8 +64,9 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     signatureHtml: string | null;
     forwardTo: string | null;
     assignedUserIds: string | null;
-    source: "cloudflare" | "gmail" | null;
+    source: "cloudflare" | "gmail" | "outlook" | null;
     gmailAccountId: string | null;
+    outlookAccountId: string | null;
   };
   const rows = await db.all<Row>(sql`
     WITH universe AS (
@@ -75,6 +82,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       s.forward_to AS forwardTo,
       s.source AS source,
       s.gmail_account_id AS gmailAccountId,
+      s.outlook_account_id AS outlookAccountId,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -98,6 +106,7 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       assignedUserIds: r.assignedUserIds ? JSON.parse(r.assignedUserIds) : [],
       source: r.source ?? "cloudflare",
       gmailAccountId: r.gmailAccountId,
+      outlookAccountId: r.outlookAccountId,
     })),
     200,
   );
@@ -201,9 +210,11 @@ const PatchInboxBodySchema = z
       .union([z.string().email(), z.literal(""), z.null()])
       .optional(),
     // Where this inbox's mail comes from. Absent = unchanged.
-    source: z.enum(["cloudflare", "gmail"]).optional(),
+    source: z.enum(["cloudflare", "gmail", "outlook"]).optional(),
     // FK to gmail_accounts.id. Absent = unchanged; null clears it.
     gmailAccountId: z.string().nullable().optional(),
+    // FK to outlook_accounts.id. Absent = unchanged; null clears it.
+    outlookAccountId: z.string().nullable().optional(),
     // Google Group routing was attempted in this slice and withdrawn after
     // adversarial review found List-ID and Delivered-To are both
     // sender-forgeable — an attacker could pick which customer's timeline
@@ -220,6 +231,7 @@ const PatchInboxBodySchema = z
       b.forwardTo !== undefined ||
       b.source !== undefined ||
       b.gmailAccountId !== undefined ||
+      b.outlookAccountId !== undefined ||
       b.gmailGroupAddress !== undefined,
     "must update at least one field",
   );
@@ -248,8 +260,9 @@ const patchInboxRoute = createRoute({
         displayMode: z.enum(["thread", "chat"]),
         signatureHtml: z.string().nullable(),
         forwardTo: z.string().nullable(),
-        source: z.enum(["cloudflare", "gmail"]),
+        source: z.enum(["cloudflare", "gmail", "outlook"]),
         gmailAccountId: z.string().nullable(),
+        outlookAccountId: z.string().nullable(),
       }),
       "Updated",
     ),
@@ -362,6 +375,26 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   // fields the request happened to carry.
   const sourceGiven = body.source !== undefined;
   const accountGiven = body.gmailAccountId !== undefined;
+  const outlookGiven = body.outlookAccountId !== undefined;
+
+  // Naming both providers' mailboxes, or an Outlook mailbox with a source
+  // other than "outlook", has no single meaning — refuse rather than guess.
+  // (Gmail's own contradiction with source "cloudflare" is checked below.)
+  const gmailNamed = accountGiven && body.gmailAccountId !== null;
+  const outlookNamed = outlookGiven && body.outlookAccountId !== null;
+  if (
+    (gmailNamed && outlookNamed) ||
+    (gmailNamed && body.source === "outlook") ||
+    (outlookNamed && sourceGiven && body.source !== "outlook")
+  ) {
+    return c.json(
+      {
+        error:
+          'The source and the mailbox in this request contradict each other. Send source: "gmail" with a gmailAccountId, source: "outlook" with an outlookAccountId, or source: "cloudflare" on its own to unmap.',
+      },
+      400,
+    );
+  }
 
   // One body that says both things at once is a mistake worth naming rather
   // than silently resolving in a direction the caller may not have meant.
@@ -387,12 +420,17 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     ? body.gmailAccountId!
     : (currentRow?.gmailAccountId ?? null);
 
-  // Naming a mailbox is choosing Gmail...
-  if (accountGiven && body.gmailAccountId !== null && !sourceGiven) {
-    nextSource = "gmail";
-  }
-  // ...and choosing Cloudflare is giving the mailbox up.
-  if (nextSource === "cloudflare") nextGmailAccountId = null;
+  let nextOutlookAccountId = outlookGiven
+    ? body.outlookAccountId!
+    : (currentRow?.outlookAccountId ?? null);
+
+  // Naming a mailbox is choosing its provider...
+  if (gmailNamed && !sourceGiven) nextSource = "gmail";
+  if (outlookNamed && !sourceGiven) nextSource = "outlook";
+  // ...and an inbox reads from one place, so the provider it is not mapped
+  // to (both, for Cloudflare) gives its mailbox up.
+  if (nextSource !== "gmail") nextGmailAccountId = null;
+  if (nextSource !== "outlook") nextOutlookAccountId = null;
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
@@ -487,6 +525,66 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     }
   }
 
+  if (nextSource === "outlook" && nextOutlookAccountId === null) {
+    return c.json(
+      {
+        error:
+          'An Outlook inbox must name the connected mailbox it reads from. Send outlookAccountId alongside source: "outlook", or use source: "cloudflare" to unmap it.',
+      },
+      400,
+    );
+  }
+
+  // The Outlook counterpart of the send-as check above: the mailbox must
+  // receive (and so can send) as this address — its own address or one of
+  // its aliases. Microsoft lists aliases for work and school accounts; a
+  // personal account offers only its own address.
+  if (
+    nextOutlookAccountId !== null &&
+    (currentRow?.source !== "outlook" ||
+      currentRow?.outlookAccountId !== nextOutlookAccountId)
+  ) {
+    const cfg = await outlookAuthConfig(db, c.env);
+    if (!cfg) {
+      return c.json(
+        {
+          error:
+            "Microsoft is not set up yet. Add its app registration's client ID and secret under Inboxes → Connected mailboxes → Microsoft settings.",
+        },
+        503,
+      );
+    }
+    let addresses: string[];
+    try {
+      const token = await getOutlookAccessToken(db, nextOutlookAccountId, cfg);
+      const profile = await getOutlookProfile(token);
+      addresses = [profile.emailAddress, ...profile.aliases];
+    } catch (e) {
+      const reason =
+        e instanceof MicrosoftAuthError ? e.code : "address_check_failed";
+      console.error(
+        `[admin-inboxes] could not verify the Outlook mapping for ${email} (account ${nextOutlookAccountId}): ${reason}`,
+      );
+      return c.json(
+        {
+          error: `Could not verify that ${email} belongs to the connected Microsoft mailbox, so the mapping was not saved. Please try again.`,
+        },
+        502,
+      );
+    }
+    if (!addresses.includes(email)) {
+      return c.json(
+        {
+          error: `The connected Microsoft mailbox does not receive mail as ${email}, so the mapping was not saved. Map its own address (${addresses[0]}), or add ${email} as an alias of that mailbox in Microsoft 365 first.`,
+        },
+        400,
+      );
+    }
+  }
+
+  const outlookMappingChanged =
+    nextOutlookAccountId !== (currentRow?.outlookAccountId ?? null);
+
   // The mailbox this inbox's stored Gmail thread ids came from is about to
   // stop being the mailbox it reads from. Those ids are per-MAILBOX and
   // nothing records which account issued them, so from here on they are
@@ -503,7 +601,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextSignatureHtml === null &&
     nextForwardTo === null &&
     nextSource === "cloudflare" &&
-    nextGmailAccountId === null
+    nextGmailAccountId === null &&
+    nextOutlookAccountId === null
   ) {
     await db.delete(senderIdentities).where(eq(senderIdentities.email, email));
     if (mappingChanged) await clearGmailThreadIds(db, [email]);
@@ -516,6 +615,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         forwardTo: null,
         source: "cloudflare",
         gmailAccountId: null,
+        outlookAccountId: null,
       },
       200,
     );
@@ -531,6 +631,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       forwardTo: nextForwardTo,
       source: nextSource,
       gmailAccountId: nextGmailAccountId,
+      outlookAccountId: nextOutlookAccountId,
       createdAt: now,
       updatedAt: now,
     })
@@ -543,6 +644,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         forwardTo: nextForwardTo,
         source: nextSource,
         gmailAccountId: nextGmailAccountId,
+        outlookAccountId: nextOutlookAccountId,
         updatedAt: now,
       },
     });
@@ -557,6 +659,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   if (mappingChanged && nextGmailAccountId) {
     await ensureBackfillJobs(db, c.env, nextGmailAccountId).catch(() => {});
   }
+  if (outlookMappingChanged && nextOutlookAccountId) {
+    await ensureBackfillJobs(db, c.env, nextOutlookAccountId).catch(() => {});
+  }
 
   return c.json(
     {
@@ -567,6 +672,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       forwardTo: nextForwardTo,
       source: nextSource,
       gmailAccountId: nextGmailAccountId,
+      outlookAccountId: nextOutlookAccountId,
     },
     200,
   );

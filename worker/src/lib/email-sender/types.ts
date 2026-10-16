@@ -72,7 +72,8 @@ export interface EmailSender {
     | "demo"
     | "bavimail"
     | "postmark"
-    | "gmail";
+    | "gmail"
+    | "outlook";
   send(params: SendEmailParams): Promise<SendEmailResult>;
   maxAttachmentBytes(): number;
 }

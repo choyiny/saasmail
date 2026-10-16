@@ -16,6 +16,7 @@ import {
   fetchAdminInboxes,
   fetchAdminUsers,
   fetchGmailAccounts,
+  fetchOutlookAccounts,
   updateInboxAssignments,
   updateInboxSettings,
   type AdminInbox,
@@ -61,6 +62,9 @@ export default function AdminInboxTable({
   // Connected Google mailboxes an inbox can be pointed at.
   const [gmailAccounts, setGmailAccounts] = useState<GmailAccount[]>([]);
   const [gmailAccountsFailed, setGmailAccountsFailed] = useState(false);
+  // And connected Outlook mailboxes, loaded the same way.
+  const [outlookAccounts, setOutlookAccounts] = useState<GmailAccount[]>([]);
+  const [outlookAccountsFailed, setOutlookAccountsFailed] = useState(false);
   // Per-inbox source-mapping errors, keyed by inbox. The server's message is
   // kept word for word — on a rejected mapping it is the only actionable part.
   const [sourceErrors, setSourceErrors] = useState<Record<string, string>>({});
@@ -92,6 +96,16 @@ export default function AdminInboxTable({
       })
       .catch(() => {
         if (!cancelled) setGmailAccountsFailed(true);
+      });
+    fetchOutlookAccounts()
+      .then((rows) => {
+        if (!cancelled) {
+          setOutlookAccounts(rows);
+          setOutlookAccountsFailed(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setOutlookAccountsFailed(true);
       });
     return () => {
       cancelled = true;
@@ -170,6 +184,7 @@ export default function AdminInboxTable({
                 ...created,
                 source: "cloudflare" as const,
                 gmailAccountId: null,
+                outlookAccountId: null,
               },
             ].sort((a, b) => a.email.localeCompare(b.email)),
       );
@@ -299,15 +314,19 @@ export default function AdminInboxTable({
    * is shown verbatim: it names the address and says what to do about it.
    */
   async function handleSetSource(inbox: AdminInbox, value: string) {
-    const nextSource = value === "cloudflare" ? "cloudflare" : "gmail";
-    const nextAccountId = value === "cloudflare" ? null : value;
-    if (inbox.source === nextSource && inbox.gmailAccountId === nextAccountId) {
+    const next = sourceFromValue(value);
+    if (
+      inbox.source === next.source &&
+      inbox.gmailAccountId === next.gmailAccountId &&
+      inbox.outlookAccountId === next.outlookAccountId
+    ) {
       return;
     }
 
     const before = {
       source: inbox.source,
       gmailAccountId: inbox.gmailAccountId,
+      outlookAccountId: inbox.outlookAccountId,
     };
     setSourceErrors((p) => {
       const { [inbox.email]: _drop, ...rest } = p;
@@ -315,22 +334,28 @@ export default function AdminInboxTable({
     });
     setSourceSavingFor(inbox.email);
     setInboxes((all) =>
-      all.map((r) =>
-        r.email === inbox.email
-          ? { ...r, source: nextSource, gmailAccountId: nextAccountId }
-          : r,
-      ),
+      all.map((r) => (r.email === inbox.email ? { ...r, ...next } : r)),
     );
 
     try {
+      // Only the chosen provider's id is sent: naming both, even as null,
+      // is fine, but the server reads an Outlook id with source "gmail" as a
+      // contradiction.
       const res = await updateInboxSettings(inbox.email, {
-        source: nextSource,
-        gmailAccountId: nextAccountId,
+        source: next.source,
+        ...(next.source === "outlook"
+          ? { outlookAccountId: next.outlookAccountId }
+          : { gmailAccountId: next.gmailAccountId }),
       });
       setInboxes((all) =>
         all.map((r) =>
           r.email === inbox.email
-            ? { ...r, source: res.source, gmailAccountId: res.gmailAccountId }
+            ? {
+                ...r,
+                source: res.source,
+                gmailAccountId: res.gmailAccountId,
+                outlookAccountId: res.outlookAccountId ?? null,
+              }
             : r,
         ),
       );
@@ -667,6 +692,8 @@ export default function AdminInboxTable({
                           inbox={inbox}
                           accounts={gmailAccounts}
                           accountsFailed={gmailAccountsFailed}
+                          outlookAccounts={outlookAccounts}
+                          outlookAccountsFailed={outlookAccountsFailed}
                           saving={sourceSavingFor === inbox.email}
                           error={sourceErrors[inbox.email]}
                           onChange={(v) => handleSetSource(inbox, v)}
@@ -801,10 +828,41 @@ function DisplayNameInput({ inbox, onCommit }: DisplayNameInputProps) {
   );
 }
 
+/**
+ * The select's value for a mapping. A Gmail mailbox is its bare id (what the
+ * value has always been); an Outlook mailbox is prefixed, so the two sets of
+ * ids can never be confused.
+ */
+const OUTLOOK_PREFIX = "outlook:";
+
+function sourceFromValue(value: string): {
+  source: AdminInbox["source"];
+  gmailAccountId: string | null;
+  outlookAccountId: string | null;
+} {
+  if (value === "cloudflare") {
+    return {
+      source: "cloudflare",
+      gmailAccountId: null,
+      outlookAccountId: null,
+    };
+  }
+  if (value.startsWith(OUTLOOK_PREFIX)) {
+    return {
+      source: "outlook",
+      gmailAccountId: null,
+      outlookAccountId: value.slice(OUTLOOK_PREFIX.length),
+    };
+  }
+  return { source: "gmail", gmailAccountId: value, outlookAccountId: null };
+}
+
 interface SourceSelectProps {
   inbox: AdminInbox;
   accounts: GmailAccount[];
   accountsFailed: boolean;
+  outlookAccounts?: GmailAccount[];
+  outlookAccountsFailed?: boolean;
   saving: boolean;
   error?: string;
   onChange: (value: string) => void;
@@ -817,14 +875,29 @@ interface SourceSelectProps {
  */
 function SourceSelect({
   inbox,
-  accounts,
-  accountsFailed,
+  accounts: gmailOptions,
+  accountsFailed: gmailFailed,
+  outlookAccounts = [],
+  outlookAccountsFailed = false,
   saving,
   error,
   onChange,
 }: SourceSelectProps) {
+  // Both providers' mailboxes, as one list of select values.
+  const accounts = [
+    ...gmailOptions,
+    ...outlookAccounts.map((a) => ({ ...a, id: `${OUTLOOK_PREFIX}${a.id}` })),
+  ];
+  const isOutlook = inbox.source === "outlook";
   const mappedId =
-    inbox.source === "gmail" ? (inbox.gmailAccountId ?? null) : null;
+    inbox.source === "gmail"
+      ? (inbox.gmailAccountId ?? null)
+      : isOutlook && inbox.outlookAccountId
+        ? `${OUTLOOK_PREFIX}${inbox.outlookAccountId}`
+        : null;
+  // Whether the list this mapping would be found in failed to load.
+  const accountsFailed = isOutlook ? outlookAccountsFailed : gmailFailed;
+  const grouped = gmailOptions.length > 0 && outlookAccounts.length > 0;
   // A mapping can outlive the mailbox it points at, but "the mailbox is gone"
   // and "we could not ask" are different facts and must not share a label.
   // The option text is the only thing visible on a closed <select>, so
@@ -874,16 +947,35 @@ function SourceSelect({
         {orphaned && mappedId !== null && (
           <option value={mappedId}>Mailbox no longer connected</option>
         )}
-        {accounts.map((a) => (
-          <option key={a.id} value={a.id}>
-            {a.emailAddress}
-          </option>
-        ))}
+        {grouped ? (
+          <>
+            <optgroup label="Google">
+              {gmailOptions.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.emailAddress}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Microsoft">
+              {outlookAccounts.map((a) => (
+                <option key={a.id} value={`${OUTLOOK_PREFIX}${a.id}`}>
+                  {a.emailAddress}
+                </option>
+              ))}
+            </optgroup>
+          </>
+        ) : (
+          accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.emailAddress}
+            </option>
+          ))
+        )}
         {accounts.length === 0 && (
           <option value="__unavailable" disabled>
-            {accountsFailed
+            {gmailFailed || outlookAccountsFailed
               ? "Couldn't load connected mailboxes"
-              : "Connect a Google mailbox first"}
+              : "Connect a mailbox first"}
           </option>
         )}
       </select>

@@ -6,6 +6,17 @@ import { GmailApiError } from "../gmail/api";
 import { GoogleAuthError } from "../gmail/oauth";
 import { getAccessToken, invalidateAccessToken } from "../gmail/token";
 import { createEmailSender } from "./index";
+import {
+  OutlookSender,
+  OUTLOOK_MAX_ATTACHMENT_BYTES,
+} from "./providers/outlook";
+import {
+  getOutlookAccessToken,
+  invalidateOutlookAccessToken,
+  outlookAuthConfig,
+} from "../outlook/token";
+import { MicrosoftAuthError } from "../outlook/oauth";
+import { GraphApiError } from "../outlook/api";
 import { gmailAuthConfig } from "../gmail/sync";
 import { GmailSender, GMAIL_MAX_ATTACHMENT_BYTES } from "./providers/gmail";
 import type { EmailSender } from "./types";
@@ -30,8 +41,10 @@ export class GmailSenderUnavailableError extends Error {
   constructor(
     readonly code: string,
     readonly inbox: string,
+    /** The same refusal applies to an Outlook-mapped inbox. */
+    readonly provider: "gmail" | "outlook" = "gmail",
   ) {
-    super(`gmail sender unavailable for ${inbox}: ${code}`);
+    super(`${provider} sender unavailable for ${inbox}: ${code}`);
     this.name = "GmailSenderUnavailableError";
   }
 }
@@ -81,6 +94,21 @@ export async function createSenderForInbox(
       `[createSenderForInbox] ${fromAddress} is Gmail-mapped but no token could be resolved: ${code}. Refusing to send it through another transport.`,
     );
     throw new GmailSenderUnavailableError(code, fromAddress);
+  }
+  // The same rule for an Outlook-mapped inbox: send through the mailbox, or
+  // refuse — never reroute it through another provider.
+  try {
+    const outlookSender = await tryOutlookSender(db, env, fromAddress);
+    if (outlookSender) return outlookSender;
+  } catch (e) {
+    const code =
+      e instanceof MicrosoftAuthError || e instanceof GraphApiError
+        ? e.code
+        : "token_unavailable";
+    console.error(
+      `[createSenderForInbox] ${fromAddress} is Outlook-mapped but no token could be resolved: ${code}. Refusing to send it through another transport.`,
+    );
+    throw new GmailSenderUnavailableError(code, fromAddress, "outlook");
   }
   return createEmailSender(env);
 }
@@ -147,6 +175,9 @@ export async function maxAttachmentBytesForInbox(
     if (await resolveGmailAccountId(db, env, fromAddress)) {
       return GMAIL_MAX_ATTACHMENT_BYTES;
     }
+    if (await resolveOutlookAccountId(db, env, fromAddress)) {
+      return OUTLOOK_MAX_ATTACHMENT_BYTES;
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error(
@@ -192,6 +223,51 @@ async function tryGmailSender(
     reauthorize: async () => {
       await invalidateAccessToken(db, accountId);
       return getAccessToken(db, accountId, cfg);
+    },
+  });
+}
+
+/**
+ * The Outlook account `fromAddress` sends through, or null when it is not an
+ * Outlook-mapped inbox (or Microsoft is not set up). Quiet: unlike Gmail's,
+ * there is nothing to log for the common case of a non-Outlook inbox.
+ */
+async function resolveOutlookAccountId(
+  db: DrizzleD1Database<typeof schema>,
+  env: ForInboxEnv,
+  fromAddress: string,
+): Promise<string | null> {
+  const normalizedFrom = fromAddress.trim().toLowerCase();
+  const [identity] = await db
+    .select({
+      source: senderIdentities.source,
+      outlookAccountId: senderIdentities.outlookAccountId,
+    })
+    .from(senderIdentities)
+    .where(eq(senderIdentities.email, normalizedFrom));
+  if (identity?.source !== "outlook" || !identity.outlookAccountId) {
+    return null;
+  }
+  if (!(await outlookAuthConfig(db, env))) return null;
+  return identity.outlookAccountId;
+}
+
+async function tryOutlookSender(
+  db: DrizzleD1Database<typeof schema>,
+  env: ForInboxEnv,
+  fromAddress: string,
+): Promise<OutlookSender | null> {
+  const accountId = await resolveOutlookAccountId(db, env, fromAddress);
+  if (!accountId) return null;
+  const cfg = (await outlookAuthConfig(db, env))!;
+  // Resolving the token now is what surfaces a revoked grant here, where the
+  // caller refuses the send, instead of mid-request.
+  const accessToken = await getOutlookAccessToken(db, accountId, cfg);
+  return new OutlookSender(accessToken, undefined, {
+    accountId,
+    reauthorize: async () => {
+      await invalidateOutlookAccessToken(db, accountId);
+      return getOutlookAccessToken(db, accountId, cfg);
     },
   });
 }

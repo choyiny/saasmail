@@ -12,6 +12,8 @@ import {
   type OAuthProvider,
 } from "../lib/oauth-providers";
 import { gmailRedirectUri } from "./admin-gmail-router";
+import { outlookRedirectUri } from "./admin-outlook-router";
+import { outlookAccounts } from "../db/outlook-accounts.schema";
 import type { Variables } from "../variables";
 
 /**
@@ -59,16 +61,18 @@ function redirectUriFor(
   provider: OAuthProvider,
   env: { BASE_URL?: string },
 ): string {
-  if (provider === "google") return gmailRedirectUri(env);
-  return `${(env.BASE_URL ?? "").replace(/\/$/, "")}/api/admin/outlook/callback`;
+  return provider === "google"
+    ? gmailRedirectUri(env)
+    : outlookRedirectUri(env);
 }
 
 async function connectedCount(
   db: Parameters<typeof describeProvider>[0],
   provider: OAuthProvider,
 ): Promise<number> {
-  if (provider !== "google") return 0;
-  const [row] = await db.select({ n: count() }).from(gmailAccounts);
+  const [row] = await db
+    .select({ n: count() })
+    .from(provider === "google" ? gmailAccounts : outlookAccounts);
   return row?.n ?? 0;
 }
 

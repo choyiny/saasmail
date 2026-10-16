@@ -1,6 +1,6 @@
-import { createMimeMessage, Mailbox } from "mimetext/browser";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
-import { parseFrom, toBase64 } from "../shared";
+import { toBase64 } from "../shared";
+import { buildMimeMessage } from "./mime";
 import { classifyErrorMessage, transientFromStatus } from "../classify";
 import { GoogleAuthError } from "../../gmail/oauth";
 
@@ -122,57 +122,11 @@ export class GmailSender implements EmailSender {
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
     try {
-      const { name, address } = parseFrom(params.from);
-      const msg = createMimeMessage();
-      msg.setSender(name ? { name, addr: address } : { addr: address });
-      msg.setRecipient(params.to);
-      if (params.cc && params.cc.length > 0) {
-        // setCc REPLACES the Cc header rather than appending to it, so
-        // calling it once per address (as a loop would) keeps only the
-        // last one — silently dropping every earlier recipient. Build the
-        // full array first and call it exactly once.
-        msg.setCc(
-          params.cc.map((c) => {
-            const parsed = parseFrom(c);
-            return parsed.name
-              ? { name: parsed.name, addr: parsed.address }
-              : { addr: parsed.address };
-          }),
-        );
-      }
-      msg.setSubject(params.subject);
-      if (params.text) {
-        msg.addMessage({ contentType: "text/plain", data: params.text });
-      }
-      if (params.html) {
-        msg.addMessage({ contentType: "text/html", data: params.html });
-      }
-      if (params.attachments) {
-        for (const a of params.attachments) {
-          msg.addAttachment({
-            filename: a.filename,
-            contentType: a.contentType,
-            data: toBase64(a.content),
-          });
-        }
-      }
-      if (params.headers) {
-        for (const [key, value] of Object.entries(params.headers)) {
-          // Reply-To is a predefined address-type header in mimetext, so a
-          // bare string fails its mailbox validate/dump (unlike plain
-          // headers like Message-ID / In-Reply-To). Wrap it in a Mailbox so
-          // it serializes.
-          if (key.toLowerCase() === "reply-to") {
-            msg.setHeader(key, new Mailbox(value));
-          } else {
-            msg.setHeader(key, value);
-          }
-        }
-      }
+      const raw = buildMimeMessage(params);
 
       const accessToken = await this.resolveToken();
       const body: Record<string, unknown> = {
-        raw: toBase64Url(new TextEncoder().encode(msg.asRaw())),
+        raw: toBase64Url(new TextEncoder().encode(raw)),
       };
       // Threading a reply onto an existing Gmail conversation instead of
       // starting a new one is purely a matter of sending this alongside

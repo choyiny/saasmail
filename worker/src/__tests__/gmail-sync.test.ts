@@ -1271,7 +1271,7 @@ describe("syncAllGmailAccounts", () => {
         env as unknown as CloudflareBindings,
         fakeCtx(),
       ),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ importTaken: expect.any(Boolean) });
 
     // The healthy account still ingested, and still advanced its cursor.
     const rows = await getDb().select().from(emails);
@@ -1328,7 +1328,7 @@ describe("syncAllGmailAccounts", () => {
           env as unknown as CloudflareBindings,
           fakeCtx(),
         ),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ importTaken: expect.any(Boolean) });
 
       expect(
         warnSpy.mock.calls.some((call) =>
@@ -1386,7 +1386,7 @@ describe("syncAllGmailAccounts", () => {
           env as unknown as CloudflareBindings,
           fakeCtx(),
         ),
-      ).resolves.toBeUndefined();
+      ).resolves.toEqual({ importTaken: expect.any(Boolean) });
 
       // Asserts on the account address appearing in the logged output
       // (not an exact string) — a rejection isolation test elsewhere in
@@ -1454,7 +1454,7 @@ describe("syncAllGmailAccounts", () => {
             env as unknown as CloudflareBindings,
             fakeCtx(),
           ),
-        ).resolves.toBeUndefined();
+        ).resolves.toEqual({ importTaken: expect.any(Boolean) });
       } finally {
         errorSpy.mockRestore();
       }
@@ -2029,7 +2029,10 @@ describe("the one-year import job", () => {
       await ensureBackfillJobs(getDb(), envWith(binding));
 
       expect(created).toHaveLength(1);
-      expect(created[0].params).toEqual({ accountId: "acct-1" });
+      expect(created[0].params).toEqual({
+        accountId: "acct-1",
+        provider: "google",
+      });
       expect((await account()).backfillJobId).toBe(created[0].id);
     });
 
@@ -2071,7 +2074,9 @@ describe("the one-year import job", () => {
 
       await ensureBackfillJobs(getDb(), envWith(binding));
 
-      expect(created.map((c) => c.params)).toEqual([{ accountId: "acct-2" }]);
+      expect(created.map((c) => c.params)).toEqual([
+        { accountId: "acct-2", provider: "google" },
+      ]);
       expect(await jobOf("acct-2")).toBe(created[0].id);
     });
 
@@ -2105,7 +2110,9 @@ describe("the one-year import job", () => {
 
       await ensureBackfillJobs(getDb(), envWith(binding));
 
-      expect(created.map((c) => c.params)).toEqual([{ accountId: "acct-2" }]);
+      expect(created.map((c) => c.params)).toEqual([
+        { accountId: "acct-2", provider: "google" },
+      ]);
     });
 
     it("puts a mailbox that was just mapped first, even before a sync clears its error", async () => {
@@ -2115,7 +2122,9 @@ describe("the one-year import job", () => {
 
       await ensureBackfillJobs(getDb(), envWith(binding), "acct-2");
 
-      expect(created.map((c) => c.params)).toEqual([{ accountId: "acct-2" }]);
+      expect(created.map((c) => c.params)).toEqual([
+        { accountId: "acct-2", provider: "google" },
+      ]);
     });
 
     it("gives the turn back when the job cannot be created", async () => {

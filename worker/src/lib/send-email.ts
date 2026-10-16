@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { attachments } from "../db/attachments.schema";
@@ -421,14 +421,15 @@ export async function replyToEmail(
     sender = await createSenderForInbox(db, env, fromAddress);
   } catch (err) {
     if (!(err instanceof GmailSenderUnavailableError)) throw err;
+    const which = err.provider === "outlook" ? "Microsoft" : "Google";
     return {
       ok: false,
       code: "SEND_FAILED",
       message:
-        `saasmail could not reach the Google mailbox behind ${fromAddress}, ` +
+        `saasmail could not reach the ${which} mailbox behind ${fromAddress}, ` +
         "so this reply was not sent and was not queued for retry. Send it " +
         "again in a moment; if it keeps failing, reconnect this mailbox " +
-        "under Gmail settings.",
+        "on the Inboxes page.",
     };
   }
 
@@ -586,7 +587,11 @@ export async function replyToEmail(
   // the configured provider on a revoked grant or missing secrets, and that
   // fallback send legitimately IS going out via the configured provider, so
   // it keeps the normal outbox retry below.
-  const usingGmail = sender.provider === "gmail";
+  // Outlook follows the same rule as Gmail: a reply going out through the
+  // connected mailbox is sent directly, never queued for the configured
+  // provider to retry under another identity.
+  const usingGmail =
+    sender.provider === "gmail" || sender.provider === "outlook";
 
   let outcome: OutboxOutcome;
   let sendResult: SendOutput;
@@ -646,7 +651,7 @@ export async function replyToEmail(
         message:
           result.error.delivered || result.error.reconnect
             ? `${result.error.message}${result.error.reconnect ? " This reply was not sent and was not queued for retry." : ""}`
-            : "Gmail did not accept this reply, and it was not queued for " +
+            : `${sender.provider === "outlook" ? "Outlook" : "Gmail"} did not accept this reply, and it was not queued for ` +
               `retry: ${result.error.message}. Send it again to retry.`,
       };
     }
@@ -738,6 +743,23 @@ export async function replyToEmail(
           and(
             eq(sentEmails.gmailMessageId, gmailMessageIdForRow),
             eq(sentEmails.fromAddress, fromAddress),
+          ),
+        ),
+      db.insert(sentEmails).values(sentEmailRow),
+    ]);
+  } else if (sender.provider === "outlook") {
+    // Outlook returns no id, so the race the Gmail branch above handles
+    // shows up as a mirrored row with this reply's Message-ID and an Outlook
+    // id: the cron read Sent Items before this insert. Same remedy — the
+    // send path's row is the authoritative one.
+    await db.batch([
+      db
+        .delete(sentEmails)
+        .where(
+          and(
+            eq(sentEmails.messageId, messageId),
+            eq(sentEmails.fromAddress, fromAddress),
+            isNotNull(sentEmails.outlookMessageId),
           ),
         ),
       db.insert(sentEmails).values(sentEmailRow),

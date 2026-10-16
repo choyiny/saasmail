@@ -26,6 +26,7 @@ import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
 import { adminGmailRouter } from "./routers/admin-gmail-router";
 import { adminIntegrationsRouter } from "./routers/admin-integrations-router";
+import { adminOutlookRouter } from "./routers/admin-outlook-router";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
@@ -36,6 +37,7 @@ import type { SequenceEmailMessage } from "./lib/sequence-processor";
 import { processOutbox } from "./lib/outbox";
 import { syncAllGmailAccounts } from "./lib/gmail/sync";
 import { ensureBackfillJobs } from "./lib/gmail/backfill-job";
+import { syncAllOutlookAccounts } from "./lib/outlook/sync";
 import { drizzle } from "drizzle-orm/d1";
 import { schema } from "./db/schema";
 import { notificationsRouter } from "./routers/notifications-router";
@@ -258,6 +260,7 @@ app.route("/api/admin", adminRouter);
 app.route("/api/admin/inboxes", adminInboxesRouter);
 app.route("/api/admin/gmail", adminGmailRouter);
 app.route("/api/admin/integrations", adminIntegrationsRouter);
+app.route("/api/admin/outlook", adminOutlookRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a
@@ -349,8 +352,9 @@ export default {
     // Promise.allSettled) and no-ops when the integration isn't configured,
     // so this call either does nothing or runs to completion.
     //
-    // `syncAllGmailAccounts` returns `Promise<void>` — it does not hand
-    // per-account outcomes back to this handler. It logs them itself
+    // Neither provider's sync hands per-account outcomes back to this
+    // handler (Gmail returns only whether it used the inline import's turn,
+    // which the Outlook sync needs). They log them themselves
     // instead: a distinct line for an account that synced but failed to
     // ingest a message, and another for an account whose history cursor
     // expired and had to be re-seeded (see its `results.forEach` for both).
@@ -360,7 +364,23 @@ export default {
     ctx.waitUntil(
       (async () => {
         const db = drizzle(env.DB, { schema });
-        await syncAllGmailAccounts(db, env, ctx);
+        // Each provider isolated from the other: a hard Gmail failure must
+        // not stop Outlook mailboxes syncing, or the reverse.
+        let importTaken = false;
+        try {
+          importTaken = (await syncAllGmailAccounts(db, env, ctx)).importTaken;
+        } catch (err) {
+          console.error(
+            `[cron] gmail sync failed: ${err instanceof Error ? err.message : "unknown error"}`,
+          );
+        }
+        try {
+          await syncAllOutlookAccounts(db, env, ctx, { importTaken });
+        } catch (err) {
+          console.error(
+            `[cron] outlook sync failed: ${err instanceof Error ? err.message : "unknown error"}`,
+          );
+        }
         // After the sync, so an account it just found unmapped is skipped.
         await ensureBackfillJobs(db, env);
       })().catch((err) =>

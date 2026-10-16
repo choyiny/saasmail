@@ -4,6 +4,9 @@ import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle, type DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../../db/schema";
 import { gmailAccounts } from "../../db/gmail-accounts.schema";
+import { outlookAccounts } from "../../db/outlook-accounts.schema";
+import { outlookAuthConfig } from "../outlook/token";
+import { runOutlookBackfillChunk } from "../outlook/sync";
 import { NO_PERSONAL_INBOX_ERROR } from "./error-codes";
 import {
   gmailAuthConfig,
@@ -50,7 +53,29 @@ export const CHUNK_SIZE = 25;
 /** Steps before handing off to a fresh instance: 250 messages per instance. */
 export const CHUNKS_PER_JOB = 10;
 
-export type BackfillJobParams = { accountId: string };
+/**
+ * Which mailbox to import. `provider` was added with Outlook; an instance
+ * started before that carries none and is a Gmail import.
+ */
+export type BackfillJobParams = {
+  accountId: string;
+  provider?: ImportProvider;
+};
+
+/** The providers whose mailboxes this job imports. */
+export type ImportProvider = "google" | "microsoft";
+
+/**
+ * The columns the claim logic touches. `gmail_accounts` and
+ * `outlook_accounts` both carry them under the same names, so the one table
+ * object stands in for either — `tableFor` is the only place that relies on
+ * that.
+ */
+function tableFor(provider: ImportProvider): typeof gmailAccounts {
+  return (provider === "google"
+    ? gmailAccounts
+    : outlookAccounts) as unknown as typeof gmailAccounts;
+}
 
 /** Instance statuses that mean the job is alive and will make progress. */
 const LIVE_STATUSES = new Set([
@@ -72,6 +97,8 @@ export class GmailBackfillWorkflow extends WorkflowEntrypoint<
       step,
       event.payload.accountId,
       event.instanceId,
+      undefined,
+      event.payload.provider ?? "google",
     );
   }
 }
@@ -94,6 +121,7 @@ export async function runBackfillJob(
     chunkSize: CHUNK_SIZE,
     chunksPerJob: CHUNKS_PER_JOB,
   },
+  provider: ImportProvider = "google",
 ) {
   for (let i = 0; i < sizes.chunksPerJob; i++) {
     // A throw — Gmail down, a token refresh failing — is retried by the
@@ -107,8 +135,23 @@ export async function runBackfillJob(
       },
       async (): Promise<BackfillChunkResult> => {
         const db = drizzle(env.DB, { schema });
-        // Read per chunk, inside the step: an admin can change the Google
+        // Read per chunk, inside the step: an admin can change the provider
         // settings while a job runs.
+        if (provider === "microsoft") {
+          const cfg = await outlookAuthConfig(db, env);
+          if (!cfg) {
+            return { status: "stopped", handled: 0, reason: "not_configured" };
+          }
+          return runOutlookBackfillChunk(
+            db,
+            env,
+            ctx,
+            cfg,
+            accountId,
+            jobId,
+            sizes.chunkSize,
+          );
+        }
         const cfg = await gmailAuthConfig(db, env);
         if (!cfg) {
           return { status: "stopped", handled: 0, reason: "not_configured" };
@@ -135,15 +178,22 @@ export async function runBackfillJob(
   }
 
   const successor = await step.do("hand off", async () =>
-    handOff(drizzle(env.DB, { schema }), env, accountId, jobId),
+    handOff(drizzle(env.DB, { schema }), env, provider, accountId, jobId),
   );
   return { status: "handed_off", successor } as const;
 }
 
 /** A fresh instance id. Unique per start, and within the 100-char limit. */
-function newJobId(accountId: string): string {
-  return `gmail-backfill-${accountId}-${Date.now()}`;
+function newJobId(provider: ImportProvider, accountId: string): string {
+  const prefix = provider === "google" ? "gmail" : "outlook";
+  return `${prefix}-backfill-${accountId}-${Date.now()}`;
 }
+
+/**
+ * True while no unfinished import, of either provider, holds a claim. The
+ * one-at-a-time rule spans both tables.
+ */
+const NO_IMPORT_HOLDS_THE_TURN = sql`NOT EXISTS (SELECT 1 FROM gmail_accounts AS other WHERE other.backfill_job_id IS NOT NULL AND other.backfill_completed_at IS NULL) AND NOT EXISTS (SELECT 1 FROM outlook_accounts AS other WHERE other.backfill_job_id IS NOT NULL AND other.backfill_completed_at IS NULL)`;
 
 /**
  * Move the account from `fromJobId` to a new instance and start it.
@@ -155,25 +205,30 @@ function newJobId(accountId: string): string {
 async function handOff(
   db: DrizzleD1Database<typeof schema>,
   env: CloudflareBindings,
+  provider: ImportProvider,
   accountId: string,
   fromJobId: string,
 ): Promise<string | null> {
-  const next = newJobId(accountId);
+  const table = tableFor(provider);
+  const next = newJobId(provider, accountId);
   const moved = await db
-    .update(gmailAccounts)
+    .update(table)
     .set({ backfillJobId: next })
     .where(
       and(
-        eq(gmailAccounts.id, accountId),
-        eq(gmailAccounts.backfillJobId, fromJobId),
-        isNull(gmailAccounts.backfillCompletedAt),
+        eq(table.id, accountId),
+        eq(table.backfillJobId, fromJobId),
+        isNull(table.backfillCompletedAt),
       ),
     )
-    .returning({ id: gmailAccounts.id });
+    .returning({ id: table.id });
   if (moved.length === 0) return null;
   // If this throws after the update, the account names an instance that does
   // not exist; `ensureBackfillJobs` treats that as dead and starts another.
-  await env.GMAIL_BACKFILL!.create({ id: next, params: { accountId } });
+  await env.GMAIL_BACKFILL!.create({
+    id: next,
+    params: { accountId, provider },
+  });
   return next;
 }
 
@@ -186,28 +241,30 @@ async function handOff(
 async function claimAndStart(
   db: DrizzleD1Database<typeof schema>,
   env: CloudflareBindings,
+  provider: ImportProvider,
   accountId: string,
 ): Promise<string | null> {
-  const id = newJobId(accountId);
+  const table = tableFor(provider);
+  const id = newJobId(provider, accountId);
   const claimed = await db
-    .update(gmailAccounts)
+    .update(table)
     .set({ backfillJobId: id })
     .where(
       and(
-        eq(gmailAccounts.id, accountId),
-        isNull(gmailAccounts.backfillJobId),
-        isNull(gmailAccounts.backfillCompletedAt),
-        sql`NOT EXISTS (SELECT 1 FROM gmail_accounts AS other WHERE other.backfill_job_id IS NOT NULL AND other.backfill_completed_at IS NULL)`,
+        eq(table.id, accountId),
+        isNull(table.backfillJobId),
+        isNull(table.backfillCompletedAt),
+        NO_IMPORT_HOLDS_THE_TURN,
       ),
     )
-    .returning({ id: gmailAccounts.id });
+    .returning({ id: table.id });
   if (claimed.length === 0) return null;
   try {
-    await env.GMAIL_BACKFILL!.create({ id, params: { accountId } });
+    await env.GMAIL_BACKFILL!.create({ id, params: { accountId, provider } });
   } catch (err) {
     // Give the turn back, or it is held by an instance that never existed
     // until the next tick notices.
-    await release(db, accountId, id);
+    await release(db, provider, accountId, id);
     throw err;
   }
   return id;
@@ -216,18 +273,15 @@ async function claimAndStart(
 /** Drop `jobId`'s claim on the account, if it still holds it. */
 async function release(
   db: DrizzleD1Database<typeof schema>,
+  provider: ImportProvider,
   accountId: string,
   jobId: string,
 ): Promise<void> {
+  const table = tableFor(provider);
   await db
-    .update(gmailAccounts)
+    .update(table)
     .set({ backfillJobId: null })
-    .where(
-      and(
-        eq(gmailAccounts.id, accountId),
-        eq(gmailAccounts.backfillJobId, jobId),
-      ),
-    );
+    .where(and(eq(table.id, accountId), eq(table.backfillJobId, jobId)));
 }
 
 /**
@@ -286,26 +340,52 @@ export async function ensureBackfillJobs(
   env: CloudflareBindings,
   justMapped?: string,
 ): Promise<void> {
-  if (!hasBackfillJob(env) || !(await gmailAuthConfig(db, env))) return;
+  if (!hasBackfillJob(env)) return;
 
-  const pending = await db
-    .select({
-      id: gmailAccounts.id,
-      emailAddress: gmailAccounts.emailAddress,
-      jobId: gmailAccounts.backfillJobId,
-      lastError: gmailAccounts.lastError,
-    })
-    .from(gmailAccounts)
-    .where(isNull(gmailAccounts.backfillCompletedAt))
-    .orderBy(asc(gmailAccounts.createdAt));
+  type Pending = {
+    provider: ImportProvider;
+    id: string;
+    emailAddress: string;
+    jobId: string | null;
+    lastError: string | null;
+    createdAt: number;
+  };
+  const pending: Pending[] = [];
+  // A provider that is not set up contributes nothing: its jobs would stop
+  // at once. Both tables are read either way for live claims, below.
+  const providers: Array<[ImportProvider, boolean]> = [
+    ["google", (await gmailAuthConfig(db, env)) !== null],
+    ["microsoft", (await outlookAuthConfig(db, env)) !== null],
+  ];
+  for (const [provider, configured] of providers) {
+    const table = tableFor(provider);
+    const rows = await db
+      .select({
+        id: table.id,
+        emailAddress: table.emailAddress,
+        jobId: table.backfillJobId,
+        lastError: table.lastError,
+        createdAt: table.createdAt,
+      })
+      .from(table)
+      .where(isNull(table.backfillCompletedAt));
+    for (const row of rows) {
+      if (configured || row.jobId) pending.push({ provider, ...row });
+    }
+  }
+  pending.sort((a, b) => a.createdAt - b.createdAt);
 
   for (const account of pending) {
     if (!account.jobId) continue;
     if (await isLive(env, account.jobId)) return;
-    await release(db, account.id, account.jobId);
+    await release(db, account.provider, account.id, account.jobId);
   }
 
+  const configured = new Set(
+    providers.filter(([, ok]) => ok).map(([provider]) => provider),
+  );
   const candidates = pending
+    .filter((a) => configured.has(a.provider))
     .filter(
       (a) => a.id === justMapped || a.lastError !== NO_PERSONAL_INBOX_ERROR,
     )
@@ -316,11 +396,12 @@ export async function ensureBackfillJobs(
     );
 
   for (const account of candidates) {
+    const label = account.provider === "google" ? "Gmail" : "Outlook";
     try {
-      const id = await claimAndStart(db, env, account.id);
+      const id = await claimAndStart(db, env, account.provider, account.id);
       if (id) {
         console.log(
-          `Gmail backfill for ${account.emailAddress}: started job ${id}.`,
+          `${label} backfill for ${account.emailAddress}: started job ${id}.`,
         );
       }
       // Claimed, or someone else claimed first: either way the turn is taken.
@@ -328,7 +409,7 @@ export async function ensureBackfillJobs(
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unknown error";
       console.error(
-        `Gmail backfill for ${account.emailAddress}: could not start a job: ${reason}`,
+        `${label} backfill for ${account.emailAddress}: could not start a job: ${reason}`,
       );
     }
   }
