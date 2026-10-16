@@ -92,7 +92,7 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, context_key TEXT NOT NULL, from_address TEXT, to_address TEXT, cc TEXT, subject TEXT, body_html TEXT, body_text TEXT, reply_to_email_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS drafts_user_context_idx ON drafts(user_id, context_key)`,
     `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, last_gap_at INTEGER, backfill_until INTEGER, backfill_since INTEGER, backfill_page_token TEXT, backfill_offset INTEGER NOT NULL DEFAULT 0, backfill_count INTEGER NOT NULL DEFAULT 0, backfill_completed_at INTEGER, backfill_reached INTEGER, backfill_job_id TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
-    // Newsletter module (migration 0035).
+    // Newsletter module (migration 0046).
     `CREATE TABLE IF NOT EXISTS async_jobs (id TEXT PRIMARY KEY, job_type TEXT NOT NULL, ref_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'running', cursor TEXT, storage_key TEXT, total_rows INTEGER, processed_rows INTEGER NOT NULL DEFAULT 0, imported_count INTEGER NOT NULL DEFAULT 0, skipped_count INTEGER NOT NULL DEFAULT 0, error_summary TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS async_jobs_ref_idx ON async_jobs(job_type, ref_id)`,
     `CREATE INDEX IF NOT EXISTS async_jobs_status_idx ON async_jobs(status)`,
@@ -119,7 +119,7 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS campaign_events_campaign_type_idx ON campaign_events(campaign_id, event_type)`,
     `CREATE INDEX IF NOT EXISTS campaign_events_campaign_occurred_idx ON campaign_events(campaign_id, occurred_at)`,
     // The partial unique indexes are the actual dedup mechanism (migration
-    // 0038); a plain composite index would not enforce it, so the test schema
+    // 0047); a plain composite index would not enforce it, so the test schema
     // must carry them or dedup tests would pass against a weaker table.
     `CREATE UNIQUE INDEX IF NOT EXISTS campaign_events_open_unique ON campaign_events(campaign_id, contact_id) WHERE event_type = 'open'`,
     `CREATE UNIQUE INDEX IF NOT EXISTS campaign_events_click_unique ON campaign_events(campaign_id, contact_id, campaign_link_id) WHERE event_type = 'click'`,
