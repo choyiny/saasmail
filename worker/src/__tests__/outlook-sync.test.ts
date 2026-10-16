@@ -108,7 +108,7 @@ function stubGraph(opts: {
         headers: { "content-type": "application/json" },
       });
 
-    if (url.includes("login.microsoftonline.com")) {
+    if (new URL(url).hostname === "login.microsoftonline.com") {
       return json({
         access_token: "at-new",
         expires_in: 3600,
@@ -419,7 +419,7 @@ describe("Outlook live sync", () => {
     await run();
 
     expect(
-      requests.filter((r) => r.includes("graph.microsoft.com")),
+      requests.filter((r) => new URL(r).hostname === "graph.microsoft.com"),
     ).toHaveLength(0);
     expect((await account()).lastError).toBe("no_personal_inbox");
   });

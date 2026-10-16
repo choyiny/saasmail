@@ -91,7 +91,7 @@ function stubMicrosoft(opts: {
         status,
         headers: { "content-type": "application/json" },
       });
-    if (url.includes("login.microsoftonline.com")) {
+    if (new URL(url).hostname === "login.microsoftonline.com") {
       return json({
         access_token: "at-1",
         expires_in: 3600,
