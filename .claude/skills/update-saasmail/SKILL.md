@@ -64,9 +64,11 @@ If the rebase still stops (e.g., a whole file conflict that `-X ours` can't reso
 
 Never run `git rebase --skip` without asking — that silently drops one of the user's commits.
 
-### 5. Check for new VAPID configuration
+### 5. Bring `wrangler.jsonc` up to date
 
-Run:
+`wrangler.jsonc` is gitignored, so the rebase never touches it: bindings, crons and vars that upstream added to `wrangler.jsonc.example` are missing until they are copied over. Compare the two files and show the user each top-level block or `vars` key present in the example but absent from their config (for example `workflows`, `durable_objects` and its `migrations`, or a changed `triggers.crons`). Add the ones they accept, keeping their own values and IDs; never overwrite a value they already set.
+
+Then check push notifications:
 
 ```bash
 wrangler secret list
@@ -75,7 +77,7 @@ grep "VAPID_PUBLIC_KEY" wrangler.jsonc
 
 If `VAPID_PRIVATE_KEY` is missing from `wrangler secret list` **or** `VAPID_PUBLIC_KEY` is missing from `wrangler.jsonc`, prompt the user:
 
-> This update adds browser push notifications. Generate VAPID keys now? (If skipped, push remains disabled until you run `yarn vapid:generate`.)
+> Browser push notifications aren't configured. Generate VAPID keys now? (If skipped, push remains disabled until you run `yarn vapid:generate`.)
 
 **If yes**, run the same flow as the onboarding step:
 
@@ -97,7 +99,7 @@ Run:
 yarn db:migrate:prod
 ```
 
-This ensures any new migrations (including the push-subscriptions table) are applied to the remote D1 database. If the command reports nothing to migrate, that's fine — continue.
+This ensures any new migrations are applied to the remote D1 database. If the command reports nothing to migrate, that's fine — continue.
 
 ### 6. Restore stashed changes
 
@@ -114,7 +116,7 @@ If `stash pop` itself conflicts, leave the stash entry in place and tell the use
 Give the user a concise summary:
 
 - Whether `upstream` was newly added or already configured.
-- How many commits were pulled from upstream (`git rev-list --count HEAD@{1}..HEAD` after the rebase, or count from the fetch output).
+- How many commits were pulled from upstream: `git rev-list --count ORIG_HEAD..upstream/main`, run right after the rebase while `ORIG_HEAD` still points at the pre-rebase branch. (`HEAD@{1}` is the rebase's last step, not the old branch, so it counts 0.)
 - Whether any conflicts were auto-resolved in favor of upstream (check rebase output for `CONFLICT` lines that were resolved by the strategy).
 - Whether stashed changes were restored cleanly.
 

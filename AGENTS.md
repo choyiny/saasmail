@@ -21,7 +21,7 @@ there and link it from the index rather than growing `README.md`.
 
 - Use **yarn**, not npm (`yarn install --frozen-lockfile` in CI).
 - **Format:** `yarn format` before push. Husky runs `lint-staged` → Prettier on staged `*.{js,jsx,ts,tsx,json,css,md,html}` at commit; CI runs full-tree `yarn format:check` (so husky alone is not enough if you skip staging a dirty file).
-- **Typecheck:** `yarn tsc --noEmit`
+- **Typecheck:** `yarn tsc -b`. The root `tsconfig.json` has `"files": []` and only references `tsconfig.app.json`, so `yarn tsc --noEmit` checks no files and always passes. `main` already carries a few `tsc -b` errors; don't add to them.
 - **Unit tests:** `yarn test` (invokes `vitest run --config vitest.config.test.ts` — bare `vitest run` hits the wrong pool config and fails to start).
 - **E2E:** `yarn test:e2e` (Playwright; **wipes local D1** — re-seed with `yarn db:seed:dev` afterward). Needs `DEMO_MODE=1` + `DISABLE_PASSKEY_GATE=true` in `.dev.vars`, and `http://localhost:8788` in `TRUSTED_ORIGINS` in `wrangler.jsonc` (see `.dev.vars.example` / `wrangler.jsonc.example` and [`docs/development.md`](./docs/development.md#end-to-end-tests)).
 
@@ -32,7 +32,7 @@ Vitest uses `@cloudflare/vitest-pool-workers`, which requires a present `wrangle
 ```bash
 cp wrangler.jsonc.ci wrangler.jsonc
 mkdir -p dist/client
-yarn tsc --noEmit
+yarn tsc -b
 yarn test
 ```
 
@@ -43,10 +43,10 @@ Prefer `wrangler.jsonc.ci` for unit tests (placeholders tuned for the pool). Use
 | Workflow / check name                               | Merge impact                                                                                                                                                                                                                                           |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Format → `prettier`                                 | Fails if `yarn format:check` fails                                                                                                                                                                                                                     |
-| Test → `vitest` (+ typecheck step in that workflow) | Fails on `yarn tsc --noEmit` or `yarn test`                                                                                                                                                                                                            |
+| Test → `vitest` (+ typecheck step in that workflow) | Fails on `yarn test` or `yarn test:web` (its `yarn tsc --noEmit` step checks no files, so it never fails)                                                                                                                                              |
 | e2e → `playwright`                                  | Fails on `yarn test:e2e`                                                                                                                                                                                                                               |
 | Check PR labels → job named `test`                  | Fails unless the PR has **at least one** of `major` / `minor` / `patch`; also fails if `hold` is present (`disable-reviews: true`, so this is a failing check — not a review). Note the job is named `test`, distinct from the Test/`vitest` workflow. |
-| CodeQL → `Analyze (javascript-typescript)`          | Runs on PRs to `main`; findings are uploaded via codeql-action (do not treat SARIF alerts as an automatic red X unless the Analyze job itself fails)                                                                                                   |
+| CodeQL → `Analyze (javascript-typescript)`          | Runs on PRs to `main`. A new alert is posted as a review comment and fails a separate `CodeQL` check even when `Analyze` passes — test code included. Fix the flagged code rather than treating the red check as noise                                 |
 | Release Drafter → `update_release_draft`            | Updates draft release notes; not a content gate                                                                                                                                                                                                        |
 
 Semver labels drive [release-drafter](./.github/release-drafter.yml). Dependabot PRs already get `patch`. **Maintainers** apply `major` / `minor` / `patch` on human PRs — external fork openers generally cannot set labels on `choyiny/saasmail`. Docs-only → `patch`.
@@ -56,7 +56,7 @@ Semver labels drive [release-drafter](./.github/release-drafter.yml). Dependabot
 From [`CONTRIBUTING.md`](./CONTRIBUTING.md) + the PR template:
 
 1. Focused change; branch off `main`.
-2. `yarn format` / `yarn tsc --noEmit` / `yarn test` (and `yarn test:e2e` if UI or HTTP surface changed).
+2. `yarn format` / `yarn tsc -b` / `yarn test` / `yarn test:web` (and `yarn test:e2e` if UI or HTTP surface changed).
 3. User-visible change → entry under `## [Unreleased]` in `CHANGELOG.md`.
 4. Schema or data migration → see below; include the generated files.
 5. Behavior/setup change → update the relevant page under [`docs/`](./docs/README.md) (and `README.md` if the overview or feature index changes).

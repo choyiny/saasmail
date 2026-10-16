@@ -137,14 +137,17 @@ Edit `wrangler.jsonc` and fill in:
 
 **Do not rename bindings.** The worker code looks them up by exact name — renaming any of these will break the app:
 
-| Key in `wrangler.jsonc`      | Required value  |
-| ---------------------------- | --------------- |
-| `d1_databases[].binding`     | `"DB"`          |
-| `r2_buckets[].binding`       | `"R2"`          |
-| `queues.producers[].binding` | `"EMAIL_QUEUE"` |
-| `send_email[].name`          | `"EMAIL"`       |
+| Key in `wrangler.jsonc`           | Required value                                                  |
+| --------------------------------- | --------------------------------------------------------------- |
+| `d1_databases[].binding`          | `"DB"`                                                          |
+| `r2_buckets[].binding`            | `"R2"`                                                          |
+| `queues.producers[].binding`      | `"EMAIL_QUEUE"`                                                 |
+| `send_email[].name`               | `"EMAIL"`                                                       |
+| `assets.binding`                  | `"ASSETS"`                                                      |
+| `workflows[].binding`             | `"GMAIL_BACKFILL"`, with `class_name` `"GmailBackfillWorkflow"` |
+| `durable_objects.bindings[].name` | `"NOTIFICATIONS_HUB"`, with `class_name` `"NotificationsHub"`   |
 
-`database_name`, `bucket_name`, `queue`, `account_id`, and all IDs can be freely changed. Only the `binding` / `name` values above are load-bearing.
+`database_name`, `bucket_name`, `queue`, the workflow's `name`, `account_id`, and all IDs can be freely changed. Only the values above are load-bearing.
 
 ### Step 4.5: Optional — Replace the logo
 
@@ -324,7 +327,7 @@ Show the user exactly what was set up, substituting their real values:
 - D1 database `saasmail-db` (binding `DB`)
 - R2 bucket `saasmail-attachments` (binding `R2`)
 - Queue `saasmail-sequence-emails` (binding `EMAIL_QUEUE`)
-- Hourly cron for sequence email delivery
+- Cron every 15 minutes for sequence and outbox delivery (and connected-mailbox sync)
 
 ## Common Issues
 

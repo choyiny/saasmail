@@ -10,7 +10,7 @@ Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, 
 - Backend: Hono + Zod OpenAPI routes in `worker/src/routers/`
 - Frontend: React + Tailwind in `src/`
 - Database: Drizzle ORM with D1 in `worker/src/db/`
-- Run `yarn tsc --noEmit` to type-check before committing
+- Run `yarn tsc -b` to type-check before committing (`yarn tsc --noEmit` checks no files — the root `tsconfig.json` only holds project references)
 - Run `yarn test` for tests
 - Run `yarn format` / `yarn format:check` before pushing (CI enforces Prettier)
 
