@@ -180,6 +180,30 @@ describe("generateWranglerConfig", () => {
     expect(c.env.dev.vars.COOKIE_PREFIX).toBe("mine");
   });
 
+  it("renames the consumer of the producer's queue, wherever it is listed", () => {
+    const other = '{ "queue": "other-queue", "max_retries": 1 },\n      ';
+    const t2 = template.replace(
+      '"consumers": [\n      {',
+      `"consumers": [\n      ${other}{`,
+    );
+    expect(t2).not.toBe(template);
+    const c = read(generateWranglerConfig(t2, fixture(), extra));
+    expect(c.queues.consumers.map((x: any) => x.queue)).toEqual([
+      "other-queue",
+      "acme-sequence-emails",
+    ]);
+    expect(() =>
+      generateWranglerConfig(
+        template.replace(
+          '"queue": "saasmail-sequence-emails",\n        "max_batch',
+          '"queue": "x",\n        "max_batch',
+        ),
+        fixture(),
+        extra,
+      ),
+    ).toThrow(/consumer/);
+  });
+
   it("keeps template comments below the header", () => {
     const text = generateWranglerConfig(template, fixture(), extra);
     expect(text).toContain("// Outbound email provider selection");

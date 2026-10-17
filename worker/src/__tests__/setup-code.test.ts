@@ -50,6 +50,12 @@ describe("setup code", () => {
     expect(await setupCodeHash(" abcd-efgh jkmn-pqrs-tuvw \n")).toBe(a);
   });
 
+  it("hashes a fixed vector shared with the installer CLI", async () => {
+    expect(await setupCodeHash("ABCD-EFGH-JKMN-PQRS-TUVW")).toBe(
+      "d1d5079c636ac8353aa6acc43178ca940837a4dbc13028a5d93376fff410df65",
+    );
+  });
+
   it("status says a code is required while the hash is set and nobody exists", async () => {
     const res = await call(await setupCodeHash(CODE), "/api/setup/status");
     expect(await res.json()).toEqual({

@@ -95,19 +95,27 @@ export function generateWranglerConfig(
   );
 
   const queues = root.queues as {
-    producers?: { binding?: string }[];
-    consumers?: unknown[];
+    producers?: { binding?: string; queue?: string }[];
+    consumers?: { queue?: string }[];
   };
   const producer = queues?.producers?.findIndex(
     (p) => p.binding === "EMAIL_QUEUE",
   );
-  if (producer === undefined || producer < 0 || !queues.consumers?.length) {
+  const templateQueue =
+    producer !== undefined && producer >= 0
+      ? queues.producers![producer].queue
+      : undefined;
+  const consumer =
+    templateQueue === undefined
+      ? -1
+      : (queues.consumers?.findIndex((c) => c.queue === templateQueue) ?? -1);
+  if (producer === undefined || producer < 0 || consumer < 0) {
     throw new Error(
-      'wrangler.jsonc.example has no queues producer with binding "EMAIL_QUEUE" and a consumer.',
+      'wrangler.jsonc.example has no queues producer with binding "EMAIL_QUEUE" and a consumer of its queue.',
     );
   }
   set(["queues", "producers", producer, "queue"], n.queue);
-  set(["queues", "consumers", 0, "queue"], n.queue);
+  set(["queues", "consumers", consumer, "queue"], n.queue);
 
   set(
     ["workflows", indexOf("workflows", "GMAIL_BACKFILL"), "name"],

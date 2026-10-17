@@ -31,6 +31,11 @@ describe("setup code", () => {
     for (const c of ["abcd-efgh-jkmn-pqrs-tuvw", " X-y z\n", ""])
       expect(setupCodeHash(c)).toBe(await workerHash(c));
   });
+  it("hashes a fixed vector", () => {
+    expect(setupCodeHash("ABCD-EFGH-JKMN-PQRS-TUVW")).toBe(
+      "d1d5079c636ac8353aa6acc43178ca940837a4dbc13028a5d93376fff410df65",
+    );
+  });
   it("has the documented format", () => {
     for (let i = 0; i < 50; i++)
       expect(generateSetupCode()).toMatch(
