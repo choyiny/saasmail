@@ -205,6 +205,11 @@ function workerSeed(
 const without = (...names: string[]) =>
   BINDINGS.filter((b) => !names.includes(b.name));
 
+const withVar = (name: string, text: string): WorkerBinding[] => [
+  ...without(name),
+  { type: "plain_text", name, text },
+];
+
 function workerHarness(
   o: {
     seed?: FakeCloudflareSeed;
@@ -379,6 +384,9 @@ describe("adoptWorker", () => {
     await expect(run(h)).rejects.toThrow(
       "VAPID_PRIVATE_KEY is set but its public key is unknown",
     );
+    await expect(run(h)).rejects.toThrow(
+      "For an adopted worker, set the VAPID_PUBLIC_KEY var on the worker instead.",
+    );
     expect(existsSync(home)).toBe(false);
   });
 
@@ -394,12 +402,15 @@ describe("adoptWorker", () => {
 
   it("custom domain sets hostname", async () => {
     const h = workerHarness({
-      seed: workerSeed({
-        workerDomains: [
-          { hostname: "other.example.com", service: "other" },
-          { hostname: "mail.example.com", service: "acme" },
-        ],
-      }),
+      seed: workerSeed(
+        {
+          workerDomains: [
+            { hostname: "other.example.com", service: "other" },
+            { hostname: "mail.example.com", service: "acme" },
+          ],
+        },
+        withVar("BASE_URL", "https://mail.example.com"),
+      ),
     });
     const s = await run(h);
     expect(s.inputs.hostname).toBe("mail.example.com");
@@ -498,5 +509,88 @@ describe("adoptWorker", () => {
     const h = workerHarness();
     await expect(run(h)).rejects.toThrow(`${dest()} already has an install`);
     expect(readState(dest(), first.installationId)).toEqual(first);
+  });
+});
+
+describe("adoptWorker: stops beyond the template mapping", () => {
+  const plan = (h: ReturnType<typeof workerHarness>) =>
+    planAdoptWorker(h.ctx, {
+      accountId: W_ACCOUNT,
+      worker: "acme",
+      inputs: {},
+    });
+
+  it("BASE_URL on a host that is not the chosen one stops", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, withVar("BASE_URL", "https://x.example.com")),
+    });
+    await expect(plan(h)).rejects.toThrow(
+      "BASE_URL is https://x.example.com, but the worker has no custom domain for it (adopt would record https://acme.me.workers.dev). Routes other than custom domains are not supported by adopt.",
+    );
+    const custom = workerHarness({
+      seed: workerSeed({
+        workerDomains: [{ hostname: "mail.example.com", service: "acme" }],
+      }),
+    });
+    await expect(plan(custom)).rejects.toThrow(
+      `BASE_URL is ${W_BASE}, but the worker has no custom domain for it`,
+    );
+  });
+
+  it("the report shows the VAPID subject and key, so the digest binds them", async () => {
+    const a = await plan(workerHarness());
+    expect(a.report).toContain("  VAPID subject: mailto:me@acme.dev");
+    expect(a.report).toContain("  VAPID public key: PUB…");
+    const b = await plan(
+      workerHarness({
+        seed: workerSeed({}, withVar("VAPID_SUBJECT", "mailto:x@acme.dev")),
+      }),
+    );
+    expect(b.digest).not.toBe(a.digest);
+  });
+
+  it("no DB binding stops", async () => {
+    await expect(
+      plan(workerHarness({ seed: workerSeed({}, without("DB")) })),
+    ).rejects.toThrow("The worker has no D1 binding DB");
+  });
+
+  it("a template binding name with the wrong type stops as unknown", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, [
+        ...without("DB"),
+        { type: "kv_namespace", name: "DB", id: "kv1" },
+      ]),
+    });
+    await expect(plan(h)).rejects.toThrow("DB (kv_namespace)");
+  });
+
+  it("a worker that already carries SAASMAIL_INSTALLATION stops", async () => {
+    const h = workerHarness({
+      seed: workerSeed(
+        {},
+        withVar("SAASMAIL_INSTALLATION", '{"installationId":"acme-1"}'),
+      ),
+    });
+    await expect(plan(h)).rejects.toThrow("adopt --from <checkout>");
+  });
+
+  it("several custom domains with BASE_URL naming none stop", async () => {
+    const h = workerHarness({
+      seed: workerSeed({
+        workerDomains: [
+          { hostname: "a.example.com", service: "acme" },
+          { hostname: "b.example.com", service: "acme" },
+        ],
+      }),
+    });
+    await expect(plan(h)).rejects.toThrow(
+      "serves several custom domains (a.example.com, b.example.com)",
+    );
+  });
+
+  it("no custom domain and no workers.dev subdomain stops", async () => {
+    const h = workerHarness({ seed: workerSeed({ subdomain: null }) });
+    await expect(plan(h)).rejects.toThrow("no workers.dev subdomain");
   });
 });

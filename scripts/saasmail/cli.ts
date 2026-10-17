@@ -9,6 +9,7 @@ import { adoptFromCheckout, pickCheckoutState } from "./adopt.ts";
 import {
   adoptWorker,
   detectProvider,
+  noWorker,
   planAdoptWorker,
   type AdoptInputs,
 } from "./adopt-worker.ts";
@@ -1115,12 +1116,16 @@ async function runAdoptWorker(
   try {
     const accountId = await resolveAccount(ctx.cf, io, f.account);
     const asking = io.tty && !f.yes;
-    // Only a provider prompt needs the worker's provider up front; otherwise the plan detects it.
+    // A wrong worker name stops before any mail prompt.
+    const settings = await ctx.cf.workerSettings(accountId, worker);
+    if (!settings) {
+      io.print(noWorker(worker, accountId));
+      return 1;
+    }
+    // The provider prompt offers what the worker uses first; without one the plan detects it.
     const detected =
       asking && f.provider === undefined
-        ? detectProvider(
-            (await ctx.cf.workerSettings(accountId, worker))?.bindings ?? [],
-          )
+        ? detectProvider(settings.bindings)
         : DEFAULT_PROVIDER;
     const mail = await resolveMail(f, io, detected);
     const inputs: AdoptInputs = {

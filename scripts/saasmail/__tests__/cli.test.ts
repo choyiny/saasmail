@@ -1752,6 +1752,14 @@ describe("adopt --worker", () => {
     expect(c.text()).toContain("npx saasmail adopt --worker acme");
   });
 
+  it("a wrong worker name stops before any mail prompt", async () => {
+    const h = harness({ home: home(), seed, tty: true });
+    expect(await main(["adopt", "--worker", "nope"], h.deps)).toBe(1);
+    expect(h.text()).toContain(`No worker named nope on account ${ACCOUNT}`);
+    expect(h.asked).toEqual([]);
+    expect(existsSync(home())).toBe(false);
+  });
+
   it("worker-only flags with --from are usage errors", async () => {
     const h = harness({ home: home() });
     expect(

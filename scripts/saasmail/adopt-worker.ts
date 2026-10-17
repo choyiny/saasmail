@@ -48,6 +48,9 @@ const NOTHING = "Nothing was changed.";
 const isTemplate = (b: WorkerBinding) =>
   b.name in TEMPLATE && TEMPLATE[b.name as TemplateName].type === b.type;
 
+export const noWorker = (worker: string, accountId: string) =>
+  `No worker named ${worker} on account ${accountId}. ${NOTHING}`;
+
 /** Provider the worker uses: Email Sending when it has a send_email binding, else by credential secret. */
 export function detectProvider(bindings: WorkerBinding[]): Provider {
   if (bindings.some((b) => b.type === "send_email")) return "cloudflare";
@@ -224,11 +227,7 @@ export async function planAdoptWorker(
     );
   }
   const settings = await ctx.cf.workerSettings(accountId, worker);
-  if (!settings) {
-    throw new Error(
-      `No worker named ${worker} on account ${accountId}. ${NOTHING}`,
-    );
-  }
+  if (!settings) throw new Error(noWorker(worker, accountId));
   const { bindings } = settings;
   const unknown = bindings.filter(
     (b) =>
@@ -273,6 +272,13 @@ export async function planAdoptWorker(
     }
     baseUrl = `https://${worker}.${sub}.workers.dev`;
   }
+  // A zone route (or a BASE_URL naming another host) would silently move the install's URL.
+  const deployedHost = hostOf(vars.BASE_URL);
+  if (deployedHost && deployedHost !== new URL(baseUrl).hostname) {
+    throw new Error(
+      `BASE_URL is ${vars.BASE_URL}, but the worker has no custom domain for it (adopt would record ${baseUrl}). Routes other than custom domains are not supported by adopt. ${NOTHING}`,
+    );
+  }
 
   const provider = o.inputs.provider ?? detectProvider(bindings);
   if (provider !== "cloudflare" && (o.inputs.sendDomains ?? []).length > 0) {
@@ -315,7 +321,9 @@ export async function planAdoptWorker(
   const vapidPublicKey = vars.VAPID_PUBLIC_KEY || undefined;
   if (vapidPublicKey) s.vapidPublicKey = vapidPublicKey;
   else if (secrets.includes("VAPID_PRIVATE_KEY"))
-    throw new Error(lostVapidMessage(ctx, s));
+    throw new Error(
+      `${lostVapidMessage(ctx, s)} For an adopted worker, set the VAPID_PUBLIC_KEY var on the worker instead.`,
+    );
   // The deployed subject is kept: push services key subscriptions to it.
   s = {
     ...s,
@@ -367,7 +375,8 @@ export async function planAdoptWorker(
     `  Provider       ${i.provider}`,
     `  Send domains   ${list(i.sendDomains)}`,
     `  Cookie prefix  ${i.cookiePrefix}`,
-    `  VAPID key      ${vapidPublicKey ? "from VAPID_PUBLIC_KEY" : "none (the first upgrade generates a pair)"}`,
+    `  VAPID subject: ${s.vapidSubject}`,
+    `  VAPID public key: ${vapidPublicKey ? `${vapidPublicKey.slice(0, 12)}…` : "none (the first upgrade generates a pair)"}`,
     "",
     `Secrets on the worker (names only): ${list(secrets)}`,
   );
