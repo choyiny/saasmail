@@ -14,9 +14,13 @@ Contributor and coding-agent conventions (CI gates, Prettier, PR semver labels, 
 - Run `yarn test` for tests
 - Run `yarn format` / `yarn format:check` before pushing (CI enforces Prettier)
 
+## Installer
+
+- `yarn saasmail install` (`scripts/saasmail/`, docs/setup.md) provisions, configures and deploys an instance deterministically; `yarn saasmail status` checks it. Pure modules plus a Cloudflare REST port and a process runner, tested with fakes by `yarn test` (Node vitest config in `scripts/saasmail/`); `yarn typecheck:cli` type-checks it. State lives in the gitignored `.saasmail/`.
+
 ## Skills
 
-- `/saasmail-onboarding` — Interactive setup wizard for deploying a new saasmail instance
+- `/saasmail-onboarding` — Guides `yarn saasmail install` (plan, then the user applies it in their own terminal) to deploy a new saasmail instance
 - `/use-saasmail` — How to call a deployed saasmail instance's HTTP API to send emails (raw or via templates) and enroll recipients in sequences
 - `/create-saasmail-template` — Authoring email templates: the `{{variable}}` grammar, conditional and repeating `{{#section}}` rules, escaping, and the required-vs-optional send contract
 - `/update-saasmail` — Rebase a fork onto `upstream/main` (links the upstream remote if needed)

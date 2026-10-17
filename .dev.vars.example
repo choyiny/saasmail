@@ -36,3 +36,8 @@ GOOGLE_OAUTH_CLIENT_SECRET=
 # Never rotate this without reconnecting every mailbox — stored tokens
 # become permanently undecryptable.
 TOKEN_ENCRYPTION_KEY=
+
+# Optional: SHA-256 hash of a one-time setup code (set by `yarn saasmail
+# install`). While set, the first admin can only be created with the code.
+# Leave blank for local dev. Hash: strip dashes/whitespace, upper-case, lowercase SHA-256 hex.
+SETUP_CODE_HASH=

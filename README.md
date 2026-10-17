@@ -25,19 +25,23 @@ SaaS teams that want a self-hosted email stack on Cloudflare Workers — one sha
 
 ## Quickstart
 
-**Prerequisites:** a domain on Cloudflare with Email Routing available, the Workers Paid plan, and [Node.js](https://nodejs.org/) v18+.
+**Prerequisites:** the Workers Paid plan, any domains you will use as active zones on Cloudflare, and [Node.js](https://nodejs.org/) v22.18+.
 
-The fastest path is the Claude Code onboarding skill — it provisions every Cloudflare resource, fills out your config, runs migrations, and deploys for you:
+One command provisions every Cloudflare resource, writes your config, runs migrations, generates the secrets, deploys, and wires up Email Routing and Email Sending:
 
 ```bash
 git clone https://github.com/choyiny/saasmail.git
 cd saasmail
-claude   # then run /saasmail-onboarding
+yarn install
+yarn wrangler login
+yarn saasmail install
 ```
 
-**First successful result:** your worker is live at your domain, and visiting it prompts you to create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+Prefer a guide? Run `claude` and then `/saasmail-onboarding`.
 
-Prefer to wire it up by hand? See [Setup](docs/setup.md) (~8 steps).
+**First successful result:** your worker is live, the installer prints a one-time setup code, and `/onboarding` on your URL asks for it before you create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+
+Prefer to wire it up by hand? See [Setup](docs/setup.md#manual-setup) (~8 steps).
 
 ## Documentation
 

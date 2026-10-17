@@ -42,7 +42,9 @@ describe("setup router", () => {
         expect(data.code).toBe("DATABASE_MIGRATION_REQUIRED");
         expect(data.command).toBe("yarn db:migrate:prod");
         expect(data.error).toContain("yarn db:migrate:prod");
-        expect(data.error).toContain("/saasmail-onboarding");
+        expect(data.error).toBe(
+          "Database migrations have not been applied yet. Run `yarn db:migrate:prod` to create the production D1 tables, or run `yarn saasmail install --resume` to continue setup, then reload saasmail.",
+        );
       } finally {
         await applyMigrations();
       }

@@ -22,8 +22,9 @@ there and link it from the index rather than growing `README.md`.
 - Use **yarn**, not npm (`yarn install --frozen-lockfile` in CI).
 - **Format:** `yarn format` before push. Husky runs `lint-staged` → Prettier on staged `*.{js,jsx,ts,tsx,json,css,md,html}` at commit; CI runs full-tree `yarn format:check` (so husky alone is not enough if you skip staging a dirty file).
 - **Typecheck:** `yarn tsc -b`. The root `tsconfig.json` has `"files": []` and only references `tsconfig.app.json`, so `yarn tsc --noEmit` checks no files and always passes. `main` already carries a few `tsc -b` errors; don't add to them.
-- **Unit tests:** `yarn test` (invokes `vitest run --config vitest.config.test.ts` — bare `vitest run` hits the wrong pool config and fails to start).
-- **E2E:** `yarn test:e2e` (Playwright; **wipes local D1** — re-seed with `yarn db:seed:dev` afterward). Needs `DEMO_MODE=1` + `DISABLE_PASSKEY_GATE=true` in `.dev.vars`, and `http://localhost:8788` in `TRUSTED_ORIGINS` in `wrangler.jsonc` (see `.dev.vars.example` / `wrangler.jsonc.example` and [`docs/development.md`](./docs/development.md#end-to-end-tests)).
+- **Installer:** `yarn saasmail install` / `status` (`scripts/saasmail/`, [`docs/setup.md`](./docs/setup.md)); its tests run in `yarn test` (own Node vitest config) and `yarn typecheck:cli` type-checks it.
+- **Unit tests:** `yarn test` (runs the installer's tests, then `vitest run --config vitest.config.test.ts` — bare `vitest run` hits the wrong pool config and fails to start).
+- **E2E:** `yarn test:e2e` (Playwright; **wipes local D1** — re-seed with `yarn db:seed:dev` afterward). Needs `DEMO_MODE=1` + `DISABLE_PASSKEY_GATE=true` in `.dev.vars`, and `http://localhost:8788` in `TRUSTED_ORIGINS` (in `wrangler.jsonc`, or `.dev.vars` when the installer generated it) (see `.dev.vars.example` / `wrangler.jsonc.example` and [`docs/development.md`](./docs/development.md#end-to-end-tests)).
 
 ### Local `yarn test` prerequisites
 

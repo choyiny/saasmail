@@ -54,6 +54,7 @@ import { requirePasskey } from "./middleware/require-passkey";
 import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
 import { registerMcpRoutes } from "./mcp/http";
+import { installRouter } from "./routers/install-router";
 import {
   BEARER_AUTH_SCHEME,
   bearerAuthSecurityScheme,
@@ -293,6 +294,9 @@ app.route("/api", bootstrapRouter);
 // bearer tokens via mcpHandler rather than the session/API-key pipeline, and
 // it sits outside `/api/*` so that middleware never applies to it.
 registerMcpRoutes(app);
+
+// Public: what `yarn saasmail install` reads to recognise an installation.
+app.route("/", installRouter);
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
