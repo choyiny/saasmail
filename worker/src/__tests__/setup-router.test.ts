@@ -42,7 +42,7 @@ describe("setup router", () => {
         expect(data.code).toBe("DATABASE_MIGRATION_REQUIRED");
         expect(data.command).toBe("yarn db:migrate:prod");
         expect(data.error).toContain("yarn db:migrate:prod");
-        expect(data.error).toContain("/saasmail-onboarding");
+        expect(data.error).toContain("yarn saasmail install --resume");
       } finally {
         await applyMigrations();
       }
