@@ -2,11 +2,47 @@
 
 # Updating saasmail
 
-## Recommended: `/update-saasmail`
+## Recommended: `npx saasmail@latest upgrade`
 
-From inside Claude Code, run **`/update-saasmail`**. It links the `upstream` remote to `https://github.com/choyiny/saasmail`, fetches the latest, and rebases your local commits on top. Any unresolvable conflicts are auto-resolved in favor of upstream so the sync never gets stuck.
+If you installed with `npx saasmail install`, upgrade the same way:
 
-## Manual
+```bash
+npx saasmail@latest upgrade --plan     # read-only: what would change, and the apply command
+npx saasmail@latest upgrade            # apply
+```
+
+It moves the installation to the package's version: applies new migrations, adds the bindings and secrets the release needs, and deploys. `npx saasmail status` shows the running version next to **Latest** on npm. Flags: `--name <name>` (when several installs exist), `--plan`, `--expect-plan <digest>`, `--resume`, `--yes`, `--replace-custom-code`.
+
+- **No downgrades.** If the site runs a newer version than the package, it stops and names the version to run instead.
+- **Custom code.** If the running version is not a release (a modified fork, a dirty or diverged commit, or one it cannot identify), it stops and changes nothing. `--replace-custom-code` replaces it with the release.
+- **Migrations cannot be undone.** If a release is broken, the way back is the next release.
+- **A failed upgrade** prints the command to continue; `--resume` picks it up even if the site is down meanwhile.
+
+`/update-saasmail` in Claude Code runs the plan and walks you through it; you run the apply in your own terminal because it prints the setup code.
+
+## Adopt an existing install
+
+Installs made another way move under the package once, then upgrade as above.
+
+From a clone that ran `yarn saasmail install`:
+
+```bash
+npx saasmail adopt --from <checkout>
+```
+
+This copies the install's state and `wrangler.jsonc` to `~/.saasmail/<slug>/`; nothing on Cloudflare changes. The clone keeps a marker and refuses to install or resume it afterwards.
+
+From a worker deployed by hand or by the old onboarding skill:
+
+```bash
+npx saasmail adopt --worker <name> [--account <id|name>] [--inbound-domain <domain>] [--send-domain <domain>] --plan
+```
+
+It reads the worker's bindings from Cloudflare and deploys nothing. If the running version is unknown, the first upgrade needs `--replace-custom-code`. Zone routes other than custom domains are not supported.
+
+## Forks and modified code
+
+Keep a clone, and sync it with upstream:
 
 ```bash
 git remote add upstream https://github.com/choyiny/saasmail.git  # first time only
@@ -14,7 +50,7 @@ git fetch upstream
 git rebase upstream/main -X ours
 ```
 
-The `-X ours` flag tells rebase to prefer upstream for conflicting hunks (during a rebase, "ours" is the branch being rebased onto). Your local commits are still replayed on top.
+The `-X ours` flag tells rebase to prefer upstream for conflicting hunks (during a rebase, "ours" is the branch being rebased onto). Your local commits are still replayed on top. `/update-saasmail` does this for you.
 
 After rebasing, apply any new migrations:
 

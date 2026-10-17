@@ -2,27 +2,23 @@
 
 # Setup
 
-Deploy saasmail to your own Cloudflare account with one command, `yarn saasmail install`. It takes about 15 minutes, plus DNS propagation if you use Cloudflare Email Sending. The same inputs always give the same resource names, the same `wrangler.jsonc`, and the same plan. The [`/saasmail-onboarding`](../.claude/skills/saasmail-onboarding/SKILL.md) Claude Code skill walks you through it; you don't need Claude to use it. The manual steps are kept [below](#manual-setup).
+Deploy saasmail to your own Cloudflare account with one command, `npx saasmail install`. It takes about 15 minutes, plus DNS propagation if you use Cloudflare Email Sending. The same inputs always give the same resource names, the same `wrangler.jsonc`, and the same plan. The [`/saasmail-onboarding`](../.claude/skills/saasmail-onboarding/SKILL.md) Claude Code skill walks you through it; you don't need Claude to use it. Running a fork or modified code? [Install from a clone](#install-from-a-clone) instead. The manual steps are kept [below](#manual-setup).
 
 ## Prerequisites
 
 - A Cloudflare account on the **Workers Paid** plan (Queues are not on Workers Free) with **R2** enabled.
-- Node.js v22.18+ for the installer (it runs TypeScript directly; `yarn saasmail` prints a clear message on an older Node.js 22, but below 22.6 it may fail to parse before that check can run) and [Yarn](https://yarnpkg.com/). The manual setup below keeps its own, lower requirement.
+- [Node.js](https://nodejs.org/) 22 or newer (`npx` comes with it). Installing from a clone needs v22.18+ and [Yarn](https://yarnpkg.com/); the manual setup below keeps its own, lower requirement.
 - For a custom hostname, and for every inbound or send domain: the domain is an **active zone in this Cloudflare account**. A domain you receive mail on must be a zone of its own (a subdomain you want routed needs its own zone).
-- Cloudflare credentials: `yarn wrangler login`, or `CLOUDFLARE_API_TOKEN` (see [Token permissions](#token-permissions)).
+- Cloudflare credentials: `npx wrangler@<version> login` (the installer prints the exact command with the pinned wrangler version if you are not logged in), or `CLOUDFLARE_API_TOKEN` (see [Token permissions](#token-permissions)).
 - _Optional:_ an account with Resend, Postmark or Bavimail — see [Email providers](email-providers.md).
 
 ## Install
 
 ```bash
-git clone https://github.com/choyiny/saasmail.git
-cd saasmail
-yarn install
-yarn wrangler login
-yarn saasmail install
+npx saasmail install
 ```
 
-In a terminal it asks for an installation name, the Cloudflare account (when your login sees several), where to serve (a custom hostname or `<name>.<subdomain>.workers.dev`), the domains whose mail saasmail receives, the outbound provider, the domains to send from, and the cookie prefix. Each answer can be a flag instead:
+The package carries a built release and its own pinned wrangler, so there is nothing to clone. Everything the install records, including the generated `wrangler.jsonc`, lives in `~/.saasmail/<slug>/` (set `SAASMAIL_HOME` to put it elsewhere); none of it is committed anywhere. In a terminal it asks for an installation name, the Cloudflare account (when your login sees several), where to serve (a custom hostname or `<name>.<subdomain>.workers.dev`), the domains whose mail saasmail receives, the outbound provider, the domains to send from, and the cookie prefix. Each answer can be a flag instead:
 
 | Flag                        | Meaning                                                                                                            |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -46,11 +42,11 @@ The installer first runs read-only checks (Workers Paid, R2, the workers.dev sub
 
 `--plan` changes nothing and prints the exact apply command, ending in `--expect-plan <digest> --yes`. The apply recomputes the plan and stops if its digest differs from the one you reviewed.
 
-What it creates: a D1 database (`<name>-db`), an R2 bucket (`<name>-attachments`), a Queue (`<name>-sequence-emails`), the worker `<name>` and its Gmail-backfill Workflow, and `wrangler.jsonc` generated from `wrangler.jsonc.example` (it refuses to overwrite a hand-written one and says how to move it aside). Then it applies the migrations and generates this instance's secrets once: `BETTER_AUTH_SECRET`, `UNSUBSCRIBE_SECRET`, `TOKEN_ENCRYPTION_KEY` and the VAPID key pair for push notifications. They go to the deploy through a temporary 0600 file, never argv or logs, and an existing secret is never regenerated. The record of what it did is `.saasmail/<id>.json` (gitignored).
+What it creates: a D1 database (`<name>-db`), an R2 bucket (`<name>-attachments`), a Queue (`<name>-sequence-emails`), the worker `<name>` and its Gmail-backfill Workflow, and `wrangler.jsonc` generated from `wrangler.jsonc.example` (it refuses to overwrite a hand-written one and says how to move it aside). Then it applies the migrations and generates this instance's secrets once: `BETTER_AUTH_SECRET`, `UNSUBSCRIBE_SECRET`, `TOKEN_ENCRYPTION_KEY` and the VAPID key pair for push notifications. They go to the deploy through a temporary 0600 file, never argv or logs, and an existing secret is never regenerated. The record of what it did is the state file in the install's directory under `~/.saasmail/`.
 
 ### The setup code
 
-At the end it prints a **setup code** once, and `<BASE_URL>/onboarding`. Open that page and enter the code to create the first admin; until then nobody else can claim the instance. The code is stored only as a hash (`SETUP_CODE_HASH`). Run the apply in your own terminal window: the code and your keys are printed there. If you lose it before creating the admin, `yarn saasmail install --resume --name <name> --new-setup-code` issues a new one and the old one stops working (in a terminal, `--resume` alone asks first, default no).
+At the end it prints a **setup code** once, and `<BASE_URL>/onboarding`. Open that page and enter the code to create the first admin; until then nobody else can claim the instance. The code is stored only as a hash (`SETUP_CODE_HASH`). Run the apply in your own terminal window: the code and your keys are printed there. If you lose it before creating the admin, `npx saasmail install --resume --name <name> --new-setup-code` issues a new one and the old one stops working (in a terminal, `--resume` alone asks first, default no).
 
 ### Email Routing (inbound)
 
@@ -69,19 +65,33 @@ Email Routing and Email Sending are independent: a domain can do either, both or
 
 ### Resume, status, and adding domains
 
-If a run stops, it prints the step that failed and the command to continue: `yarn saasmail install --resume --name <name>` skips what is done and creates nothing twice. `--resume` on a finished installation adds what you supply now:
+If a run stops, it prints the step that failed and the command to continue: `npx saasmail install --resume --name <name>` skips what is done and creates nothing twice. `--resume` on a finished installation adds what you supply now:
 
-- **Domains** given with `--inbound-domain` or `--send-domain` are _added_ to the recorded ones. A recorded domain can't be removed through the CLI; to drop one (including one that later gained foreign MX records and now blocks every resume), edit `.saasmail/<id>.json` or pick another domain.
+- **Domains** given with `--inbound-domain` or `--send-domain` are _added_ to the recorded ones. A recorded domain can't be removed through the CLI; to drop one (including one that later gained foreign MX records and now blocks every resume), edit the install's state file or pick another domain.
 - **Credentials** are required until the first deploy has sent them and optional afterwards (added only when given; a terminal asks for the ones you skipped).
 - A new setup code, only with consent and while no user exists.
 
-A zone whose Email Routing never becomes ready within 60 seconds fails that step, and fails again each resume until the zone is healthy. `--resume` never upgrades a deployed instance: updates go through [Updating](updating.md).
+A zone whose Email Routing never becomes ready within 60 seconds fails that step, and fails again each resume until the zone is healthy. `--resume` never upgrades a deployed instance: updates go through `npx saasmail@latest upgrade` ([Updating](updating.md)).
 
-`yarn saasmail status` shows the recorded installation (add `--name <name>` when there are several) and asks the deployed worker's public `/.well-known/saasmail` whether it matches.
+`npx saasmail status` shows the recorded installation (add `--name <name>` when there are several), the **Latest** version on npm, and asks the deployed worker's public `/.well-known/saasmail` whether it matches.
+
+### Install from a clone
+
+For a fork or modified code, install from a checkout. The flags and prompts are the same; the commands are `yarn saasmail ...`, and the state and generated `wrangler.jsonc` live in the checkout (`.saasmail/`, gitignored).
+
+```bash
+git clone https://github.com/choyiny/saasmail.git
+cd saasmail
+yarn install
+yarn wrangler login
+yarn saasmail install
+```
+
+`upgrade` and `adopt` are npm-only: in a clone they print the `npx` command to run. To hand a clone's install to the package, run `npx saasmail adopt --from <checkout>` (see [Updating](updating.md#adopt-an-existing-install)); the clone then refuses to deploy it. `npx saasmail upgrade` stops on modified code unless you pass `--replace-custom-code`.
 
 ### Token permissions
 
-`yarn wrangler login` covers the Workers, D1, R2, Queues and Email calls. A custom hostname or inbound domains may need `CLOUDFLARE_API_TOKEN` with **Zone → DNS → Read**, because wrangler's login scopes may not include reading DNS records: if preflight says the token can't read DNS records, create such a token. For `CLOUDFLARE_API_TOKEN` (also useful in CI), create an API token with these permissions, scoped to the account and to the zones involved. The installer reports a 401/403 as "The API token cannot read: …". The list is derived from the REST calls the installer and `wrangler deploy` make; names are the dashboard's permission groups, and those marked (unverified) are the nearest match, so adjust if the dashboard words them differently.
+`wrangler login` covers the Workers, D1, R2, Queues and Email calls. A custom hostname or inbound domains may need `CLOUDFLARE_API_TOKEN` with **Zone → DNS → Read**, because wrangler's login scopes may not include reading DNS records: if preflight says the token can't read DNS records, create such a token. For `CLOUDFLARE_API_TOKEN` (also useful in CI), create an API token with these permissions, scoped to the account and to the zones involved. The installer reports a 401/403 as "The API token cannot read: …". The list is derived from the REST calls the installer and `wrangler deploy` make; names are the dashboard's permission groups, and those marked (unverified) are the nearest match, so adjust if the dashboard words them differently.
 
 - **Account → Account Settings → Read** (list accounts)
 - **Account → Workers Scripts → Edit** (deploy, secrets, worker settings, workers.dev subdomain, Workflows)
@@ -97,7 +107,7 @@ A zone whose Email Routing never becomes ready within 60 seconds fails that step
 
 ## Manual setup
 
-`yarn saasmail install` replaces this section; use it if you can't run the installer, or to see what it does. A hand-written `wrangler.jsonc` works the same, but the installer will refuse to overwrite it. Email Routing is set up in step 7.
+`npx saasmail install` replaces this section; use it if you can't run the installer, or to see what it does. A hand-written `wrangler.jsonc` works the same, but the installer will refuse to overwrite it. Email Routing is set up in step 7.
 
 ### Prerequisites
 

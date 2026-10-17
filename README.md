@@ -25,19 +25,25 @@ SaaS teams that want a self-hosted email stack on Cloudflare Workers — one sha
 
 ## Quickstart
 
-**Prerequisites:** the Workers Paid plan, any domains you will use as active zones on Cloudflare, and [Node.js](https://nodejs.org/) v22.18+.
+**Prerequisites:** [Node.js](https://nodejs.org/) 22 or newer, a Cloudflare account on the Workers Paid plan, and a domain on Cloudflare for mail (any domains you will use must be active zones).
 
-One command provisions every Cloudflare resource, writes your config, runs migrations, generates the secrets, deploys, and wires up Email Routing and Email Sending:
+One command provisions every Cloudflare resource, writes your config, runs migrations, generates the secrets, deploys, and wires up Email Routing and Email Sending. No clone needed:
 
 ```bash
-git clone https://github.com/choyiny/saasmail.git
-cd saasmail
-yarn install
-yarn wrangler login
-yarn saasmail install
+npx wrangler login   # or set CLOUDFLARE_API_TOKEN; the installer prints the exact command if you forget
+npx saasmail install
 ```
 
-Prefer a guide? Run `claude` and then `/saasmail-onboarding`.
+Your install's state and generated `wrangler.jsonc` live in `~/.saasmail/<name>/` (`SAASMAIL_HOME` overrides), never in a repository. Later:
+
+```bash
+npx saasmail@latest upgrade   # move to the newest release
+npx saasmail status           # what is installed, what is latest
+```
+
+Installed from a clone before? `npx saasmail adopt --from <checkout>` moves it; see [Updating](docs/updating.md). Running a fork or modified code? Clone the repo and use `yarn saasmail install` instead ([Setup](docs/setup.md#install-from-a-clone)).
+
+Prefer a guide? Clone the repo, run `claude` and then `/saasmail-onboarding`.
 
 **First successful result:** your worker is live, the installer prints a one-time setup code, and `/onboarding` on your URL asks for it before you create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
 
