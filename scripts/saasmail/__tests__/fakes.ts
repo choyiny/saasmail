@@ -55,8 +55,13 @@ export interface FakeCloudflareSeed {
   catchAll?: Record<string, CatchAll>;
   /** zone id -> Email Sending subdomains */
   sending?: Record<string, SendingSubdomain[]>;
-  /** sending subdomain id -> the DNS records it needs */
+  /** sending subdomain id (or name) -> the DNS records it needs */
   sendingDns?: Record<string, SendingDnsRecord[]>;
+  /**
+   * After `enableEmailRoutingDns`, the status stays "unconfigured" until this many `emailRouting`
+   * reads (the last of them answers "ready"); `Infinity` never gets ready. Unset: ready at once.
+   */
+  routingReadyAfter?: number;
 }
 
 export type FakeCloudflare = Cloudflare & {
@@ -87,6 +92,8 @@ export function fakeCloudflare(seed: FakeCloudflareSeed = {}): FakeCloudflare {
     sending: structuredClone(seed.sending ?? {}),
   };
   let nextId = 1;
+  /** zone id -> `emailRouting` reads left before the status turns "ready". */
+  const pendingReady = new Map<string, number>();
 
   async function enter(method: keyof Cloudflare, args: unknown[]) {
     calls.push({ method, args });
@@ -201,12 +208,26 @@ export function fakeCloudflare(seed: FakeCloudflareSeed = {}): FakeCloudflare {
     },
     async emailRouting(zoneId) {
       await enter("emailRouting", [zoneId]);
+      const left = pendingReady.get(zoneId);
+      if (left !== undefined) {
+        if (left <= 1) {
+          pendingReady.delete(zoneId);
+          state.routing[zoneId] = { enabled: true, status: "ready" };
+        } else {
+          pendingReady.set(zoneId, left - 1);
+        }
+      }
       const r = state.routing[zoneId];
       return r ? { ...r } : null;
     },
     async enableEmailRoutingDns(zoneId) {
       await enter("enableEmailRoutingDns", [zoneId]);
-      state.routing[zoneId] = { enabled: true, status: "ready" };
+      const after = seed.routingReadyAfter ?? 0;
+      if (after > 0) pendingReady.set(zoneId, after);
+      state.routing[zoneId] = {
+        enabled: true,
+        status: after > 0 ? "unconfigured" : "ready",
+      };
       return { ...state.routing[zoneId] };
     },
     async catchAll(zoneId) {
@@ -233,7 +254,13 @@ export function fakeCloudflare(seed: FakeCloudflareSeed = {}): FakeCloudflare {
     },
     async sendingDns(zoneId, subdomainId) {
       await enter("sendingDns", [zoneId, subdomainId]);
-      return structuredClone(seed.sendingDns?.[subdomainId] ?? []);
+      const name = state.sending[zoneId]?.find(
+        (x) => x.id === subdomainId,
+      )?.name;
+      const rows =
+        seed.sendingDns?.[subdomainId] ??
+        (name === undefined ? undefined : seed.sendingDns?.[name]);
+      return structuredClone(rows ?? []);
     },
   };
   return fake;
