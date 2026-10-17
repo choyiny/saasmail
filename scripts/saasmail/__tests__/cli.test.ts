@@ -1,37 +1,1164 @@
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
-import { isEntry, main, USAGE } from "../cli.ts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Ctx } from "../apply.ts";
+import { renderConfig } from "../apply-steps.ts";
+import type { SendingDnsRecord } from "../cloudflare.ts";
+import {
+  applyCommand,
+  isEntry,
+  main,
+  resolveToken,
+  type Deps,
+} from "../cli.ts";
+import type { Io } from "../collect.ts";
+import { installationIdOf, resourceNames } from "../names.ts";
+import { R2_MARKER_KEY } from "../observe.ts";
+import type { RunResult } from "../runner.ts";
+import {
+  listStates,
+  newState,
+  readState,
+  writeState,
+  type InstallState,
+} from "../state.ts";
+import {
+  fakeCloudflare,
+  fakeRunner,
+  type FakeCloudflare,
+  type FakeCloudflareSeed,
+} from "./fakes.ts";
 
-describe("cli stub", () => {
-  it("prints usage for no command and --help, exit 0", () => {
-    for (const argv of [[], ["--help"], ["help"]]) {
-      const out: string[] = [];
-      expect(main(argv, (s) => out.push(s))).toBe(0);
-      expect(out.join("\n")).toBe(USAGE);
+const ACCOUNT = "a".repeat(32);
+const VERSION = "abcdef123456";
+const ID = installationIdOf(ACCOUNT, "acme", "workers.dev");
+const BASE = "https://acme.me.workers.dev";
+const FLAGS = ["--name", "acme", "--account", ACCOUNT, "--workers-dev"];
+const ZONE = { id: "z-example", name: "example.com", status: "active" };
+const ZONE2 = { id: "z-other", name: "other.org", status: "active" };
+const SENDING_DNS: SendingDnsRecord[] = [
+  { type: "TXT", name: "_dmarc.example.com", content: "v=DMARC1; p=none" },
+];
+
+let root: string;
+let cwd: string;
+let dir: string;
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "saasmail-cli-"));
+  cwd = join(root, "repo");
+  dir = join(cwd, ".saasmail");
+  mkdirSync(join(cwd, "migrations"), { recursive: true });
+  copyFileSync(
+    new URL("../../../wrangler.jsonc.example", import.meta.url),
+    join(cwd, "wrangler.jsonc.example"),
+  );
+  writeFileSync(
+    join(cwd, "migrations", "0000_init.sql"),
+    "CREATE TABLE a (x);",
+  );
+});
+
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+});
+
+type Deploy = { args: string[]; secrets: Record<string, string> | null };
+
+function harness(
+  opts: {
+    tty?: boolean;
+    env?: Record<string, string>;
+    seed?: FakeCloudflareSeed;
+    prompts?: (string | null)[];
+    wellKnown?: () => Response;
+    confirm?: boolean;
+    setupStatus?: { setupRequired: boolean; codeRequired: boolean };
+    onCloudflare?: (cf: FakeCloudflare) => void;
+  } = {},
+) {
+  let cf: FakeCloudflare | null = null;
+  let tokenCalls = 0;
+  const deploys: Deploy[] = [];
+  const ok = (stdout = ""): RunResult => ({ code: 0, stdout, stderr: "" });
+  const runner = fakeRunner({
+    "git rev-parse": () => ok(`${VERSION}\n`),
+    "git status": () => ok(""),
+    yarn: (args) => {
+      if (args[1] === "deploy") {
+        const i = args.indexOf("--secrets-file");
+        deploys.push({
+          args,
+          secrets:
+            i >= 0
+              ? (JSON.parse(readFileSync(args[i + 1]!, "utf8")) as Record<
+                  string,
+                  string
+                >)
+              : null,
+        });
+        return ok();
+      }
+      if (args[1] === "wrangler" && args[2] === "secret")
+        return { code: 1, stdout: "", stderr: "not found" };
+      if (args[1] === "wrangler" && args[2] === "d1") return ok();
+      throw new Error(`unexpected yarn ${args.join(" ")}`);
+    },
+  });
+  const out: string[] = [];
+  const prompts = [...(opts.prompts ?? [])];
+  const asked: { msg: string; mask?: boolean }[] = [];
+  const confirms: string[] = [];
+  const events: string[] = [];
+  const io: Io = {
+    tty: opts.tty ?? false,
+    async prompt(msg, o) {
+      asked.push({ msg, mask: o.mask });
+      events.push(`prompt:${msg}`);
+      return prompts.shift() ?? null;
+    },
+    async select<T>(_m: string, options: { value: T }[]) {
+      return options[0]!.value;
+    },
+    async confirm(m: string, initial: boolean) {
+      confirms.push(m);
+      events.push(`confirm:${m}`);
+      return opts.confirm ?? initial;
+    },
+    print(t) {
+      out.push(t);
+    },
+  };
+  const fetched: string[] = [];
+  const fetchImpl = (async (input: string | URL | Request) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    fetched.push(url);
+    if (url === `${BASE}/.well-known/saasmail`) {
+      if (opts.wellKnown) return opts.wellKnown();
+      return Response.json({ installationId: ID, version: VERSION });
     }
+    if (url === `${BASE}/api/setup/status`) {
+      return Response.json(
+        opts.setupStatus ?? { setupRequired: true, codeRequired: true },
+      );
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  }) as typeof fetch;
+  const deps: Deps = {
+    io,
+    env: opts.env ?? {},
+    runner,
+    dir,
+    cwd,
+    fetchImpl,
+    sleep: async () => {},
+    now: () => new Date("2026-10-17T00:00:00Z"),
+    async token() {
+      tokenCalls++;
+      return "tok";
+    },
+    cloudflare() {
+      cf = fakeCloudflare({
+        accounts: [{ id: ACCOUNT, name: "Acme" }],
+        subdomain: "me",
+        zones: [ZONE, ZONE2],
+        sendingDns: { "example.com": SENDING_DNS },
+        ...opts.seed,
+      });
+      opts.onCloudflare?.(cf);
+      return cf;
+    },
+  };
+  return {
+    deps,
+    out,
+    asked,
+    confirms,
+    events,
+    fetched,
+    runner,
+    deploys,
+    text: () => out.join("\n"),
+    cf: () => cf,
+    tokenCalls: () => tokenCalls,
+  };
+}
+
+function installedState(
+  over: Partial<InstallState["inputs"]> = {},
+): InstallState {
+  const s = newState({
+    installationId: ID,
+    accountId: ACCOUNT,
+    inputs: {
+      name: "acme",
+      hostname: null,
+      workersDev: true,
+      inboundDomains: [],
+      provider: "cloudflare",
+      sendDomains: [],
+      cookiePrefix: "saasmail",
+      ...over,
+    },
+    names: resourceNames("acme"),
+    baseUrl: BASE,
+  });
+  return {
+    ...s,
+    status: "installed",
+    resources: [
+      {
+        key: "d1",
+        kind: "d1",
+        name: "acme-db",
+        id: "d1-x",
+        ownership: "created",
+        state: "ready",
+      },
+    ],
+    steps: [{ key: "deploy:1", at: "2026-10-16T00:00:00.000Z" }],
+    deployedVersion: VERSION,
+    vapidPublicKey: "PUBKEY",
+  };
+}
+
+/** What Cloudflare holds for an installed `s` (enough for its plan to be all reuse/deploy). */
+function seedFor(s: InstallState): FakeCloudflareSeed {
+  return {
+    d1: [{ uuid: "d1-x", name: "acme-db" }],
+    r2: {
+      "acme-attachments": {
+        [R2_MARKER_KEY]: JSON.stringify({
+          installationId: s.installationId,
+          ownershipNonce: s.ownershipNonce,
+          key: "attachments",
+        }),
+      },
+    },
+    queues: [
+      {
+        id: "q-x",
+        name: "acme-sequence-emails",
+        producers: [{ type: "worker", script: "acme" }],
+        consumers: [{ type: "worker", script: "acme" }],
+      },
+    ],
+    workflows: [{ name: "acme-gmail-backfill", scriptName: "acme" }],
+    workerVars: {
+      acme: {
+        SAASMAIL_INSTALLATION: JSON.stringify({
+          installationId: s.installationId,
+          ownershipNonce: s.ownershipNonce,
+        }),
+        VAPID_PUBLIC_KEY: "PUBKEY",
+      },
+    },
+  };
+}
+
+const MUTATING = [
+  "createD1",
+  "createR2",
+  "createQueue",
+  "putR2Object",
+  "enableEmailRoutingDns",
+  "putCatchAllWorker",
+  "createSendingSubdomain",
+];
+/** Cloudflare calls that change something; a D1 query counts unless it only reads. */
+const mutations = (h: ReturnType<typeof harness>) =>
+  h
+    .cf()!
+    .calls.filter(
+      (c) =>
+        MUTATING.includes(c.method) ||
+        (c.method === "queryD1" && !/^\s*SELECT\b/i.test(String(c.args[2]))),
+    );
+
+describe("usage", () => {
+  it("--help lists both commands, every flag and env var, exit 0", async () => {
+    const h = harness();
+    expect(await main(["--help"], h.deps)).toBe(0);
+    const t = h.text();
+    for (const s of [
+      "install",
+      "status",
+      "--name",
+      "--account",
+      "--hostname",
+      "--workers-dev",
+      "--inbound-domain",
+      "--provider",
+      "--send-domain",
+      "--cookie-prefix",
+      "--plan",
+      "--expect-plan",
+      "--resume",
+      "--new-setup-code",
+      "--yes",
+      "CLOUDFLARE_API_TOKEN",
+      "SAASMAIL_RESEND_API_KEY",
+      "SAASMAIL_POSTMARK_API_KEY",
+      "SAASMAIL_BAVIMAIL_API_KEY",
+      "SAASMAIL_BAVIMAIL_ALIAS_ID",
+    ])
+      expect(t).toContain(s);
   });
 
-  it("an unknown command prints usage and exits 2", () => {
-    const out: string[] = [];
-    expect(main(["frobnicate"], (s) => out.push(s))).toBe(2);
-    expect(out.join("\n")).toContain("Unknown command: frobnicate");
-    expect(out.join("\n")).toContain(USAGE);
+  it("no command prints usage and exits 2; unknown command exits 2", async () => {
+    expect(await main([], harness().deps)).toBe(2);
+    const h = harness();
+    expect(await main(["nope"], h.deps)).toBe(2);
+    expect(h.text()).toContain("Unknown command: nope");
   });
 
-  it("isEntry prefers import.meta.main, else compares real paths", () => {
-    const dir = mkdtempSync(join(tmpdir(), "sm-cli-"));
-    const file = join(dir, "cli.ts");
+  it("an unknown flag is a usage error", async () => {
+    const h = harness();
+    expect(await main(["install", "--frobnicate"], h.deps)).toBe(2);
+    expect(h.cf()).toBeNull();
+  });
+});
+
+describe("install", () => {
+  it("without a terminal and without --yes exits 2 before any read", async () => {
+    const h = harness();
+    expect(await main(["install", ...FLAGS], h.deps)).toBe(2);
+    expect(h.text()).toContain(
+      "Not running in a terminal: pass --yes to apply (or --plan to only review).",
+    );
+    expect(h.cf()).toBeNull();
+    expect(h.tokenCalls()).toBe(0);
+  });
+
+  it("--hostname with --workers-dev is a usage error", async () => {
+    const h = harness();
+    const code = await main(
+      ["install", "--plan", "--hostname", "mail.example.com", "--workers-dev"],
+      h.deps,
+    );
+    expect(code).toBe(2);
+    expect(h.cf()).toBeNull();
+  });
+
+  it.each([
+    ["--inbound-domain", "not a domain"],
+    ["--send-domain", "exa_mple.com"],
+    ["--hostname", "nodot"],
+  ])("an invalid %s is a usage error", async (flag, value) => {
+    const h = harness();
+    expect(await main(["install", "--plan", flag, value], h.deps)).toBe(2);
+    expect(h.text()).toContain("is not a hostname");
+    expect(h.cf()).toBeNull();
+  });
+
+  it("an unknown --provider is a usage error", async () => {
+    const h = harness();
+    expect(
+      await main(["install", "--plan", "--provider", "sendgrid"], h.deps),
+    ).toBe(2);
+    expect(h.text()).toContain("--provider");
+    expect(h.cf()).toBeNull();
+  });
+
+  it("--send-domain with another provider is a usage error", async () => {
+    const h = harness();
+    const code = await main(
+      [
+        "install",
+        "--plan",
+        "--provider",
+        "resend",
+        "--send-domain",
+        "example.com",
+      ],
+      h.deps,
+    );
+    expect(code).toBe(2);
+    expect(h.text()).toContain("--send-domain");
+    expect(h.cf()).toBeNull();
+  });
+
+  it("--plan prints the plan and the apply command, writes nothing", async () => {
+    const h = harness();
+    expect(await main(["install", "--plan", ...FLAGS], h.deps)).toBe(0);
+    const text = h.text();
+    expect(text).toContain("create  d1");
+    expect(text).toContain("No Cloudflare resource or local file was changed.");
+    const digest = /Plan ([0-9a-f]{12})/.exec(text)?.[1];
+    expect(digest).toBeDefined();
+    expect(h.out.at(-1)).toBe(
+      `yarn saasmail install --name acme --account ${ACCOUNT} --workers-dev --provider cloudflare --cookie-prefix saasmail --expect-plan ${digest} --yes`,
+    );
+    expect(existsSync(dir)).toBe(false);
+    expect(existsSync(join(cwd, "wrangler.jsonc"))).toBe(false);
+    expect(mutations(h)).toEqual([]);
+    expect(h.runner.calls).toEqual([]);
+  });
+
+  it("normalises domains (trim, lowercase, dedupe, first-seen order) in the plan and the command", async () => {
+    const h = harness();
+    const code = await main(
+      [
+        "install",
+        "--plan",
+        ...FLAGS,
+        "--inbound-domain",
+        " Other.ORG ",
+        "--inbound-domain",
+        "example.com",
+        "--inbound-domain",
+        "other.org",
+        "--send-domain",
+        "EXAMPLE.com",
+        "--send-domain",
+        "example.com",
+      ],
+      h.deps,
+    );
+    expect(code).toBe(0);
+    const text = h.text();
+    expect(text).toContain("Inbound   other.org, example.com");
+    expect(text).toContain("Send      example.com");
+    expect(h.out.at(-1)).toMatch(
+      new RegExp(
+        `--workers-dev --inbound-domain other.org --inbound-domain example.com --provider cloudflare --send-domain example.com --cookie-prefix saasmail --expect-plan [0-9a-f]{12} --yes$`,
+      ),
+    );
+  });
+
+  it("--plan warns that a hand-written wrangler.jsonc blocks the apply", async () => {
+    writeFileSync(join(cwd, "wrangler.jsonc"), '{ "name": "mine" }\n');
+    const h = harness();
+    expect(await main(["install", "--plan", ...FLAGS], h.deps)).toBe(0);
+    expect(h.text()).toContain(
+      "wrangler.jsonc was written by hand: apply will refuse until you move it aside",
+    );
+    rmSync(join(cwd, "wrangler.jsonc"));
+    const clean = harness();
+    await main(["install", "--plan", ...FLAGS], clean.deps);
+    expect(clean.text()).not.toContain("written by hand");
+  });
+
+  it("uses the only account and the defaults without flags", async () => {
+    const h = harness();
+    expect(await main(["install", "--plan", "--workers-dev"], h.deps)).toBe(0);
+    expect(h.out.at(-1)).toContain(
+      `--name saasmail --account ${ACCOUNT} --workers-dev --provider cloudflare --cookie-prefix saasmail`,
+    );
+  });
+
+  it("without a terminal, a missing --hostname/--workers-dev is a usage error", async () => {
+    const h = harness();
+    expect(await main(["install", "--plan", "--name", "acme"], h.deps)).toBe(2);
+    expect(h.text()).toContain("--hostname <host> or --workers-dev");
+  });
+
+  it("preflight failure exits 1 with the fix text", async () => {
+    const h = harness({ seed: { subdomain: null } });
+    expect(await main(["install", "--plan", ...FLAGS], h.deps)).toBe(1);
+    expect(h.text()).toContain(
+      "Preflight found problems; nothing was changed.",
+    );
+    expect(h.text()).toContain("Fix:");
+  });
+
+  it("preflight runs before an apply too (foreign MX stops it)", async () => {
+    const h = harness({
+      seed: {
+        dnsRecords: {
+          [ZONE.id]: [
+            {
+              name: "example.com",
+              type: "MX",
+              content: "mx.google.com",
+              priority: 1,
+            },
+          ],
+        },
+      },
+    });
+    const code = await main(
+      ["install", "--yes", ...FLAGS, "--inbound-domain", "example.com"],
+      h.deps,
+    );
+    expect(code).toBe(1);
+    expect(h.text()).toContain("Preflight found problems");
+    expect(mutations(h)).toEqual([]);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("a PlanStop exits 1 with its message", async () => {
+    const h = harness({ seed: { d1: [{ uuid: "x", name: "acme-db" }] } });
+    expect(await main(["install", "--plan", ...FLAGS], h.deps)).toBe(1);
+    expect(h.text()).toContain("already exists");
+  });
+
+  it("several accounts without a terminal need --account (exit 2)", async () => {
+    const h = harness({
+      seed: {
+        accounts: [
+          { id: ACCOUNT, name: "Acme" },
+          { id: "b".repeat(32), name: "Other" },
+        ],
+      },
+    });
+    const code = await main(
+      ["install", "--plan", "--name", "acme", "--workers-dev"],
+      h.deps,
+    );
+    expect(code).toBe(2);
+    expect(h.text()).toContain("--account is required");
+  });
+
+  it("an account may be named", async () => {
+    const h = harness();
+    expect(
+      await main(
+        ["install", "--plan", "--account", "acme", "--workers-dev"],
+        h.deps,
+      ),
+    ).toBe(0);
+    expect(h.out.at(-1)).toContain(`--account ${ACCOUNT}`);
+  });
+
+  it("an existing unfinished state without --resume exits 1 pointing to --resume", async () => {
+    const h = harness();
+    writeState(dir, { ...installedState(), status: "failed" });
+    expect(await main(["install", "--yes", ...FLAGS], h.deps)).toBe(1);
+    expect(h.text()).toContain("yarn saasmail install --resume --name acme");
+  });
+
+  it("an installed state without --resume says so and changes nothing", async () => {
+    const h = harness();
+    writeState(dir, installedState());
+    expect(await main(["install", "--yes", ...FLAGS], h.deps)).toBe(0);
+    expect(h.text()).toContain("already installed");
+    expect(mutations(h)).toEqual([]);
+  });
+
+  it("--yes without a terminal installs (provider cloudflare needs no credentials)", async () => {
+    const h = harness();
+    expect(
+      await main(
+        [
+          "install",
+          "--yes",
+          ...FLAGS,
+          "--inbound-domain",
+          "Example.com",
+          "--send-domain",
+          "example.com",
+          "--cookie-prefix",
+          "acme",
+        ],
+        h.deps,
+      ),
+    ).toBe(0);
+    const s = readState(dir, ID)!;
+    expect(s.status).toBe("installed");
+    expect(s.inputs).toEqual({
+      name: "acme",
+      hostname: null,
+      workersDev: true,
+      inboundDomains: ["example.com"],
+      provider: "cloudflare",
+      sendDomains: ["example.com"],
+      cookiePrefix: "acme",
+    });
+    expect(s.skipped).toEqual([]);
+    expect(h.text()).toContain(`saasmail is installed at ${BASE}`);
+    expect(h.text()).toMatch(/Setup code: \S+/);
+  });
+
+  it("resend: the key comes from SAASMAIL_RESEND_API_KEY and is deployed, never printed", async () => {
+    const h = harness({ env: { SAASMAIL_RESEND_API_KEY: "re_secret_key" } });
+    expect(
+      await main(
+        ["install", "--yes", ...FLAGS, "--provider", "resend"],
+        h.deps,
+      ),
+    ).toBe(0);
+    expect(h.deploys[0]!.secrets!.RESEND_API_KEY).toBe("re_secret_key");
+    expect(h.text()).not.toContain("re_secret_key");
+    expect(readState(dir, ID)!.skipped).toEqual([]);
+    expect(JSON.stringify(readState(dir, ID))).not.toContain("re_secret_key");
+  });
+
+  it("resend without the key and without a terminal exits 1 naming the variable, before any write", async () => {
+    const h = harness();
+    expect(
+      await main(
+        ["install", "--yes", ...FLAGS, "--provider", "resend"],
+        h.deps,
+      ),
+    ).toBe(1);
+    expect(h.text()).toContain("SAASMAIL_RESEND_API_KEY");
+    expect(mutations(h)).toEqual([]);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("bavimail without credentials names the missing variable", async () => {
+    const h = harness({ env: { SAASMAIL_BAVIMAIL_API_KEY: "k" } });
+    expect(
+      await main(
+        ["install", "--yes", ...FLAGS, "--provider", "bavimail"],
+        h.deps,
+      ),
+    ).toBe(1);
+    expect(h.text()).toContain("SAASMAIL_BAVIMAIL_ALIAS_ID");
+    expect(h.text()).not.toContain("SAASMAIL_BAVIMAIL_API_KEY");
+    const none = harness();
+    await main(
+      ["install", "--yes", ...FLAGS, "--provider", "bavimail"],
+      none.deps,
+    );
+    expect(none.text()).toContain(
+      "SAASMAIL_BAVIMAIL_API_KEY, SAASMAIL_BAVIMAIL_ALIAS_ID",
+    );
+  });
+
+  it("postmark in a terminal: masked prompt after the confirm", async () => {
+    const h = harness({
+      tty: true,
+      // inbound domains, cookie prefix, then the key
+      prompts: ["", "saasmail", "pm_secret"],
+    });
+    expect(
+      await main(["install", ...FLAGS, "--provider", "postmark"], h.deps),
+    ).toBe(0);
+    const i = h.events.indexOf("confirm:Apply this plan?");
+    expect(i).toBeGreaterThanOrEqual(0);
+    const p = h.events.findIndex((e) => e.startsWith("prompt:Postmark"));
+    expect(p).toBeGreaterThan(i);
+    expect(h.asked.find((a) => a.msg.startsWith("Postmark"))!.mask).toBe(true);
+    expect(h.deploys[0]!.secrets!.POSTMARK_API_KEY).toBe("pm_secret");
+  });
+
+  it("an empty credential prompt in a terminal stops before any write", async () => {
+    const h = harness({ tty: true, prompts: ["", "saasmail", ""] });
+    expect(
+      await main(["install", ...FLAGS, "--provider", "postmark"], h.deps),
+    ).toBe(1);
+    expect(h.text()).toContain("SAASMAIL_POSTMARK_API_KEY");
+    expect(mutations(h)).toEqual([]);
+  });
+
+  it("--expect-plan with a stale digest fails without creating anything", async () => {
+    const h = harness();
+    const code = await main(
+      ["install", "--yes", "--expect-plan", "000000000000", ...FLAGS],
+      h.deps,
+    );
+    expect(code).toBe(1);
+    expect(h.text()).toContain("The plan changed");
+    expect(mutations(h)).toEqual([]);
+  });
+
+  it("--yes --expect-plan <stale> stops before any credential prompt or create", async () => {
+    const h = harness({ tty: true, prompts: ["x", "y", "z"] });
+    const code = await main(
+      [
+        "install",
+        "--yes",
+        "--expect-plan",
+        "000000000000",
+        ...FLAGS,
+        "--provider",
+        "resend",
+      ],
+      h.deps,
+    );
+    expect(code).toBe(1);
+    expect(h.asked).toEqual([]);
+    expect(h.out.at(-1)).toMatch(/Plan [0-9a-f]{12}$/);
+    expect(mutations(h)).toEqual([]);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("the --plan digest applies with --expect-plan", async () => {
+    const p = harness();
+    await main(["install", "--plan", ...FLAGS], p.deps);
+    const digest = /Plan ([0-9a-f]{12})/.exec(p.text())![1]!;
+    const h = harness();
+    expect(
+      await main(
+        ["install", "--yes", "--expect-plan", digest, ...FLAGS],
+        h.deps,
+      ),
+    ).toBe(0);
+    expect(readState(dir, ID)!.status).toBe("installed");
+  });
+
+  it("a plan that changes after it was shown stops the apply", async () => {
+    const h = harness({
+      onCloudflare(cf) {
+        // The second observe (install's recomputation) sees our workflow appear: reuse, not create.
+        const orig = cf.listWorkflows.bind(cf);
+        let n = 0;
+        cf.listWorkflows = async (a) => {
+          const r = await orig(a);
+          return ++n >= 2
+            ? [...r, { name: "acme-gmail-backfill", scriptName: "acme" }]
+            : r;
+        };
+      },
+    });
+    expect(await main(["install", "--yes", ...FLAGS], h.deps)).toBe(1);
+    expect(h.text()).toContain("The plan changed since it was reviewed");
+    expect(h.cf()!.calls.filter((c) => c.method === "createD1")).toEqual([]);
+  });
+
+  it('declining "Apply this plan?" exits 1 and writes nothing', async () => {
+    const h = harness({
+      tty: true,
+      confirm: false,
+      prompts: ["", "", "saasmail"],
+    });
+    expect(await main(["install", ...FLAGS], h.deps)).toBe(1);
+    expect(h.confirms).toEqual(["Apply this plan?"]);
+    expect(h.text()).toContain("Nothing was changed.");
+    expect(existsSync(dir)).toBe(false);
+    expect(existsSync(join(cwd, "wrangler.jsonc"))).toBe(false);
+    expect(mutations(h)).toEqual([]);
+  });
+
+  it("--resume with a different --hostname exits 1 naming hostname", async () => {
+    const h = harness();
+    writeState(dir, { ...installedState(), status: "failed" });
+    const code = await main(
+      [
+        "install",
+        "--resume",
+        "--yes",
+        "--name",
+        "acme",
+        "--hostname",
+        "mail.example.com",
+      ],
+      h.deps,
+    );
+    expect(code).toBe(1);
+    expect(h.text()).toContain(
+      "These options differ from the recorded installation: hostname",
+    );
+  });
+
+  it("--resume with a different provider or cookie prefix names them", async () => {
+    const h = harness({ env: { SAASMAIL_RESEND_API_KEY: "k" } });
+    writeState(dir, { ...installedState(), status: "failed" });
+    const code = await main(
+      [
+        "install",
+        "--resume",
+        "--yes",
+        "--name",
+        "acme",
+        "--provider",
+        "resend",
+        "--cookie-prefix",
+        "other",
+      ],
+      h.deps,
+    );
+    expect(code).toBe(1);
+    expect(h.text()).toContain(
+      "These options differ from the recorded installation: provider, cookie-prefix",
+    );
+  });
+
+  it("--resume --send-domain on a recorded non-cloudflare provider is a usage error", async () => {
+    const h = harness();
+    writeState(dir, installedState({ provider: "none" }));
+    const code = await main(
+      [
+        "install",
+        "--resume",
+        "--plan",
+        "--name",
+        "acme",
+        "--send-domain",
+        "example.com",
+      ],
+      h.deps,
+    );
+    expect(code).toBe(2);
+    expect(h.text()).toContain("--send-domain");
+  });
+
+  it("--plan --resume prints a command with --resume and the digest", async () => {
+    const s = { ...installedState(), status: "failed" as const };
+    const h = harness({ seed: seedFor(s) });
+    writeState(dir, s);
+    expect(
+      await main(["install", "--plan", "--resume", "--name", "acme"], h.deps),
+    ).toBe(0);
+    expect(h.out.at(-1)).toMatch(
+      new RegExp(
+        `^yarn saasmail install --resume --name acme --account ${ACCOUNT} --workers-dev --provider cloudflare --cookie-prefix saasmail --expect-plan [0-9a-f]{12} --yes$`,
+      ),
+    );
+    expect(readState(dir, ID)).toEqual(s);
+  });
+
+  it("--plan --resume on an installed state prints no --expect-plan", async () => {
+    const s = installedState();
+    const h = harness({ seed: seedFor(s) });
+    writeState(dir, s);
+    expect(
+      await main(["install", "--plan", "--resume", "--name", "acme"], h.deps),
+    ).toBe(0);
+    expect(h.out.at(-1)).toBe(
+      `yarn saasmail install --resume --name acme --account ${ACCOUNT} --workers-dev --provider cloudflare --cookie-prefix saasmail --yes`,
+    );
+  });
+
+  it("--plan --resume with a new inbound domain adds it to the plan, writes nothing", async () => {
+    const s = installedState({ inboundDomains: ["example.com"] });
+    const h = harness({
+      seed: {
+        ...seedFor(s),
+        routing: { [ZONE.id]: { enabled: true, status: "ready" } },
+        catchAll: {
+          [ZONE.id]: {
+            enabled: true,
+            actions: [{ type: "worker", value: ["acme"] }],
+          },
+        },
+      },
+    });
+    writeState(dir, s);
+    expect(
+      await main(
+        [
+          "install",
+          "--plan",
+          "--resume",
+          "--name",
+          "acme",
+          "--inbound-domain",
+          "OTHER.org",
+        ],
+        h.deps,
+      ),
+    ).toBe(0);
+    expect(h.text()).toMatch(/create\s+routing\s+other\.org/);
+    expect(h.out.at(-1)).toContain(
+      "--inbound-domain example.com --inbound-domain other.org",
+    );
+    expect(readState(dir, ID)).toEqual(s);
+    expect(mutations(h)).toEqual([]);
+  });
+
+  it("--resume on an installed state runs resumeInstalled: verify only", async () => {
+    const s = installedState();
+    const h = harness({
+      seed: seedFor(s),
+      setupStatus: { setupRequired: false, codeRequired: false },
+    });
+    writeState(dir, s);
+    expect(
+      await main(["install", "--resume", "--yes", "--name", "acme"], h.deps),
+    ).toBe(0);
+    expect(h.out.at(-1)).toBe("Nothing to do.");
+    expect(h.confirms).toEqual([]);
+    expect(mutations(h)).toEqual([]);
+    expect(h.deploys).toEqual([]);
+    expect(h.fetched).toContain(`${BASE}/.well-known/saasmail`);
+    expect(readState(dir, ID)!.status).toBe("installed");
+  });
+
+  it("--resume on an installed state: credentials are optional, and added when given", async () => {
+    const s = installedState({ provider: "resend" });
+    const pinned = {
+      ...s,
+      deployedConfigHash: renderConfig({ cwd } as Ctx, s, VERSION).hash,
+    };
+    const without = harness({
+      seed: seedFor(s),
+      setupStatus: { setupRequired: false, codeRequired: false },
+    });
+    writeState(dir, pinned);
+    expect(
+      await main(
+        ["install", "--resume", "--yes", "--name", "acme"],
+        without.deps,
+      ),
+    ).toBe(0);
+    expect(without.deploys).toEqual([]);
+
+    const withKey = harness({
+      seed: seedFor(s),
+      env: { SAASMAIL_RESEND_API_KEY: "re_new" },
+      setupStatus: { setupRequired: false, codeRequired: false },
+    });
+    expect(
+      await main(
+        ["install", "--resume", "--yes", "--name", "acme"],
+        withKey.deps,
+      ),
+    ).toBe(0);
+    expect(withKey.deploys).toHaveLength(1);
+    expect(withKey.deploys[0]!.secrets).toEqual({ RESEND_API_KEY: "re_new" });
+  });
+
+  it("--resume preflight runs before resumeInstalled (foreign MX on a new inbound domain)", async () => {
+    const s = installedState();
+    const h = harness({
+      seed: {
+        ...seedFor(s),
+        dnsRecords: {
+          [ZONE2.id]: [
+            {
+              name: "other.org",
+              type: "MX",
+              content: "mx.google.com",
+              priority: 1,
+            },
+          ],
+        },
+      },
+    });
+    writeState(dir, s);
+    expect(
+      await main(
+        [
+          "install",
+          "--resume",
+          "--yes",
+          "--name",
+          "acme",
+          "--inbound-domain",
+          "other.org",
+        ],
+        h.deps,
+      ),
+    ).toBe(1);
+    expect(h.text()).toContain("Preflight found problems");
+    expect(h.fetched).toEqual([]);
+    expect(readState(dir, ID)).toEqual(s);
+  });
+
+  it("--resume --new-setup-code on an installed state replaces the code", async () => {
+    const s = installedState();
+    const pinned = {
+      ...s,
+      deployedConfigHash: renderConfig({ cwd } as Ctx, s, VERSION).hash,
+    };
+    const without = harness({ seed: seedFor(s) });
+    writeState(dir, pinned);
+    expect(
+      await main(
+        ["install", "--resume", "--yes", "--name", "acme"],
+        without.deps,
+      ),
+    ).toBe(0);
+    expect(without.deploys).toHaveLength(0);
+    expect(without.text()).toContain("--new-setup-code");
+
+    const withFlag = harness({ seed: seedFor(s) });
+    expect(
+      await main(
+        ["install", "--resume", "--yes", "--name", "acme", "--new-setup-code"],
+        withFlag.deps,
+      ),
+    ).toBe(0);
+    expect(withFlag.deploys).toHaveLength(1);
+    expect(withFlag.text()).toMatch(/Setup code: \S+/);
+    expect(withFlag.confirms).toEqual([]);
+  });
+
+  it("--plan --resume --new-setup-code carries the flag into the apply command", async () => {
+    const s = installedState();
+    const h = harness({ seed: seedFor(s) });
+    writeState(dir, s);
+    expect(
+      await main(
+        ["install", "--plan", "--resume", "--name", "acme", "--new-setup-code"],
+        h.deps,
+      ),
+    ).toBe(0);
+    expect(h.out.at(-1)).toBe(
+      `yarn saasmail install --resume --name acme --account ${ACCOUNT} --workers-dev --provider cloudflare --cookie-prefix saasmail --new-setup-code --yes`,
+    );
+  });
+
+  it("--resume with nothing recorded exits 1", async () => {
+    const h = harness();
+    expect(await main(["install", "--resume", "--yes"], h.deps)).toBe(1);
+    expect(h.text()).toContain("No installation found to resume");
+  });
+});
+
+describe("status", () => {
+  it("prints the recorded state and the well-known check, changing nothing", async () => {
+    const h = harness();
+    const s = installedState({ inboundDomains: ["example.com"] });
+    writeState(dir, s);
+    expect(await main(["status"], h.deps)).toBe(0);
+    const text = h.text();
+    expect(text).toContain("installed");
+    expect(text).toContain(BASE);
+    expect(text).toContain("acme-db");
+    expect(text).toContain("example.com");
+    expect(text).toContain("(matches)");
+    expect(h.fetched).toEqual([`${BASE}/.well-known/saasmail`]);
+    expect(h.cf()).toBeNull();
+    expect(h.tokenCalls()).toBe(0);
+    expect(h.runner.calls).toEqual([]);
+    expect(listStates(dir)).toEqual([s]);
+  });
+
+  it("exits 1 when the well-known answer disagrees", async () => {
+    const h = harness({
+      wellKnown: () => Response.json({ installationId: ID, version: "other" }),
+    });
+    writeState(dir, installedState());
+    expect(await main(["status"], h.deps)).toBe(1);
+    expect(h.text()).toContain("other");
+  });
+
+  it.each([
+    ["null", "null"],
+    ["an array", "[1]"],
+    ["not JSON", "<html>hi</html>"],
+  ])("exits 1 on a 2xx body that is %s", async (_label, body) => {
+    const h = harness({ wellKnown: () => new Response(body, { status: 200 }) });
+    writeState(dir, installedState());
+    expect(await main(["status"], h.deps)).toBe(1);
+    expect(h.text()).toContain(
+      `Unexpected answer from ${BASE}/.well-known/saasmail`,
+    );
+  });
+
+  it("exits 1 when unreachable", async () => {
+    const h = harness({
+      wellKnown: () => {
+        throw new Error("ECONNREFUSED");
+      },
+    });
+    writeState(dir, installedState());
+    expect(await main(["status"], h.deps)).toBe(1);
+    expect(h.text()).toContain("ECONNREFUSED");
+  });
+
+  it("with no installation says so and exits 1", async () => {
+    const h = harness();
+    expect(await main(["status"], h.deps)).toBe(1);
+    expect(h.text()).toContain("No installation found");
+    expect(h.text()).toContain("yarn saasmail install");
+  });
+
+  it("with several installations needs --name (exit 2)", async () => {
+    const h = harness();
+    writeState(dir, installedState());
+    const other = installedState();
+    writeState(dir, {
+      ...other,
+      installationId: "beta-000000000000",
+      inputs: { ...other.inputs, name: "beta" },
+    });
+    expect(await main(["status"], h.deps)).toBe(2);
+    expect(h.text()).toContain("pass --name");
+  });
+});
+
+describe("resolveToken", () => {
+  it("prefers CLOUDFLARE_API_TOKEN without running wrangler", async () => {
+    const r = fakeRunner({});
+    expect(await resolveToken({ CLOUDFLARE_API_TOKEN: "env-tok" }, r)).toBe(
+      "env-tok",
+    );
+    expect(r.calls).toEqual([]);
+  });
+
+  it("uses the last token-shaped line of wrangler's output, without colour codes", async () => {
+    const tok = "AbC_def-123.456789012345";
+    const r = fakeRunner({
+      yarn: () => ({
+        code: 0,
+        stdout: `\u001b[33m▲ [WARNING] a newer wrangler is out\u001b[0m\n\u001b[1m${tok}\u001b[22m\n\n`,
+        stderr: "",
+      }),
+    });
+    expect(await resolveToken({}, r)).toBe(tok);
+    expect(r.calls[0]!.args).toEqual(["-s", "wrangler", "auth", "token"]);
+  });
+
+  it("with no token-shaped line says to run wrangler login", async () => {
+    const r = fakeRunner({
+      yarn: () => ({
+        code: 0,
+        stdout: "You are not logged in.\nshort\n",
+        stderr: "",
+      }),
+    });
+    await expect(resolveToken({}, r)).rejects.toThrow(
+      "Run yarn wrangler login first.",
+    );
+  });
+
+  it("without a login says to run wrangler login", async () => {
+    const r = fakeRunner({
+      yarn: () => ({ code: 1, stdout: "", stderr: "Not logged in" }),
+    });
+    await expect(resolveToken({}, r)).rejects.toThrow(
+      "Run yarn wrangler login first.",
+    );
+  });
+
+  it("a token failure exits 1 with its message", async () => {
+    const h = harness();
+    h.deps.token = async () => {
+      throw new Error("Run yarn wrangler login first.");
+    };
+    expect(await main(["install", "--plan", ...FLAGS], h.deps)).toBe(1);
+    expect(h.text()).toContain("Run yarn wrangler login first.");
+    expect(h.cf()).toBeNull();
+  });
+});
+
+describe("applyCommand", () => {
+  it("single-quotes values outside the safe set", () => {
+    const s = installedState({
+      hostname: "mail.example.com",
+      workersDev: false,
+      cookiePrefix: "o'brien prefix",
+    });
+    expect(applyCommand(s, false, "abc")).toBe(
+      `yarn saasmail install --name acme --account ${ACCOUNT} --hostname mail.example.com --provider cloudflare --cookie-prefix 'o'\\''brien prefix' --expect-plan abc --yes`,
+    );
+  });
+});
+
+describe("isEntry", () => {
+  it("prefers import.meta.main, else compares real paths", () => {
+    const d = mkdtempSync(join(tmpdir(), "sm-cli-"));
+    const file = join(d, "cli.ts");
     writeFileSync(file, "");
-    const link = join(dir, "link.ts");
+    const link = join(d, "link.ts");
     symlinkSync(file, link);
     const url = pathToFileURL(file).href;
     expect(isEntry(true, undefined, url)).toBe(true);
     expect(isEntry(false, file, url)).toBe(false);
     expect(isEntry(undefined, link, url)).toBe(true);
-    expect(isEntry(undefined, join(dir, "other.ts"), url)).toBe(false);
+    expect(isEntry(undefined, join(d, "other.ts"), url)).toBe(false);
     expect(isEntry(undefined, undefined, url)).toBe(false);
+    rmSync(d, { recursive: true, force: true });
   });
 });
