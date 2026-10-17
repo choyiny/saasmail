@@ -326,12 +326,14 @@ export async function setupStatus(
 
 /**
  * `/.well-known/saasmail` must report this installation at `version` (retried every 5 s for
- * 60 s), then setup must not be open without a code. Returns the setup status.
+ * 60 s), then setup must not be open without a code. Returns the setup status. `resume` is the
+ * command a failure tells the person to run (default: `install --resume`).
  */
 export async function verifyAt(
   ctx: Ctx,
   s: InstallState,
   version: string,
+  resume: string = resumeCommand(s, ctx.source),
 ): Promise<SetupStatus> {
   const url = `${s.baseUrl}/.well-known/saasmail`;
   let last = "";
@@ -355,7 +357,7 @@ export async function verifyAt(
     }
     if (attempt >= VERIFY_TRIES) {
       const cert = s.inputs.hostname
-        ? ` A custom domain's certificate can take several minutes to issue; wait, then run: ${resumeCommand(s, ctx.source)}`
+        ? ` A custom domain's certificate can take several minutes to issue; wait, then run: ${resume}`
         : "";
       throw new Error(
         `${url} did not report installation ${s.installationId} at version ${version} within 60 s. Last response: ${last}${cert}`,
@@ -367,7 +369,7 @@ export async function verifyAt(
   const st = await setupStatus(ctx, s);
   if (st.setupRequired && !st.codeRequired) {
     throw new Error(
-      `${s.baseUrl}/api/setup/status reports setup open without a setup code: anyone could claim this instance. Run ${resumeCommand(s, ctx.source)}.`,
+      `${s.baseUrl}/api/setup/status reports setup open without a setup code: anyone could claim this instance. Run ${resume}.`,
     );
   }
   return st;

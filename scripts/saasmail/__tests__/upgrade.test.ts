@@ -140,6 +140,8 @@ function harness(
     secrets?: string[];
     confirm?: boolean;
     tty?: boolean;
+    /** Setup open without a code: verify refuses. */
+    setupOpen?: boolean;
   } = {},
 ) {
   const s = opts.state ?? installedAt120();
@@ -211,10 +213,12 @@ function harness(
       printed.push(t);
     },
   };
+  let down = false;
   const fetchImpl = (async (input: string | URL | Request) => {
     const url = typeof input === "string" ? input : String(input);
     if (url === `${BASE}/.well-known/saasmail`) {
       const deployed = deploys.length > 0 && deployResult.code === 0;
+      if (down && !deployed) throw new TypeError("fetch failed");
       return Response.json({
         installationId: deployed
           ? ID
@@ -229,7 +233,10 @@ function harness(
       });
     }
     if (url === `${BASE}/api/setup/status`) {
-      return Response.json({ setupRequired: false, codeRequired: true });
+      return Response.json({
+        setupRequired: opts.setupOpen === true,
+        codeRequired: opts.setupOpen !== true,
+      });
     }
     throw new Error(`unexpected fetch ${url}`);
   }) as typeof fetch;
@@ -252,6 +259,10 @@ function harness(
     migrations,
     printed,
     state: s,
+    /** /.well-known unreachable until a deploy succeeds. */
+    siteDown() {
+      down = true;
+    },
     failDeploys() {
       deployResult = { code: 1, stdout: "", stderr: "boom" };
     },
@@ -463,6 +474,71 @@ describe("upgrade", () => {
     expect(s.status).toBe("installed");
     expect(s.deployedVersion).toBe(TO);
     expect(s.upgradeTarget).toBeUndefined();
+  });
+
+  it("resume with /.well-known unreachable continues", async () => {
+    const h = harness();
+    h.failDeploys();
+    await run(h).catch(() => {});
+    expect(h.saved().status).toBe("failed");
+    h.okDeploys();
+    h.siteDown();
+    const s = await run(h, { resume: true });
+    expect(s.status).toBe("installed");
+    expect(s.deployedVersion).toBe(TO);
+  });
+
+  it("a fresh upgrade with /.well-known unreachable stops", async () => {
+    const h = harness();
+    h.siteDown();
+    await expect(run(h)).rejects.toThrow("Could not read");
+    expect(h.runner.calls).toHaveLength(0);
+  });
+
+  it("resumes a killed run (status upgrading)", async () => {
+    const base = installedAt120();
+    const h = harness({
+      state: {
+        ...base,
+        status: "upgrading",
+        upgradeTarget: TO,
+        resources: [
+          ...base.resources,
+          res("queue", "queue", "acme-sequence-emails", "q-1"),
+        ],
+        steps: [
+          ...base.steps,
+          { key: "provision-intent:queue", at: "2026-10-17T00:00:00.000Z" },
+          { key: `upgrade:${TO}:resources`, at: "2026-10-17T00:00:00.000Z" },
+          { key: `upgrade:${TO}:migrations`, at: "2026-10-17T00:00:00.000Z" },
+        ],
+      },
+      seed: {
+        ...seedFor(base),
+        queues: [
+          {
+            id: "q-1",
+            name: "acme-sequence-emails",
+            producers: [],
+            consumers: [],
+          },
+        ],
+      },
+    });
+    const s = await run(h, { resume: true });
+    expect(h.migrations).toHaveLength(0);
+    expect(h.deploys).toHaveLength(1);
+    expect(s.status).toBe("installed");
+    expect(s.deployedVersion).toBe(TO);
+  });
+
+  it("a failed verify names only the upgrade resume command", async () => {
+    const h = harness({ setupOpen: true });
+    const e = await run(h).catch((x: Error) => x);
+    const m = (e as Error).message;
+    expect(m).toContain("anyone could claim this instance");
+    expect(m).toContain("npx saasmail@1.3.0 upgrade --resume --name acme");
+    expect(m).not.toContain("install --resume");
   });
 
   it("an unfinished upgrade to another version stops", async () => {

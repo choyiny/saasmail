@@ -29,6 +29,7 @@ import { computePlan, type Action, type Plan } from "./plan.ts";
 import {
   acquireLock,
   hasStep,
+  readState,
   recordResource,
   recordStep,
   transition,
@@ -258,33 +259,14 @@ export async function upgrade(
     plan?: boolean;
   },
 ): Promise<InstallState> {
-  let s = opts.state;
-  const ctx = onAccount(outer, s);
-  const slug = s.inputs.name;
+  const ctx = onAccount(outer, opts.state);
+  const slug = opts.state.inputs.name;
+  const id = opts.state.installationId;
   const to = await ctx.source.version(ctx.runner);
   const resumeCmd = ctx.source.command(`upgrade --resume --name ${slug}`);
-  const unfinished =
-    s.status === "upgrading" ||
-    (s.status === "failed" && s.upgradeTarget !== undefined);
-  if (unfinished) {
-    if (s.upgradeTarget !== to) {
-      throw new Error(
-        `An upgrade to ${s.upgradeTarget} is unfinished; run npx saasmail@${s.upgradeTarget} upgrade --resume --name ${slug}.`,
-      );
-    }
-    if (!opts.resume && !opts.plan) {
-      throw new Error(`An upgrade to ${to} is unfinished; run ${resumeCmd}.`);
-    }
-  } else if (s.status !== "installed") {
-    throw new Error(
-      `${slug} is not installed yet (status ${s.status}). Finish the install first: ${resumeCommand(s, ctx.source)}`,
-    );
-  }
-  const configFile = join(ctx.configDir, "wrangler.jsonc");
-  if (existsSync(configFile) && !isGenerated(readFileSync(configFile, "utf8")))
-    throw new ConfigConflict(configFile);
-
-  const release = opts.plan ? () => {} : acquireLock(ctx.dir, s.installationId);
+  const release = opts.plan ? () => {} : acquireLock(ctx.dir, id);
+  // Spec §5.2: lock, then read the state as it is on disk now.
+  let s = readState(ctx.dir, id) ?? opts.state;
   const save = (next: InstallState) => {
     s = next;
     writeState(ctx.dir, s);
@@ -293,8 +275,44 @@ export async function upgrade(
   let step = "plan";
   let started = false;
   try {
-    const running = await inspect(ctx, s, to);
-    checkRunning(ctx, s, running, to, opts.replaceCustomCode);
+    const unfinished =
+      s.status === "upgrading" ||
+      (s.status === "failed" && s.upgradeTarget !== undefined);
+    if (unfinished) {
+      if (s.upgradeTarget !== to) {
+        throw new Error(
+          `An upgrade to ${s.upgradeTarget} is unfinished; run npx saasmail@${s.upgradeTarget} upgrade --resume --name ${slug}.`,
+        );
+      }
+      if (!opts.resume && !opts.plan) {
+        throw new Error(`An upgrade to ${to} is unfinished; run ${resumeCmd}.`);
+      }
+    } else if (s.status !== "installed") {
+      throw new Error(
+        `${slug} is not installed yet (status ${s.status}). Finish the install first: ${resumeCommand(s, ctx.source)}`,
+      );
+    }
+    const configFile = join(ctx.configDir, "wrangler.jsonc");
+    if (
+      existsSync(configFile) &&
+      !isGenerated(readFileSync(configFile, "utf8"))
+    )
+      throw new ConfigConflict(configFile);
+
+    // Continuing an upgrade skips the running-version checks; they were made (and
+    // custom code consented to) when it started, and the site may be down meanwhile.
+    let running: Running;
+    if (unfinished) {
+      const from = s.deployedVersion ?? null;
+      running = {
+        installationId: s.installationId,
+        version: from,
+        comparison: { kind: from === to ? "same" : "upgrade" },
+      };
+    } else {
+      running = await inspect(ctx, s, to);
+      checkRunning(ctx, s, running, to, opts.replaceCustomCode);
+    }
     const { plan, base, obs, have } = await planned(ctx, s, running, to);
     ctx.io.print(formatUpgradePlan(plan));
     if (opts.plan) {
@@ -371,7 +389,7 @@ export async function upgrade(
     });
     await once("markers", () => writeMarkers(ctx, s, to));
     await once("verify", async () => {
-      await verifyAt(ctx, s, to);
+      await verifyAt(ctx, s, to, resumeCmd);
     });
 
     const { upgradeTarget: _done, ...rest } = transition(s, "installed");

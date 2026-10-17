@@ -96,6 +96,8 @@ function harness(
     pkgVersion?: string;
     /** Package mode: what `wrangler secret list` prints (default: the worker is missing). */
     secretList?: RunResult;
+    /** Package mode: what `wrangler deploy` returns (default: success). */
+    deployResult?: RunResult;
   } = {},
 ) {
   let cf: FakeCloudflare | null = null;
@@ -129,7 +131,7 @@ function harness(
     [process.execPath]: (args) => {
       if (args[1] === "deploy") {
         deploys.push({ args, secrets: null });
-        return ok();
+        return opts.deployResult ?? ok();
       }
       if (args[1] === "secret")
         return opts.secretList ?? { code: 1, stdout: "", stderr: "not found" };
@@ -1354,6 +1356,38 @@ describe("upgrade", () => {
     expect(h.text()).toContain(
       "npx saasmail@1.3.0 upgrade --resume --name acme",
     );
+  });
+
+  it("a failed --replace-custom-code upgrade completes with the printed resume command", async () => {
+    const s0 = seedInstall();
+    let running = "deadbeef1234-dirty";
+    const make = (deployResult?: RunResult) =>
+      harness({
+        home: home(),
+        pkgVersion: "1.3.0",
+        secretList: allSecrets,
+        seed: seedFor(s0),
+        tty: true,
+        deployResult,
+        wellKnown: () =>
+          Response.json({ installationId: ID, version: running }),
+      });
+    const first = make({ code: 1, stdout: "", stderr: "boom" });
+    expect(
+      await main(["upgrade", "--yes", "--replace-custom-code"], first.deps),
+    ).toBe(1);
+    const printed = /Run: (npx saasmail@1\.3\.0 (.+))$/m.exec(first.text());
+    expect(printed?.[1]).toBe(
+      "npx saasmail@1.3.0 upgrade --resume --name acme",
+    );
+
+    running = "1.3.0";
+    const again = make();
+    expect(await main(printed![2]!.split(" "), again.deps)).toBe(0);
+    const s = readState(join(home(), "acme"), ID)!;
+    expect(s.status).toBe("installed");
+    expect(s.deployedVersion).toBe("1.3.0");
+    expect(again.deploys).toHaveLength(1);
   });
 
   it("checkout mode points at npx", async () => {
