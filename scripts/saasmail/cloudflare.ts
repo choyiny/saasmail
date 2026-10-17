@@ -56,6 +56,19 @@ export interface SendingDnsRecord {
   priority?: number;
 }
 
+/** One binding from a Worker's settings (fields per type; secrets carry no value). */
+export type WorkerBinding = {
+  type: string;
+  name: string;
+  id?: string;
+  database_id?: string;
+  bucket_name?: string;
+  queue_name?: string;
+  workflow_name?: string;
+  class_name?: string;
+  text?: string;
+};
+
 export interface Cloudflare {
   listAccounts(): Promise<{ id: string; name: string }[]>;
   workersSubdomain(a: string): Promise<string | null>;
@@ -90,6 +103,10 @@ export interface Cloudflare {
     body: string,
   ): Promise<void>;
   listWorkflows(a: string): Promise<{ name: string; scriptName: string }[]>;
+  workerSettings(
+    a: string,
+    script: string,
+  ): Promise<{ bindings: WorkerBinding[] } | null>;
   workerVars(a: string, script: string): Promise<Record<string, string> | null>;
   listQueues(a: string): Promise<Queue[]>;
   createQueue(a: string, name: string): Promise<{ id: string }>;
@@ -171,6 +188,18 @@ function subdomain(r: RawSubdomain): SendingSubdomain {
   return { id: r.tag, name: r.name, enabled: r.enabled ?? false };
 }
 const enc = encodeURIComponent;
+
+/** The `plain_text` bindings as a name -> text map. */
+export function plainTextVars(
+  bindings: WorkerBinding[],
+): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (const b of bindings) {
+    if (b.type === "plain_text" && typeof b.text === "string")
+      vars[b.name] = b.text;
+  }
+  return vars;
+}
 
 export function restCloudflare(
   token: string,
@@ -305,6 +334,13 @@ export function restCloudflare(
       throw e;
     }
   }
+
+  const workerSettings = async (a: string, script: string) => {
+    const r = await orNull<{ bindings?: WorkerBinding[] }>(
+      `/accounts/${a}/workers/scripts/${enc(script)}/settings`,
+    );
+    return r ? { bindings: r.bindings ?? [] } : null;
+  };
 
   const objectPath = (a: string, bucket: string, key: string) =>
     `/accounts/${a}/r2/buckets/${enc(bucket)}/objects/${key.split("/").map(enc).join("/")}`;
@@ -463,18 +499,15 @@ export function restCloudflare(
       return rows.map((r) => ({ name: r.name, scriptName: r.script_name }));
     },
 
-    // GET /accounts/{a}/workers/scripts/{s}/settings -> { bindings: [{ type: "plain_text", name, text }] } (wrangler cloudflare@5.2 resources/workers/scripts/settings); 404 -> null. Only plain_text vars are returned, so SAASMAIL_INSTALLATION must be written as a string var.
+    // GET /accounts/{a}/workers/scripts/{s}/settings -> { bindings: [{ type, name, ... }] } (wrangler cloudflare@5.2
+    // resources/workers/scripts/settings); 404 -> null. `secret_text` bindings carry names only, never values.
+    workerSettings,
+
+    // The `plain_text` bindings of workerSettings. Only plain_text vars are returned, so SAASMAIL_INSTALLATION must
+    // be written as a string var.
     async workerVars(a, script) {
-      const r = await orNull<{
-        bindings?: { type: string; name: string; text?: string }[];
-      }>(`/accounts/${a}/workers/scripts/${enc(script)}/settings`);
-      if (!r) return null;
-      const vars: Record<string, string> = {};
-      for (const b of r.bindings ?? []) {
-        if (b.type === "plain_text" && typeof b.text === "string")
-          vars[b.name] = b.text;
-      }
-      return vars;
+      const r = await workerSettings(a, script);
+      return r ? plainTextVars(r.bindings) : null;
     },
 
     // GET /accounts/{a}/queues, paged by `page` (wrangler 4.127 src/queues/client.ts listQueues; no per_page sent, none

@@ -7,7 +7,9 @@ import type {
   Queue,
   SendingDnsRecord,
   SendingSubdomain,
+  WorkerBinding,
 } from "../cloudflare.ts";
+import { plainTextVars } from "../cloudflare.ts";
 import type { RunOptions, RunResult, Runner } from "../runner.ts";
 
 type Handler = (args: string[]) => RunResult | Promise<RunResult>;
@@ -40,6 +42,8 @@ export interface FakeCloudflareSeed {
   workflows?: { name: string; scriptName: string }[];
   /** script name -> plain_text vars; absent script = 404 */
   workerVars?: Record<string, Record<string, string>>;
+  /** script name -> every binding of its settings (vars come from its plain_text ones); absent = 404 */
+  workers?: Record<string, WorkerBinding[]>;
   zones?: { id: string; name: string; status: string }[];
   subdomain?: string | null;
   workerDomains?: { hostname: string; service: string }[];
@@ -197,9 +201,17 @@ export function fakeCloudflare(seed: FakeCloudflareSeed = {}): FakeCloudflare {
       await enter("listWorkflows", [a]);
       return seed.workflows ?? [];
     },
+    async workerSettings(a, script) {
+      await enter("workerSettings", [a, script]);
+      const bindings = seed.workers?.[script];
+      return bindings ? { bindings: structuredClone(bindings) } : null;
+    },
     async workerVars(a, script) {
       await enter("workerVars", [a, script]);
-      return seed.workerVars?.[script] ?? null;
+      const bindings = seed.workers?.[script];
+      return (
+        seed.workerVars?.[script] ?? (bindings ? plainTextVars(bindings) : null)
+      );
     },
     async listQueues(a) {
       await enter("listQueues", [a]);

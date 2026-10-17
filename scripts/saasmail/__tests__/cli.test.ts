@@ -1669,3 +1669,94 @@ describe("adopt", () => {
     expect(readState(dir, ID)!.movedTo).toBeUndefined();
   });
 });
+
+describe("adopt --worker", () => {
+  const home = () => join(root, "home");
+  const seed: FakeCloudflareSeed = {
+    workers: {
+      acme: [
+        { type: "d1", name: "DB", id: "d1-acme" },
+        { type: "plain_text", name: "COOKIE_PREFIX", text: "acme" },
+        { type: "secret_text", name: "BETTER_AUTH_SECRET" },
+      ],
+    },
+    d1: [{ uuid: "d1-acme", name: "acme-db" }],
+  };
+
+  it("--from and --worker together exit 2", async () => {
+    const h = harness({ home: home() });
+    expect(
+      await main(["adopt", "--from", cwd, "--worker", "acme", "--yes"], h.deps),
+    ).toBe(2);
+    expect(h.text()).toContain("Pass either --from or --worker, not both.");
+  });
+
+  it("--plan prints the report and the apply command and writes nothing", async () => {
+    const h = harness({ home: home(), seed });
+    expect(
+      await main(
+        [
+          "adopt",
+          "--worker",
+          "acme",
+          "--inbound-domain",
+          "example.com",
+          "--plan",
+        ],
+        h.deps,
+      ),
+    ).toBe(0);
+    const text = h.text();
+    expect(text).toContain("Adopt worker acme");
+    const digest = /Plan ([0-9a-f]{12})/.exec(text)![1]!;
+    expect(text).toContain(
+      `npx saasmail@${VERSION} adopt --worker acme --account ${ACCOUNT} --inbound-domain example.com --provider none --cookie-prefix acme --expect-plan ${digest} --yes`,
+    );
+    expect(existsSync(home())).toBe(false);
+
+    const apply = harness({ home: home(), seed });
+    expect(
+      await main(
+        [
+          "adopt",
+          "--worker",
+          "acme",
+          "--account",
+          ACCOUNT,
+          "--inbound-domain",
+          "example.com",
+          "--provider",
+          "none",
+          "--cookie-prefix",
+          "acme",
+          "--expect-plan",
+          digest,
+          "--yes",
+        ],
+        apply.deps,
+      ),
+    ).toBe(0);
+    const s = listStates(join(home(), "acme"))[0]!;
+    expect(s.resources.every((r) => r.ownership === "adopted")).toBe(true);
+    expect(s.inputs.inboundDomains).toEqual(["example.com"]);
+    expect(apply.runner.calls).toHaveLength(0);
+    expect(apply.deploys).toHaveLength(0);
+  });
+
+  it("without a terminal and --yes exits 2; checkout mode points at npx", async () => {
+    const h = harness({ home: home(), seed });
+    expect(await main(["adopt", "--worker", "acme"], h.deps)).toBe(2);
+    expect(h.text()).toContain("Not running in a terminal");
+    const c = harness({ seed });
+    expect(await main(["adopt", "--worker", "acme", "--yes"], c.deps)).toBe(2);
+    expect(c.text()).toContain("npx saasmail adopt --worker acme");
+  });
+
+  it("worker-only flags with --from are usage errors", async () => {
+    const h = harness({ home: home() });
+    expect(
+      await main(["adopt", "--from", cwd, "--plan", "--yes"], h.deps),
+    ).toBe(2);
+    expect(h.text()).toContain("--plan is only for adopt --worker.");
+  });
+});

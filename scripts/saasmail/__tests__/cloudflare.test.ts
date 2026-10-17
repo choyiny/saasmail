@@ -236,6 +236,34 @@ describe("restCloudflare", () => {
     expect(full.calls).toHaveLength(1);
   });
 
+  it("workerSettings returns all bindings", async () => {
+    const bindings = [
+      { type: "plain_text", name: "A", text: "1" },
+      { type: "d1", name: "DB", id: "uuid-1" },
+      { type: "secret_text", name: "S" },
+      { type: "r2_bucket", name: "R2", bucket_name: "b" },
+    ];
+    const { fetch, calls } = fakeFetch(() => ok({ bindings }));
+    expect(
+      await restCloudflare("t", fetch, noSleep).workerSettings(
+        "a",
+        "my worker",
+      ),
+    ).toEqual({ bindings });
+    expect(calls[0]!.url.pathname).toBe(
+      "/client/v4/accounts/a/workers/scripts/my%20worker/settings",
+    );
+  });
+
+  it("workerSettings: 404 is null", async () => {
+    const miss = fakeFetch(() =>
+      Response.json({ success: false, errors: [] }, { status: 404 }),
+    );
+    expect(
+      await restCloudflare("t", miss.fetch, noSleep).workerSettings("a", "s"),
+    ).toBeNull();
+  });
+
   it("workerVars keeps only plain_text bindings; 404 -> null", async () => {
     const { fetch } = fakeFetch(() =>
       ok({

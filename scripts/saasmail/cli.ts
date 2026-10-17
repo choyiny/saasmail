@@ -6,6 +6,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { adoptFromCheckout, pickCheckoutState } from "./adopt.ts";
+import {
+  adoptWorker,
+  detectProvider,
+  planAdoptWorker,
+  type AdoptInputs,
+} from "./adopt-worker.ts";
 import { install, resumeInstalled, type Ctx, type Optional } from "./apply.ts";
 import { assertConfigWritable, OPTIONAL_ITEMS } from "./apply-steps.ts";
 import { restCloudflare, type Cloudflare } from "./cloudflare.ts";
@@ -42,7 +48,7 @@ Commands:
   install    Create or update a saasmail installation on Cloudflare
   status     Show a recorded installation and check that it answers
   upgrade    Move an installation to this package's version (npx only)
-  adopt      Take over an installation made from a checkout (npx only)
+  adopt      Take over an installation made from a checkout or by hand (npx only)
 
 install options:
   --name <name>             Installation name (default: saasmail)
@@ -81,7 +87,16 @@ upgrade options:
 adopt options:
   --from <checkout>         The checkout whose install to take over
   --name <name>             Which installation, when the checkout holds several
-  --yes                     Move without asking (required when not in a terminal)
+  --worker <name>           Or: the deployed worker of an install made without this CLI
+                            (read from Cloudflare; nothing there changes)
+  --account <id|name>       With --worker: its Cloudflare account
+  --inbound-domain <domain> With --worker: a zone whose mail it receives (repeatable)
+  --provider <provider>     With --worker: outbound email (default: what the worker uses)
+  --send-domain <domain>    With --worker: an Email Sending domain (repeatable)
+  --cookie-prefix <prefix>  With --worker: only when the worker has no COOKIE_PREFIX
+  --plan                    With --worker: only show what would be recorded
+  --expect-plan <digest>    With --worker: adopt only if the plan still has this digest
+  --yes                     Adopt without asking (required when not in a terminal)
 `;
 
 const DEFAULT_NAME = "saasmail";
@@ -156,10 +171,40 @@ const UPGRADE_OPTIONS = {
 const ADOPT_OPTIONS = {
   from: { type: "string" },
   name: { type: "string" },
-  yes: { type: "boolean" },
+  worker: { type: "string" },
+  account: INSTALL_OPTIONS.account,
+  "inbound-domain": INSTALL_OPTIONS["inbound-domain"],
+  provider: INSTALL_OPTIONS.provider,
+  "send-domain": INSTALL_OPTIONS["send-domain"],
+  "cookie-prefix": INSTALL_OPTIONS["cookie-prefix"],
+  plan: INSTALL_OPTIONS.plan,
+  "expect-plan": INSTALL_OPTIONS["expect-plan"],
+  yes: INSTALL_OPTIONS.yes,
 } as const;
 
-type AdoptFlags = { from?: string; name?: string; yes?: boolean };
+type AdoptFlags = Pick<
+  InstallFlags,
+  | "name"
+  | "account"
+  | "inbound-domain"
+  | "provider"
+  | "send-domain"
+  | "cookie-prefix"
+  | "plan"
+  | "expect-plan"
+  | "yes"
+> & { from?: string; worker?: string };
+
+/** adopt flags that only `--worker` takes. */
+const WORKER_ONLY = [
+  "account",
+  "inbound-domain",
+  "provider",
+  "send-domain",
+  "cookie-prefix",
+  "plan",
+  "expect-plan",
+] as const;
 
 type UpgradeFlags = {
   name?: string;
@@ -407,6 +452,67 @@ async function answer(
   return v;
 }
 
+type MailFlags = Pick<
+  InstallFlags,
+  "inbound-domain" | "provider" | "send-domain" | "yes"
+>;
+
+/**
+ * Inbound domains → provider → send domains: flag, else (in a terminal without --yes) a prompt,
+ * else none / `defaultProvider`. The provider prompt offers `defaultProvider` first.
+ */
+async function resolveMail(
+  f: MailFlags,
+  io: Io,
+  defaultProvider: Provider,
+): Promise<Pick<Resolved, "inboundDomains" | "provider" | "sendDomains">> {
+  const asking = io.tty && !f.yes;
+  const domainList = async (
+    flag: string[] | undefined,
+    message: string,
+  ): Promise<string[]> => {
+    if (flag !== undefined) return normaliseDomains(flag);
+    if (!asking) return [];
+    const v = await answer(io, message, { validate: domainsProblem });
+    const bad = domainsProblem(v);
+    if (bad) throw new UsageError(bad);
+    return splitDomains(v);
+  };
+
+  const inboundDomains = await domainList(
+    f["inbound-domain"],
+    "Domains whose mail saasmail receives (comma-separated, empty for none)",
+  );
+
+  let provider: Provider = defaultProvider;
+  if (f.provider !== undefined) provider = f.provider as Provider;
+  else if (asking) {
+    const options: { value: Provider; label: string }[] = [
+      { value: "cloudflare", label: "Cloudflare Email Sending" },
+      { value: "resend", label: "Resend" },
+      { value: "postmark", label: "Postmark" },
+      { value: "bavimail", label: "Bavimail" },
+      { value: "none", label: "None for now (sending fails until set)" },
+    ];
+    provider = await io.select<Provider>("Outbound email provider", [
+      ...options.filter((x) => x.value === defaultProvider),
+      ...options.filter((x) => x.value !== defaultProvider),
+    ]);
+  }
+  if (f["send-domain"] !== undefined && provider !== "cloudflare") {
+    throw new UsageError(SEND_DOMAIN_ONLY_CLOUDFLARE);
+  }
+
+  const sendDomains =
+    provider === "cloudflare"
+      ? await domainList(
+          f["send-domain"],
+          "Domains to send from with Email Sending (comma-separated, empty for none)",
+        )
+      : [];
+  return { inboundDomains, provider, sendDomains };
+}
+
 /**
  * Spec §2 order: name → account → hostname → inbound domains → provider → send domains → cookie
  * prefix. Flag, then a prompt in a terminal (collect). The mail inputs and the cookie prefix have
@@ -457,44 +563,11 @@ async function resolveInputs(
   }
 
   const asking = io.tty && !f.yes;
-  const domainList = async (
-    flag: string[] | undefined,
-    message: string,
-  ): Promise<string[]> => {
-    if (flag !== undefined) return normaliseDomains(flag);
-    if (!asking) return [];
-    const v = await answer(io, message, { validate: domainsProblem });
-    const bad = domainsProblem(v);
-    if (bad) throw new UsageError(bad);
-    return splitDomains(v);
-  };
-
-  const inboundDomains = await domainList(
-    f["inbound-domain"],
-    "Domains whose mail saasmail receives (comma-separated, empty for none)",
+  const { inboundDomains, provider, sendDomains } = await resolveMail(
+    f,
+    io,
+    DEFAULT_PROVIDER,
   );
-
-  let provider: Provider = DEFAULT_PROVIDER;
-  if (f.provider !== undefined) provider = f.provider as Provider;
-  else if (asking)
-    provider = await io.select<Provider>("Outbound email provider", [
-      { value: "cloudflare", label: "Cloudflare Email Sending" },
-      { value: "resend", label: "Resend" },
-      { value: "postmark", label: "Postmark" },
-      { value: "bavimail", label: "Bavimail" },
-      { value: "none", label: "None for now (sending fails until set)" },
-    ]);
-  if (f["send-domain"] !== undefined && provider !== "cloudflare") {
-    throw new UsageError(SEND_DOMAIN_ONLY_CLOUDFLARE);
-  }
-
-  const sendDomains =
-    provider === "cloudflare"
-      ? await domainList(
-          f["send-domain"],
-          "Domains to send from with Email Sending (comma-separated, empty for none)",
-        )
-      : [];
 
   let cookiePrefix = f["cookie-prefix"] ?? DEFAULT_COOKIE_PREFIX;
   if (f["cookie-prefix"] === undefined && asking) {
@@ -916,17 +989,27 @@ async function runUpgrade(f: UpgradeFlags, deps: Deps): Promise<number> {
   }
 }
 
-/** `adopt --from <checkout>` (spec §6): package mode only (ruling P2); writes files, never calls Cloudflare. */
+/** `adopt --from <checkout>` / `adopt --worker <name>` (spec §6): package mode only (ruling P2). */
 async function runAdopt(f: AdoptFlags, deps: Deps): Promise<number> {
   const { io, home } = deps;
   if (home === null) {
     io.print(
-      `Adopting runs from npm: npx saasmail adopt --from ${deps.configDir}.`,
+      f.worker !== undefined
+        ? `Adopting runs from npm: npx saasmail adopt --worker ${f.worker}.`
+        : `Adopting runs from npm: npx saasmail adopt --from ${deps.configDir}.`,
     );
     return 2;
   }
+  if (f.from !== undefined && f.worker !== undefined) {
+    throw new UsageError("Pass either --from or --worker, not both.");
+  }
+  if (f.worker !== undefined) return runAdoptWorker(f, f.worker, deps, home);
+  const workerOnly = WORKER_ONLY.find((k) => f[k] !== undefined);
+  if (workerOnly !== undefined) {
+    throw new UsageError(`--${workerOnly} is only for adopt --worker.`);
+  }
   if (f.from === undefined) {
-    throw new UsageError("adopt needs --from <checkout>.");
+    throw new UsageError("adopt needs --from <checkout> or --worker <name>.");
   }
   if (f.name !== undefined) {
     const bad = validateName(f.name);
@@ -960,6 +1043,115 @@ async function runAdopt(f: AdoptFlags, deps: Deps): Promise<number> {
     io.print(
       `Moved ${picked.inputs.name} to ${r.dir}.\nCheck it: npx saasmail status --name ${r.slug}\nUpgrade it: npx saasmail upgrade --name ${r.slug}`,
     );
+    return 0;
+  } catch (e) {
+    if (e instanceof UsageError) throw e;
+    io.print((e as Error).message);
+    return 1;
+  }
+}
+
+/** The apply command for a reviewed `adopt --worker` plan: the inputs as flags. */
+export function adoptCommand(
+  s: InstallState,
+  digest: string,
+  source: Source,
+): string {
+  const i = s.inputs;
+  const q = shellQuote;
+  return source.command(
+    [
+      `adopt --worker ${q(i.name)}`,
+      `--account ${q(s.accountId)}`,
+      ...i.inboundDomains.map((d) => `--inbound-domain ${q(d)}`),
+      `--provider ${q(i.provider)}`,
+      ...i.sendDomains.map((d) => `--send-domain ${q(d)}`),
+      `--cookie-prefix ${q(i.cookiePrefix)}`,
+      `--expect-plan ${digest}`,
+      "--yes",
+    ].join(" "),
+  );
+}
+
+/**
+ * `adopt --worker <name>`: reads the worker from Cloudflare and records it under <home>/<name>/.
+ * The mail inputs are collected as install collects them; the provider defaults to what the
+ * worker uses.
+ */
+async function runAdoptWorker(
+  f: AdoptFlags,
+  worker: string,
+  deps: Deps,
+  home: string,
+): Promise<number> {
+  const { io } = deps;
+  if (f.name !== undefined) {
+    throw new UsageError(
+      "--name is only for adopt --from; with --worker the install is named after the worker.",
+    );
+  }
+  const badName = validateName(worker);
+  if (badName) throw new UsageError(`--worker ${worker}: ${badName}`);
+  checkFlags({
+    "inbound-domain": f["inbound-domain"],
+    provider: f.provider,
+    "send-domain": f["send-domain"],
+    "cookie-prefix": f["cookie-prefix"],
+  });
+  if (!io.tty && !f.plan && !f.yes) {
+    io.print(NOT_A_TERMINAL);
+    return 2;
+  }
+  let token: string;
+  try {
+    token = await deps.token();
+  } catch (e) {
+    io.print((e as Error).message);
+    return 1;
+  }
+  const { env: _env, token: _t, cloudflare, home: _h, ...rest } = deps;
+  const dir = installDir(home, worker);
+  const ctx: Ctx = { ...rest, cf: cloudflare(token), dir, configDir: dir };
+  try {
+    const accountId = await resolveAccount(ctx.cf, io, f.account);
+    const asking = io.tty && !f.yes;
+    // Only a provider prompt needs the worker's provider up front; otherwise the plan detects it.
+    const detected =
+      asking && f.provider === undefined
+        ? detectProvider(
+            (await ctx.cf.workerSettings(accountId, worker))?.bindings ?? [],
+          )
+        : DEFAULT_PROVIDER;
+    const mail = await resolveMail(f, io, detected);
+    const inputs: AdoptInputs = {
+      inboundDomains: mail.inboundDomains,
+      sendDomains: mail.sendDomains,
+      ...(f.provider !== undefined || asking
+        ? { provider: mail.provider }
+        : {}),
+      ...(f["cookie-prefix"] !== undefined
+        ? { cookiePrefix: f["cookie-prefix"] }
+        : {}),
+    };
+    if (f.plan) {
+      if (listStates(dir).length > 0) {
+        io.print(`${dir} already has an install. Nothing was changed.`);
+        return 1;
+      }
+      const p = await planAdoptWorker(ctx, { accountId, worker, inputs });
+      io.print(p.report);
+      io.print(`\nPlan ${p.digest}\n\nTo apply it:`);
+      io.print(adoptCommand(p.state, p.digest, deps.source));
+      return 0;
+    }
+    await adoptWorker(ctx, {
+      accountId,
+      worker,
+      inputs,
+      yes: Boolean(f.yes),
+      expectPlan: f["expect-plan"],
+      home,
+    });
     return 0;
   } catch (e) {
     if (e instanceof UsageError) throw e;

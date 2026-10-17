@@ -279,10 +279,15 @@ export async function generatedSecrets(
   const vars = await ctx.cf.workerVars(s.accountId, s.names.worker);
   const deployed = vars?.VAPID_PUBLIC_KEY;
   if (deployed) return { secrets, vapidPublicKey: deployed };
-  throw new Error(
+  throw new Error(lostVapidMessage(ctx, s));
+}
+
+/** The worker has `VAPID_PRIVATE_KEY` but its public key is known nowhere. */
+export function lostVapidMessage(ctx: Ctx, s: InstallState): string {
+  return (
     `VAPID_PRIVATE_KEY is set but its public key is unknown: it is neither in the state file nor the deployed VAPID_PUBLIC_KEY var of worker ${s.names.worker}. ` +
-      `Set VAPID_PUBLIC_KEY (the matching public key) as "vapidPublicKey" in ${join(ctx.dir, `${s.installationId}.json`)}, ` +
-      `or delete the secret (${ctx.source.wranglerCommand(`secret delete VAPID_PRIVATE_KEY --name ${s.names.worker}`)}) to have both generated again; existing push subscriptions then stop working.`,
+    `Set VAPID_PUBLIC_KEY (the matching public key) as "vapidPublicKey" in ${join(ctx.dir, `${s.installationId}.json`)}, ` +
+    `or delete the secret (${ctx.source.wranglerCommand(`secret delete VAPID_PRIVATE_KEY --name ${s.names.worker}`)}) to have both generated again; existing push subscriptions then stop working.`
   );
 }
 
