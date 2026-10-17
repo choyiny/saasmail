@@ -66,6 +66,40 @@ describe("preflight", () => {
     );
   });
 
+  it("a 500 mentioning plan is a generic failure, not the Paid message", async () => {
+    const cf = fakeCloudflare(seed);
+    cf.failNext(
+      "listQueues",
+      new CloudflareError("plan service down", 500, [], "/q"),
+    );
+    const r = await preflight(cf, runner(), input);
+    expect(r.failures.map((f) => f.check)).toEqual(["plan"]);
+    expect(r.failures[0]!.message).toContain("Could not check");
+  });
+
+  it("403 Authentication error on queues -> token", async () => {
+    const cf = fakeCloudflare(seed);
+    cf.failNext(
+      "listQueues",
+      new CloudflareError("Authentication error", 403, [10000], "/q"),
+    );
+    const r = await preflight(cf, runner(), input);
+    expect(r.failures.map((f) => f.check)).toEqual(["token"]);
+  });
+
+  it("a null MX is rendered as null MX", async () => {
+    const cf = fakeCloudflare({
+      ...seed,
+      dnsRecords: {
+        z1: [
+          { name: "mail.example.com", type: "MX", content: ".", priority: 0 },
+        ],
+      },
+    });
+    const r = await preflight(cf, runner(), input);
+    expect(r.failures[0]!.message).toContain('null MX (".")');
+  });
+
   it("401/403 on several checks -> one token failure", async () => {
     const cf = fakeCloudflare(seed);
     cf.failNext("listQueues", new CloudflareError("no", 403, [9109], "/q"));
@@ -143,6 +177,9 @@ describe("preflight", () => {
     });
     const r = await preflight(cf, runner(), { ...input, sendDomains: [] });
     expect(r.failures.map((f) => f.check)).toEqual(["zone"]);
+    expect(r.failures[0]!.message).toBe(
+      "`mail.example.com` is under zone `example.com`; Email Routing's catch-all is zone-wide, so the inbound domain must be its own zone (add mail.example.com as a zone, or use example.com).",
+    );
   });
 
   it("send domain: parent zone is enough; missing -> failure; skipped for other providers", async () => {

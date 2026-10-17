@@ -1,5 +1,5 @@
 import { CloudflareError, type Cloudflare } from "./cloudflare.ts";
-import { withEnv, type Runner } from "./runner.ts";
+import type { Runner } from "./runner.ts";
 
 export type Failure = { check: string; message: string; fix: string };
 
@@ -68,6 +68,9 @@ const CF_MX = /^route[123]\.mx\.cloudflare\.net$/i;
 const isCloudflareMx = (content: string) =>
   CF_MX.test(content.trim().replace(/\.$/, ""));
 
+const mxLabel = (c: string) =>
+  c.trim() === "" || c.trim() === "." ? 'null MX (".")' : c;
+
 /** Read-only checks that run before any plan or write; every check runs and every failure is reported. */
 export async function preflight(
   cf: Cloudflare,
@@ -76,12 +79,10 @@ export async function preflight(
 ): Promise<{
   failures: Failure[];
   baseUrl: string | null;
+  /** Zone id per checked domain (inbound, send) and the UI hostname; null when no zone was found. */
   zoneIds: Record<string, string | null>;
 }> {
   const a = input.accountId;
-  // wrangler picks the account itself (and may ask) unless told: always the chosen one.
-  // The read-only checks use the REST client; this is for any wrangler subprocess a check runs.
-  void withEnv(runner, { CLOUDFLARE_ACCOUNT_ID: a });
 
   const plan = () =>
     guard(
@@ -96,7 +97,10 @@ export async function preflight(
           // message (unconfirmed against the live API). Auth errors with other messages still map to `token`.
           if (
             e instanceof CloudflareError &&
-            /paid|plan|subscri|upgrade/i.test(e.message)
+            [400, 402, 403].includes(e.status) &&
+            /\bworkers paid\b|\bpaid plan\b|\bsubscri|\bupgrade\b/i.test(
+              e.message,
+            )
           )
             return one(
               "plan",
@@ -227,14 +231,23 @@ export async function preflight(
       `the inbound domain ${domain}`,
       async () => {
         const z = await cf.findZone(a, domain);
-        if (!z || z.name.toLowerCase() !== domain.toLowerCase())
+        if (z && z.name.toLowerCase() !== domain.toLowerCase())
+          return {
+            ...one(
+              "zone",
+              `\`${domain}\` is under zone \`${z.name}\`; Email Routing's catch-all is zone-wide, so the inbound domain must be its own zone (add ${domain} as a zone, or use ${z.name}).`,
+              `Add ${domain} as its own zone, or use ${z.name} as the inbound domain.`,
+            ),
+            zones: { [domain]: z.id },
+          };
+        if (!z)
           return {
             ...one(
               "zone",
               `No zone for ${domain} was found in this account.`,
               "Add the domain to this Cloudflare account (as its own zone), then run the installer again.",
             ),
-            zones: { [domain]: z?.id ?? null },
+            zones: { [domain]: null },
           };
         if (z.status !== "active")
           return {
@@ -252,7 +265,7 @@ export async function preflight(
           ? [
               {
                 check: "mx",
-                message: `${domain} already has MX records (${foreign.map((m) => m.content).join(", ")}). Enabling Email Routing would take over that domain's mail. Nothing was changed.`,
+                message: `${domain} already has MX records (${foreign.map((m) => mxLabel(m.content)).join(", ")}). Enabling Email Routing would take over that domain's mail. Nothing was changed.`,
                 fix: "Use a domain (or subdomain zone) whose mail you want saasmail to receive, or remove those MX records yourself.",
               },
             ]
