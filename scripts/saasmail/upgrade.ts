@@ -107,7 +107,11 @@ async function inspect(
   return { installationId, version, comparison };
 }
 
-/** Migration files in the package that the install's D1 has not applied (no table: all). */
+/**
+ * Migration files in the package that the install's D1 has not applied. No `d1_migrations` table
+ * on an empty database: all. No such table beside other tables (a database set up without
+ * `wrangler d1 migrations apply`) stops: applying everything would fail on the existing tables.
+ */
 async function pendingMigrations(ctx: Ctx, s: InstallState): Promise<string[]> {
   const files = readdirSync(ctx.source.migrationsDir)
     .filter((f) => f.endsWith(".sql"))
@@ -123,8 +127,18 @@ async function pendingMigrations(ctx: Ctx, s: InstallState): Promise<string[]> {
     );
     applied = rows.map((r) => String(r.name));
   } catch (e) {
-    if (/no such table/i.test(message(e))) return files;
-    throw e;
+    if (!/no such table/i.test(message(e))) throw e;
+    const tables = await ctx.cf.queryD1(
+      s.accountId,
+      d1.id,
+      // D1's own tables (_cf_*) and SQLite's (sqlite_*) do not count.
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND substr(name, 1, 7) <> 'sqlite_' AND substr(name, 1, 4) <> '_cf_'",
+    );
+    if (tables.length === 0) return files;
+    throw new Error(
+      `D1 ${d1.name} has tables but no d1_migrations table; saasmail cannot tell which migrations ran. ` +
+        `See docs/updating.md ("A database without d1_migrations") to record the ones that did, then run the upgrade again. Nothing was changed.`,
+    );
   }
   return files.filter((f) => !applied.includes(f));
 }
@@ -265,8 +279,7 @@ export async function upgrade(
   const to = await ctx.source.version(ctx.runner);
   const resumeCmd = ctx.source.command(`upgrade --resume --name ${slug}`);
   const release = opts.plan ? () => {} : acquireLock(ctx.dir, id);
-  // Spec §5.2: lock, then read the state as it is on disk now.
-  let s = readState(ctx.dir, id) ?? opts.state;
+  let s = opts.state;
   const save = (next: InstallState) => {
     s = next;
     writeState(ctx.dir, s);
@@ -275,6 +288,9 @@ export async function upgrade(
   let step = "plan";
   let started = false;
   try {
+    // Spec §5.2: lock, then read the state as it is on disk now (inside the try: a corrupt
+    // state file must not leak the lock).
+    s = readState(ctx.dir, id) ?? opts.state;
     const unfinished =
       s.status === "upgrading" ||
       (s.status === "failed" && s.upgradeTarget !== undefined);

@@ -321,7 +321,14 @@ export async function main(argv: string[], deps: Deps): Promise<number> {
           return 2;
         }
         // Read-only: the checkout's own .saasmail, never moved or written.
-        const picked = pickCheckoutState(values.from, values.name);
+        let picked: InstallState;
+        try {
+          picked = pickCheckoutState(values.from, values.name);
+        } catch (e) {
+          if (e instanceof UsageError) throw e;
+          deps.io.print((e as Error).message);
+          return 1;
+        }
         return await status(
           { name: picked.inputs.name, checkout: resolve(values.from) },
           { ...deps, dir: join(values.from, ".saasmail"), latest },
@@ -1039,9 +1046,9 @@ async function runAdopt(f: AdoptFlags, deps: Deps): Promise<number> {
     return 2;
   }
   const checkout = resolve(f.from);
-  const picked = pickCheckoutState(checkout, f.name);
-  const dir = installDir(home, picked.names.worker);
   try {
+    const picked = pickCheckoutState(checkout, f.name);
+    const dir = installDir(home, picked.names.worker);
     io.print(
       `Move ${picked.inputs.name} (${picked.baseUrl}) from ${checkout} to ${dir}:\n` +
         `  copy  ${join(checkout, ".saasmail", `${picked.installationId}.json`)}\n` +

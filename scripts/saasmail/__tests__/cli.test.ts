@@ -1798,6 +1798,18 @@ describe("adopt", () => {
     expect(readState(dir, ID)!.movedTo).toBeUndefined();
   });
 
+  it("a corrupt checkout state exits 1 with its message", async () => {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${ID}.json`), "{ not json");
+    const h = harness({ home: home() });
+    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(1);
+    expect(h.text()).toContain(`${ID}.json`);
+    expect(existsSync(home())).toBe(false);
+    const st = harness({ home: home() });
+    expect(await main(["status", "--from", cwd], st.deps)).toBe(1);
+    expect(st.text()).toContain(`${ID}.json`);
+  });
+
   it("a taken destination exits 1 and leaves the checkout alone", async () => {
     const s = seedCheckout();
     writeState(MOVED(), s);

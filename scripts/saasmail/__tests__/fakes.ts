@@ -73,6 +73,8 @@ export interface FakeCloudflareSeed {
    * a uuid without an entry has no such table (the query fails like D1's).
    */
   d1Migrations?: Record<string, string[]>;
+  /** D1 uuid -> its other table names, answered to `SELECT name FROM sqlite_master …`. */
+  d1Tables?: Record<string, string[]>;
 }
 
 export type FakeCloudflare = Cloudflare & {
@@ -176,6 +178,9 @@ export function fakeCloudflare(seed: FakeCloudflareSeed = {}): FakeCloudflare {
         if (!names)
           throw new Error("no such table: d1_migrations: SQLITE_ERROR");
         return names.map((name) => ({ name }));
+      }
+      if (/^SELECT name FROM sqlite_master/.test(sql)) {
+        return (seed.d1Tables?.[id] ?? []).map((name) => ({ name }));
       }
       return [];
     },

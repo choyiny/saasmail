@@ -314,6 +314,24 @@ describe("planUpgrade", () => {
     const p = await planUpgrade(h.ctx, h.state);
     expect(p.migrations).toEqual(["0000_init.sql", "0001_more.sql"]);
   });
+
+  it("no d1_migrations table but other tables: the plan stops", async () => {
+    const s = installedAt120();
+    const h = harness({
+      seed: {
+        ...seedFor(s),
+        d1Migrations: {},
+        d1Tables: { "d1-existing": ["users", "emails"] },
+      },
+    });
+    await expect(planUpgrade(h.ctx, h.state)).rejects.toThrow(
+      "D1 acme-db has tables but no d1_migrations table; saasmail cannot tell which migrations ran. See docs/updating.md",
+    );
+    await expect(run(h)).rejects.toThrow("no d1_migrations table");
+    expect(h.deploys).toHaveLength(0);
+    expect(h.migrations).toHaveLength(0);
+    expect(h.saved().status).toBe("installed");
+  });
 });
 
 describe("upgrade", () => {
@@ -595,6 +613,21 @@ describe("upgrade", () => {
     expect(again.printed.join("\n")).toContain("Migrations: none");
     expect(s2.status).toBe("installed");
     expect(s2.deployedVersion).toBe(TO);
+  });
+
+  it("a corrupt state file fails without leaking the lock", async () => {
+    const h = harness();
+    const state = h.saved();
+    writeFileSync(join(home, `${ID}.json`), "{ not json");
+    await expect(
+      upgrade(h.ctx, {
+        state,
+        yes: true,
+        replaceCustomCode: false,
+        resume: false,
+      }),
+    ).rejects.toThrow();
+    expect(existsSync(join(home, `${ID}.lock`))).toBe(false);
   });
 
   it("--plan writes nothing and prints the apply command", async () => {

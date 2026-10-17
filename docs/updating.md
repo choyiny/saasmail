@@ -40,6 +40,20 @@ npx saasmail adopt --worker <name> [--account <id|name>] [--inbound-domain <doma
 
 It reads the worker's bindings from Cloudflare and deploys nothing. If the running version is unknown, the first upgrade needs `--replace-custom-code`. Zone routes other than custom domains are not supported.
 
+### A database without d1_migrations
+
+`upgrade` reads the `d1_migrations` table to know which migrations already ran. A database set up some other way (for example SQL files run with `wrangler d1 execute`) has saasmail's tables but no such table, so the plan stops with `D1 <name> has tables but no d1_migrations table` and changes nothing. Running every migration again would fail on the existing tables.
+
+To continue, record the migrations that already ran. Compare the database's tables with the files in the release's `migrations/` folder (the CHANGELOG names the migrations each release adds), then create the table and insert one row per applied file. Use the wrangler version the installer's printed commands name (`npx wrangler@<version>`):
+
+```bash
+npx wrangler@<version> d1 execute <database> --remote --config ~/.saasmail/<slug>/wrangler.jsonc --command "
+  CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+  INSERT INTO d1_migrations (name) VALUES ('0000_init.sql'), ('0001_...sql');"
+```
+
+Then run the upgrade again: it applies only the files not listed.
+
 ## Forks and modified code
 
 Keep a clone, and sync it with upstream:
