@@ -28,6 +28,7 @@ import {
   type Optional,
   type SetupStatus,
 } from "./apply-steps.ts";
+import { vapidSubjectFor } from "./config.ts";
 import { observe, R2_MARKER_KEY, type Observed } from "./observe.ts";
 import {
   computePlan,
@@ -300,8 +301,9 @@ export async function install(
         save({ ...s, vapidPublicKey: g.vapidPublicKey });
     }
 
-    // 4. wrangler.jsonc
+    // 4. wrangler.jsonc. VAPID_SUBJECT is frozen at the first render: later domains never change it.
     step = "config";
+    if (!s.vapidSubject) save({ ...s, vapidSubject: vapidSubjectFor(s) });
     const version = await buildVersion(ctx);
     const configHash = writeConfig(ctx, s, version);
     save(recordStep(s, `config:${configHash}`));
@@ -425,28 +427,10 @@ export async function resumeInstalled(
     step = "plan";
     const obs = await look(ctx, s);
     const plan = computePlan(desiredOf(s), obs, s);
-
-    step = "setup-status";
-    const { setupRequired } = await setupStatus(ctx, s);
-    const secrets = optionalSecrets(optional);
-    // A new code makes the old one stop working: never replaced without being asked.
-    const replace =
-      setupRequired &&
-      (opts.newSetupCode === true ||
-        (ctx.io.tty &&
-          (await ctx.io.confirm(
-            "Issue a new setup code? The old one stops working.",
-            false,
-          ))));
-    if (replace) {
-      code = generateSetupCode();
-      secrets.SETUP_CODE_HASH = setupCodeHash(code);
-    } else if (setupRequired && !ctx.io.tty) {
-      ctx.io.print(
-        `The first admin still needs the setup code. If it is lost, issue a new one (the old one stops working): ${newCodeCommand(s)}`,
-      );
-    }
-    const redeploy = Object.keys(secrets).length > 0;
+    // A state from before the subject was frozen keeps the deployed one.
+    const deployedSubject = obs.worker.vars?.VAPID_SUBJECT;
+    if (!s.vapidSubject && deployedSubject)
+      save({ ...s, vapidSubject: deployedSubject });
 
     // Never an upgrade: wrangler.jsonc is rewritten and deployed only when it would come out
     // exactly as the configuration already deployed.
@@ -458,11 +442,47 @@ export async function resumeInstalled(
         `This checkout (${head}) differs from the deployed version (${s.deployedVersion ?? "unknown"}). ` +
           "Upgrades come in a later release; wrangler.jsonc was left as it is.",
       );
-      if (redeploy) {
-        throw new Error(
-          `Adding credentials or a setup code needs a deploy, which from this checkout would be an upgrade. Check out ${s.deployedVersion ?? "the deployed commit"} and run again.`,
-        );
-      }
+    }
+
+    // Unreachable setup status: the code question is skipped, domains and credentials go on.
+    step = "setup-status";
+    let setupRequired: boolean | null;
+    try {
+      setupRequired = (await setupStatus(ctx, s)).setupRequired === true;
+    } catch (e) {
+      setupRequired = null;
+      ctx.io.print(
+        `Could not read ${s.baseUrl}/api/setup/status (${e instanceof Error ? e.message : String(e)}); the setup code was left as it is.`,
+      );
+    }
+    if (setupRequired === false && opts.newSetupCode) {
+      ctx.io.print("A site admin already exists; no setup code is needed.");
+    }
+    const secrets = optionalSecrets(optional);
+    // A new code makes the old one stop working: never replaced without being asked, and not
+    // asked about when no deploy is possible.
+    const replace =
+      setupRequired === true &&
+      (opts.newSetupCode === true ||
+        (upToDate &&
+          ctx.io.tty &&
+          (await ctx.io.confirm(
+            "Issue a new setup code? The old one stops working.",
+            false,
+          ))));
+    if (replace) {
+      code = generateSetupCode();
+      secrets.SETUP_CODE_HASH = setupCodeHash(code);
+    } else if (setupRequired === true && !ctx.io.tty) {
+      ctx.io.print(
+        `The first admin still needs the setup code. If it is lost, issue a new one (the old one stops working): ${newCodeCommand(s)}`,
+      );
+    }
+    const redeploy = Object.keys(secrets).length > 0;
+    if (redeploy && !upToDate) {
+      throw new Error(
+        `Adding credentials or a setup code needs a deploy, which from this checkout would be an upgrade. Check out ${s.deployedVersion ?? "the deployed commit"} and run again.`,
+      );
     }
     if (redeploy) {
       writeConfig(ctx, s, head);

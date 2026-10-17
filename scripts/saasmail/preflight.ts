@@ -71,6 +71,25 @@ const isCloudflareMx = (content: string) =>
 const mxLabel = (c: string) =>
   c.trim() === "" || c.trim() === "." ? 'null MX (".")' : c;
 
+export const FOREIGN_MX_FIX =
+  "Use a domain (or subdomain zone) whose mail you want saasmail to receive, or remove those MX records yourself.";
+
+/**
+ * Why Email Routing must not be enabled for `domain` (it has MX records other than Cloudflare's own
+ * route1–3), or null. Read-only; shared by preflight and apply.
+ */
+export async function foreignMx(
+  cf: Cloudflare,
+  zoneId: string,
+  domain: string,
+): Promise<string | null> {
+  const foreign = (await cf.mxRecords(zoneId, domain)).filter(
+    (m) => !isCloudflareMx(m.content),
+  );
+  if (foreign.length === 0) return null;
+  return `${domain} already has MX records (${foreign.map((m) => mxLabel(m.content)).join(", ")}). Enabling Email Routing would take over that domain's mail. Nothing was changed.`;
+}
+
 /** Read-only checks that run before any plan or write; every check runs and every failure is reported. */
 export async function preflight(
   cf: Cloudflare,
@@ -258,17 +277,9 @@ export async function preflight(
             ),
             zones: { [domain]: z.id },
           };
-        const foreign = (await cf.mxRecords(z.id, domain)).filter(
-          (m) => !isCloudflareMx(m.content),
-        );
-        const failures: Failure[] = foreign.length
-          ? [
-              {
-                check: "mx",
-                message: `${domain} already has MX records (${foreign.map((m) => mxLabel(m.content)).join(", ")}). Enabling Email Routing would take over that domain's mail. Nothing was changed.`,
-                fix: "Use a domain (or subdomain zone) whose mail you want saasmail to receive, or remove those MX records yourself.",
-              },
-            ]
+        const mx = await foreignMx(cf, z.id, domain);
+        const failures: Failure[] = mx
+          ? [{ check: "mx", message: mx, fix: FOREIGN_MX_FIX }]
           : [];
         return { failures, zones: { [domain]: z.id } };
       },

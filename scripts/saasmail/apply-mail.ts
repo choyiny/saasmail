@@ -7,6 +7,8 @@ import {
   type Ctx,
   type Optional,
 } from "./apply-steps.ts";
+import { catchAllElsewhere, catchAllOwner } from "./plan.ts";
+import { FOREIGN_MX_FIX, foreignMx } from "./preflight.ts";
 import { hasStep, type InstallState } from "./state.ts";
 
 // 13 reads 5 s apart: up to 60 s for Email Routing to report `ready`.
@@ -15,7 +17,9 @@ const ROUTING_INTERVAL_MS = 5000;
 
 /**
  * Turns Email Routing on for the zone when it is off (Cloudflare adds and locks its MX/SPF records),
- * waits for `ready`, then points the zone's catch-all at the worker.
+ * waits for `ready`, then points the zone's catch-all at the worker. Re-checks what the plan saw:
+ * MX records other than Cloudflare's stop before the enable (preflight may not have run), and a
+ * catch-all taken meanwhile stops before the PUT.
  */
 export async function routeDomain(
   ctx: Ctx,
@@ -23,6 +27,8 @@ export async function routeDomain(
   domain: string,
   zoneId: string,
 ): Promise<void> {
+  const mx = await foreignMx(ctx.cf, zoneId, domain);
+  if (mx) throw new Error(`${mx} ${FOREIGN_MX_FIX}`);
   let st: EmailRoutingSettings | null = await ctx.cf.emailRouting(zoneId);
   if (!st?.enabled) st = await ctx.cf.enableEmailRoutingDns(zoneId);
   for (let attempt = 1; st?.status !== "ready"; attempt++) {
@@ -35,58 +41,84 @@ export async function routeDomain(
     await ctx.sleep(ROUTING_INTERVAL_MS);
     st = await ctx.cf.emailRouting(zoneId);
   }
+  const current = await ctx.cf.catchAll(zoneId);
+  if (catchAllOwner(current, s.names.worker) === "taken") {
+    throw catchAllElsewhere(domain);
+  }
   await ctx.cf.putCatchAllWorker(zoneId, s.names.worker);
 }
 
 export type SendingReport = {
   domain: string;
   records: (SendingDnsRecord & { ok: boolean })[];
+  /** Set when the records could not be read; the install goes on. */
+  error?: string;
 };
 
-/** Lower case, no surrounding quotes (TXT) and no trailing dot: how two record values compare. */
-const norm = (v: string) =>
-  v
-    .trim()
-    .replace(/^"(.*)"$/s, "$1")
-    .replace(/\.$/, "")
-    .toLowerCase();
+const QUOTED_CHUNKS = /^("(?:[^"\\]|\\.)*"\s*)+$/s;
+
+/**
+ * Lower case, no trailing dot, and a TXT value's quoted chunks (`"a" "b"`) joined as DNS joins
+ * them: how two record values compare.
+ */
+export const norm = (v: string) => {
+  let t = v.trim();
+  if (QUOTED_CHUNKS.test(t)) {
+    t = [...t.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).join("");
+  }
+  return t.replace(/\.$/, "").toLowerCase();
+};
 
 /**
  * The DNS records `domain`'s Email Sending subdomain needs, each marked ok when the zone holds a
- * record of the same type, name and content. The API reports no per-record status.
+ * record of the same type, name and content. The API reports no per-record status. A read that
+ * fails is reported (`error`), never thrown: sending status never fails the install.
  */
 export async function sendingReport(
   ctx: Ctx,
   domain: string,
   zoneId: string,
 ): Promise<SendingReport> {
-  const sub = (await ctx.cf.listSendingSubdomains(zoneId)).find(
-    (x) => norm(x.name) === norm(domain),
-  );
-  if (!sub) {
-    throw new Error(`The Email Sending subdomain ${domain} was not found.`);
+  try {
+    const sub = (await ctx.cf.listSendingSubdomains(zoneId)).find(
+      (x) => norm(x.name) === norm(domain),
+    );
+    if (!sub) {
+      throw new Error(`the Email Sending subdomain ${domain} was not found`);
+    }
+    const required = await ctx.cf.sendingDns(zoneId, sub.id);
+    const byName = new Map<string, { type: string; content: string }[]>();
+    for (const name of new Set(required.map((r) => norm(r.name)))) {
+      byName.set(name, await ctx.cf.dnsRecords(zoneId, name));
+    }
+    return {
+      domain,
+      records: required.map((r) => ({
+        ...r,
+        ok: (byName.get(norm(r.name)) ?? []).some(
+          (h) =>
+            norm(h.type) === norm(r.type) &&
+            norm(h.content) === norm(r.content),
+        ),
+      })),
+    };
+  } catch (e) {
+    return {
+      domain,
+      records: [],
+      error: e instanceof Error ? e.message : String(e),
+    };
   }
-  const required = await ctx.cf.sendingDns(zoneId, sub.id);
-  const byName = new Map<string, { type: string; content: string }[]>();
-  for (const name of new Set(required.map((r) => norm(r.name)))) {
-    byName.set(name, await ctx.cf.dnsRecords(zoneId, name));
-  }
-  return {
-    domain,
-    records: required.map((r) => ({
-      ...r,
-      ok: (byName.get(norm(r.name)) ?? []).some(
-        (h) =>
-          norm(h.type) === norm(r.type) && norm(h.content) === norm(r.content),
-      ),
-    })),
-  };
 }
 
 function sendingLines(reports: SendingReport[]): string[] {
   if (reports.length === 0) return [];
   const lines = ["", "Sending (Cloudflare Email Sending):"];
   for (const r of reports) {
+    if (r.error !== undefined) {
+      lines.push(`  ${r.domain}: status unknown: ${r.error}`);
+      continue;
+    }
     const missing = r.records.some((x) => !x.ok);
     lines.push(
       missing

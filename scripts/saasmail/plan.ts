@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { CatchAll } from "./cloudflare.ts";
 import type { ResourceNames } from "./names.ts";
 import type { Observed } from "./observe.ts";
 import {
@@ -72,7 +73,7 @@ const zoneMissing = (domain: string) =>
     `Zone for \`${domain}\` not found in this account. Nothing was changed.`,
   );
 
-const catchAllElsewhere = (domain: string) =>
+export const catchAllElsewhere = (domain: string) =>
   new PlanStop(
     `\`${domain}\`'s catch-all rule already sends mail elsewhere and was not set by this installation. Nothing was changed.`,
   );
@@ -242,17 +243,29 @@ function decideRouting(
   }
   const r = observed.routing[domain];
   const c = r?.catchAll ?? null;
-  if (!c || !c.enabled) {
-    return "create";
-  }
-  const only = c.actions.length === 1 ? c.actions[0] : undefined;
-  if (only?.type === "worker" && only.value?.[0] === desired.names.worker) {
+  const owner = catchAllOwner(c, desired.names.worker);
+  if (owner === "ours") {
     return r.enabled && r.status === "ready" ? "reuse" : "create";
   }
-  if (only?.type === "drop") {
+  if (owner === "free") {
     return "create";
   }
   throw catchAllElsewhere(domain);
+}
+
+/**
+ * A zone's catch-all: `ours` (enabled, one `worker` action naming `worker`), `free` (absent,
+ * disabled, or the dashboard default of one `drop`: safe to take over) or `taken`.
+ */
+export function catchAllOwner(
+  c: CatchAll | null,
+  worker: string,
+): "ours" | "free" | "taken" {
+  if (!c || !c.enabled) return "free";
+  const only = c.actions.length === 1 ? c.actions[0] : undefined;
+  if (only?.type === "worker" && only.value?.[0] === worker) return "ours";
+  if (only?.type === "drop") return "free";
+  return "taken";
 }
 
 /** A sending subdomain holds no data: present → reuse, absent → create. */

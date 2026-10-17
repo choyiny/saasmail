@@ -245,6 +245,8 @@ function harness(
     deploy?: RunResult;
     wellKnown?: () => Response | Promise<Response>;
     setupStatus?: { setupRequired: boolean; codeRequired: boolean };
+    /** The first this-many setup status reads fail (the site unreachable). */
+    setupStatusFailures?: number;
     tty?: boolean;
     confirm?: boolean;
   } = {},
@@ -301,6 +303,7 @@ function harness(
     },
   };
   const fetched: string[] = [];
+  let setupFailuresLeft = opts.setupStatusFailures ?? 0;
   const fetchImpl = (async (input: string | URL | Request) => {
     const url =
       typeof input === "string"
@@ -318,6 +321,10 @@ function harness(
       });
     }
     if (url === `${BASE}/api/setup/status`) {
+      if (setupFailuresLeft > 0) {
+        setupFailuresLeft--;
+        throw new TypeError("fetch failed");
+      }
       return Response.json(
         opts.setupStatus ?? { setupRequired: true, codeRequired: true },
       );
@@ -733,6 +740,53 @@ describe("install", () => {
 });
 
 describe("routing", () => {
+  it("refuses a domain with MX records other than Cloudflare's before enabling", async () => {
+    const h = harness({
+      seed: {
+        dnsRecords: {
+          [ZONE.id]: [
+            {
+              type: "MX",
+              name: "example.com",
+              content: "mx.google.com",
+              priority: 1,
+            },
+          ],
+        },
+      },
+    });
+    const err = (await install(h.ctx, {
+      state: freshState(),
+      ...noOptional,
+    }).catch((e: Error) => e)) as Error;
+    expect(err.message).toContain(
+      "example.com already has MX records (mx.google.com). Enabling Email Routing would take over that domain's mail.",
+    );
+    expect(err.message).toContain("Step routing:example.com failed");
+    expect(h.count("enableEmailRoutingDns")).toBe(0);
+    expect(h.count("putCatchAllWorker")).toBe(0);
+  });
+
+  it("stops when the catch-all was taken after the plan", async () => {
+    const h = harness();
+    const enable = h.cf.enableEmailRoutingDns.bind(h.cf);
+    h.cf.enableEmailRoutingDns = async (z) => {
+      h.cf.state.catchAll[z] = {
+        enabled: true,
+        actions: [{ type: "forward", value: ["someone@example.net"] }],
+      };
+      return enable(z);
+    };
+    const err = (await install(h.ctx, {
+      state: freshState(),
+      ...noOptional,
+    }).catch((e: Error) => e)) as Error;
+    expect(err.message).toContain(
+      "`example.com`'s catch-all rule already sends mail elsewhere",
+    );
+    expect(h.count("putCatchAllWorker")).toBe(0);
+  });
+
   it("waits for Email Routing to be ready before the catch-all", async () => {
     const h = harness({ seed: { routingReadyAfter: 3 } });
     const out = await install(h.ctx, { state: freshState(), ...noOptional });
@@ -783,6 +837,36 @@ describe("routing", () => {
 });
 
 describe("sending", () => {
+  it("joins a TXT value split into quoted chunks before comparing", async () => {
+    const h = harness({
+      seed: {
+        dnsRecords: {
+          [ZONE.id]: [
+            {
+              type: "TXT",
+              name: "cf-bounce.example.com",
+              content: '"v=spf1 include:_spf.mx.cloudflare.net" " ~all"',
+            },
+          ],
+        },
+      },
+    });
+    await install(h.ctx, { state: freshState(), ...noOptional });
+    expect(h.printed.join("\n")).toMatch(
+      /ok\s+TXT cf-bounce\.example\.com v=spf1 include:_spf\.mx\.cloudflare\.net ~all/,
+    );
+  });
+
+  it("an error reading the records is reported, never fatal", async () => {
+    const h = harness();
+    h.cf.failNext("sendingDns", new Error("HTTP 500"));
+    const out = await install(h.ctx, { state: freshState(), ...noOptional });
+    expect(out.status).toBe("installed");
+    expect(h.printed.join("\n")).toContain(
+      "example.com: status unknown: HTTP 500",
+    );
+  });
+
   it("reports each record ok or missing; missing records never fail the install", async () => {
     const h = harness({
       seed: {
@@ -1044,6 +1128,81 @@ describe("resumeInstalled", () => {
     await resumeInstalled(c.ctx, pinned(c, s), {}, { newSetupCode: true });
     expect(c.deploys).toHaveLength(0);
     expect(c.printed.join("\n")).not.toContain("Setup code:");
+    expect(c.printed.join("\n")).toContain(
+      "A site admin already exists; no setup code is needed.",
+    );
+  });
+
+  it("does not ask for a new code when no deploy is possible (HEAD moved)", async () => {
+    const { s, seed } = installedFixture();
+    const h = harness({
+      seed,
+      tty: true,
+      version: "fedcba654321",
+      wellKnown: () => Response.json({ installationId: ID, version: VERSION }),
+      setupStatus: open,
+    });
+    await resumeInstalled(h.ctx, pinned(h, s, VERSION), {});
+    expect(h.confirms).toEqual([]);
+    expect(h.deploys).toHaveLength(0);
+  });
+
+  it("an unreachable setup status skips the code question; domains and credentials still go on", async () => {
+    const { s, seed } = installedFixture({
+      provider: "resend",
+      sendDomains: [],
+    });
+    const h = harness({
+      seed,
+      tty: true,
+      setupStatus: closed,
+      setupStatusFailures: 1,
+    });
+    const more = {
+      ...s,
+      inputs: { ...s.inputs, inboundDomains: ["example.com", "other.org"] },
+    };
+    const out = await resumeInstalled(h.ctx, pinned(h, more), {
+      resendApiKey: "re_1",
+    });
+    expect(h.confirms).toEqual([]);
+    expect(h.deploys.map((d) => d.secrets)).toEqual([
+      { RESEND_API_KEY: "re_1" },
+    ]);
+    expect(out.steps.map((x) => x.key)).toContain("routing:other.org");
+    expect(h.printed.join("\n")).toContain(
+      `Could not read ${BASE}/api/setup/status (fetch failed); the setup code was left as it is.`,
+    );
+  });
+
+  it("a workers.dev install keeps its VAPID subject: a later domain and credential deploy once", async () => {
+    const first = harness({ setupStatus: closed });
+    const installed = await install(first.ctx, {
+      state: freshState({
+        inboundDomains: [],
+        provider: "resend",
+        sendDomains: [],
+      }),
+      yes: true,
+      optional: {},
+    });
+    expect(installed.vapidSubject).toBe("mailto:admin@acme.me.workers.dev");
+    const h = harness({
+      seed: carryOver(first.cf, installed),
+      setupStatus: closed,
+    });
+    const more = {
+      ...installed,
+      inputs: { ...installed.inputs, inboundDomains: ["other.org"] },
+    };
+    const out = await resumeInstalled(h.ctx, more, { resendApiKey: "re_1" });
+    expect(h.deploys).toHaveLength(1);
+    expect(h.deploys[0].secrets).toEqual({ RESEND_API_KEY: "re_1" });
+    expect(h.printed.join("\n")).not.toContain("differs");
+    expect(readConfig().vars.VAPID_SUBJECT).toBe(
+      "mailto:admin@acme.me.workers.dev",
+    );
+    expect(out.steps.map((x) => x.key)).toContain("routing:other.org");
   });
 
   it("without a terminal and without --new-setup-code, keeps the old code", async () => {

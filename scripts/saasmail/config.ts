@@ -38,6 +38,20 @@ function parseConfig(text: string): Record<string, unknown> {
 }
 
 /**
+ * `VAPID_SUBJECT`: the one frozen in the state, else `mailto:admin@` the hostname, the first send
+ * domain, the first inbound domain, or the base URL's host.
+ */
+export function vapidSubjectFor(s: InstallState): string {
+  if (s.vapidSubject) return s.vapidSubject;
+  const domain =
+    s.inputs.hostname ??
+    s.inputs.sendDomains[0] ??
+    s.inputs.inboundDomains[0] ??
+    new URL(s.baseUrl).hostname;
+  return `mailto:admin@${domain}`;
+}
+
+/**
  * Builds wrangler.jsonc from the tracked template and the install state.
  * Pure: the output depends only on the arguments. Comments in the template
  * survive because every change is a targeted jsonc-parser edit.
@@ -140,8 +154,6 @@ export function generateWranglerConfig(
   // Not a wrangler key; Email Routing is set up through the API.
   if ("email_routing" in root) set(["email_routing"], undefined);
 
-  const subjectDomain =
-    s.inputs.hostname ?? s.inputs.sendDomains[0] ?? s.inputs.inboundDomains[0];
   const vars: Record<string, string> = {
     BASE_URL: s.baseUrl,
     TRUSTED_ORIGINS: s.baseUrl,
@@ -154,8 +166,8 @@ export function generateWranglerConfig(
       ownershipNonce: s.ownershipNonce,
     }),
     SAASMAIL_VERSION: extra.version,
+    VAPID_SUBJECT: vapidSubjectFor(s),
   };
-  if (subjectDomain) vars.VAPID_SUBJECT = `mailto:admin@${subjectDomain}`;
   for (const [k, v] of Object.entries(vars)) set(["vars", k], v);
 
   if (extra.existing !== null) {

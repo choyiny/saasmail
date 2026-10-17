@@ -126,7 +126,7 @@ describe("generateWranglerConfig", () => {
     expect(c.vars.BASE_URL).toBe("https://acme.me.workers.dev");
   });
 
-  it("subject falls back to an inbound domain, then to the template value", () => {
+  it("subject falls back to an inbound domain, then to the base URL's host", () => {
     const s = fixture(null, "resend");
     s.inputs.sendDomains = [];
     expect(
@@ -135,7 +135,16 @@ describe("generateWranglerConfig", () => {
     s.inputs.inboundDomains = [];
     expect(
       read(generateWranglerConfig(template, s, extra)).vars.VAPID_SUBJECT,
-    ).toBe("mailto:admin@<your-domain>");
+    ).toBe("mailto:admin@acme.me.workers.dev");
+  });
+
+  it("a subject frozen in the state wins over the domains", () => {
+    const s = fixture(null);
+    s.vapidSubject = "mailto:admin@acme.me.workers.dev";
+    s.inputs.sendDomains = ["new.example.com"];
+    expect(
+      read(generateWranglerConfig(template, s, extra)).vars.VAPID_SUBJECT,
+    ).toBe("mailto:admin@acme.me.workers.dev");
   });
 
   it("send_email only for the cloudflare provider", () => {

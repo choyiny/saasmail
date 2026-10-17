@@ -66,6 +66,11 @@ export interface InstallState {
   deployedVersion?: string;
   /** VAPID public key paired with the `VAPID_PRIVATE_KEY` secret (public, so it may live here). */
   vapidPublicKey?: string;
+  /**
+   * `VAPID_SUBJECT` as first rendered, kept from then on: later domain changes must not change the
+   * deployed config (push services key subscriptions to it, and drift would block resume deploys).
+   */
+  vapidSubject?: string;
 }
 
 export type NewStateInput = Pick<
