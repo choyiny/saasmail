@@ -25,8 +25,9 @@ DEMO_MODE=1
 #   wrangler secret put UNSUBSCRIBE_SECRET
 UNSUBSCRIBE_SECRET=replace-with-output-of-openssl-rand-hex-32
 
-# Gmail integration (docs/gmail.md). OAuth client credentials from an
-# Internal consent screen in your own Workspace organisation.
+# Gmail integration (docs/gmail.md). Optional: the OAuth client is normally
+# entered on the Inboxes page (Google settings) and stored encrypted. These
+# are only read when nothing is saved there.
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 

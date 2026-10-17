@@ -95,9 +95,6 @@ export async function runBackfillJob(
     chunksPerJob: CHUNKS_PER_JOB,
   },
 ) {
-  const cfg = gmailAuthConfig(env);
-  if (!cfg) return { status: "stopped", reason: "not_configured" } as const;
-
   for (let i = 0; i < sizes.chunksPerJob; i++) {
     // A throw — Gmail down, a token refresh failing — is retried by the
     // step. It resumes from the last saved point; anything the failed
@@ -108,16 +105,24 @@ export async function runBackfillJob(
         retries: { limit: 3, delay: "30 seconds", backoff: "exponential" },
         timeout: "10 minutes",
       },
-      async () =>
-        runBackfillChunk(
-          drizzle(env.DB, { schema }),
+      async (): Promise<BackfillChunkResult> => {
+        const db = drizzle(env.DB, { schema });
+        // Read per chunk, inside the step: an admin can change the Google
+        // settings while a job runs.
+        const cfg = await gmailAuthConfig(db, env);
+        if (!cfg) {
+          return { status: "stopped", handled: 0, reason: "not_configured" };
+        }
+        return runBackfillChunk(
+          db,
           env,
           ctx,
           cfg,
           accountId,
           jobId,
           sizes.chunkSize,
-        ),
+        );
+      },
     );
     if (result.status === "done") {
       // Finished, and so no longer holding the claim: hand the turn to the
@@ -281,7 +286,7 @@ export async function ensureBackfillJobs(
   env: CloudflareBindings,
   justMapped?: string,
 ): Promise<void> {
-  if (!hasBackfillJob(env) || !gmailAuthConfig(env)) return;
+  if (!hasBackfillJob(env) || !(await gmailAuthConfig(db, env))) return;
 
   const pending = await db
     .select({

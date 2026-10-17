@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import ProviderSettingsPanel from "@/components/ProviderSettingsPanel";
 import { useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
@@ -345,6 +346,8 @@ export default function ConnectedMailboxes({
           Connect a Google mailbox
         </button>
       </div>
+
+      <ProviderSettingsPanel provider="google" />
 
       {(connectResult === "error" || connectError !== null) && (
         <div

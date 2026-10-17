@@ -14,6 +14,7 @@ import { computeConversationId, externalsOnly } from "../conversation-id";
 import { fetchInternalDomains } from "../internal-domains";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
+import { loadProviderConfig } from "../oauth-providers";
 import { getProfile, GoogleAuthError } from "./oauth";
 import {
   listHistory,
@@ -954,7 +955,13 @@ export type BackfillChunkResult =
   | {
       status: "stopped";
       handled: number;
-      reason: "gone" | "complete" | "superseded" | "no_inbox" | "failed";
+      reason:
+        | "gone"
+        | "complete"
+        | "superseded"
+        | "no_inbox"
+        | "failed"
+        | "not_configured";
     };
 
 /**
@@ -1203,20 +1210,22 @@ async function syncHistory(
  * stop the others, so every account runs under Promise.allSettled and its
  * rejection is logged rather than propagated.
  */
-/** The OAuth and encryption secrets, or null when Gmail is not configured. */
-export function gmailAuthConfig(
+/**
+ * The Google OAuth app and encryption secrets, or null when Gmail is not
+ * configured. Entered on the Inboxes page (see `lib/oauth-providers`), with
+ * the old env vars as a fallback.
+ */
+export async function gmailAuthConfig(
+  db: DrizzleD1Database<typeof schema>,
   env: CloudflareBindings,
-): GmailAuthConfig | null {
-  const gmailEnv = env as CloudflareBindings & {
-    GOOGLE_OAUTH_CLIENT_ID?: string;
-    GOOGLE_OAUTH_CLIENT_SECRET?: string;
-    TOKEN_ENCRYPTION_KEY?: string;
+): Promise<GmailAuthConfig | null> {
+  const cfg = await loadProviderConfig(db, env, "google");
+  if (!cfg) return null;
+  return {
+    clientId: cfg.clientId,
+    clientSecret: cfg.clientSecret,
+    encryptionKey: cfg.encryptionKey,
   };
-  const clientId = gmailEnv.GOOGLE_OAUTH_CLIENT_ID;
-  const clientSecret = gmailEnv.GOOGLE_OAUTH_CLIENT_SECRET;
-  const encryptionKey = gmailEnv.TOKEN_ENCRYPTION_KEY;
-  if (!clientId || !clientSecret || !encryptionKey) return null;
-  return { clientId, clientSecret, encryptionKey };
 }
 
 export async function syncAllGmailAccounts(
@@ -1226,7 +1235,7 @@ export async function syncAllGmailAccounts(
 ): Promise<void> {
   // Gmail sync is optional. An instance that never configured it must not log
   // an error on every cron tick.
-  const cfg = gmailAuthConfig(env);
+  const cfg = await gmailAuthConfig(db, env);
   if (!cfg) return;
 
   const accounts = await db.select().from(gmailAccounts);

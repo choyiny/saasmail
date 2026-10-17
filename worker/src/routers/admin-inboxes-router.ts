@@ -13,6 +13,7 @@ import { GoogleAuthError } from "../lib/gmail/oauth";
 import { getAccessToken } from "../lib/gmail/token";
 import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
 import { ensureBackfillJobs } from "../lib/gmail/backfill-job";
+import { gmailAuthConfig } from "../lib/gmail/sync";
 import type { Variables } from "../variables";
 
 type InboxesEnv = CloudflareBindings & {
@@ -25,15 +26,6 @@ export const adminInboxesRouter = new OpenAPIHono<{
   Bindings: InboxesEnv;
   Variables: Variables;
 }>();
-
-/** The secrets a Gmail token refresh needs, or null when unconfigured. */
-function gmailConfig(env: InboxesEnv) {
-  const clientId = env.GOOGLE_OAUTH_CLIENT_ID;
-  const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET;
-  const encryptionKey = env.TOKEN_ENCRYPTION_KEY;
-  if (!clientId || !clientSecret || !encryptionKey) return null;
-  return { clientId, clientSecret, encryptionKey };
-}
 
 const InboxRowSchema = z.object({
   email: z.string(),
@@ -447,9 +439,15 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     (currentRow?.source !== "gmail" ||
       currentRow?.gmailAccountId !== nextGmailAccountId)
   ) {
-    const cfg = gmailConfig(c.env);
+    const cfg = await gmailAuthConfig(db, c.env);
     if (!cfg) {
-      return c.json({ error: "Gmail integration is not configured" }, 503);
+      return c.json(
+        {
+          error:
+            "Google is not set up yet. Add its OAuth client ID and secret under Inboxes → Connected mailboxes → Google settings.",
+        },
+        503,
+      );
     }
 
     let sendAs: string[];

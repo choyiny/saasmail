@@ -6,6 +6,7 @@ import { GmailApiError } from "../gmail/api";
 import { GoogleAuthError } from "../gmail/oauth";
 import { getAccessToken, invalidateAccessToken } from "../gmail/token";
 import { createEmailSender } from "./index";
+import { gmailAuthConfig } from "../gmail/sync";
 import { GmailSender, GMAIL_MAX_ATTACHMENT_BYTES } from "./providers/gmail";
 import type { EmailSender } from "./types";
 
@@ -15,9 +16,6 @@ type ForInboxEnv = CloudflareBindings & {
   BAVIMAIL_API_KEY?: string;
   BAVIMAIL_ALIAS_ID?: string;
   POSTMARK_API_KEY?: string;
-  GOOGLE_OAUTH_CLIENT_ID?: string;
-  GOOGLE_OAUTH_CLIENT_SECRET?: string;
-  TOKEN_ENCRYPTION_KEY?: string;
 };
 
 /**
@@ -100,11 +98,7 @@ async function resolveGmailAccountId(
   env: ForInboxEnv,
   fromAddress: string,
 ): Promise<string | null> {
-  if (
-    !env.GOOGLE_OAUTH_CLIENT_ID ||
-    !env.GOOGLE_OAUTH_CLIENT_SECRET ||
-    !env.TOKEN_ENCRYPTION_KEY
-  ) {
+  if (!(await gmailAuthConfig(db, env))) {
     console.error(
       "[createSenderForInbox] Gmail integration is not configured (missing OAuth secrets); falling back to the configured provider",
     );
@@ -176,10 +170,8 @@ async function tryGmailSender(
   const accountId = await resolveGmailAccountId(db, env, fromAddress);
   if (!accountId) return null;
 
-  const clientId = env.GOOGLE_OAUTH_CLIENT_ID!;
-  const clientSecret = env.GOOGLE_OAUTH_CLIENT_SECRET!;
-  const encryptionKey = env.TOKEN_ENCRYPTION_KEY!;
-  const cfg = { clientId, clientSecret, encryptionKey };
+  // Non-null: resolveGmailAccountId only returns an id when it is configured.
+  const cfg = (await gmailAuthConfig(db, env))!;
 
   // Resolve a token now — this is what surfaces a dangling gmailAccountId
   // (getAccessToken throws "unknown gmail account") or a grant revoked
