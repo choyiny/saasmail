@@ -1,0 +1,48 @@
+name: Publish
+
+# Publishes the npm package `saasmail` when a release is published. Never runs on pull requests.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the tag is vX.Y.Z[-pre]
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag '$TAG' is not vX.Y.Z[-pre]; not publishing."
+            exit 1
+          fi
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+          registry-url: https://registry.npmjs.org
+      - run: yarn install --frozen-lockfile
+      - name: Seed wrangler.jsonc (gitignored; needed by vitest-pool-workers)
+        run: cp wrangler.jsonc.ci wrangler.jsonc
+      - name: Create empty assets dir (referenced by wrangler.jsonc)
+        run: mkdir -p dist/client
+      - run: yarn test
+      - name: Build the package
+        run: node scripts/saasmail/pack.mjs --version "$VERSION"
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # A prerelease goes to the `next` tag so `latest` stays on the last release.
+          tag=latest
+          case "$VERSION" in *-*) tag=next ;; esac
+          npm publish ./build/npm --provenance --access public --tag "$tag"
