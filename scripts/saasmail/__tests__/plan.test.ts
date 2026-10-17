@@ -524,6 +524,78 @@ describe("computePlan", () => {
   });
 });
 
+describe("computePlan: adopted resources", () => {
+  const adopted = (
+    key: string,
+    kind: Resource["kind"],
+    name: string,
+    id: string,
+  ): Resource => ({ ...rec(key, kind, name, id), ownership: "adopted" });
+  const withRes = (...r: Resource[]) => {
+    const s = state();
+    s.resources.push(...r);
+    return s;
+  };
+
+  it("adopted d1 without install row is reused", () => {
+    const s = withRes(adopted("d1", "d1", "saasmail-db", "uuid-1"));
+    const o = {
+      ...empty(),
+      d1: [{ uuid: "uuid-1", name: "saasmail-db" }],
+      d1Tables: { "uuid-1": ["emails"] },
+      d1InstallRow: { "uuid-1": null },
+    };
+    expect(computePlan(desired, o, s).actions[0].action).toBe("reuse");
+  });
+
+  it("adopted r2 with objects and no marker is reused", () => {
+    const s = withRes(adopted("attachments", "r2", names.attachments, "x"));
+    const o = {
+      ...empty(),
+      r2: [names.attachments],
+      r2Empty: { [names.attachments]: false },
+    };
+    expect(computePlan(desired, o, s).actions[1].action).toBe("reuse");
+  });
+
+  it("adopted queue without our consumer and adopted workflow are reused", () => {
+    const s = withRes(
+      adopted("queue", "queue", names.queue, "q-1"),
+      adopted("workflow", "workflow", names.workflow, names.workflow),
+    );
+    const o = {
+      ...empty(),
+      queues: [queue([], [], "q-1")],
+      workflows: [{ name: names.workflow, scriptName: "other" }],
+    };
+    const a = computePlan(desired, o, s).actions;
+    expect(a[2].action).toBe("reuse");
+    expect(a[3].action).toBe("reuse");
+  });
+
+  it("adopted worker without SAASMAIL_INSTALLATION deploys", () => {
+    const s = withRes(adopted("worker", "worker", "saasmail", "saasmail"));
+    const o = { ...empty(), worker: { exists: true, vars: {} } };
+    expect(computePlan(desired, o, s).actions[4].action).toBe("deploy");
+  });
+
+  it("adopted id mismatch stops", () => {
+    const s = withRes(adopted("d1", "d1", "saasmail-db", "uuid-old"));
+    const o = {
+      ...empty(),
+      d1: [{ uuid: "uuid-new", name: "saasmail-db" }],
+    };
+    expect(stopMessage(() => computePlan(desired, o, s))).toContain(
+      "`saasmail-db` is recorded as adopted",
+    );
+    const s2 = withRes(adopted("queue", "queue", names.queue, "q-old"));
+    const o2 = { ...empty(), queues: [queue([], [], "q-new")] };
+    expect(stopMessage(() => computePlan(desired, o2, s2))).toContain(
+      "recorded as adopted",
+    );
+  });
+});
+
 describe("computePlan: queue", () => {
   it("reuses a queue whose consumer is our worker", () => {
     const o = {

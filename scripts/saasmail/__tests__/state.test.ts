@@ -79,6 +79,11 @@ describe("transition", () => {
     ["failed", "deploying"],
     ["failed", "verifying"],
     ["deploying", "provisioning"],
+    ["installed", "upgrading"],
+    ["upgrading", "installed"],
+    ["upgrading", "failed"],
+    ["failed", "upgrading"],
+    ["upgrading", "upgrading"],
     ["provisioning", "provisioning"],
     ["deploying", "deploying"],
     ["verifying", "verifying"],
@@ -93,6 +98,18 @@ describe("transition", () => {
     const s = { ...fresh(), status: "provisioning" as const };
     expect(transition(s, "provisioning")).toBe(s);
   });
+  it("installed can start an upgrade", () => {
+    const s = { ...fresh(), status: "installed" as const };
+    expect(transition(s, "upgrading").status).toBe("upgrading");
+  });
+  it("failed upgrade resumes", () => {
+    const s = { ...fresh(), status: "failed" as const };
+    expect(transition(s, "upgrading").status).toBe("upgrading");
+  });
+  it("upgrading again is a no-op returning the state unchanged", () => {
+    const s = { ...fresh(), status: "upgrading" as const };
+    expect(transition(s, "upgrading")).toBe(s);
+  });
   const denied: [Status, Status][] = [
     ["installed", "provisioning"],
     ["installed", "installed"],
@@ -100,6 +117,8 @@ describe("transition", () => {
     ["planned", "installed"],
     ["planned", "deploying"],
     ["failed", "installed"],
+    ["upgrading", "provisioning"],
+    ["planned", "upgrading"],
   ];
   for (const [from, to] of denied) {
     it(`${from} -> ${to} throws`, () => {
@@ -147,6 +166,27 @@ describe("files", () => {
     expect(statSync(statePath(dir, s.installationId)).mode & 0o777).toBe(0o600);
     expect(readdirSync(dir)).toEqual([`${s.installationId}.json`]);
     expect(listStates(dir)).toEqual([s]);
+  });
+  it("adopted ownership and the new optional fields round-trip", () => {
+    const s = recordResource(
+      {
+        ...fresh(),
+        movedTo: "/abs/dir",
+        adoptedAt: "2026-10-17T00:00:00.000Z",
+        upgradedAt: "2026-10-18T00:00:00.000Z",
+        upgradeTarget: "0.11.0",
+      },
+      {
+        key: "d1",
+        kind: "d1",
+        name: "x",
+        id: "id1",
+        ownership: "adopted",
+        state: "ready",
+      },
+    );
+    writeState(dir, s);
+    expect(readState(dir, s.installationId)).toEqual(s);
   });
   it("missing state reads as null, missing dir lists empty", () => {
     expect(readState(dir, "nope")).toBeNull();

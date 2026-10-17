@@ -79,6 +79,7 @@ const RANK: Record<Status, number> = {
   deploying: 2,
   verifying: 3,
   installed: 4,
+  upgrading: 4,
 };
 
 const PHASES: Status[] = ["provisioning", "deploying", "verifying"];

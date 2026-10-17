@@ -94,6 +94,54 @@ function parseObject(
   }
 }
 
+const adoptedMismatch = (name: string) =>
+  new PlanStop(
+    `\`${name}\` is recorded as adopted, but what exists in Cloudflare is not the resource that was adopted. Nothing was changed.`,
+  );
+
+/**
+ * A resource recorded as adopted is ours without the marker, row or var checks: the recorded
+ * identity must match what is observed (ids for D1 and queues, names for the rest).
+ */
+function decideAdopted(
+  kind: ResourceKind,
+  name: string,
+  desired: Desired,
+  observed: Observed,
+  recorded: Resource,
+): Action["action"] {
+  switch (kind) {
+    case "d1": {
+      const matches = observed.d1.filter((d) => d.name === name);
+      if (matches.length === 0) throw recordedButMissing(name);
+      if (!matches.some((d) => d.uuid === recorded.id)) {
+        throw adoptedMismatch(name);
+      }
+      return "reuse";
+    }
+    case "r2":
+      if (!observed.r2.includes(name)) throw recordedButMissing(name);
+      if (recorded.name !== name) throw adoptedMismatch(name);
+      return "reuse";
+    case "queue": {
+      const q = observed.queues.find((x) => x.name === name);
+      if (!q) throw recordedButMissing(name);
+      if (q.id !== recorded.id) throw adoptedMismatch(name);
+      return "reuse";
+    }
+    case "workflow": {
+      const matches = observed.workflows.filter((w) => w.name === name);
+      if (matches.length === 0) throw recordedButMissing(name);
+      if (recorded.name !== name) throw adoptedMismatch(name);
+      return "reuse";
+    }
+    case "worker":
+      if (!observed.worker.exists) throw recordedButMissing(name);
+      if (recorded.name !== desired.names.worker) throw adoptedMismatch(name);
+      return "deploy";
+  }
+}
+
 /** One resource's action, or a PlanStop. `recorded` is this key's state-file entry, if any. */
 function decide(
   key: Key,
@@ -105,6 +153,9 @@ function decide(
 ): Action["action"] {
   const name = desired.names[key];
   const { installationId, ownershipNonce } = desired;
+  if (recorded?.ownership === "adopted") {
+    return decideAdopted(kind, name, desired, observed, recorded);
+  }
   const intent = state !== null && hasStep(state, `provision-intent:${key}`);
 
   switch (kind) {
