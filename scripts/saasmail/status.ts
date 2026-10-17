@@ -41,6 +41,7 @@ export function describeState(s: InstallState): string {
     `Inbound       ${list(i.inboundDomains)}`,
     `Provider      ${i.provider}`,
   ];
+  if (s.movedTo !== undefined) lines.splice(2, 0, `Moved         ${s.movedTo}`);
   if (i.provider === "cloudflare") {
     lines.push(`Send          ${list(i.sendDomains)}`);
   }

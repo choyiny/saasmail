@@ -500,7 +500,7 @@ export async function resumeInstalled(
     if (!upToDate) {
       ctx.io.print(
         `${ctx.source.kind === "checkout" ? "This checkout" : "This package"} (${head}) differs from the deployed version (${s.deployedVersion ?? "unknown"}). ` +
-          "Upgrades come in a later release; wrangler.jsonc was left as it is.",
+          `Upgrades: run npx saasmail adopt --from ${ctx.configDir}, then npx saasmail upgrade.`,
       );
     }
 

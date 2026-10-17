@@ -1323,7 +1323,7 @@ describe("resumeInstalled", () => {
     expect(existsSync(join(cwd, "wrangler.jsonc"))).toBe(false);
     const out = h.printed.join("\n");
     expect(out).toContain("Nothing to do.");
-    expect(out).toContain("Upgrades come in a later release");
+    expect(out).toContain("Upgrades: run npx saasmail adopt --from");
   });
 
   it("refuses credentials that would need an upgrade deploy", async () => {

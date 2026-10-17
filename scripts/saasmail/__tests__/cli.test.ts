@@ -1582,3 +1582,90 @@ describe("isEntry", () => {
     rmSync(d, { recursive: true, force: true });
   });
 });
+
+describe("adopt", () => {
+  const home = () => join(root, "home");
+  const MOVED = () => join(home(), resourceNames("acme").worker);
+  const seedCheckout = (over: Partial<InstallState> = {}) => {
+    const s = { ...installedState(), ...over };
+    writeState(dir, s);
+    writeFileSync(join(cwd, "wrangler.jsonc"), "// generated\n{}\n");
+    return s;
+  };
+  const MOVED_LINE = () =>
+    `This install moved to ${MOVED()}. Run npx saasmail upgrade --name ${resourceNames("acme").worker}.`;
+
+  it("moves the install and the checkout then refuses install and --resume", async () => {
+    seedCheckout();
+    const h = harness({ home: home() });
+    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(0);
+    expect(h.text()).toContain(`Moved acme to ${MOVED()}`);
+    expect(readState(MOVED(), ID)!.adoptedAt).toBe("2026-10-17T00:00:00.000Z");
+    expect(readState(dir, ID)!.movedTo).toBe(MOVED());
+    expect(h.tokenCalls()).toBe(0);
+
+    const checkoutHarness = () => harness({});
+    const fresh = checkoutHarness();
+    expect(await main(["install", ...FLAGS, "--yes"], fresh.deps)).toBe(1);
+    expect(fresh.text()).toContain(MOVED_LINE());
+    expect(fresh.deploys).toHaveLength(0);
+
+    const resume = checkoutHarness();
+    expect(
+      await main(
+        ["install", "--resume", "--name", "acme", "--yes"],
+        resume.deps,
+      ),
+    ).toBe(1);
+    expect(resume.text()).toContain(MOVED_LINE());
+    expect(resume.deploys).toHaveLength(0);
+  });
+
+  it("status on a moved checkout state shows where it went", async () => {
+    seedCheckout({ movedTo: "/somewhere/acme" });
+    const h = harness({});
+    expect(await main(["status"], h.deps)).toBe(0);
+    expect(h.text()).toContain("Moved         /somewhere/acme");
+  });
+
+  it("asks before moving, and a no changes nothing", async () => {
+    seedCheckout();
+    const h = harness({ home: home(), tty: true, confirm: false });
+    expect(await main(["adopt", "--from", cwd], h.deps)).toBe(1);
+    expect(h.confirms).toEqual(["Move this install?"]);
+    expect(h.text()).toContain("Nothing was changed.");
+    expect(existsSync(MOVED())).toBe(false);
+    expect(readState(dir, ID)!.movedTo).toBeUndefined();
+  });
+
+  it("without a terminal and --yes exits 2", async () => {
+    seedCheckout();
+    const h = harness({ home: home() });
+    expect(await main(["adopt", "--from", cwd], h.deps)).toBe(2);
+    expect(h.text()).toContain("Not running in a terminal");
+    expect(existsSync(MOVED())).toBe(false);
+  });
+
+  it("needs --from", async () => {
+    const h = harness({ home: home() });
+    expect(await main(["adopt", "--yes"], h.deps)).toBe(2);
+    expect(h.text()).toContain("adopt needs --from");
+  });
+
+  it("checkout mode points at npx", async () => {
+    seedCheckout();
+    const h = harness({});
+    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(2);
+    expect(h.text()).toContain(`npx saasmail adopt --from ${cwd}`);
+    expect(readState(dir, ID)!.movedTo).toBeUndefined();
+  });
+
+  it("a taken destination exits 1 and leaves the checkout alone", async () => {
+    const s = seedCheckout();
+    writeState(MOVED(), s);
+    const h = harness({ home: home() });
+    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(1);
+    expect(h.text()).toContain(`${MOVED()} already has an install`);
+    expect(readState(dir, ID)!.movedTo).toBeUndefined();
+  });
+});
