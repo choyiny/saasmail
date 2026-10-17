@@ -26,7 +26,7 @@ const MigrationRequiredSchema = z.object({
 
 const MIGRATION_REQUIRED_RESPONSE = {
   error:
-    "Database migrations have not been applied yet. Run `yarn db:migrate:prod` to create the production D1 tables, or or run `yarn saasmail install --resume` to continue setup, then reload saasmail.",
+    "Database migrations have not been applied yet. Run `yarn db:migrate:prod` to create the production D1 tables, or run `yarn saasmail install --resume` to continue setup, then reload saasmail.",
   code: "DATABASE_MIGRATION_REQUIRED",
   command: "yarn db:migrate:prod",
 } as const;
@@ -113,7 +113,8 @@ const createRouteDef = createRoute({
   responses: {
     ...json200Response(SetupResponseSchema, "First user created"),
     403: {
-      description: "Setup has already been completed",
+      description:
+        "Setup has already been completed, or the setup code is missing or wrong",
       content: { "application/json": { schema: ErrorSchema } },
     },
     400: {
