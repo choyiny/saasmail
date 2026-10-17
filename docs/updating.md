@@ -40,6 +40,8 @@ npx saasmail adopt --worker <name> [--account <id|name>] [--inbound-domain <doma
 
 It reads the worker's bindings from Cloudflare and deploys nothing. If the running version is unknown, the first upgrade needs `--replace-custom-code`. Zone routes other than custom domains are not supported.
 
+The first upgrade deploys saasmail's generated config, which replaces the worker's vars. So adopt stops, writing nothing, when a var would be lost or changed: a var the generated config does not set, one it sets to a different value (for example a `TRUSTED_ORIGINS` list edited by hand; it becomes the site URL), or a plain var named like a secret saasmail generates (`BETTER_AUTH_SECRET`, `UNSUBSCRIBE_SECRET`, `TOKEN_ENCRYPTION_KEY`, `VAPID_PRIVATE_KEY`, `SETUP_CODE_HASH`). It lists each var with its current and new value (a secret-named var's value is not shown). Change or remove them on the worker, then run adopt again. For a secret-named var, keep its value: change its type to Secret in the dashboard (Worker → Settings → Variables and Secrets), so data it protects stays readable. `SAASMAIL_VERSION` is expected to change and does not stop it.
+
 ### A database without d1_migrations
 
 `upgrade` reads the `d1_migrations` table to know which migrations already ran. A database set up some other way (for example SQL files run with `wrangler d1 execute`) has saasmail's tables but no such table, so the plan stops with `D1 <name> has tables but no d1_migrations table` and changes nothing. Running every migration again would fail on the existing tables.

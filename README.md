@@ -30,9 +30,10 @@ SaaS teams that want a self-hosted email stack on Cloudflare Workers — one sha
 One command provisions every Cloudflare resource, writes your config, runs migrations, generates the secrets, deploys, and wires up Email Routing and Email Sending. No clone needed:
 
 ```bash
-npx wrangler login   # or set CLOUDFLARE_API_TOKEN; the installer prints the exact command if you forget
-npx saasmail install
+npx saasmail install   # not signed in? it prints the login command to run first
 ```
+
+Sign in to Cloudflare with the login command the installer prints (its pinned wrangler), or set `CLOUDFLARE_API_TOKEN`.
 
 Your install's state and generated `wrangler.jsonc` live in `~/.saasmail/<name>/` (`SAASMAIL_HOME` overrides), never in a repository. Later:
 

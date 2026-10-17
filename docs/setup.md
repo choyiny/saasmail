@@ -73,7 +73,7 @@ If a run stops, it prints the step that failed and the command to continue: `npx
 
 A zone whose Email Routing never becomes ready within 60 seconds fails that step, and fails again each resume until the zone is healthy. `--resume` never upgrades a deployed instance: updates go through `npx saasmail@latest upgrade` ([Updating](updating.md)).
 
-`npx saasmail status` shows the recorded installation (add `--name <name>` when there are several), the **Latest** version on npm, and asks the deployed worker's public `/.well-known/saasmail` whether it matches.
+`npx saasmail status` shows the recorded installation (add `--name <name>` when there are several), the **Latest** version on npm with the command that upgrades to it (`npx saasmail@<latest> upgrade --name <name>`), and asks the deployed worker's public `/.well-known/saasmail` whether it matches. For an install still in a clone, `npx saasmail status --from <checkout>` reads the checkout's state without moving or writing anything; its upgrade hint adopts from that checkout first.
 
 ### Install from a clone
 
