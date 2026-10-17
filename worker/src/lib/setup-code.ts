@@ -16,7 +16,7 @@ export async function setupCodeHash(code: string): Promise<string> {
     .join("");
 }
 
-/** Any env shape: Site admin → Setup passes a partial one. */
+/** Any env shape. */
 function configuredHash(env: object): string {
   const v = (env as { SETUP_CODE_HASH?: unknown }).SETUP_CODE_HASH;
   return typeof v === "string" ? v.trim().toLowerCase() : "";

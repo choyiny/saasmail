@@ -206,6 +206,20 @@ describe("preflight", () => {
     expect(other.failures).toEqual([]);
   });
 
+  it("send domain: a zone that is not active -> zone failure naming the status", async () => {
+    const cf = fakeCloudflare({
+      ...seed,
+      zones: [...seed.zones, zone("z9", "corp.com", "pending")],
+    });
+    const r = await preflight(cf, runner(), {
+      ...input,
+      sendDomains: ["x.corp.com"],
+    });
+    expect(r.failures.map((f) => f.check)).toEqual(["zone"]);
+    expect(r.failures[0]!.message).toContain("pending");
+    expect(r.zoneIds["x.corp.com"]).toBe("z9");
+  });
+
   it("--workers-dev without a subdomain -> workers-dev failure", async () => {
     const r = await preflight(
       fakeCloudflare({ zones: seed.zones }),

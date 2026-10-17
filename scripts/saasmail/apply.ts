@@ -491,7 +491,7 @@ export async function resumeInstalled(
     const redeploy = Object.keys(secrets).length > 0;
     if (redeploy && !upToDate) {
       throw new Error(
-        `Adding credentials or a setup code needs a deploy, which from this checkout would be an upgrade. Check out ${s.deployedVersion ?? "the deployed commit"} and run again.`,
+        `Adding credentials or a setup code needs a deploy, which from this checkout would be an upgrade. Check out ${s.deployedVersion ?? "the deployed commit"} and run again. If you have updated with \`yarn deploy\` since installing, do not: deploying the older commit would roll back code and schema. Follow docs/updating.md instead.`,
       );
     }
     if (redeploy) {

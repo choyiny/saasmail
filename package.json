@@ -3,9 +3,6 @@
   "version": "0.10.0",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=22.18"
-  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -14,9 +11,9 @@
     "auth:generate": "npx @better-auth/cli@latest generate --config worker/src/auth/index.ts --output worker/src/db/auth.schema.ts -y",
     "auth:migrate": "npx @better-auth/cli@latest migrate --config worker/src/auth/index.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate:dev": "wrangler d1 migrations apply saasmail-db --local",
-    "db:migrate:prod": "wrangler d1 migrations apply saasmail-db --remote",
-    "db:seed:dev": "wrangler d1 execute saasmail-db --local --file=seeds/demo.sql && bash seeds/upload-attachments.sh",
+    "db:migrate:dev": "wrangler d1 migrations apply DB --local",
+    "db:migrate:prod": "wrangler d1 migrations apply DB --remote",
+    "db:seed:dev": "wrangler d1 execute DB --local --file=seeds/demo.sql && bash seeds/upload-attachments.sh",
     "db:studio:dev": "drizzle-kit studio",
     "db:studio:prod": "NODE_ENV=production drizzle-kit studio",
     "cf-typegen": "node scripts/cf-typegen.mjs",

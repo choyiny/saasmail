@@ -3,6 +3,7 @@ import type { CatchAll, Queue } from "../cloudflare.ts";
 import { resourceNames } from "../names.ts";
 import { observe, type MailInputs, type Observed } from "../observe.ts";
 import {
+  catchAllOwner,
   computePlan,
   formatPlan,
   planDigest,
@@ -955,5 +956,26 @@ describe("observe", () => {
     expect(cf.calls.some((c) => c.method === "listSendingSubdomains")).toBe(
       false,
     );
+  });
+});
+
+describe("catchAllOwner", () => {
+  const rule = (actions: CatchAll["actions"], enabled = true): CatchAll =>
+    ({ enabled, actions }) as CatchAll;
+
+  it("a rule with several actions is taken, even if one is ours", () => {
+    expect(
+      catchAllOwner(
+        rule([
+          { type: "worker", value: ["acme-worker"] },
+          { type: "forward", value: ["me@example.com"] },
+        ]),
+        "acme-worker",
+      ),
+    ).toBe("taken");
+  });
+
+  it("an enabled rule with no actions is taken", () => {
+    expect(catchAllOwner(rule([]), "acme-worker")).toBe("taken");
   });
 });

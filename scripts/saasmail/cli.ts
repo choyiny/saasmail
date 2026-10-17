@@ -1,5 +1,6 @@
 // `yarn saasmail <command>`: the user-facing installer (spec docs/superpowers/specs/2026-10-17-deterministic-install-design.md
 // §2–§6). Every outside effect comes in through `Deps`, so tests drive `main` with fakes; the real wiring is at the bottom.
+import "./node-guard.ts";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

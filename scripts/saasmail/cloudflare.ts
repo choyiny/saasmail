@@ -359,7 +359,7 @@ export function restCloudflare(
     },
 
     // GET /zones/{z}/workers/routes -> [{ id, pattern, script? }] (wrangler cloudflare@5.2 resources/workers/routes
-    // list; wrangler"s deploy reads `{ pattern, script }` from the same path). No script = a route that runs no worker.
+    // list; wrangler's deploy reads `{ pattern, script }` from the same path). No script = a route that runs no worker.
     async workerRoutes(zoneId) {
       const rows = await list<{ pattern: string; script?: string | null }>(
         `/zones/${enc(zoneId)}/workers/routes`,

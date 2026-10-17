@@ -293,16 +293,25 @@ export async function preflight(
       async () => {
         const z = await cf.findZone(a, domain);
         const zones = { [domain]: z?.id ?? null };
-        return z
-          ? { failures: [], zones }
-          : {
-              ...one(
-                "zone",
-                `No zone covering the send domain ${domain} was found in this account.`,
-                "Add the domain to this Cloudflare account, then run the installer again.",
-              ),
-              zones,
-            };
+        if (!z)
+          return {
+            ...one(
+              "zone",
+              `No zone covering the send domain ${domain} was found in this account.`,
+              "Add the domain to this Cloudflare account, then run the installer again.",
+            ),
+            zones,
+          };
+        if (z.status !== "active")
+          return {
+            ...one(
+              "zone",
+              `The zone ${z.name} is ${z.status}, not active.`,
+              "Finish the zone setup (point the registrar at Cloudflare nameservers) and wait until it is active.",
+            ),
+            zones,
+          };
+        return { failures: [], zones };
       },
       "Check the zone in the Cloudflare dashboard.",
     );
