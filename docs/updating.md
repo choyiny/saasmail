@@ -22,7 +22,7 @@ After rebasing, apply any new migrations:
 yarn db:migrate:prod
 ```
 
-Your `wrangler.jsonc` is yours and is never touched by the rebase, so compare it with `wrangler.jsonc.example` for new bindings — the [CHANGELOG](../CHANGELOG.md) names each one. A missing binding usually means a feature falls back or stays off rather than failing; the Gmail import job (`workflows`) is one.
+If `yarn saasmail install` generated your `wrangler.jsonc` (its first line says so), don't hand-edit its top level: the installer owns it and records a hash of what it deployed, and `yarn saasmail install --resume` refuses to deploy when the config it would generate from this checkout differs (an upgrade). It never upgrades a deployed instance, so updates still go through the path above. Your `wrangler.jsonc` is yours and is never touched by the rebase, so compare it with `wrangler.jsonc.example` for new bindings — the [CHANGELOG](../CHANGELOG.md) names each one. A missing binding usually means a feature falls back or stays off rather than failing; the Gmail import job (`workflows`) is one.
 
 ---
 

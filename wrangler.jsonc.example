@@ -1,6 +1,7 @@
 {
   // Copy this file to wrangler.jsonc and fill in your values.
   // wrangler.jsonc is gitignored so each deployer has their own config.
+  // Recommended: `yarn saasmail install` generates it from this file and creates the resources.
   "name": "saasmail",
   "main": "worker/src/index.ts",
   "account_id": "<your-cloudflare-account-id>",
