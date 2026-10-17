@@ -9,7 +9,12 @@ import { install, resumeInstalled, type Ctx, type Optional } from "./apply.ts";
 import { assertConfigWritable, OPTIONAL_ITEMS } from "./apply-steps.ts";
 import { restCloudflare, type Cloudflare } from "./cloudflare.ts";
 import { clackIo, collect, type Io } from "./collect.ts";
-import { installDir, listInstalls, pickInstall, saasmailHome } from "./home.ts";
+import {
+  installDir,
+  pickInstall,
+  pickResumable,
+  saasmailHome,
+} from "./home.ts";
 import { ConfigConflict } from "./config.ts";
 import { installationIdOf, resourceNames, validateName } from "./names.ts";
 import { observe } from "./observe.ts";
@@ -596,29 +601,7 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
     let s: InstallState;
     let recorded: boolean;
     if (f.resume) {
-      if (home !== null) {
-        const all = listInstalls(home);
-        const unfinished = all.filter((i) => i.state.status !== "installed");
-        const pick =
-          f.name !== undefined
-            ? all.find((i) => i.slug === f.name)
-            : unfinished.length === 1
-              ? unfinished[0]
-              : unfinished.length === 0 && all.length === 1
-                ? all[0]
-                : undefined;
-        if (
-          f.name === undefined &&
-          (unfinished.length > 1 || all.length > 1) &&
-          !pick
-        ) {
-          throw new UsageError(
-            `Several installs: ${all.map((i) => i.slug).join(", ")}. Pass --name.`,
-          );
-        }
-        if (pick) inInstall(pick.slug);
-        else ctx = { ...ctx, dir: home, configDir: home };
-      }
+      if (home !== null) inInstall(pickResumable(home, f.name).slug);
       const found = resumable(ctx.dir, f.name);
       if (!found) {
         io.print(

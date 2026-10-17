@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+  utimesSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -79,5 +87,14 @@ describe("pickInstall", () => {
     expect(() => pickInstall(join(home, "missing"), undefined)).toThrow(
       UsageError,
     );
+  });
+});
+
+describe("listInstalls", () => {
+  it("skips files and dangling symlinks", () => {
+    put("acme");
+    writeFileSync(join(home, "note.txt"), "x");
+    symlinkSync(join(home, "nowhere"), join(home, "dangling"));
+    expect(listInstalls(home).map((i) => i.slug)).toEqual(["acme"]);
   });
 });

@@ -453,6 +453,62 @@ describe("install", () => {
     expect(h.out.at(-1)).toContain(`npx saasmail@${VERSION} install`);
   });
 
+  describe("package --resume", () => {
+    const home = () => join(root, "home");
+    const seed = (name: string, status: "installed" | "failed") => {
+      const d = join(home(), name);
+      writeState(d, {
+        ...installedState(),
+        installationId: installationIdOf(ACCOUNT, name, "workers.dev"),
+        inputs: { ...installedState().inputs, name },
+        status,
+      });
+    };
+    const resume = (extra: string[] = []) => {
+      const h = harness({ home: home() });
+      return main(["install", "--resume", "--yes", ...extra], h.deps).then(
+        (code) => ({ code, text: h.text() }),
+      );
+    };
+
+    it("picks the only unfinished install", async () => {
+      seed("acme", "failed");
+      seed("done", "installed");
+      const r = await resume();
+      expect(r.text).not.toContain("Several installs");
+      expect(r.text).not.toContain("No saasmail install");
+      // Selected and run: it got as far as comparing the recorded resources with Cloudflare.
+      expect(r.text).toContain("`acme-db` is recorded but missing");
+      expect(existsSync(join(home(), "wrangler.jsonc"))).toBe(false);
+    });
+
+    it("several unfinished without --name: exit 2 listing them", async () => {
+      seed("acme", "failed");
+      seed("beta", "failed");
+      seed("done", "installed");
+      const r = await resume();
+      expect(r.code).toBe(2);
+      expect(r.text).toContain("Several installs: acme, beta. Pass --name.");
+    });
+
+    it("--name selects", async () => {
+      seed("acme", "failed");
+      seed("beta", "failed");
+      const r = await resume(["--name", "acme"]);
+      expect(r.text).not.toContain("Several installs");
+      expect(r.text).toContain("`acme-db` is recorded but missing");
+    });
+
+    it("none: a clear message, exit 2", async () => {
+      const r = await resume();
+      expect(r.code).toBe(2);
+      expect(r.text).toContain(`No saasmail install to resume in ${home()}.`);
+      const n = await resume(["--name", "ghost"]);
+      expect(n.code).toBe(2);
+      expect(n.text).toContain("No saasmail install named ghost");
+    });
+  });
+
   it("package status finds the only install under home", async () => {
     const home = join(root, "home");
     const h = harness({ home });
