@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +16,10 @@ describe("checkoutSource", () => {
       args: ["-s", "wrangler", "secret", "list"],
     });
     expect(s.wranglerCommand("d1 list")).toBe("yarn wrangler d1 list");
+    expect(s.wranglerBare(["auth", "token"])).toEqual({
+      cmd: "yarn",
+      args: ["-s", "wrangler", "auth", "token"],
+    });
   });
   it("deploy", () => {
     expect(s.deploy("/r", null)).toEqual({
@@ -84,6 +88,13 @@ describe.each(["nested", "hoisted"] as const)(
       });
       expect(s.wranglerCommand("tail")).toBe("npx wrangler@4.127.0 tail");
     });
+    it("wranglerBare runs its own bin without --config", () => {
+      const { root, s } = setup();
+      expect(s.wranglerBare(["auth", "token"])).toEqual({
+        cmd: process.execPath,
+        args: [realpathSync(binOf(root)), "auth", "token"],
+      });
+    });
     it("deploy", () => {
       const { root, s } = setup();
       const bin = realpathSync(binOf(root));
@@ -111,6 +122,15 @@ describe.each(["nested", "hoisted"] as const)(
       expect(s.build?.moduleConfig.no_bundle).toBe(true);
       expect(s.templatePath).toBe(join(root, "wrangler.jsonc.example"));
       expect(s.migrationsDir).toBe(join(root, "migrations"));
+    });
+    it("moduleConfig drops path-valued keys (base_dir)", () => {
+      const { root } = setup();
+      writeFileSync(
+        join(root, "worker", "build.json"),
+        JSON.stringify({ no_bundle: true, base_dir: "/build/worker" }),
+      );
+      const s = packageSource(root);
+      expect(s.build?.moduleConfig).toEqual({ no_bundle: true });
     });
     it("command", () => {
       expect(setup().s.command("install --resume --name acme")).toBe(

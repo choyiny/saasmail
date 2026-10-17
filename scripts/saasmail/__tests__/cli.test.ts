@@ -1492,8 +1492,38 @@ describe("status", () => {
     });
     expect(await main(["status"], h.deps)).toBe(0);
     expect(h.text()).toMatch(/Latest\s+9\.9\.9/);
+    // The latest version, never this package's own (which would redeploy the same release).
+    expect(h.text()).toContain("(npx saasmail@9.9.9 upgrade --name acme)");
+    expect(h.text()).not.toContain(`saasmail@${VERSION}`);
+  });
+
+  it("in a checkout, the hint adopts from it with npx, then upgrades (never yarn saasmail upgrade)", async () => {
+    const h = harness({
+      latest: "9.9.9",
+      wellKnown: () => Response.json({ installationId: ID, version: "1.0.0" }),
+    });
+    writeState(dir, { ...installedState(), deployedVersion: "1.0.0" });
+    expect(await main(["status"], h.deps)).toBe(0);
     expect(h.text()).toContain(
-      `(${h.deps.source.command("upgrade --name acme")})`,
+      `(npx saasmail@9.9.9 adopt --from ${cwd} --name acme, then npx saasmail@9.9.9 upgrade --name acme)`,
+    );
+    expect(h.text()).not.toContain("yarn saasmail upgrade");
+  });
+
+  it("status --from a checkout hints adopt from that checkout, then upgrade", async () => {
+    const checkout = join(root, "checkout");
+    writeState(join(checkout, ".saasmail"), {
+      ...installedState(),
+      deployedVersion: "1.0.0",
+    });
+    const h = harness({
+      home: join(root, "home"),
+      latest: "9.9.9",
+      wellKnown: () => Response.json({ installationId: ID, version: "1.0.0" }),
+    });
+    expect(await main(["status", "--from", checkout], h.deps)).toBe(0);
+    expect(h.text()).toContain(
+      `(npx saasmail@9.9.9 adopt --from ${checkout} --name acme, then npx saasmail@9.9.9 upgrade --name acme)`,
     );
   });
 
@@ -1577,12 +1607,7 @@ describe("resolveToken", () => {
   it("prefers CLOUDFLARE_API_TOKEN without running wrangler", async () => {
     const r = fakeRunner({});
     expect(
-      await resolveToken(
-        { CLOUDFLARE_API_TOKEN: "env-tok" },
-        r,
-        source,
-        "/repo",
-      ),
+      await resolveToken({ CLOUDFLARE_API_TOKEN: "env-tok" }, r, source),
     ).toBe("env-tok");
     expect(r.calls).toEqual([]);
   });
@@ -1596,8 +1621,41 @@ describe("resolveToken", () => {
         stderr: "",
       }),
     });
-    expect(await resolveToken({}, r, source, "/repo")).toBe(tok);
+    expect(await resolveToken({}, r, source)).toBe(tok);
     expect(r.calls[0]!.args).toEqual(["-s", "wrangler", "auth", "token"]);
+  });
+
+  it("package mode runs its wrangler's auth token without --config", async () => {
+    const pkgSource = packageSource(
+      fakePackage(mkdtempSync(join(tmpdir(), "tok-")), {
+        version: "1.2.0",
+        commit: "abc123def456",
+      }),
+    );
+    const tok = "AbC_def-123.456789012345";
+    const r = fakeRunner({
+      [process.execPath]: () => ({ code: 0, stdout: `${tok}\n`, stderr: "" }),
+    });
+    expect(await resolveToken({}, r, pkgSource)).toBe(tok);
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0]!.cmd).toBe(process.execPath);
+    expect(r.calls[0]!.args.slice(1)).toEqual(["auth", "token"]);
+    expect(r.calls[0]!.args).not.toContain("--config");
+  });
+
+  it("package mode without a login prints its pinned login command", async () => {
+    const pkgSource = packageSource(
+      fakePackage(mkdtempSync(join(tmpdir(), "tok-")), {
+        version: "1.2.0",
+        commit: "abc123def456",
+      }),
+    );
+    const r = fakeRunner({
+      [process.execPath]: () => ({ code: 1, stdout: "", stderr: "x" }),
+    });
+    await expect(resolveToken({}, r, pkgSource)).rejects.toThrow(
+      "Run npx wrangler@4.127.0 login first.",
+    );
   });
 
   it("with no token-shaped line says to run wrangler login", async () => {
@@ -1608,7 +1666,7 @@ describe("resolveToken", () => {
         stderr: "",
       }),
     });
-    await expect(resolveToken({}, r, source, "/repo")).rejects.toThrow(
+    await expect(resolveToken({}, r, source)).rejects.toThrow(
       "Run yarn wrangler login first.",
     );
   });
@@ -1617,7 +1675,7 @@ describe("resolveToken", () => {
     const r = fakeRunner({
       yarn: () => ({ code: 1, stdout: "", stderr: "Not logged in" }),
     });
-    await expect(resolveToken({}, r, source, "/repo")).rejects.toThrow(
+    await expect(resolveToken({}, r, source)).rejects.toThrow(
       "Run yarn wrangler login first.",
     );
   });

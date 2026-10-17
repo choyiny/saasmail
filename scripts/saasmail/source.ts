@@ -7,7 +7,7 @@ export type BuildPaths = {
   main: string; // <root>/worker/index.js
   assetsDir: string; // <root>/client
   migrationsDir: string; // <root>/migrations
-  /** Module-loading keys copied from the build's wrangler.json (no_bundle, rules, find_additional_modules, base_dir, if present). */
+  /** Module-loading keys copied from the build's wrangler.json (no_bundle, rules, find_additional_modules, if present). */
   moduleConfig: Record<string, unknown>;
 };
 
@@ -25,6 +25,8 @@ export type Source = {
   build: BuildPaths | null;
   /** How to run wrangler with `args`, for a config in `configDir`. */
   wrangler(args: string[], configDir: string): { cmd: string; args: string[] };
+  /** How to run a wrangler command that reads no config (`auth token`): never passes `--config`. */
+  wranglerBare(args: string[]): { cmd: string; args: string[] };
   /** A printed wrangler command line: `yarn wrangler <args>` or `npx wrangler@<version> <args>`. */
   wranglerCommand(args: string): string;
   /** The deploy command (checkout: `yarn -s deploy`, which builds; package: wrangler deploy, no build). */
@@ -64,6 +66,10 @@ export function checkoutSource(root: string): Source {
     commit: null,
     build: null,
     wrangler: (args) => ({ cmd: "yarn", args: ["-s", "wrangler", ...args] }),
+    wranglerBare: (args) => ({
+      cmd: "yarn",
+      args: ["-s", "wrangler", ...args],
+    }),
     wranglerCommand: (args) => `yarn wrangler ${args}`,
     deploy: (_configDir, secretsFile) => ({
       cmd: "yarn",
@@ -77,12 +83,9 @@ export function checkoutSource(root: string): Source {
   };
 }
 
-const MODULE_KEYS = [
-  "no_bundle",
-  "rules",
-  "find_additional_modules",
-  "base_dir",
-];
+// Path-valued keys (base_dir) never ship: pack.mjs refuses them (they would resolve against the
+// user's config, not the package).
+const MODULE_KEYS = ["no_bundle", "rules", "find_additional_modules"];
 
 export function packageSource(root: string): Source {
   const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
@@ -130,6 +133,11 @@ export function packageSource(root: string): Source {
     wrangler: (args, configDir) => ({
       cmd: process.execPath,
       args: [wranglerBin, ...args, ...configArgs(configDir)],
+    }),
+    // An explicit --config that does not exist is a hard error in wrangler, even for `auth token`.
+    wranglerBare: (args) => ({
+      cmd: process.execPath,
+      args: [wranglerBin, ...args],
     }),
     wranglerCommand: (args) => `npx wrangler@${wranglerPkg.version} ${args}`,
     deploy: (configDir, secretsFile) => ({

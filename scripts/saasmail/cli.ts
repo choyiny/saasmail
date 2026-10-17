@@ -262,12 +262,11 @@ export async function resolveToken(
   env: Record<string, string | undefined>,
   runner: Runner,
   source: Source,
-  configDir: string,
 ): Promise<string> {
   if (env.CLOUDFLARE_API_TOKEN) return env.CLOUDFLARE_API_TOKEN;
   let token: string | undefined;
   try {
-    const c = source.wrangler(["auth", "token"], configDir);
+    const c = source.wranglerBare(["auth", "token"]);
     const r = await runner.run(c.cmd, c.args);
     if (r.code === 0)
       token = r.stdout
@@ -324,7 +323,7 @@ export async function main(argv: string[], deps: Deps): Promise<number> {
         // Read-only: the checkout's own .saasmail, never moved or written.
         const picked = pickCheckoutState(values.from, values.name);
         return await status(
-          { name: picked.inputs.name },
+          { name: picked.inputs.name, checkout: resolve(values.from) },
           { ...deps, dir: join(values.from, ".saasmail"), latest },
         );
       }
@@ -1225,7 +1224,7 @@ if (isEntry(import.meta.main, process.argv[1], import.meta.url)) {
     fetchImpl: fetch,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: () => new Date(),
-    token: () => resolveToken(process.env, processRunner, source, home ?? cwd),
+    token: () => resolveToken(process.env, processRunner, source),
     cloudflare: (token) => restCloudflare(token, fetch),
   };
   process.exitCode = await main(process.argv.slice(2), deps);
