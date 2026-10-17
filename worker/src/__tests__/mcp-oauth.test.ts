@@ -6,14 +6,18 @@ import {
   MCP_AUDIENCE,
   REDIRECT_URI,
   type Credentials,
+  Jar,
   callTool,
   createUserWithPassword,
   exchangeToken,
   getAccessToken,
   mcpRpc,
+  pkce,
   readRpc,
+  registerClient,
   req,
   runFlow,
+  signIn,
 } from "./mcp-helpers";
 
 const ADMIN: Credentials = {
@@ -182,26 +186,29 @@ describe("MCP OAuth", () => {
       expect(res.status).not.toBe(200);
     });
 
-    it("rejects a resource outside validAudiences", async () => {
-      // The resource is validated when tokens are minted, not at authorize —
-      // so this has to be asserted on the exchange.
-      const { code, verifier, clientId } = await runFlow(
-        ADMIN,
-        "openid email:read",
-        {
+    it("rejects a resource that isn't a configured resource", async () => {
+      // Rejected at authorize: the client is sent back with invalid_target
+      // and no code, so there is nothing to exchange.
+      const jar = new Jar();
+      await signIn(jar, ADMIN);
+      const { client_id } = await registerClient("openid email:read");
+      const { challenge } = await pkce();
+      const res = await req(
+        `/api/auth/oauth2/authorize?${new URLSearchParams({
+          client_id,
+          redirect_uri: REDIRECT_URI,
+          response_type: "code",
+          scope: "openid email:read",
           resource: "https://evil.example.com/mcp",
-        },
+          code_challenge: challenge,
+          code_challenge_method: "S256",
+          state: "test-state",
+        })}`,
+        { headers: { cookie: jar.header }, redirect: "manual" },
       );
-      const res = await exchangeToken({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: REDIRECT_URI,
-        client_id: clientId,
-        code_verifier: verifier,
-        resource: "https://evil.example.com/mcp",
-      });
-      expect(res.status).not.toBe(200);
-      expect(await res.text()).toContain("invalid_request");
+      const location = new URL(res.headers.get("location") ?? "", BASE_URL);
+      expect(location.searchParams.get("error")).toBe("invalid_target");
+      expect(location.searchParams.get("code")).toBeNull();
     });
   });
 
