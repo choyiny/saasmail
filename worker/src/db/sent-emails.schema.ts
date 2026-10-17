@@ -48,6 +48,11 @@ export const sentEmails = sqliteTable(
      * shares the same id, so it is NOT unique here.
      */
     gmailThreadId: text("gmail_thread_id"),
+    /**
+     * FK campaigns.id — null for every non-campaign send. Lets a campaign send
+     * appear in the recipient's timeline without any new query logic.
+     */
+    campaignId: text("campaign_id"),
     sentAt: integer("sent_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },

@@ -5,6 +5,7 @@ import { emails } from "./emails.schema";
 import { sentEmails } from "./sent-emails.schema";
 import { attachments } from "./attachments.schema";
 import { emailTemplates } from "./email-templates.schema";
+import { newsletterAssets } from "./newsletter-assets.schema";
 import { apiKeys } from "./api-keys.schema";
 import { sequences } from "./sequences.schema";
 import { sequenceEnrollments } from "./sequence-enrollments.schema";
@@ -18,6 +19,15 @@ import { blocklist } from "./blocklist.schema";
 import { outboxEmails } from "./outbox-emails.schema";
 import { drafts } from "./drafts.schema";
 import { gmailAccounts } from "./gmail-accounts.schema";
+import { asyncJobs } from "./async-jobs.schema";
+import { contacts } from "./contacts.schema";
+import { lists } from "./lists.schema";
+import { listMembers } from "./list-members.schema";
+import { campaigns } from "./campaigns.schema";
+import { campaignRecipients } from "./campaign-recipients.schema";
+import { campaignLinks } from "./campaign-links.schema";
+import { campaignEvents } from "./campaign-events.schema";
+import { campaignUnsubscribeAttributions } from "./campaign-unsubscribe-attributions.schema";
 
 export const schema = {
   ...authSchema,
@@ -40,4 +50,14 @@ export const schema = {
   outboxEmails,
   drafts,
   gmailAccounts,
+  asyncJobs,
+  contacts,
+  lists,
+  listMembers,
+  campaigns,
+  campaignRecipients,
+  campaignLinks,
+  campaignEvents,
+  campaignUnsubscribeAttributions,
+  newsletterAssets,
 } as const;

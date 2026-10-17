@@ -35,6 +35,11 @@ import MessageLinkPage from "@/pages/MessageLinkPage";
 import UnsubscribePage from "@/pages/UnsubscribePage";
 import BlocklistPage from "@/pages/BlocklistPage";
 import OutboxPage from "@/pages/OutboxPage";
+import ListsPage from "@/pages/ListsPage";
+import ListDetailPage from "@/pages/ListDetailPage";
+import CampaignsPage from "@/pages/CampaignsPage";
+import CampaignDetailPage from "@/pages/CampaignDetailPage";
+import ContactPrivacyPage from "@/pages/ContactPrivacyPage";
 
 const queryClient = new QueryClient();
 
@@ -162,6 +167,14 @@ function App() {
                   element={<SequenceEditorPage />}
                 />
                 <Route path="/sequences/:id" element={<SequenceDetailPage />} />
+                <Route
+                  path="/admin/contacts"
+                  element={<ContactPrivacyPage />}
+                />
+                <Route path="/lists" element={<ListsPage />} />
+                <Route path="/lists/:id" element={<ListDetailPage />} />
+                <Route path="/campaigns" element={<CampaignsPage />} />
+                <Route path="/campaigns/:id" element={<CampaignDetailPage />} />
                 <Route path="/api-keys" element={<ApiKeysPage />} />
                 <Route path="/inboxes" element={<InboxesPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
