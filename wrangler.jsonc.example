@@ -108,7 +108,13 @@
     // VAPID_PUBLIC_KEY and VAPID_SUBJECT are public config (safe to commit here).
     // Generate all three with `yarn vapid:generate`. Leave blank to disable push.
     "VAPID_PUBLIC_KEY": "",
-    "VAPID_SUBJECT": "mailto:admin@<your-domain>"
+    "VAPID_SUBJECT": "mailto:admin@<your-domain>",
+
+    /* installer */
+    // Written by `yarn saasmail install` so `/.well-known/saasmail` can report
+    // which installation this is. Leave blank when deploying by hand.
+    "SAASMAIL_INSTALLATION": "",
+    "SAASMAIL_VERSION": ""
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

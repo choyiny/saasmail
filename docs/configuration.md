@@ -24,6 +24,10 @@ Your Cloudflare Workers configuration. Created from `wrangler.jsonc.example`. Th
   sends you to the production callback.
 - `vars.TRUSTED_ORIGINS` — CORS allowed origins
 - `vars.COOKIE_PREFIX` — Prefix for better-auth session cookies
+- `vars.SAASMAIL_INSTALLATION` / `vars.SAASMAIL_VERSION` — written by
+  `yarn saasmail install`; public `GET /.well-known/saasmail` reports the
+  installation id, version and schema digest from them (never the ownership
+  nonce). Leave blank when deploying by hand.
 - `vars.VAPID_PUBLIC_KEY` / `vars.VAPID_SUBJECT` — public VAPID config for
   browser push notifications. Generate with `yarn vapid:generate` and store
   the private key via `wrangler secret put VAPID_PRIVATE_KEY`. Leave blank

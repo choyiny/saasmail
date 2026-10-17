@@ -16,10 +16,17 @@ declare namespace Cloudflare {
 		COOKIE_PREFIX: "saasmail";
 		VAPID_PUBLIC_KEY: "";
 		VAPID_SUBJECT: "mailto:admin@<your-domain>";
+		/** Written by `yarn saasmail install`: JSON `{ installationId, ownershipNonce }`. Empty when not installed by the installer. */
+		SAASMAIL_INSTALLATION: "";
+		SAASMAIL_VERSION: "";
 		/** Secret: set via `wrangler secret put VAPID_PRIVATE_KEY`. Not emitted by `wrangler types`; added manually. */
 		VAPID_PRIVATE_KEY?: string;
 		/** Secret: set via `wrangler secret put UNSUBSCRIBE_SECRET`. Used to sign one-click unsubscribe tokens. Not emitted by `wrangler types`; added manually. */
 		UNSUBSCRIBE_SECRET: string;
+		/** Secret: AES key (base64, 32 bytes) for stored OAuth tokens. Set via `wrangler secret put TOKEN_ENCRYPTION_KEY`. Not emitted by `wrangler types`; added manually. */
+		TOKEN_ENCRYPTION_KEY?: string;
+		/** Secret: hash of the first-run setup code, written by the installer. Not emitted by `wrangler types`; added manually. */
+		SETUP_CODE_HASH?: string;
 		/** Secret: set via `wrangler secret put BETTER_AUTH_SECRET`. Signs sessions and protects the OAuth signing keys in `jwkss`. Not emitted by `wrangler types`; added manually. */
 		BETTER_AUTH_SECRET: string;
 		NOTIFICATIONS_HUB: DurableObjectNamespace<import("./worker/src/index").NotificationsHub>;

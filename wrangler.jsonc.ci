@@ -77,6 +77,8 @@
     "BASE_URL": "http://localhost:8080",
     "TRUSTED_ORIGINS": "http://localhost:8080,http://localhost:8788",
     "COOKIE_PREFIX": "saasmail",
-    "DISABLE_PASSKEY_GATE": "true"
+    "DISABLE_PASSKEY_GATE": "true",
+    "SAASMAIL_INSTALLATION": "",
+    "SAASMAIL_VERSION": ""
   }
 }
