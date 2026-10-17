@@ -3,12 +3,15 @@
 import type { Io } from "./collect.ts";
 import type { Source } from "./source.ts";
 import { listStates, type InstallState } from "./state.ts";
+import { compareSemver } from "./versions.ts";
 
 export type StatusDeps = {
   io: Io;
   dir: string;
   fetchImpl: typeof fetch;
   source: Source;
+  /** The newest release on npm; null when it cannot be read. */
+  latest(): Promise<string | null>;
 };
 
 export class UsageError extends Error {}
@@ -29,7 +32,13 @@ export function findState(dir: string, name?: string): InstallState | null {
 
 const list = (xs: string[]) => (xs.length > 0 ? xs.join(", ") : "(none)");
 
-export function describeState(s: InstallState): string {
+const SEMVER_ONLY =
+  /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+
+export function describeState(
+  s: InstallState,
+  latest?: { version: string | null; upgrade: string },
+): string {
   const kw = Math.max(0, ...s.resources.map((r) => r.kind.length));
   const nw = Math.max(0, ...s.resources.map((r) => r.name.length));
   const i = s.inputs;
@@ -50,6 +59,17 @@ export function describeState(s: InstallState): string {
     `Steps         ${s.steps.length} recorded`,
     `Version       ${s.deployedVersion ?? "(not deployed yet)"}`,
   );
+  if (latest) {
+    const running = s.deployedVersion;
+    const older =
+      latest.version !== null &&
+      running !== undefined &&
+      SEMVER_ONLY.test(running) &&
+      compareSemver(running, latest.version) < 0;
+    lines.push(
+      `Latest        ${latest.version ?? "unknown"}${older ? `  (${latest.upgrade})` : ""}`,
+    );
+  }
   if (s.skipped.length > 0) {
     lines.push(`Skipped       ${s.skipped.join(", ")}`);
   }
@@ -62,7 +82,7 @@ export function describeState(s: InstallState): string {
 }
 
 export async function status(
-  opts: { name?: string },
+  opts: { name?: string; slug?: string },
   deps: StatusDeps,
 ): Promise<number> {
   const { io } = deps;
@@ -81,7 +101,15 @@ export async function status(
     );
     return 1;
   }
-  io.print(describeState(s));
+  const latest = await deps.latest();
+  io.print(
+    describeState(s, {
+      version: latest,
+      upgrade: deps.source.command(
+        `upgrade --name ${opts.slug ?? s.inputs.name}`,
+      ),
+    }),
+  );
 
   const url = `${s.baseUrl}/.well-known/saasmail`;
   let got: { installationId?: unknown; version?: unknown };

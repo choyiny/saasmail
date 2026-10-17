@@ -40,6 +40,7 @@ import {
 } from "./state.ts";
 import { findState, status, UsageError } from "./status.ts";
 import { upgrade } from "./upgrade.ts";
+import { latestOnNpm } from "./versions.ts";
 
 export const usage = (
   source: Source,
@@ -76,6 +77,7 @@ install options:
 
 status options:
   --name <name>             Which installation (default: the only one recorded)
+  --from <checkout>         Package only: read a checkout's installation instead (read-only)
 
 upgrade options:
   --name <name>             Which installation (default: the only one recorded)
@@ -307,15 +309,32 @@ export async function main(argv: string[], deps: Deps): Promise<number> {
     if (command === "status") {
       const { values } = parseArgs({
         args: rest,
-        options: { name: { type: "string" } },
+        options: { name: { type: "string" }, from: { type: "string" } },
         strict: true,
         allowPositionals: false,
       });
+      const latest = () => latestOnNpm(deps.fetchImpl);
+      if (values.from !== undefined) {
+        if (deps.home === null) {
+          deps.io.print(
+            "status --from reads a checkout from the installed package; in a checkout, run yarn saasmail status.",
+          );
+          return 2;
+        }
+        // Read-only: the checkout's own .saasmail, never moved or written.
+        const picked = pickCheckoutState(values.from, values.name);
+        return await status(
+          { name: picked.inputs.name },
+          { ...deps, dir: join(values.from, ".saasmail"), latest },
+        );
+      }
       // Package mode: the install's own directory under home.
-      const dir = deps.home
-        ? installDir(deps.home, pickInstall(deps.home, values.name).slug)
-        : deps.dir;
-      return await status(values, { ...deps, dir });
+      const picked = deps.home ? pickInstall(deps.home, values.name) : null;
+      const dir = picked ? installDir(deps.home!, picked.slug) : deps.dir;
+      return await status(
+        { name: values.name, slug: picked?.slug },
+        { ...deps, dir, latest },
+      );
     }
     if (command === "upgrade") {
       const { values } = parseArgs({

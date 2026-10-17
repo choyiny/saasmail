@@ -87,6 +87,8 @@ function harness(
     seed?: FakeCloudflareSeed;
     prompts?: (string | null)[];
     wellKnown?: () => Response;
+    /** The npm registry's dist-tags.latest; null = the registry answers 500. */
+    latest?: string | null;
     confirm?: boolean;
     setupStatus?: { setupRequired: boolean; codeRequired: boolean };
     onCloudflare?: (cf: FakeCloudflare) => void;
@@ -190,6 +192,11 @@ function harness(
     if (url === `${BASE}/.well-known/saasmail`) {
       if (opts.wellKnown) return opts.wellKnown();
       return Response.json({ installationId: ID, version: VERSION });
+    }
+    if (url === "https://registry.npmjs.org/saasmail") {
+      if (opts.latest === undefined || opts.latest === null)
+        return new Response("down", { status: 500 });
+      return Response.json({ "dist-tags": { latest: opts.latest } });
     }
     if (url === `${BASE}/api/setup/status`) {
       return Response.json(
@@ -1430,7 +1437,10 @@ describe("status", () => {
     expect(text).toContain("acme-db");
     expect(text).toContain("example.com");
     expect(text).toContain("(matches)");
-    expect(h.fetched).toEqual([`${BASE}/.well-known/saasmail`]);
+    expect(h.fetched).toEqual([
+      "https://registry.npmjs.org/saasmail",
+      `${BASE}/.well-known/saasmail`,
+    ]);
     expect(h.cf()).toBeNull();
     expect(h.tokenCalls()).toBe(0);
     expect(h.runner.calls).toEqual([]);
@@ -1468,6 +1478,76 @@ describe("status", () => {
     writeState(dir, installedState());
     expect(await main(["status"], h.deps)).toBe(1);
     expect(h.text()).toContain("ECONNREFUSED");
+  });
+
+  it("prints the latest release, and the upgrade command when running is older", async () => {
+    const h = harness({
+      home: join(root, "home"),
+      latest: "9.9.9",
+      wellKnown: () => Response.json({ installationId: ID, version: "1.0.0" }),
+    });
+    writeState(join(root, "home", "acme"), {
+      ...installedState(),
+      deployedVersion: "1.0.0",
+    });
+    expect(await main(["status"], h.deps)).toBe(0);
+    expect(h.text()).toMatch(/Latest\s+9\.9\.9/);
+    expect(h.text()).toContain(
+      `(${h.deps.source.command("upgrade --name acme")})`,
+    );
+  });
+
+  it("running at the latest prints no upgrade hint", async () => {
+    const h = harness({ latest: VERSION });
+    writeState(dir, installedState());
+    expect(await main(["status"], h.deps)).toBe(0);
+    expect(h.text()).toMatch(new RegExp(`Latest\\s+${VERSION}\\n`));
+    expect(h.text()).not.toContain("upgrade --name");
+  });
+
+  it("offline prints latest unknown and the exit stays 0", async () => {
+    const h = harness({ latest: null });
+    writeState(dir, installedState());
+    expect(await main(["status"], h.deps)).toBe(0);
+    expect(h.text()).toMatch(/Latest\s+unknown/);
+  });
+
+  it("--from reads a checkout in package mode, read-only", async () => {
+    const checkout = join(root, "checkout");
+    const cdir = join(checkout, ".saasmail");
+    const s = installedState();
+    writeState(cdir, s);
+    const other = installedState();
+    writeState(cdir, {
+      ...other,
+      installationId: "beta-000000000000",
+      inputs: { ...other.inputs, name: "beta" },
+    });
+    const h = harness({ home: join(root, "home") });
+    expect(await main(["status", "--from", checkout], h.deps)).toBe(2);
+    expect(h.text()).toContain("Pass --name");
+    const h2 = harness({ home: join(root, "home") });
+    expect(
+      await main(["status", "--from", checkout, "--name", "acme"], h2.deps),
+    ).toBe(0);
+    expect(h2.text()).toContain("acme-db");
+    expect(listStates(cdir)).toHaveLength(2);
+    expect(existsSync(join(root, "home"))).toBe(false);
+  });
+
+  it("--from in a checkout is a usage error", async () => {
+    const h = harness();
+    expect(await main(["status", "--from", "/x"], h.deps)).toBe(2);
+  });
+
+  it("a moved install shows where", async () => {
+    const h = harness();
+    writeState(dir, {
+      ...installedState(),
+      movedTo: "/home/me/.saasmail/acme",
+    });
+    await main(["status"], h.deps);
+    expect(h.text()).toMatch(/Moved\s+\/home\/me\/\.saasmail\/acme/);
   });
 
   it("with no installation says so and exits 1", async () => {

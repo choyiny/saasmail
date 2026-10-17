@@ -1107,6 +1107,22 @@ describe("resumeInstalled", () => {
     expect(out.status).toBe("installed");
   });
 
+  it("a differing package version points at upgrade, not adopt", async () => {
+    const { s, seed } = installedFixture();
+    const h = harness({ seed, setupStatus: closed, pkg: true });
+    await resumeInstalled(
+      h.ctx,
+      { ...pinned(h, s, "1.0.0"), deployedConfigHash: "old" },
+      {},
+    );
+    const text = h.printed.join("\n");
+    expect(text).toContain("differs from the deployed version");
+    expect(text).toContain(
+      `Run ${h.ctx.source.command(`upgrade --name ${s.names.worker}`)} to move it to 1.0.0.`,
+    );
+    expect(text).not.toContain("adopt --from");
+  });
+
   it("adds an inbound domain: routing only, no deploy", async () => {
     const { s, seed } = installedFixture();
     const h = harness({ seed, setupStatus: closed });

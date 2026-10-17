@@ -500,7 +500,9 @@ export async function resumeInstalled(
     if (!upToDate) {
       ctx.io.print(
         `${ctx.source.kind === "checkout" ? "This checkout" : "This package"} (${head}) differs from the deployed version (${s.deployedVersion ?? "unknown"}). ` +
-          `Upgrades: run npx saasmail adopt --from ${ctx.configDir}, then npx saasmail upgrade.`,
+          (ctx.source.kind === "package"
+            ? `Run ${ctx.source.command(`upgrade --name ${s.names.worker}`)} to move it to ${head}.`
+            : `Upgrades: run npx saasmail adopt --from ${ctx.configDir}, then npx saasmail upgrade.`),
       );
     }
 
