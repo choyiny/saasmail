@@ -1,19 +1,26 @@
 name: Publish
 
 # Publishes the npm package `saasmail` when a release is published. Never runs on pull requests.
+# Two jobs: `build` installs dependencies, tests and packs with read-only permissions and no
+# OIDC token; `publish` only downloads the packed directory and runs `npm publish`, so no
+# dependency code ever runs where a publish token can be minted.
 on:
   release:
     types: [published]
 
 permissions:
   contents: read
-  id-token: write # npm provenance
 
 jobs:
-  npm:
+  build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
     steps:
       - name: Check the tag is vX.Y.Z[-pre]
+        id: tag
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
@@ -22,14 +29,15 @@ jobs:
             exit 1
           fi
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      # No dependency cache: a release build never restores what other runs wrote.
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-          cache: yarn
-          registry-url: https://registry.npmjs.org
       - run: yarn install --frozen-lockfile
       - name: Seed wrangler.jsonc (gitignored; needed by vitest-pool-workers)
         run: cp wrangler.jsonc.ci wrangler.jsonc
@@ -38,11 +46,46 @@ jobs:
       - run: yarn test
       - name: Build the package
         run: node scripts/saasmail/pack.mjs --version "$VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-package
+          path: build/npm
+          # client/.assetsignore must ship.
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - name: Check the tag is vX.Y.Z[-pre]
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::Release tag '$TAG' is not vX.Y.Z[-pre]; not publishing."
+            exit 1
+          fi
+      # No checkout and no install: only the packed directory from `build` is published.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm-package
+          path: build/npm
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           # A prerelease goes to the `next` tag so `latest` stays on the last release.
           tag=latest
           case "$VERSION" in *-*) tag=next ;; esac
-          npm publish ./build/npm --provenance --access public --tag "$tag"
+          npm publish ./build/npm --provenance --access public --tag "$tag" --ignore-scripts
