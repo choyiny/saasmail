@@ -13,6 +13,7 @@ import {
   isGenerated,
 } from "./config.ts";
 import type { Runner } from "./runner.ts";
+import { checkoutSource } from "./source.ts";
 import {
   generateEncryptionKey,
   generateHexSecret,
@@ -119,19 +120,9 @@ async function mustRun(ctx: Ctx, what: string, cmd: string, args: string[]) {
   return r;
 }
 
-/** `git rev-parse --short=12 HEAD`, plus `-dirty` with uncommitted changes: what verify expects. */
-export async function buildVersion(ctx: Ctx): Promise<string> {
-  const head = await mustRun(ctx, "git rev-parse", "git", [
-    "rev-parse",
-    "--short=12",
-    "HEAD",
-  ]);
-  const status = await mustRun(ctx, "git status", "git", [
-    "status",
-    "--porcelain",
-  ]);
-  const sha = head.stdout.trim();
-  return status.stdout.trim() ? `${sha}-dirty` : sha;
+/** The checkout's version (git sha, `-dirty` with uncommitted changes): what verify expects. */
+export function buildVersion(ctx: Ctx): Promise<string> {
+  return checkoutSource(ctx.cwd).version(ctx.runner);
 }
 
 const configPath = (ctx: Ctx) => join(ctx.cwd, "wrangler.jsonc");

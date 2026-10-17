@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   CatchAll,
   Cloudflare,
@@ -264,4 +266,55 @@ export function fakeCloudflare(seed: FakeCloudflareSeed = {}): FakeCloudflare {
     },
   };
   return fake;
+}
+
+/**
+ * A temp saasmail package under `dir` (package.json, worker/build.json, a wrangler package with a bin).
+ * "nested": wrangler under <root>/node_modules; "hoisted": beside the package, as npx installs it.
+ * Returns the package root.
+ */
+export function fakePackage(
+  dir: string,
+  o: {
+    version: string;
+    commit: string;
+    wranglerLayout?: "nested" | "hoisted";
+  },
+): string {
+  const hoisted = o.wranglerLayout === "hoisted";
+  const root = hoisted
+    ? join(dir, "node_modules", "saasmail")
+    : join(dir, "saasmail");
+  const wranglerDir = hoisted
+    ? join(dir, "node_modules", "wrangler")
+    : join(root, "node_modules", "wrangler");
+  const put = (p: string, text: string) => {
+    mkdirSync(join(p, ".."), { recursive: true });
+    writeFileSync(p, text);
+  };
+  put(
+    join(root, "package.json"),
+    JSON.stringify({
+      name: "saasmail",
+      version: o.version,
+      saasmailCommit: o.commit,
+    }),
+  );
+  put(
+    join(root, "worker", "build.json"),
+    JSON.stringify({
+      no_bundle: true,
+      rules: [{ type: "ESModule", globs: ["**/*.js"] }],
+    }),
+  );
+  put(
+    join(wranglerDir, "package.json"),
+    JSON.stringify({
+      name: "wrangler",
+      version: "4.127.0",
+      bin: { wrangler: "./bin/wrangler.js" },
+    }),
+  );
+  put(join(wranglerDir, "bin", "wrangler.js"), "");
+  return root;
 }
