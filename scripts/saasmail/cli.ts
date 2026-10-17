@@ -31,6 +31,7 @@ import {
   type Provider,
 } from "./state.ts";
 import { findState, status, UsageError } from "./status.ts";
+import { upgrade } from "./upgrade.ts";
 
 export const usage = (
   source: Source,
@@ -39,6 +40,7 @@ export const usage = (
 Commands:
   install    Create or update a saasmail installation on Cloudflare
   status     Show a recorded installation and check that it answers
+  upgrade    Move an installation to this package's version (npx only)
 
 install options:
   --name <name>             Installation name (default: saasmail)
@@ -65,6 +67,14 @@ install options:
 
 status options:
   --name <name>             Which installation (default: the only one recorded)
+
+upgrade options:
+  --name <name>             Which installation (default: the only one recorded)
+  --plan                    Only show what would change, then print the apply command
+  --expect-plan <digest>    Apply only if the plan still has this digest
+  --resume                  Continue a failed upgrade
+  --replace-custom-code     Replace a running version that is not a release with this one
+  --yes                     Apply without asking (required when not in a terminal)
 `;
 
 const DEFAULT_NAME = "saasmail";
@@ -126,6 +136,27 @@ const INSTALL_OPTIONS = {
   "new-setup-code": { type: "boolean" },
   yes: { type: "boolean" },
 } as const;
+
+const UPGRADE_OPTIONS = {
+  name: { type: "string" },
+  plan: { type: "boolean" },
+  "expect-plan": { type: "string" },
+  resume: { type: "boolean" },
+  yes: { type: "boolean" },
+  "replace-custom-code": { type: "boolean" },
+} as const;
+
+type UpgradeFlags = {
+  name?: string;
+  plan?: boolean;
+  "expect-plan"?: string;
+  resume?: boolean;
+  yes?: boolean;
+  "replace-custom-code"?: boolean;
+};
+
+const NOT_A_TERMINAL =
+  "Not running in a terminal: pass --yes to apply (or --plan to only review).";
 
 const HOST_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
 const COOKIE_RE = /^[A-Za-z0-9_-]{1,32}$/;
@@ -224,6 +255,15 @@ export async function main(argv: string[], deps: Deps): Promise<number> {
         ? installDir(deps.home, pickInstall(deps.home, values.name).slug)
         : deps.dir;
       return await status(values, { ...deps, dir });
+    }
+    if (command === "upgrade") {
+      const { values } = parseArgs({
+        args: rest,
+        options: UPGRADE_OPTIONS,
+        strict: true,
+        allowPositionals: false,
+      });
+      return await runUpgrade(values, deps);
     }
   } catch (e) {
     if (e instanceof UsageError || isParseArgsError(e)) {
@@ -575,9 +615,7 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
   checkFlags(f);
   // Before the token or any Cloudflare call.
   if (!io.tty && !f.plan && !f.yes) {
-    io.print(
-      "Not running in a terminal: pass --yes to apply (or --plan to only review).",
-    );
+    io.print(NOT_A_TERMINAL);
     return 2;
   }
 
@@ -608,6 +646,15 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
           f.name === undefined
             ? `No installation found to resume in ${ctx.dir}.`
             : `No installation named ${f.name} found in ${ctx.dir}.`,
+        );
+        return 1;
+      }
+      if (
+        found.status === "upgrading" ||
+        (found.status === "failed" && found.upgradeTarget !== undefined)
+      ) {
+        io.print(
+          `An upgrade to ${found.upgradeTarget} is unfinished; run ${deps.source.command(`upgrade --resume --name ${found.inputs.name}`)}.`,
         );
         return 1;
       }
@@ -789,6 +836,46 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
   } catch (e) {
     if (e instanceof UsageError) throw e;
     // A PlanStop's message is the text meant for the person, like every other failure here.
+    io.print((e as Error).message);
+    return 1;
+  }
+}
+
+/** `upgrade` (spec §5): package mode only (ruling P2); a checkout points at npx. */
+async function runUpgrade(f: UpgradeFlags, deps: Deps): Promise<number> {
+  const { io, home } = deps;
+  if (home === null) {
+    io.print(
+      `Upgrades run from npm: npx saasmail adopt --from ${deps.configDir}, then npx saasmail upgrade.`,
+    );
+    return 2;
+  }
+  if (!io.tty && !f.plan && !f.yes) {
+    io.print(NOT_A_TERMINAL);
+    return 2;
+  }
+  const picked = pickInstall(home, f.name);
+  let token: string;
+  try {
+    token = await deps.token();
+  } catch (e) {
+    io.print((e as Error).message);
+    return 1;
+  }
+  const { env: _env, token: _t, cloudflare, home: _h, ...rest } = deps;
+  const d = installDir(home, picked.slug);
+  const ctx: Ctx = { ...rest, cf: cloudflare(token), dir: d, configDir: d };
+  try {
+    await upgrade(ctx, {
+      state: picked.state,
+      yes: Boolean(f.yes),
+      expectPlan: f["expect-plan"],
+      replaceCustomCode: Boolean(f["replace-custom-code"]),
+      resume: Boolean(f.resume),
+      plan: Boolean(f.plan),
+    });
+    return 0;
+  } catch (e) {
     io.print((e as Error).message);
     return 1;
   }

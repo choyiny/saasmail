@@ -53,7 +53,7 @@ import {
 
 export { verify, type Ctx, type Optional };
 
-const desiredOf = (s: InstallState): Desired => ({
+export const desiredOf = (s: InstallState): Desired => ({
   installationId: s.installationId,
   ownershipNonce: s.ownershipNonce,
   names: s.names,
@@ -62,10 +62,10 @@ const desiredOf = (s: InstallState): Desired => ({
   sendDomains: s.inputs.sendDomains,
 });
 
-const look = (ctx: Ctx, s: InstallState): Promise<Observed> =>
+export const look = (ctx: Ctx, s: InstallState): Promise<Observed> =>
   observe(ctx.cf, s.accountId, s.names, s.inputs);
 
-const resource = (
+export const resource = (
   key: string,
   kind: Resource["kind"],
   name: string,
@@ -112,7 +112,7 @@ function wrap(e: unknown, step: string, s: InstallState, ctx: Ctx): Error {
 }
 
 /** Every wrangler (and deploy) subprocess works on the recorded account, never one wrangler picks. */
-const onAccount = (ctx: Ctx, s: InstallState): Ctx => ({
+export const onAccount = (ctx: Ctx, s: InstallState): Ctx => ({
   ...ctx,
   runner: withEnv(ctx.runner, { CLOUDFLARE_ACCOUNT_ID: s.accountId }),
 });
@@ -192,6 +192,93 @@ async function mailSteps(
   return { changed: changed || sending.length > 0, sending };
 }
 
+/** How a step helper reads and saves the running state, and names the step for error messages. */
+export type StepRun = {
+  get(): InstallState;
+  save(s: InstallState): void;
+  setStep(key: string): void;
+};
+
+/**
+ * D1, R2 and the Queue for every plan action not recorded yet (the Workflow and the worker come
+ * from the deploy). `obs` is what the plan was computed from; a create looks again first.
+ */
+export async function provision(
+  ctx: Ctx,
+  plan: Plan,
+  observed: Observed,
+  run: StepRun,
+): Promise<void> {
+  let obs = observed;
+  const acct = run.get().accountId;
+  for (const a of plan.actions) {
+    if (a.kind !== "d1" && a.kind !== "r2" && a.kind !== "queue") continue;
+    if (run.get().resources.some((r) => r.key === a.key)) continue;
+    run.setStep(`provision:${a.key}`);
+    let action = a.action;
+    if (action === "create") {
+      // Look again before the intent is recorded: a name someone else took meanwhile must
+      // stop here, not pass as ours later (an intent lets an empty same-name resource be reused).
+      obs = await look(ctx, run.get());
+      action = computePlan(desiredOf(run.get()), obs, run.get()).actions.find(
+        (x) => x.key === a.key,
+      )!.action;
+      if (action === "create")
+        run.save(recordStep(run.get(), `provision-intent:${a.key}`));
+    }
+    let id: string;
+    if (a.kind === "d1") {
+      id =
+        action === "create"
+          ? (await ctx.cf.createD1(acct, a.name)).uuid
+          : obs.d1.find((d) => d.name === a.name)!.uuid;
+    } else if (a.kind === "queue") {
+      id =
+        action === "create"
+          ? (await ctx.cf.createQueue(acct, a.name)).id
+          : obs.queues.find((q) => q.name === a.name)!.id;
+    } else {
+      if (action === "create") await ctx.cf.createR2(acct, a.name);
+      // The marker goes in before the bucket is recorded: a recorded bucket always has one.
+      // A reused bucket without one is ours and empty (plan.ts), so it gets one now.
+      if (obs.r2Markers[a.name] == null) {
+        await putMarker(ctx, acct, a.name, markerOf(run.get(), a.key));
+      }
+      id = a.name;
+    }
+    run.save(recordResource(run.get(), resource(a.key, a.kind, a.name, id)));
+  }
+}
+
+const markerOf = (s: InstallState, key: string) => ({
+  installationId: s.installationId,
+  ownershipNonce: s.ownershipNonce,
+  key,
+});
+
+/**
+ * The ownership markers: the R2 marker of each bucket recorded as adopted (created buckets got
+ * theirs when provisioned), then the D1 `install_state` row at `version`. Idempotent.
+ */
+export async function writeMarkers(
+  ctx: Ctx,
+  s: InstallState,
+  version: string,
+): Promise<void> {
+  for (const r of s.resources) {
+    if (r.kind === "r2" && r.ownership === "adopted")
+      await putMarker(ctx, s.accountId, r.name, markerOf(s, r.key));
+  }
+  const d1 = s.resources.find((r) => r.key === "d1")!;
+  await writeInstallRow(
+    ctx,
+    s,
+    d1.id,
+    version,
+    migrationsDigest(ctx.source.migrationsDir),
+  );
+}
+
 export async function install(
   outer: Ctx,
   opts: {
@@ -206,7 +293,6 @@ export async function install(
   let step = "plan";
   let code: string | null = null;
   const optional = opts.optional;
-  const acct = s.accountId;
   const save = (next: InstallState) => {
     s = next;
     writeState(ctx.dir, s);
@@ -236,7 +322,7 @@ export async function install(
     // 1. Draft saved, lock held; the plan is recomputed against Cloudflare as it is now.
     save(s);
     const desired = desiredOf(s);
-    let obs = await look(ctx, s);
+    const obs = await look(ctx, s);
     const plan = computePlan(desired, obs, s);
     if (opts.expectPlan !== undefined && opts.expectPlan !== plan.digest) {
       throw new Error(
@@ -247,47 +333,11 @@ export async function install(
     enter("provisioning");
 
     // 2. D1, R2 and the Queue (the Workflow and the worker come from the deploy).
-    for (const a of plan.actions) {
-      if (a.kind !== "d1" && a.kind !== "r2" && a.kind !== "queue") continue;
-      if (s.resources.some((r) => r.key === a.key)) continue;
-      step = `provision:${a.key}`;
-      let action = a.action;
-      if (action === "create") {
-        // Look again before the intent is recorded: a name someone else took meanwhile must
-        // stop here, not pass as ours later (an intent lets an empty same-name resource be reused).
-        obs = await look(ctx, s);
-        action = computePlan(desired, obs, s).actions.find(
-          (x) => x.key === a.key,
-        )!.action;
-        if (action === "create")
-          save(recordStep(s, `provision-intent:${a.key}`));
-      }
-      let id: string;
-      if (a.kind === "d1") {
-        id =
-          action === "create"
-            ? (await ctx.cf.createD1(acct, a.name)).uuid
-            : obs.d1.find((d) => d.name === a.name)!.uuid;
-      } else if (a.kind === "queue") {
-        id =
-          action === "create"
-            ? (await ctx.cf.createQueue(acct, a.name)).id
-            : obs.queues.find((q) => q.name === a.name)!.id;
-      } else {
-        if (action === "create") await ctx.cf.createR2(acct, a.name);
-        // The marker goes in before the bucket is recorded: a recorded bucket always has one.
-        // A reused bucket without one is ours and empty (plan.ts), so it gets one now.
-        if (obs.r2Markers[a.name] == null) {
-          await putMarker(ctx, acct, a.name, {
-            installationId: s.installationId,
-            ownershipNonce: s.ownershipNonce,
-            key: a.key,
-          });
-        }
-        id = a.name;
-      }
-      save(recordResource(s, resource(a.key, a.kind, a.name, id)));
-    }
+    await provision(ctx, plan, obs, {
+      get: () => s,
+      save,
+      setStep: (k) => (step = k),
+    });
 
     // 3. Generated secrets the worker lacks. Before the config: the VAPID public key goes into it.
     let secrets: Record<string, string> = {};
@@ -314,8 +364,7 @@ export async function install(
     if (!hasStep(s, `migrations:${digest}`)) {
       step = `migrations:${digest}`;
       await applyMigrations(ctx);
-      const d1 = s.resources.find((r) => r.key === "d1")!;
-      await writeInstallRow(ctx, s, d1.id, version, digest);
+      await writeMarkers(ctx, s, version);
       save(recordStep(s, step));
     }
 

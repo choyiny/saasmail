@@ -92,6 +92,10 @@ function harness(
     onCloudflare?: (cf: FakeCloudflare) => void;
     /** Package mode: installs live under this home, run from a fake npm package. */
     home?: string;
+    /** Package mode: the fake package's version (default VERSION). */
+    pkgVersion?: string;
+    /** Package mode: what `wrangler secret list` prints (default: the worker is missing). */
+    secretList?: RunResult;
   } = {},
 ) {
   let cf: FakeCloudflare | null = null;
@@ -128,7 +132,7 @@ function harness(
         return ok();
       }
       if (args[1] === "secret")
-        return { code: 1, stdout: "", stderr: "not found" };
+        return opts.secretList ?? { code: 1, stdout: "", stderr: "not found" };
       return ok();
     },
   });
@@ -158,7 +162,7 @@ function harness(
   };
   const pkgSource = () => {
     const pkgRoot = fakePackage(join(root, "pkg"), {
-      version: VERSION,
+      version: opts.pkgVersion ?? VERSION,
       commit: "abc",
     });
     mkdirSync(join(pkgRoot, "migrations"), { recursive: true });
@@ -333,6 +337,8 @@ describe("usage", () => {
     for (const s of [
       "install",
       "status",
+      "upgrade",
+      "--replace-custom-code",
       "--name",
       "--account",
       "--hostname",
@@ -1279,6 +1285,103 @@ describe("install", () => {
     expect(await main(["install", "--resume", "--yes"], h.deps)).toBe(1);
     expect(h.text()).toContain("No installation found to resume");
   });
+});
+
+describe("upgrade", () => {
+  const home = () => join(root, "home");
+  const seedInstall = (over: Partial<InstallState> = {}) => {
+    const s = { ...installedState(), deployedVersion: "1.2.0", ...over };
+    writeState(join(home(), "acme"), s);
+    return s;
+  };
+  const allSecrets: RunResult = {
+    code: 0,
+    stdout: JSON.stringify(
+      [
+        "BETTER_AUTH_SECRET",
+        "UNSUBSCRIBE_SECRET",
+        "TOKEN_ENCRYPTION_KEY",
+        "VAPID_PRIVATE_KEY",
+      ].map((name) => ({ name })),
+    ),
+    stderr: "",
+  };
+  const upgradeHarness = (o: { tty?: boolean } = {}) => {
+    const s = seedInstall();
+    return harness({
+      home: home(),
+      pkgVersion: "1.3.0",
+      secretList: allSecrets,
+      seed: seedFor(s),
+      tty: o.tty,
+      wellKnown: () => Response.json({ installationId: ID, version: "1.2.0" }),
+    });
+  };
+
+  it("upgrade --plan prints the apply command", async () => {
+    const h = upgradeHarness();
+    const before = readFileSync(join(home(), "acme", `${ID}.json`), "utf8");
+    expect(await main(["upgrade", "--plan"], h.deps)).toBe(0);
+    const text = h.text();
+    expect(text).toContain("Upgrade acme: 1.2.0 → 1.3.0");
+    const digest = /Plan ([0-9a-f]{12})/.exec(text)?.[1];
+    expect(digest).toBeDefined();
+    expect(text).toContain(
+      `npx saasmail@1.3.0 upgrade --name acme --expect-plan ${digest}`,
+    );
+    expect(h.deploys).toHaveLength(0);
+    expect(readFileSync(join(home(), "acme", `${ID}.json`), "utf8")).toBe(
+      before,
+    );
+    expect(readdirSync(join(home(), "acme"))).toEqual([`${ID}.json`]);
+  });
+
+  it("upgrade without tty needs --yes or --plan", async () => {
+    const h = upgradeHarness();
+    expect(await main(["upgrade"], h.deps)).toBe(2);
+    expect(h.text()).toContain("--yes");
+    expect(h.tokenCalls()).toBe(0);
+  });
+
+  it("upgrade --yes deploys the package version", async () => {
+    const h = upgradeHarness();
+    expect(await main(["upgrade", "--yes", "--name", "acme"], h.deps)).toBe(1);
+    // The fake site keeps reporting 1.2.0, so verify fails after the deploy.
+    expect(h.deploys).toHaveLength(1);
+    const s = readState(join(home(), "acme"), ID)!;
+    expect(s.status).toBe("failed");
+    expect(s.upgradeTarget).toBe("1.3.0");
+    expect(h.text()).toContain(
+      "npx saasmail@1.3.0 upgrade --resume --name acme",
+    );
+  });
+
+  it("checkout mode points at npx", async () => {
+    const h = harness();
+    expect(await main(["upgrade", "--yes"], h.deps)).toBe(2);
+    expect(h.text()).toContain(
+      `Upgrades run from npm: npx saasmail adopt --from ${cwd}, then npx saasmail upgrade.`,
+    );
+    expect(h.tokenCalls()).toBe(0);
+  });
+
+  it.each([
+    ["upgrading", {}],
+    ["failed", { upgradeTarget: "1.3.0" }],
+  ] as const)(
+    "install --resume refuses an unfinished upgrade (%s)",
+    async (status, extra) => {
+      seedInstall({ status, upgradeTarget: "1.3.0", ...extra });
+      const h = harness({ home: home(), pkgVersion: "1.3.0" });
+      expect(
+        await main(["install", "--resume", "--yes", "--name", "acme"], h.deps),
+      ).toBe(1);
+      expect(h.text()).toContain(
+        "An upgrade to 1.3.0 is unfinished; run npx saasmail@1.3.0 upgrade --resume --name acme.",
+      );
+      expect(h.deploys).toHaveLength(0);
+    },
+  );
 });
 
 describe("status", () => {
