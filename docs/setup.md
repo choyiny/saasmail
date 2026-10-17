@@ -7,7 +7,7 @@ Deploy saasmail to your own Cloudflare account with one command, `yarn saasmail 
 ## Prerequisites
 
 - A Cloudflare account on the **Workers Paid** plan (Queues are not on Workers Free) with **R2** enabled.
-- Node.js v22.18+ (the installer runs TypeScript directly) and [Yarn](https://yarnpkg.com/).
+- Node.js v22.18+ for the installer (it runs TypeScript directly; `yarn saasmail` prints a clear message on an older Node.js 22, but below 22.6 it may fail to parse before that check can run) and [Yarn](https://yarnpkg.com/). The manual setup below keeps its own, lower requirement.
 - For a custom hostname, and for every inbound or send domain: the domain is an **active zone in this Cloudflare account**. A domain you receive mail on must be a zone of its own (a subdomain you want routed needs its own zone).
 - Cloudflare credentials: `yarn wrangler login`, or `CLOUDFLARE_API_TOKEN` (see [Token permissions](#token-permissions)).
 - _Optional:_ an account with Resend, Postmark or Bavimail — see [Email providers](email-providers.md).
@@ -54,10 +54,12 @@ At the end it prints a **setup code** once, and `<BASE_URL>/onboarding`. Open th
 
 ### Email Routing (inbound)
 
-For each `--inbound-domain`, after the deploy, the installer turns on Email Routing for the zone (Cloudflare adds its MX and SPF records), waits for it to be ready, and points the zone's **catch-all** at the worker. It stops, changing nothing, when:
+For each `--inbound-domain`, after the deploy, the installer turns on Email Routing for the zone (Cloudflare adds its MX and an SPF TXT record), waits for it to be ready, and points the zone's **catch-all** at the worker. It stops, changing nothing, when:
 
 - the domain has MX records other than Cloudflare's own (`route1`–`route3.mx.cloudflare.net`): enabling routing would take over that domain's mail; or
 - the catch-all already does something else, such as forwarding to an address or another worker. A catch-all that is off or set to drop (the dashboard default) is taken over.
+
+Enabling Email Routing adds Cloudflare's MX and an SPF TXT record to the zone. A zone that already publishes an SPF record should merge them, because two SPF records are invalid.
 
 ### Email Sending (outbound)
 
@@ -79,7 +81,7 @@ A zone whose Email Routing never becomes ready within 60 seconds fails that step
 
 ### Token permissions
 
-`yarn wrangler login` is enough. If you'd rather use `CLOUDFLARE_API_TOKEN` (for example in CI), create an API token with these permissions, scoped to the account and to the zones involved. The installer reports a 401/403 as "The API token cannot read: …". The list is derived from the REST calls the installer and `wrangler deploy` make; names are the dashboard's permission groups, and those marked (unverified) are the nearest match, so adjust if the dashboard words them differently.
+`yarn wrangler login` covers the Workers, D1, R2, Queues and Email calls. A custom hostname or inbound domains may need `CLOUDFLARE_API_TOKEN` with **Zone → DNS → Read**, because wrangler's login scopes may not include reading DNS records: if preflight says the token can't read DNS records, create such a token. For `CLOUDFLARE_API_TOKEN` (also useful in CI), create an API token with these permissions, scoped to the account and to the zones involved. The installer reports a 401/403 as "The API token cannot read: …". The list is derived from the REST calls the installer and `wrangler deploy` make; names are the dashboard's permission groups, and those marked (unverified) are the nearest match, so adjust if the dashboard words them differently.
 
 - **Account → Account Settings → Read** (list accounts)
 - **Account → Workers Scripts → Edit** (deploy, secrets, worker settings, workers.dev subdomain, Workflows)
@@ -95,7 +97,7 @@ A zone whose Email Routing never becomes ready within 60 seconds fails that step
 
 ## Manual setup
 
-`yarn saasmail install` replaces this section; use it if you can't run the installer, or to see what it does. A hand-written `wrangler.jsonc` works the same, but the installer will refuse to overwrite it. Skip `email_routing` in the example config: it is not a wrangler key and does nothing; Email Routing is set up in step 7.
+`yarn saasmail install` replaces this section; use it if you can't run the installer, or to see what it does. A hand-written `wrangler.jsonc` works the same, but the installer will refuse to overwrite it. Email Routing is set up in step 7.
 
 ### Prerequisites
 
