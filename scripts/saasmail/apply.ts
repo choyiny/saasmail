@@ -10,7 +10,6 @@ import {
 import {
   applyMigrations,
   assertConfigWritable,
-  buildVersion,
   deploy,
   existingSecretNames,
   generatedSecrets,
@@ -38,6 +37,7 @@ import {
   type Plan,
 } from "./plan.ts";
 import { withEnv } from "./runner.ts";
+import type { Source } from "./source.ts";
 import { generateSetupCode, setupCodeHash } from "./secrets.ts";
 import {
   acquireLock,
@@ -102,10 +102,10 @@ function keepCode(ctx: Ctx, s: InstallState, code: string | null) {
   }
 }
 
-function wrap(e: unknown, step: string, s: InstallState): Error {
+function wrap(e: unknown, step: string, s: InstallState, ctx: Ctx): Error {
   const msg = e instanceof Error ? e.message : String(e);
   return new Error(
-    `${msg}\n\nStep ${step} failed. Nothing after it ran. Run: ${resumeCommand(s)}`,
+    `${msg}\n\nStep ${step} failed. Nothing after it ran. Run: ${resumeCommand(s, ctx.source)}`,
     { cause: e },
   );
 }
@@ -304,12 +304,12 @@ export async function install(
     // 4. wrangler.jsonc. VAPID_SUBJECT is frozen at the first render: later domains never change it.
     step = "config";
     if (!s.vapidSubject) save({ ...s, vapidSubject: vapidSubjectFor(s) });
-    const version = await buildVersion(ctx);
+    const version = await ctx.source.version(ctx.runner);
     const configHash = writeConfig(ctx, s, version);
     save(recordStep(s, `config:${configHash}`));
 
     // 5. Migrations, then the install_state row (the D1 ownership marker).
-    const digest = migrationsDigest(ctx.cwd);
+    const digest = migrationsDigest(ctx.source.migrationsDir);
     if (!hasStep(s, `migrations:${digest}`)) {
       step = `migrations:${digest}`;
       await applyMigrations(ctx);
@@ -384,21 +384,21 @@ export async function install(
     if (s.status !== "installed") s = transition(s, "failed");
     writeState(ctx.dir, s);
     if (codeDeployed) keepCode(ctx, s, code);
-    throw wrap(e, step, s);
+    throw wrap(e, step, s, ctx);
   } finally {
     release();
   }
-  ctx.io.print(summary(s, code, optional, sending));
+  ctx.io.print(summary(s, code, optional, sending, ctx.source));
   if (!code && setup.setupRequired && setup.codeRequired) {
     ctx.io.print(
-      `The first admin still needs a setup code. If you no longer have it, run: ${newCodeCommand(s)}`,
+      `The first admin still needs a setup code. If you no longer have it, run: ${newCodeCommand(s, ctx.source)}`,
     );
   }
   return s;
 }
 
-const newCodeCommand = (s: InstallState) =>
-  `${resumeCommand(s)} --new-setup-code`;
+const newCodeCommand = (s: InstallState, source: Source) =>
+  `${resumeCommand(s, source)} --new-setup-code`;
 
 /**
  * `--resume` on an installed instance (spec §6): adds supplied provider credentials and, while no
@@ -445,11 +445,11 @@ export async function resumeInstalled(
     // Never an upgrade: wrangler.jsonc is rewritten and deployed only when it would come out
     // exactly as the configuration already deployed.
     step = "config";
-    const head = await buildVersion(ctx);
+    const head = await ctx.source.version(ctx.runner);
     const upToDate = renderConfig(ctx, s, head).hash === s.deployedConfigHash;
     if (!upToDate) {
       ctx.io.print(
-        `This checkout (${head}) differs from the deployed version (${s.deployedVersion ?? "unknown"}). ` +
+        `${ctx.source.kind === "checkout" ? "This checkout" : "This package"} (${head}) differs from the deployed version (${s.deployedVersion ?? "unknown"}). ` +
           "Upgrades come in a later release; wrangler.jsonc was left as it is.",
       );
     }
@@ -485,13 +485,15 @@ export async function resumeInstalled(
       secrets.SETUP_CODE_HASH = setupCodeHash(code);
     } else if (setupRequired === true && !ctx.io.tty) {
       ctx.io.print(
-        `The first admin still needs the setup code. If it is lost, issue a new one (the old one stops working): ${newCodeCommand(s)}`,
+        `The first admin still needs the setup code. If it is lost, issue a new one (the old one stops working): ${newCodeCommand(s, ctx.source)}`,
       );
     }
     const redeploy = Object.keys(secrets).length > 0;
     if (redeploy && !upToDate) {
       throw new Error(
-        `Adding credentials or a setup code needs a deploy, which from this checkout would be an upgrade. Check out ${s.deployedVersion ?? "the deployed commit"} and run again. If you have updated with \`yarn deploy\` since installing, do not: deploying the older commit would roll back code and schema. Follow docs/updating.md instead.`,
+        ctx.source.kind === "checkout"
+          ? `Adding credentials or a setup code needs a deploy, which from this checkout would be an upgrade. Check out ${s.deployedVersion ?? "the deployed commit"} and run again. If you have updated with \`yarn deploy\` since installing, do not: deploying the older commit would roll back code and schema. Follow docs/updating.md instead.`
+          : `Adding credentials or a setup code needs a deploy, which from this package would be an upgrade. Run the deployed version again (${s.deployedVersion ?? "unknown"}).`,
       );
     }
     if (redeploy) {
@@ -523,14 +525,14 @@ export async function resumeInstalled(
     await verifyAt(ctx, s, s.deployedVersion ?? head);
     ctx.io.print(
       redeploy || mail.changed
-        ? summary(s, code, optional, mail.sending)
+        ? summary(s, code, optional, mail.sending, ctx.source)
         : "Nothing to do.",
     );
     return s;
   } catch (e) {
     writeState(ctx.dir, s);
     if (codeDeployed) keepCode(ctx, s, code);
-    throw wrap(e, step, s);
+    throw wrap(e, step, s, ctx);
   } finally {
     release();
   }

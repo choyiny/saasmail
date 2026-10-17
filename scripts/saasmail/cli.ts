@@ -15,6 +15,7 @@ import { observe } from "./observe.ts";
 import { computePlan, formatPlan } from "./plan.ts";
 import { preflight } from "./preflight.ts";
 import { processRunner, type Runner } from "./runner.ts";
+import { checkoutSource, type Source } from "./source.ts";
 import {
   hasStep,
   listStates,
@@ -25,7 +26,9 @@ import {
 } from "./state.ts";
 import { findState, status, UsageError } from "./status.ts";
 
-export const USAGE = `Usage: yarn saasmail <command> [options]
+export const usage = (
+  source: Source,
+) => `Usage: ${source.command("<command> [options]")}
 
 Commands:
   install    Create or update a saasmail installation on Cloudflare
@@ -150,17 +153,20 @@ const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g;
 const TOKEN_LINE = /^[A-Za-z0-9._-]{20,}$/;
 
 /**
- * The token: CLOUDFLARE_API_TOKEN, else the last token-shaped line of `yarn -s wrangler auth token`
+ * The token: CLOUDFLARE_API_TOKEN, else the last token-shaped line of `wrangler auth token`
  * (banners and colour codes around it are ignored).
  */
 export async function resolveToken(
   env: Record<string, string | undefined>,
   runner: Runner,
+  source: Source,
+  configDir: string,
 ): Promise<string> {
   if (env.CLOUDFLARE_API_TOKEN) return env.CLOUDFLARE_API_TOKEN;
   let token: string | undefined;
   try {
-    const r = await runner.run("yarn", ["-s", "wrangler", "auth", "token"]);
+    const c = source.wrangler(["auth", "token"], configDir);
+    const r = await runner.run(c.cmd, c.args);
     if (r.code === 0)
       token = r.stdout
         .replace(ANSI, "")
@@ -171,7 +177,7 @@ export async function resolveToken(
   } catch {
     // no wrangler: same message
   }
-  if (!token) throw new Error("Run yarn wrangler login first.");
+  if (!token) throw new Error(`Run ${source.wranglerCommand("login")} first.`);
   return token;
 }
 
@@ -185,7 +191,7 @@ export async function main(argv: string[], deps: Deps): Promise<number> {
     command === "-h" ||
     command === "help"
   ) {
-    io.print(USAGE);
+    io.print(usage(deps.source));
     return command === undefined ? 2 : 0;
   }
   try {
@@ -209,12 +215,12 @@ export async function main(argv: string[], deps: Deps): Promise<number> {
     }
   } catch (e) {
     if (e instanceof UsageError || isParseArgsError(e)) {
-      io.print(`${(e as Error).message}\n\n${USAGE}`);
+      io.print(`${(e as Error).message}\n\n${usage(deps.source)}`);
       return 2;
     }
     throw e;
   }
-  io.print(`Unknown command: ${command}\n\n${USAGE}`);
+  io.print(`Unknown command: ${command}\n\n${usage(deps.source)}`);
   return 2;
 }
 
@@ -501,11 +507,12 @@ export function applyCommand(
   resume: boolean,
   digest: string | null,
   newSetupCode = false,
+  source: Source,
 ): string {
   const i = s.inputs;
   const q = shellQuote;
   return [
-    "yarn saasmail install",
+    source.command("install"),
     ...(resume ? ["--resume"] : []),
     `--name ${q(i.name)}`,
     `--account ${q(s.accountId)}`,
@@ -628,14 +635,14 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
         if (existing.status === "installed") {
           io.print(
             `${r.name} is already installed at ${existing.baseUrl}. Nothing was changed.\n` +
-              `Check it: yarn saasmail status --name ${r.name}\n` +
-              `Add domains or credentials: yarn saasmail install --resume --name ${r.name}\n` +
-              `Replace a lost setup code (before the first admin exists): yarn saasmail install --resume --name ${r.name} --new-setup-code`,
+              `Check it: ${deps.source.command(`status --name ${r.name}`)}\n` +
+              `Add domains or credentials: ${deps.source.command(`install --resume --name ${r.name}`)}\n` +
+              `Replace a lost setup code (before the first admin exists): ${deps.source.command(`install --resume --name ${r.name} --new-setup-code`)}`,
           );
           return 0;
         }
         io.print(
-          `An installation of ${r.name} is recorded with status ${existing.status}. Rerun with --resume: yarn saasmail install --resume --name ${r.name}`,
+          `An installation of ${r.name} is recorded with status ${existing.status}. Rerun with --resume: ${deps.source.command(`install --resume --name ${r.name}`)}`,
         );
         return 1;
       }
@@ -718,6 +725,7 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
           Boolean(f.resume),
           bound ? plan.digest : null,
           Boolean(f["new-setup-code"]),
+          deps.source,
         ),
       );
       return 0;
@@ -789,16 +797,18 @@ export function isEntry(
 
 if (isEntry(import.meta.main, process.argv[1], import.meta.url)) {
   const cwd = process.cwd();
+  const source = checkoutSource(cwd);
   const deps: Deps = {
     io: clackIo,
     env: process.env,
     runner: processRunner,
     dir: join(cwd, ".saasmail"),
-    cwd,
+    source,
+    configDir: cwd,
     fetchImpl: fetch,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: () => new Date(),
-    token: () => resolveToken(process.env, processRunner),
+    token: () => resolveToken(process.env, processRunner, source, cwd),
     cloudflare: (token) => restCloudflare(token, fetch),
   };
   process.exitCode = await main(process.argv.slice(2), deps);

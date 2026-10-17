@@ -13,7 +13,7 @@ import {
   isGenerated,
 } from "./config.ts";
 import type { Runner } from "./runner.ts";
-import { checkoutSource } from "./source.ts";
+import type { Source } from "./source.ts";
 import {
   generateEncryptionKey,
   generateHexSecret,
@@ -28,8 +28,10 @@ export type Ctx = {
   io: Io;
   /** Where state and lock files live (`.saasmail/`). */
   dir: string;
-  /** The checkout: wrangler.jsonc, wrangler.jsonc.example and migrations/ live here. */
-  cwd: string;
+  /** Where the installer runs from: a checkout or the npm package. */
+  source: Source;
+  /** Where the generated wrangler.jsonc lives: the checkout root, or `~/.saasmail/<slug>`. */
+  configDir: string;
   fetchImpl: typeof fetch;
   sleep(ms: number): Promise<void>;
   now(): Date;
@@ -109,8 +111,12 @@ export function optionalSecrets(o: Optional): Record<string, string> {
 
 const tail = (text: string) => text.trim().split("\n").slice(-10).join("\n");
 
-async function mustRun(ctx: Ctx, what: string, cmd: string, args: string[]) {
-  const r = await ctx.runner.run(cmd, args, { cwd: ctx.cwd });
+async function mustRun(
+  ctx: Ctx,
+  what: string,
+  c: { cmd: string; args: string[] },
+) {
+  const r = await ctx.runner.run(c.cmd, c.args, { cwd: ctx.configDir });
   if (r.code !== 0) {
     const out = tail(r.stderr || r.stdout);
     throw new Error(
@@ -120,12 +126,7 @@ async function mustRun(ctx: Ctx, what: string, cmd: string, args: string[]) {
   return r;
 }
 
-/** The checkout's version (git sha, `-dirty` with uncommitted changes): what verify expects. */
-export function buildVersion(ctx: Ctx): Promise<string> {
-  return checkoutSource(ctx.cwd).version(ctx.runner);
-}
-
-const configPath = (ctx: Ctx) => join(ctx.cwd, "wrangler.jsonc");
+const configPath = (ctx: Ctx) => join(ctx.configDir, "wrangler.jsonc");
 
 function existingConfig(ctx: Ctx): string | null {
   const p = configPath(ctx);
@@ -147,12 +148,10 @@ export function renderConfig(
   s: InstallState,
   version: string,
 ): { text: string; hash: string } {
-  const template = readFileSync(
-    join(ctx.cwd, "wrangler.jsonc.example"),
-    "utf8",
-  );
+  const template = readFileSync(ctx.source.templatePath, "utf8");
   const text = generateWranglerConfig(template, s, {
     version,
+    command: ctx.source.command("install"),
     existing: existingConfig(ctx),
   });
   return {
@@ -173,8 +172,7 @@ export function writeConfig(
 }
 
 /** sha256 over the sorted migrations/*.sql names and contents. */
-export function migrationsDigest(cwd: string): string {
-  const d = join(cwd, "migrations");
+export function migrationsDigest(d: string): string {
   const hash = createHash("sha256");
   for (const f of readdirSync(d)
     .filter((f) => f.endsWith(".sql"))
@@ -188,15 +186,14 @@ export function migrationsDigest(cwd: string): string {
 }
 
 export async function applyMigrations(ctx: Ctx): Promise<void> {
-  await mustRun(ctx, "wrangler d1 migrations apply", "yarn", [
-    "-s",
-    "wrangler",
-    "d1",
-    "migrations",
-    "apply",
-    "DB",
-    "--remote",
-  ]);
+  await mustRun(
+    ctx,
+    "wrangler d1 migrations apply",
+    ctx.source.wrangler(
+      ["d1", "migrations", "apply", "DB", "--remote"],
+      ctx.configDir,
+    ),
+  );
 }
 
 /** The D1 ownership marker: written after the migrations created `install_state`. */
@@ -230,11 +227,11 @@ export async function existingSecretNames(
   worker: string,
   workerIsNew: boolean,
 ): Promise<string[]> {
-  const r = await ctx.runner.run(
-    "yarn",
-    ["-s", "wrangler", "secret", "list", "--name", worker, "--format", "json"],
-    { cwd: ctx.cwd },
+  const c = ctx.source.wrangler(
+    ["secret", "list", "--name", worker, "--format", "json"],
+    ctx.configDir,
   );
+  const r = await ctx.runner.run(c.cmd, c.args, { cwd: ctx.configDir });
   if (r.code !== 0) {
     if (workerIsNew) return [];
     throw new Error(
@@ -278,31 +275,28 @@ export async function generatedSecrets(
   throw new Error(
     `VAPID_PRIVATE_KEY is set but its public key is unknown: it is neither in the state file nor the deployed VAPID_PUBLIC_KEY var of worker ${s.names.worker}. ` +
       `Set VAPID_PUBLIC_KEY (the matching public key) as "vapidPublicKey" in ${join(ctx.dir, `${s.installationId}.json`)}, ` +
-      `or delete the secret (yarn wrangler secret delete VAPID_PRIVATE_KEY --name ${s.names.worker}) to have both generated again; existing push subscriptions then stop working.`,
+      `or delete the secret (${ctx.source.wranglerCommand(`secret delete VAPID_PRIVATE_KEY --name ${s.names.worker}`)}) to have both generated again; existing push subscriptions then stop working.`,
   );
 }
 
-/** `yarn -s deploy`, with a 0600 secrets file only when there are secrets to send. */
+/** `source.deploy`, with a 0600 secrets file only when there are secrets to send. */
 export async function deploy(
   ctx: Ctx,
   secrets: Record<string, string>,
 ): Promise<void> {
+  const what =
+    ctx.source.kind === "checkout" ? "yarn deploy" : "wrangler deploy";
   if (Object.keys(secrets).length === 0) {
-    await mustRun(ctx, "yarn deploy", "yarn", ["-s", "deploy"]);
+    await mustRun(ctx, what, ctx.source.deploy(ctx.configDir, null));
     return;
   }
   await withSecretsFile(secrets, (path) =>
-    mustRun(ctx, "yarn deploy", "yarn", [
-      "-s",
-      "deploy",
-      "--secrets-file",
-      path,
-    ]),
+    mustRun(ctx, what, ctx.source.deploy(ctx.configDir, path)),
   );
 }
 
-export const resumeCommand = (s: InstallState) =>
-  `yarn saasmail install --resume --name ${s.inputs.name}`;
+export const resumeCommand = (s: InstallState, source: Source) =>
+  source.command(`install --resume --name ${s.inputs.name}`);
 
 // 13 tries 5 s apart: 60 s of waiting while a custom domain's certificate is issued.
 const VERIFY_TRIES = 13;
@@ -354,7 +348,7 @@ export async function verifyAt(
     }
     if (attempt >= VERIFY_TRIES) {
       const cert = s.inputs.hostname
-        ? ` A custom domain's certificate can take several minutes to issue; wait, then run: ${resumeCommand(s)}`
+        ? ` A custom domain's certificate can take several minutes to issue; wait, then run: ${resumeCommand(s, ctx.source)}`
         : "";
       throw new Error(
         `${url} did not report installation ${s.installationId} at version ${version} within 60 s. Last response: ${last}${cert}`,
@@ -366,7 +360,7 @@ export async function verifyAt(
   const st = await setupStatus(ctx, s);
   if (st.setupRequired && !st.codeRequired) {
     throw new Error(
-      `${s.baseUrl}/api/setup/status reports setup open without a setup code: anyone could claim this instance. Run ${resumeCommand(s)}.`,
+      `${s.baseUrl}/api/setup/status reports setup open without a setup code: anyone could claim this instance. Run ${resumeCommand(s, ctx.source)}.`,
     );
   }
   return st;
@@ -374,5 +368,9 @@ export async function verifyAt(
 
 /** verifyAt the version last deployed (HEAD's when none is recorded). */
 export async function verify(ctx: Ctx, s: InstallState): Promise<void> {
-  await verifyAt(ctx, s, s.deployedVersion ?? (await buildVersion(ctx)));
+  await verifyAt(
+    ctx,
+    s,
+    s.deployedVersion ?? (await ctx.source.version(ctx.runner)),
+  );
 }

@@ -158,7 +158,7 @@ describe("lock", () => {
   it("second acquire throws; release removes the file", () => {
     const release = acquireLock(dir, "id", { pidAlive: () => true });
     expect(() => acquireLock(dir, "id", { pidAlive: () => true })).toThrow(
-      `Another yarn saasmail run is using this installation (pid ${process.pid} on ${hostname()}).`,
+      `Another saasmail run is using this installation (pid ${process.pid} on ${hostname()}).`,
     );
     release();
     expect(existsSync(join(dir, "id.lock"))).toBe(false);
@@ -178,7 +178,7 @@ describe("lock", () => {
     makeDir();
     writeFileSync(join(dir, "id.lock"), "");
     expect(() => acquireLock(dir, "id", { pidAlive: () => false })).toThrow(
-      /Another yarn saasmail run/,
+      /Another saasmail run/,
     );
     expect(readFileSync(join(dir, "id.lock"), "utf8")).toBe("");
   });

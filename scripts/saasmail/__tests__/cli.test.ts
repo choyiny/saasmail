@@ -26,6 +26,7 @@ import type { Io } from "../collect.ts";
 import { installationIdOf, resourceNames } from "../names.ts";
 import { R2_MARKER_KEY } from "../observe.ts";
 import type { RunResult } from "../runner.ts";
+import { checkoutSource } from "../source.ts";
 import {
   listStates,
   newState,
@@ -165,7 +166,8 @@ function harness(
     env: opts.env ?? {},
     runner,
     dir,
-    cwd,
+    source: checkoutSource(cwd),
+    configDir: cwd,
     fetchImpl,
     sleep: async () => {},
     now: () => new Date("2026-10-17T00:00:00Z"),
@@ -889,7 +891,11 @@ describe("install", () => {
     const s = installedState({ provider: "resend" });
     const pinned = {
       ...s,
-      deployedConfigHash: renderConfig({ cwd } as Ctx, s, VERSION).hash,
+      deployedConfigHash: renderConfig(
+        { source: checkoutSource(cwd), configDir: cwd } as Ctx,
+        s,
+        VERSION,
+      ).hash,
     };
     const without = harness({
       seed: seedFor(s),
@@ -960,7 +966,11 @@ describe("install", () => {
     const s = installedState();
     const pinned = {
       ...s,
-      deployedConfigHash: renderConfig({ cwd } as Ctx, s, VERSION).hash,
+      deployedConfigHash: renderConfig(
+        { source: checkoutSource(cwd), configDir: cwd } as Ctx,
+        s,
+        VERSION,
+      ).hash,
     };
     const without = harness({ seed: seedFor(s) });
     writeState(dir, pinned);
@@ -1013,7 +1023,11 @@ describe("install", () => {
       const s = installedState();
       const pinned = {
         ...s,
-        deployedConfigHash: renderConfig({ cwd } as Ctx, s, VERSION).hash,
+        deployedConfigHash: renderConfig(
+          { source: checkoutSource(cwd), configDir: cwd } as Ctx,
+          s,
+          VERSION,
+        ).hash,
       };
       writeState(dir, pinned);
       return {
@@ -1215,12 +1229,19 @@ describe("status", () => {
   });
 });
 
+const source = checkoutSource("/repo");
+
 describe("resolveToken", () => {
   it("prefers CLOUDFLARE_API_TOKEN without running wrangler", async () => {
     const r = fakeRunner({});
-    expect(await resolveToken({ CLOUDFLARE_API_TOKEN: "env-tok" }, r)).toBe(
-      "env-tok",
-    );
+    expect(
+      await resolveToken(
+        { CLOUDFLARE_API_TOKEN: "env-tok" },
+        r,
+        source,
+        "/repo",
+      ),
+    ).toBe("env-tok");
     expect(r.calls).toEqual([]);
   });
 
@@ -1233,7 +1254,7 @@ describe("resolveToken", () => {
         stderr: "",
       }),
     });
-    expect(await resolveToken({}, r)).toBe(tok);
+    expect(await resolveToken({}, r, source, "/repo")).toBe(tok);
     expect(r.calls[0]!.args).toEqual(["-s", "wrangler", "auth", "token"]);
   });
 
@@ -1245,7 +1266,7 @@ describe("resolveToken", () => {
         stderr: "",
       }),
     });
-    await expect(resolveToken({}, r)).rejects.toThrow(
+    await expect(resolveToken({}, r, source, "/repo")).rejects.toThrow(
       "Run yarn wrangler login first.",
     );
   });
@@ -1254,7 +1275,7 @@ describe("resolveToken", () => {
     const r = fakeRunner({
       yarn: () => ({ code: 1, stdout: "", stderr: "Not logged in" }),
     });
-    await expect(resolveToken({}, r)).rejects.toThrow(
+    await expect(resolveToken({}, r, source, "/repo")).rejects.toThrow(
       "Run yarn wrangler login first.",
     );
   });
@@ -1277,7 +1298,7 @@ describe("applyCommand", () => {
       workersDev: false,
       cookiePrefix: "o'brien prefix",
     });
-    expect(applyCommand(s, false, "abc")).toBe(
+    expect(applyCommand(s, false, "abc", false, source)).toBe(
       `yarn saasmail install --name acme --account ${ACCOUNT} --hostname mail.example.com --provider cloudflare --cookie-prefix 'o'\\''brien prefix' --expect-plan abc --yes`,
     );
   });

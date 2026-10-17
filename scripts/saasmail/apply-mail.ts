@@ -1,5 +1,6 @@
 // Mail steps for apply.ts (spec §6 steps 7–8) and the closing summary. Both mail steps run after
 // the deploy: the catch-all names the worker. The installer reads DNS records; it never writes them.
+import type { Source } from "./source.ts";
 import type { EmailRoutingSettings, SendingDnsRecord } from "./cloudflare.ts";
 import {
   OPTIONAL_ITEMS,
@@ -138,6 +139,7 @@ export function summary(
   code: string | null,
   optional: Optional,
   sending: SendingReport[],
+  source: Source,
 ): string {
   const lines = [`saasmail is installed at ${s.baseUrl}`, ""];
   if (code) {
@@ -172,6 +174,9 @@ export function summary(
     lines.push("", "Skipped:");
     for (const i of skipped) lines.push(`  ${i.label}`);
   }
-  lines.push("", `Add domains or credentials later with: ${resumeCommand(s)}`);
+  lines.push(
+    "",
+    `Add domains or credentials later with: ${resumeCommand(s, source)}`,
+  );
   return lines.join("\n");
 }
