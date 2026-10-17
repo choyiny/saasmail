@@ -589,6 +589,84 @@ describe("adoptWorker: stops beyond the template mapping", () => {
     );
   });
 
+  it("a plain var named like a secret saasmail generates stops, value not shown", async () => {
+    const h = workerHarness({
+      seed: workerSeed(
+        {},
+        withVar("TOKEN_ENCRYPTION_KEY", "plain-held-key-0123456789"),
+      ),
+    });
+    const err = await plan(h).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    const msg = (err as Error).message;
+    expect(msg).toContain(
+      "Worker acme has vars the first upgrade would drop or change:",
+    );
+    expect(msg).toContain(
+      "  TOKEN_ENCRYPTION_KEY  (value not shown) -> removed; the upgrade would generate a TOKEN_ENCRYPTION_KEY secret in its place",
+    );
+    expect(msg).not.toContain("plain-held-key-0123456789");
+    expect(msg).toContain(
+      "Change or remove them on the worker, then run adopt again. Nothing was changed.",
+    );
+  });
+
+  it("a plain var the generated config does not set stops with its value", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, withVar("FEATURE_X", "on")),
+    });
+    await expect(plan(h)).rejects.toThrow(
+      '  FEATURE_X  "on" -> removed (saasmail\'s config does not set it)',
+    );
+  });
+
+  it("a var the generated config sets to another value stops with both values", async () => {
+    const h = workerHarness({
+      seed: workerSeed(
+        {},
+        withVar("TRUSTED_ORIGINS", `http://localhost:8080,${W_BASE}`),
+      ),
+    });
+    await expect(plan(h)).rejects.toThrow(
+      `  TRUSTED_ORIGINS  "http://localhost:8080,${W_BASE}" -> "${W_BASE}"`,
+    );
+  });
+
+  it("every such var is listed in one stop, and adopt writes nothing", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, [
+        ...without("COOKIE_PREFIX"),
+        { type: "plain_text", name: "FEATURE_X", text: "on" },
+        { type: "plain_text", name: "SETUP_CODE_HASH", text: "h" },
+        { type: "plain_text", name: "TRUSTED_ORIGINS", text: "x" },
+      ]),
+    });
+    const err = (await adoptWorker(h.ctx, {
+      accountId: W_ACCOUNT,
+      worker: "acme",
+      inputs: {},
+      yes: true,
+      home,
+    }).catch((e: Error) => e)) as Error;
+    expect(err.message).toContain("  FEATURE_X ");
+    expect(err.message).toContain("  SETUP_CODE_HASH ");
+    expect(err.message).toContain("  TRUSTED_ORIGINS ");
+    expect(existsSync(join(home, "acme"))).toBe(false);
+    expect(h.cf.calls.filter((c) => WRITES.includes(c.method))).toEqual([]);
+  });
+
+  it("SAASMAIL_VERSION may change at the first upgrade; an equal var passes", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, [
+        ...BINDINGS,
+        { type: "plain_text", name: "SAASMAIL_VERSION", text: "0.9.0" },
+        { type: "plain_text", name: "TRUSTED_ORIGINS", text: W_BASE },
+      ]),
+    });
+    const p = await plan(h);
+    expect(p.state.inputs.name).toBe("acme");
+  });
+
   it("no custom domain and no workers.dev subdomain stops", async () => {
     const h = workerHarness({ seed: workerSeed({ subdomain: null }) });
     await expect(plan(h)).rejects.toThrow("no workers.dev subdomain");

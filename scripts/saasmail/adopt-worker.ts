@@ -10,10 +10,11 @@ import { sendingReport } from "./apply-mail.ts";
 import {
   lostVapidMessage,
   OPTIONAL_ITEMS,
+  renderConfig,
   writeConfig,
 } from "./apply-steps.ts";
 import { plainTextVars, type WorkerBinding } from "./cloudflare.ts";
-import { vapidSubjectFor } from "./config.ts";
+import { configVars, vapidSubjectFor } from "./config.ts";
 import { installDir } from "./home.ts";
 import { installationIdOf, resourceNames, validateName } from "./names.ts";
 import { catchAllOwner } from "./plan.ts";
@@ -44,6 +45,52 @@ const OTHER_NAMES = new Set(["ASSETS", "NOTIFICATIONS_HUB"]);
 const OTHER_TYPES = new Set(["plain_text", "secret_text", "send_email"]);
 
 const NOTHING = "Nothing was changed.";
+
+/** Secrets saasmail generates when the worker lacks them: a plain var of that name would be replaced. */
+const GENERATED_SECRETS = new Set([
+  "BETTER_AUTH_SECRET",
+  "UNSUBSCRIBE_SECRET",
+  "TOKEN_ENCRYPTION_KEY",
+  "VAPID_PRIVATE_KEY",
+  "SETUP_CODE_HASH",
+]);
+/** Vars the first upgrade is expected to change. */
+const EXPECTED_TO_CHANGE = new Set([
+  "SAASMAIL_VERSION",
+  "SAASMAIL_INSTALLATION",
+]);
+
+/**
+ * The worker's plain vars that the first upgrade's deploy would drop or change (wrangler deploy
+ * replaces every var with the generated config's): one line each, current -> new. A var named like
+ * a generated secret has its value withheld, since it likely holds one.
+ */
+function varChanges(
+  current: Record<string, string>,
+  next: Record<string, string>,
+): string[] {
+  const lines: string[] = [];
+  for (const [name, value] of Object.entries(current).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    if (GENERATED_SECRETS.has(name)) {
+      lines.push(
+        `  ${name}  (value not shown) -> removed; the upgrade would generate a ${name} secret in its place`,
+      );
+    } else if (EXPECTED_TO_CHANGE.has(name)) {
+      continue;
+    } else if (!(name in next)) {
+      lines.push(
+        `  ${name}  ${JSON.stringify(value)} -> removed (saasmail's config does not set it)`,
+      );
+    } else if (next[name] !== value) {
+      lines.push(
+        `  ${name}  ${JSON.stringify(value)} -> ${JSON.stringify(next[name])}`,
+      );
+    }
+  }
+  return lines;
+}
 
 const isTemplate = (b: WorkerBinding) =>
   b.name in TEMPLATE && TEMPLATE[b.name as TemplateName].type === b.type;
@@ -333,10 +380,22 @@ export async function planAdoptWorker(
     }),
   };
 
+  const to = await ctx.source.version(ctx.runner);
+  // Spec §6.7: what the first upgrade cannot carry over stops here, before anything is written.
+  const changes = varChanges(vars, configVars(renderConfig(ctx, s, to).text));
+  if (changes.length > 0) {
+    throw new Error(
+      [
+        `Worker ${worker} has vars the first upgrade would drop or change:`,
+        ...changes,
+        `Change or remove them on the worker, then run adopt again. ${NOTHING}`,
+      ].join("\n"),
+    );
+  }
+
   const running =
     (await wellKnownVersion(ctx, baseUrl)) ?? (vars.SAASMAIL_VERSION || null);
   if (running !== null) s.deployedVersion = running;
-  const to = await ctx.source.version(ctx.runner);
   const cmp = await compareRunning(
     running,
     { version: to, commit: ctx.source.commit ?? "" },
