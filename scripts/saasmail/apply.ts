@@ -410,7 +410,11 @@ export async function resumeInstalled(
   outer: Ctx,
   state: InstallState,
   optional: Optional,
-  opts: { newSetupCode?: boolean } = {},
+  opts: {
+    newSetupCode?: boolean;
+    /** The digest of the plan shown (and confirmed); a plan that changes meanwhile stops. */
+    expectPlan?: string;
+  } = {},
 ): Promise<InstallState> {
   let s = state;
   const ctx = onAccount(outer, s);
@@ -427,6 +431,12 @@ export async function resumeInstalled(
     step = "plan";
     const obs = await look(ctx, s);
     const plan = computePlan(desiredOf(s), obs, s);
+    if (opts.expectPlan !== undefined && opts.expectPlan !== plan.digest) {
+      throw new Error(
+        `The plan changed since it was reviewed (expected ${opts.expectPlan}, now ${plan.digest}):\n\n` +
+          `${formatPlan(plan, s.inputs, s.baseUrl)}\n\nReview it again with --plan, then apply with --expect-plan ${plan.digest}.`,
+      );
+    }
     // A state from before the subject was frozen keeps the deployed one.
     const deployedSubject = obs.worker.vars?.VAPID_SUBJECT;
     if (!s.vapidSubject && deployedSubject)

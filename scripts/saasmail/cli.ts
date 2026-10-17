@@ -240,6 +240,11 @@ function checkFlags(f: InstallFlags): void {
   if (f.hostname !== undefined && f["workers-dev"]) {
     throw new UsageError("Pass either --hostname or --workers-dev, not both.");
   }
+  if (f["new-setup-code"] && !f.resume) {
+    throw new UsageError(
+      "--new-setup-code works only with --resume (on an installed instance).",
+    );
+  }
   if (f.provider !== undefined && !isProvider(f.provider)) {
     throw new UsageError(
       `--provider must be one of ${PROVIDERS.join(", ")} (got ${f.provider}).`,
@@ -687,6 +692,13 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
     );
     io.print(formatPlan(plan, s.inputs, s.baseUrl));
     const installed = s.status === "installed";
+    // An installed resume that routes or onboards a domain changes mail delivery: it is confirmed
+    // and bound to the plan like a first install. Credential- or code-only resumes are not.
+    const pendingMail = plan.actions.some(
+      (a) =>
+        (a.kind === "routing" || a.kind === "sending") && !hasStep(s, a.key),
+    );
+    const bound = !installed || pendingMail;
 
     if (f.plan) {
       try {
@@ -698,12 +710,12 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
         );
       }
       io.print(`\nPlan ${plan.digest}\n\nTo apply it:`);
-      // An installed resume applies no plan (resumeInstalled), so its command carries no digest.
+      // An installed resume without mail changes applies no plan, so its command carries no digest.
       io.print(
         applyCommand(
           s,
           Boolean(f.resume),
-          installed ? null : plan.digest,
+          bound ? plan.digest : null,
           Boolean(f["new-setup-code"]),
         ),
       );
@@ -717,20 +729,23 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
       return 1;
     }
 
-    if (!installed && !f.yes && !(await io.confirm("Apply this plan?", true))) {
+    if (bound && !f.yes && !(await io.confirm("Apply this plan?", true))) {
       io.print("Nothing was changed.");
       return 1;
     }
     const { optional, missing } = await collectCredentials(deps, s);
     if (missing.length > 0) {
       io.print(
-        `The ${s.inputs.provider} provider needs ${missing.join(", ")}: set ${missing.length > 1 ? "them" : "it"} in the environment, or run in a terminal to be asked. Nothing was changed.`,
+        io.tty
+          ? `The ${s.inputs.provider} provider needs ${missing.join(", ")}, which ${missing.length > 1 ? "were" : "was"} left empty. Nothing was changed.`
+          : `The ${s.inputs.provider} provider needs ${missing.join(", ")}: set ${missing.length > 1 ? "them" : "it"} in the environment, or run in a terminal to be asked. Nothing was changed.`,
       );
       return 1;
     }
     if (installed) {
       await resumeInstalled(ctx, s, optional, {
         newSetupCode: Boolean(f["new-setup-code"]),
+        expectPlan: pendingMail ? (expected ?? plan.digest) : undefined,
       });
     } else {
       await install(ctx, {

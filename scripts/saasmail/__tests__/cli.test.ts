@@ -656,6 +656,8 @@ describe("install", () => {
       await main(["install", ...FLAGS, "--provider", "postmark"], h.deps),
     ).toBe(1);
     expect(h.text()).toContain("SAASMAIL_POSTMARK_API_KEY");
+    expect(h.text()).toContain("left empty");
+    expect(h.text()).not.toContain("run in a terminal");
     expect(mutations(h)).toEqual([]);
   });
 
@@ -996,6 +998,141 @@ describe("install", () => {
     expect(h.out.at(-1)).toBe(
       `yarn saasmail install --resume --name acme --account ${ACCOUNT} --workers-dev --provider cloudflare --cookie-prefix saasmail --new-setup-code --yes`,
     );
+  });
+
+  describe("installed --resume that adds a domain", () => {
+    const ADD = [
+      "install",
+      "--resume",
+      "--name",
+      "acme",
+      "--inbound-domain",
+      "other.org",
+    ];
+    const setup = (o: Parameters<typeof harness>[0] = {}) => {
+      const s = installedState();
+      const pinned = {
+        ...s,
+        deployedConfigHash: renderConfig({ cwd } as Ctx, s, VERSION).hash,
+      };
+      writeState(dir, pinned);
+      return {
+        pinned,
+        h: harness({
+          seed: seedFor(s),
+          setupStatus: { setupRequired: false, codeRequired: false },
+          ...o,
+        }),
+      };
+    };
+
+    it("asks to apply in a terminal and records the routing step on yes", async () => {
+      const { h } = setup({ tty: true });
+      expect(await main(ADD, h.deps)).toBe(0);
+      expect(h.confirms).toEqual(["Apply this plan?"]);
+      const steps = readState(dir, ID)!.steps.map((x) => x.key);
+      expect(steps).toContain("routing:other.org");
+      expect(readState(dir, ID)!.inputs.inboundDomains).toEqual(["other.org"]);
+    });
+
+    it("declining writes nothing", async () => {
+      const { h, pinned } = setup({ tty: true, confirm: false });
+      expect(await main(ADD, h.deps)).toBe(1);
+      expect(h.text()).toContain("Nothing was changed.");
+      expect(mutations(h)).toEqual([]);
+      expect(readState(dir, ID)).toEqual(pinned);
+    });
+
+    it("--plan prints --expect-plan, and that command applies", async () => {
+      const { h, pinned } = setup();
+      expect(await main([...ADD, "--plan"], h.deps)).toBe(0);
+      const cmd = h.out.at(-1)!;
+      expect(cmd).toMatch(
+        /^yarn saasmail install --resume --name acme .*--inbound-domain other\.org .*--expect-plan [0-9a-f]{12} --yes$/,
+      );
+      const again = harness({
+        seed: seedFor(pinned),
+        setupStatus: { setupRequired: false, codeRequired: false },
+      });
+      expect(await main(cmd.split(" ").slice(2), again.deps)).toBe(0);
+      expect(readState(dir, ID)!.steps.map((x) => x.key)).toContain(
+        "routing:other.org",
+      );
+    });
+
+    it("a stale --expect-plan stops it", async () => {
+      const { h, pinned } = setup();
+      expect(
+        await main([...ADD, "--yes", "--expect-plan", "000000000000"], h.deps),
+      ).toBe(1);
+      expect(h.text()).toContain("The plan changed");
+      expect(mutations(h)).toEqual([]);
+      expect(readState(dir, ID)).toEqual(pinned);
+    });
+
+    it("a plan that changes before resumeInstalled recomputes it stops", async () => {
+      const { h } = setup({
+        onCloudflare(cf) {
+          // The second observe (resumeInstalled's) sees other.org's catch-all taken by us: reuse.
+          const orig = cf.catchAll.bind(cf);
+          let n = 0;
+          cf.catchAll = async (z) => {
+            const r = await orig(z);
+            if (z !== ZONE2.id) return r;
+            return ++n >= 2
+              ? {
+                  enabled: true,
+                  actions: [{ type: "worker", value: ["acme"] }],
+                }
+              : r;
+          };
+          const settings = cf.emailRouting.bind(cf);
+          let m = 0;
+          cf.emailRouting = async (z) =>
+            z === ZONE2.id && ++m >= 2
+              ? { enabled: true, status: "ready" }
+              : settings(z);
+        },
+      });
+      expect(await main([...ADD, "--yes"], h.deps)).toBe(1);
+      expect(h.text()).toContain("The plan changed since it was reviewed");
+      expect(
+        h.cf()!.calls.filter((c) => c.method === "putCatchAllWorker"),
+      ).toEqual([]);
+    });
+  });
+
+  it("--new-setup-code without --resume is a usage error", async () => {
+    const h = harness();
+    expect(
+      await main(["install", "--plan", ...FLAGS, "--new-setup-code"], h.deps),
+    ).toBe(2);
+    expect(h.text()).toContain("--new-setup-code");
+    expect(h.cf()).toBeNull();
+  });
+
+  it("the printed apply command round-trips: it applies with no digest mismatch", async () => {
+    const p = harness();
+    const args = [
+      "install",
+      "--plan",
+      ...FLAGS,
+      "--inbound-domain",
+      " Other.ORG ",
+      "--inbound-domain",
+      "example.com",
+      "--send-domain",
+      "EXAMPLE.com",
+    ];
+    expect(await main(args, p.deps)).toBe(0);
+    const cmd = p.out.at(-1)!;
+    expect(cmd.startsWith("yarn saasmail ")).toBe(true);
+    const h = harness();
+    expect(await main(cmd.split(" ").slice(2), h.deps)).toBe(0);
+    expect(h.text()).not.toContain("The plan changed");
+    const s = readState(dir, ID)!;
+    expect(s.status).toBe("installed");
+    expect(s.inputs.inboundDomains).toEqual(["other.org", "example.com"]);
   });
 
   it("--resume with nothing recorded exits 1", async () => {
