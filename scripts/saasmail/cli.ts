@@ -2,20 +2,21 @@
 // §2–§6). Every outside effect comes in through `Deps`, so tests drive `main` with fakes; the real wiring is at the bottom.
 import "./node-guard.ts";
 import { realpathSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { install, resumeInstalled, type Ctx, type Optional } from "./apply.ts";
 import { assertConfigWritable, OPTIONAL_ITEMS } from "./apply-steps.ts";
 import { restCloudflare, type Cloudflare } from "./cloudflare.ts";
 import { clackIo, collect, type Io } from "./collect.ts";
+import { installDir, listInstalls, pickInstall, saasmailHome } from "./home.ts";
 import { ConfigConflict } from "./config.ts";
 import { installationIdOf, resourceNames, validateName } from "./names.ts";
 import { observe } from "./observe.ts";
 import { computePlan, formatPlan } from "./plan.ts";
 import { preflight } from "./preflight.ts";
 import { processRunner, type Runner } from "./runner.ts";
-import { checkoutSource, type Source } from "./source.ts";
+import { checkoutSource, packageSource, type Source } from "./source.ts";
 import {
   hasStep,
   listStates,
@@ -85,6 +86,8 @@ export type Deps = Omit<Ctx, "cf"> & {
   /** The Cloudflare API token; throws with what to do when there is none. */
   token(): Promise<string>;
   cloudflare(token: string): Cloudflare;
+  /** Package mode: the directory holding every install (<home>/<slug>/); null = checkout mode (dir and configDir as given). */
+  home: string | null;
 };
 
 type InstallFlags = {
@@ -211,7 +214,11 @@ export async function main(argv: string[], deps: Deps): Promise<number> {
         strict: true,
         allowPositionals: false,
       });
-      return await status(values, deps);
+      // Package mode: the install's own directory under home.
+      const dir = deps.home
+        ? installDir(deps.home, pickInstall(deps.home, values.name).slug)
+        : deps.dir;
+      return await status(values, { ...deps, dir });
     }
   } catch (e) {
     if (e instanceof UsageError || isParseArgsError(e)) {
@@ -576,19 +583,48 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
     io.print((e as Error).message);
     return 1;
   }
-  const { env: _env, token: _t, cloudflare, ...rest } = deps;
-  const ctx: Ctx = { ...rest, cf: cloudflare(token) };
+  const { env: _env, token: _t, cloudflare, home, ...rest } = deps;
+  let ctx: Ctx = { ...rest, cf: cloudflare(token) };
+  // Package mode: state, lock and wrangler.jsonc live together in <home>/<slug>/, chosen once the name is known.
+  const inInstall = (slug: string) => {
+    if (home === null) return;
+    const d = installDir(home, slug);
+    ctx = { ...ctx, dir: d, configDir: d };
+  };
 
   try {
     let s: InstallState;
     let recorded: boolean;
     if (f.resume) {
-      const found = resumable(deps.dir, f.name);
+      if (home !== null) {
+        const all = listInstalls(home);
+        const unfinished = all.filter((i) => i.state.status !== "installed");
+        const pick =
+          f.name !== undefined
+            ? all.find((i) => i.slug === f.name)
+            : unfinished.length === 1
+              ? unfinished[0]
+              : unfinished.length === 0 && all.length === 1
+                ? all[0]
+                : undefined;
+        if (
+          f.name === undefined &&
+          (unfinished.length > 1 || all.length > 1) &&
+          !pick
+        ) {
+          throw new UsageError(
+            `Several installs: ${all.map((i) => i.slug).join(", ")}. Pass --name.`,
+          );
+        }
+        if (pick) inInstall(pick.slug);
+        else ctx = { ...ctx, dir: home, configDir: home };
+      }
+      const found = resumable(ctx.dir, f.name);
       if (!found) {
         io.print(
           f.name === undefined
-            ? `No installation found to resume in ${deps.dir}.`
-            : `No installation named ${f.name} found in ${deps.dir}.`,
+            ? `No installation found to resume in ${ctx.dir}.`
+            : `No installation named ${f.name} found in ${ctx.dir}.`,
         );
         return 1;
       }
@@ -630,7 +666,8 @@ async function runInstall(f: InstallFlags, deps: Deps): Promise<number> {
         r.name,
         r.hostname ?? "workers.dev",
       );
-      const existing = readState(deps.dir, id);
+      inInstall(r.name);
+      const existing = readState(ctx.dir, id);
       if (existing) {
         if (existing.status === "installed") {
           io.print(
@@ -797,18 +834,25 @@ export function isEntry(
 
 if (isEntry(import.meta.main, process.argv[1], import.meta.url)) {
   const cwd = process.cwd();
-  const source = checkoutSource(cwd);
+  // The npm bundle defines __SAASMAIL_PACKAGE_ROOT__ (Task 11); in a checkout it is not defined at all.
+  const PACKAGED = typeof __SAASMAIL_PACKAGE_ROOT__ === "string";
+  const home = PACKAGED ? saasmailHome(process.env) : null;
+  // The bundle lives at <root>/bin/saasmail.js.
+  const source = PACKAGED
+    ? packageSource(dirname(dirname(fileURLToPath(import.meta.url))))
+    : checkoutSource(cwd);
   const deps: Deps = {
     io: clackIo,
     env: process.env,
     runner: processRunner,
-    dir: join(cwd, ".saasmail"),
+    dir: home ?? join(cwd, ".saasmail"),
     source,
-    configDir: cwd,
+    home,
+    configDir: home ?? cwd,
     fetchImpl: fetch,
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     now: () => new Date(),
-    token: () => resolveToken(process.env, processRunner, source, cwd),
+    token: () => resolveToken(process.env, processRunner, source, home ?? cwd),
     cloudflare: (token) => restCloudflare(token, fetch),
   };
   process.exitCode = await main(process.argv.slice(2), deps);

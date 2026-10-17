@@ -12,4 +12,10 @@ describe("nodeProblem", () => {
         `yarn saasmail needs Node.js 22.18 or newer (found ${v}).`,
       );
   });
+  it("package floor accepts 22.0.0 and names Node 22", () => {
+    expect(nodeProblem("22.0.0", [22, 0])).toBeUndefined();
+    expect(nodeProblem("21.7.3", [22, 0])).toBe(
+      "saasmail needs Node.js 22 or newer (found 21.7.3).",
+    );
+  });
 });

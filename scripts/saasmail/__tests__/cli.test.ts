@@ -3,6 +3,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
+  statSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -26,7 +28,7 @@ import type { Io } from "../collect.ts";
 import { installationIdOf, resourceNames } from "../names.ts";
 import { R2_MARKER_KEY } from "../observe.ts";
 import type { RunResult } from "../runner.ts";
-import { checkoutSource } from "../source.ts";
+import { checkoutSource, packageSource } from "../source.ts";
 import {
   listStates,
   newState,
@@ -36,6 +38,7 @@ import {
 } from "../state.ts";
 import {
   fakeCloudflare,
+  fakePackage,
   fakeRunner,
   type FakeCloudflare,
   type FakeCloudflareSeed,
@@ -87,6 +90,8 @@ function harness(
     confirm?: boolean;
     setupStatus?: { setupRequired: boolean; codeRequired: boolean };
     onCloudflare?: (cf: FakeCloudflare) => void;
+    /** Package mode: installs live under this home, run from a fake npm package. */
+    home?: string;
   } = {},
 ) {
   let cf: FakeCloudflare | null = null;
@@ -116,6 +121,16 @@ function harness(
       if (args[1] === "wrangler" && args[2] === "d1") return ok();
       throw new Error(`unexpected yarn ${args.join(" ")}`);
     },
+    // Package mode runs wrangler as `node <wrangler.js> ...`.
+    [process.execPath]: (args) => {
+      if (args[1] === "deploy") {
+        deploys.push({ args, secrets: null });
+        return ok();
+      }
+      if (args[1] === "secret")
+        return { code: 1, stdout: "", stderr: "not found" };
+      return ok();
+    },
   });
   const out: string[] = [];
   const prompts = [...(opts.prompts ?? [])];
@@ -140,6 +155,22 @@ function harness(
     print(t) {
       out.push(t);
     },
+  };
+  const pkgSource = () => {
+    const pkgRoot = fakePackage(join(root, "pkg"), {
+      version: VERSION,
+      commit: "abc",
+    });
+    mkdirSync(join(pkgRoot, "migrations"), { recursive: true });
+    copyFileSync(
+      join(cwd, "wrangler.jsonc.example"),
+      join(pkgRoot, "wrangler.jsonc.example"),
+    );
+    copyFileSync(
+      join(cwd, "migrations", "0000_init.sql"),
+      join(pkgRoot, "migrations", "0000_init.sql"),
+    );
+    return packageSource(pkgRoot);
   };
   const fetched: string[] = [];
   const fetchImpl = (async (input: string | URL | Request) => {
@@ -166,7 +197,8 @@ function harness(
     env: opts.env ?? {},
     runner,
     dir,
-    source: checkoutSource(cwd),
+    source: opts.home ? pkgSource() : checkoutSource(cwd),
+    home: opts.home ?? null,
     configDir: cwd,
     fetchImpl,
     sleep: async () => {},
@@ -394,6 +426,43 @@ describe("install", () => {
     expect(code).toBe(2);
     expect(h.text()).toContain("--send-domain");
     expect(h.cf()).toBeNull();
+  });
+
+  it("package install writes under home/<slug>", async () => {
+    const home = join(root, "home");
+    const h = harness({ home });
+    const before = readdirSync(cwd).sort();
+    const code = await main(["install", "--yes", ...FLAGS], h.deps);
+    expect(code).toBe(0);
+    const d = join(home, "acme");
+    expect(existsSync(join(d, `${ID}.json`))).toBe(true);
+    expect(existsSync(join(d, "wrangler.jsonc"))).toBe(true);
+    const mode = (p: string) => statSync(p).mode & 0o777;
+    expect(mode(join(d, `${ID}.json`))).toBe(0o600);
+    expect(mode(join(d, "wrangler.jsonc"))).toBe(0o600);
+    expect(mode(d)).toBe(0o700);
+    expect(readdirSync(cwd).sort()).toEqual(before);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("package --plan creates no home directory", async () => {
+    const home = join(root, "home");
+    const h = harness({ home });
+    expect(await main(["install", "--plan", ...FLAGS], h.deps)).toBe(0);
+    expect(existsSync(home)).toBe(false);
+    expect(h.out.at(-1)).toContain(`npx saasmail@${VERSION} install`);
+  });
+
+  it("package status finds the only install under home", async () => {
+    const home = join(root, "home");
+    const h = harness({ home });
+    expect(await main(["install", "--yes", ...FLAGS], h.deps)).toBe(0);
+    const s = harness({ home });
+    expect(await main(["status"], s.deps)).toBe(0);
+    expect(s.text()).toContain("Installation");
+    const none = harness({ home: join(root, "empty") });
+    expect(await main(["status"], none.deps)).toBe(2);
+    expect(none.text()).toContain("No saasmail install in");
   });
 
   it("--plan prints the plan and the apply command, writes nothing", async () => {

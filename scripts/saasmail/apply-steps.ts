@@ -168,7 +168,13 @@ export function writeConfig(
   version: string,
 ): string {
   const { text, hash } = renderConfig(ctx, s, version);
-  if (text !== existingConfig(ctx)) writeFileSync(configPath(ctx), text);
+  // Under ~/.saasmail the config sits with the state file, so it is private like it; a checkout's is the repo's own.
+  if (text !== existingConfig(ctx))
+    writeFileSync(
+      configPath(ctx),
+      text,
+      ctx.source.kind === "package" ? { mode: 0o600 } : undefined,
+    );
   return hash;
 }
 
