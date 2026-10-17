@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { parse, type ParseError } from "jsonc-parser";
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import {
   ConfigConflict,
+  configHash,
   deployedPart,
   generateWranglerConfig,
   isGenerated,
@@ -49,6 +51,7 @@ const extra = {
   version: "1.2.3",
   existing: null,
   command: "yarn saasmail install",
+  build: null,
 };
 
 function read(text: string) {
@@ -257,5 +260,55 @@ describe("isGenerated / deployedPart", () => {
     const b = base.replace(/\n}\s*$/, ',\n  "env": { "dev": { "x": 1 } }\n}\n');
     expect(deployedPart(a)).toBe(deployedPart(b));
     expect(parse(deployedPart(a)).env).toBeUndefined();
+  });
+});
+
+describe("package build paths", () => {
+  const build = (p: string) => ({
+    main: `${p}/worker/index.js`,
+    assetsDir: `${p}/client`,
+    migrationsDir: `${p}/migrations`,
+    moduleConfig: {
+      no_bundle: true,
+      rules: [{ type: "ESModule", globs: ["**/*.js"] }],
+    },
+  });
+
+  it("package build paths are written", () => {
+    const c = read(
+      generateWranglerConfig(template, fixture(), {
+        ...extra,
+        build: build("/p"),
+      }),
+    );
+    expect(c.main).toBe("/p/worker/index.js");
+    expect(c.no_bundle).toBe(true);
+    expect(c.rules).toEqual([{ type: "ESModule", globs: ["**/*.js"] }]);
+    expect(c.assets.directory).toBe("/p/client");
+    expect(c.assets.binding).toBe("ASSETS");
+    expect(c.d1_databases[0].migrations_dir).toBe("/p/migrations");
+  });
+
+  it("package path change is not drift", () => {
+    const state = fixture();
+    const render = (p: string, version = "1.2.3") =>
+      generateWranglerConfig(template, state, {
+        ...extra,
+        version,
+        build: build(p),
+      });
+    expect(configHash(render("/p"), build("/p"))).toBe(
+      configHash(render("/q"), build("/q")),
+    );
+    expect(configHash(render("/p"), build("/p"))).not.toBe(
+      configHash(render("/p", "1.2.4"), build("/p")),
+    );
+  });
+
+  it("checkout hash unchanged", () => {
+    const text = generateWranglerConfig(template, fixture(), extra);
+    expect(configHash(text, null)).toBe(
+      createHash("sha256").update(deployedPart(text)).digest("hex"),
+    );
   });
 });

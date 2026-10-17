@@ -8,7 +8,7 @@ import type { Cloudflare } from "./cloudflare.ts";
 import type { Io } from "./collect.ts";
 import {
   ConfigConflict,
-  deployedPart,
+  configHash,
   generateWranglerConfig,
   isGenerated,
 } from "./config.ts";
@@ -153,10 +153,11 @@ export function renderConfig(
     version,
     command: ctx.source.command("install"),
     existing: existingConfig(ctx),
+    build: ctx.source.build,
   });
   return {
     text,
-    hash: createHash("sha256").update(deployedPart(text)).digest("hex"),
+    hash: configHash(text, ctx.source.build),
   };
 }
 
