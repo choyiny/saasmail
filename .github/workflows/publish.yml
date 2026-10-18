@@ -3,7 +3,9 @@ name: Publish
 # Publishes the npm package `saasmail` when a release is published. Never runs on pull requests.
 # Two jobs: `build` installs dependencies, tests and packs with read-only permissions and no
 # OIDC token; `publish` only downloads the packed directory and runs `npm publish`, so no
-# dependency code ever runs where a publish token can be minted.
+# dependency code ever runs where a publish token can be minted. Publishing uses npm trusted
+# publishing (OIDC): no npm token is stored. The package's trusted publisher on npmjs.com is
+# choyiny/saasmail, workflow publish.yml.
 on:
   release:
     types: [published]
@@ -60,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # npm trusted publishing and provenance
     steps:
       - name: Check the tag is vX.Y.Z[-pre]
         env:
@@ -76,13 +78,14 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10.
+      - run: npm install -g npm@11.21.0
       - uses: actions/download-artifact@v7
         with:
           name: npm-package
           path: build/npm
       - name: Publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           # A prerelease goes to the `next` tag so `latest` stays on the last release.
