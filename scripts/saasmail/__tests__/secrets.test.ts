@@ -1,5 +1,11 @@
 import { createHash, createPrivateKey, createPublicKey } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+} from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   generateEncryptionKey,
@@ -85,8 +91,13 @@ describe("withSecretsFile", () => {
     let p = "";
     const out = await withSecretsFile({ A: "x", B: "y" }, async (path) => {
       p = path;
-      expect(statSync(path).mode & 0o777).toBe(0o600);
-      expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      // One descriptor for both checks, so the mode and the contents are the same file's.
+      const fd = openSync(path, "r");
+      const mode = fstatSync(fd).mode;
+      const text = readFileSync(fd, "utf8");
+      closeSync(fd);
+      expect(mode & 0o777).toBe(0o600);
+      expect(JSON.parse(text)).toEqual({
         A: "x",
         B: "y",
       });

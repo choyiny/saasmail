@@ -775,6 +775,7 @@ describe("computePlan: Email Sending", () => {
   };
 
   function observed(present: string[]): Observed {
+    const has = new Set(present);
     return {
       ...empty(),
       zones: { "example.com": "zone-com", "mail.example.org": "zone-org" },
@@ -782,9 +783,9 @@ describe("computePlan: Email Sending", () => {
         "example.com": { enabled: false, status: null, catchAll: null },
       },
       sending: {
-        "example.com": { present: present.includes("example.com") },
+        "example.com": { present: has.has("example.com") },
         "mail.example.org": {
-          present: present.includes("mail.example.org"),
+          present: has.has("mail.example.org"),
         },
       },
     };

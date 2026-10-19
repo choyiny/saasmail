@@ -1001,7 +1001,7 @@ describe("install", () => {
         h.deps,
       ),
     ).toBe(0);
-    expect(h.text()).toMatch(/create\s+routing\s+other\.org/);
+    expect(h.text()).toMatch(/^.*create\s+routing\s+other\.org/m);
     expect(h.out.at(-1)).toContain(
       "--inbound-domain example.com --inbound-domain other.org",
     );

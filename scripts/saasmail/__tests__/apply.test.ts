@@ -506,7 +506,7 @@ describe("install", () => {
     expect(setupCodeHash(code!)).toBe(secrets.SETUP_CODE_HASH);
     expect(summary).toContain(`${BASE}/onboarding`);
     expect(summary).toContain(RESUME);
-    expect(summary).toMatch(/example\.com.*acme/);
+    expect(summary).toMatch(/^.*example\.com.*acme/m);
     // No secret ever lands in the state file.
     const stateText = readFileSync(join(dir, `${ID}.json`), "utf8");
     for (const v of [code!, ...Object.values(secrets)])
@@ -955,7 +955,7 @@ describe("sending", () => {
       ),
     ).toBe(false);
     const summary = h.printed.join("\n");
-    expect(summary).toMatch(/example\.com.*pending/);
+    expect(summary).toMatch(/^.*example\.com.*pending/m);
     expect(summary).toMatch(
       /ok\s+MX cf-bounce\.example\.com route1\.mx\.cloudflare\.net/,
     );
@@ -1147,7 +1147,7 @@ describe("resumeInstalled", () => {
     expect(readState(dir, ID)!.steps.map((x) => x.key)).toContain(
       "routing:other.org",
     );
-    expect(h.printed.join("\n")).toMatch(/other\.org.*acme/);
+    expect(h.printed.join("\n")).toMatch(/^.*other\.org.*acme/m);
   });
 
   it("adds a send domain: sending only, no deploy", async () => {

@@ -96,7 +96,12 @@ function viteBuild(configPath, outDir) {
   // The plugin points .wrangler/deploy/config.json at its output; left pointing at the placeholder
   // build, a maintainer's next `yarn wrangler ...` without --config would read it.
   const redirect = join(ROOT, ".wrangler", "deploy", "config.json");
-  const before = existsSync(redirect) ? readFileSync(redirect) : null;
+  let before = null;
+  try {
+    before = readFileSync(redirect);
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
   try {
     execFileSync("yarn", ["-s", "build", "--outDir", outDir], {
       cwd: ROOT,
