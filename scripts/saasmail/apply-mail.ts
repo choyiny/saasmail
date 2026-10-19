@@ -56,6 +56,13 @@ export type SendingReport = {
   error?: string;
 };
 
+/**
+ * A DMARC policy: a domain has one, and any policy the owner chose satisfies Email Sending, so an
+ * existing one counts as present whatever its tags.
+ */
+const isDmarc = (r: { type: string; content: string }) =>
+  norm(r.type) === "txt" && norm(r.content).startsWith("v=dmarc1");
+
 const QUOTED_CHUNKS = /^("(?:[^"\\]|\\.)*"\s*)+$/s;
 
 /**
@@ -99,7 +106,7 @@ export async function sendingReport(
         ok: (byName.get(norm(r.name)) ?? []).some(
           (h) =>
             norm(h.type) === norm(r.type) &&
-            norm(h.content) === norm(r.content),
+            (norm(h.content) === norm(r.content) || (isDmarc(r) && isDmarc(h))),
         ),
       })),
     };

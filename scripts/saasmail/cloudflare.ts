@@ -1,4 +1,5 @@
 // Typed Cloudflare REST client for the installer. Never logs or echoes the token.
+import { publicDns } from "./public-dns.ts";
 
 export class CloudflareError extends Error {
   status: number;
@@ -78,6 +79,7 @@ export interface Cloudflare {
   ): Promise<{ id: string; name: string; status: string } | null>;
   listZones(a: string): Promise<{ id: string; name: string; status: string }[]>;
   workerDomains(a: string): Promise<{ hostname: string; service: string }[]>;
+  /** Records at exactly `name`, as public DNS answers (see public-dns.ts); `zoneId` is unused there. */
   dnsRecords(
     zoneId: string,
     name: string,
@@ -210,6 +212,7 @@ export function restCloudflare(
   const sleep =
     options.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const dns = publicDns(fetchImpl, { sleep: options.sleep });
 
   /** One HTTP exchange. GETs retry up to 3 times on 429/5xx; everything else is sent once. */
   async function send(
@@ -394,14 +397,10 @@ export function restCloudflare(
       return rows.map((r) => ({ hostname: r.hostname, service: r.service }));
     },
 
-    // GET /zones/{z}/dns_records?name.exact= (wrangler cloudflare@5.2 resources/dns/records list; `name.exact`
-    // per developers.cloudflare.com/api/resources/dns/subresources/records/methods/list/).
-    async dnsRecords(zoneId, name) {
-      const rows = await list<{ type: string; content: string }>(
-        `/zones/${enc(zoneId)}/dns_records`,
-        { perPage: 100, query: { "name.exact": name } },
-      );
-      return rows.map((r) => ({ type: r.type, content: r.content }));
+    // Public DNS, not GET /zones/{z}/dns_records: `wrangler login` cannot grant dns_records:read. A wildcard
+    // record answers for every name under it, so it shows here where the records API would show nothing.
+    async dnsRecords(_zoneId, name) {
+      return dns.records(name);
     },
 
     // GET /zones/{z}/workers/routes -> [{ id, pattern, script? }] (wrangler cloudflare@5.2 resources/workers/routes
@@ -544,17 +543,9 @@ export function restCloudflare(
       return { id: r.queue_id };
     },
 
-    // GET /zones/{z}/dns_records?type=MX&name.exact= (same endpoint as dnsRecords; `type` filter and MX `priority` per
-    // developers.cloudflare.com/api/resources/dns/subresources/records/methods/list/).
-    async mxRecords(zoneId, name) {
-      const rows = await list<{ content: string; priority?: number }>(
-        `/zones/${enc(zoneId)}/dns_records`,
-        { perPage: 100, query: { type: "MX", "name.exact": name } },
-      );
-      return rows.map((r) => ({
-        content: r.content,
-        priority: r.priority ?? null,
-      }));
+    // Public DNS, as dnsRecords.
+    async mxRecords(_zoneId, name) {
+      return dns.mx(name);
     },
 
     // GET /zones/{z}/email/routing -> { enabled, status, ... } (wrangler 4.127 src/email-routing/client.ts

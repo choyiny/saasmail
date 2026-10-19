@@ -967,6 +967,21 @@ describe("sending", () => {
     );
   });
 
+  it("a DMARC policy of the owner's own counts as present", async () => {
+    const own = SENDING_DNS.map((r) =>
+      r.name === "_dmarc.example.com"
+        ? {
+            ...r,
+            content:
+              '"v=DMARC1; p=quarantine; rua=mailto:postmaster@example.com"',
+          }
+        : r,
+    );
+    const h = harness({ seed: { dnsRecords: { [ZONE.id]: own } } });
+    await install(h.ctx, { state: freshState(), ...noOptional });
+    expect(h.printed.join("\n")).not.toContain("missing:");
+  });
+
   it("all records present: the domain is ready", async () => {
     const h = harness({ seed: { dnsRecords: { [ZONE.id]: SENDING_DNS } } });
     await install(h.ctx, { state: freshState(), ...noOptional });

@@ -91,7 +91,7 @@ yarn saasmail install
 
 ### Token permissions
 
-`wrangler login` covers the Workers, D1, R2, Queues and Email calls. A custom hostname or inbound domains may need `CLOUDFLARE_API_TOKEN` with **Zone → DNS → Read**, because wrangler's login scopes may not include reading DNS records: if preflight says the token can't read DNS records, create such a token. For `CLOUDFLARE_API_TOKEN` (also useful in CI), create an API token with these permissions, scoped to the account and to the zones involved. The installer reports a 401/403 as "The API token cannot read: …". The list is derived from the REST calls the installer and `wrangler deploy` make; names are the dashboard's permission groups, and those marked (unverified) are the nearest match, so adjust if the dashboard words them differently.
+`wrangler login` covers every call the installer makes. DNS records (a custom hostname's existing records, inbound domains' MX records, Email Sending's records) are read from public DNS (Cloudflare's DNS over HTTPS at cloudflare-dns.com), not the zone's records API, because `wrangler login` cannot grant reading DNS records; records added in the last few minutes may not show yet. For `CLOUDFLARE_API_TOKEN` (also useful in CI), create an API token with these permissions, scoped to the account and to the zones involved. The installer reports a 401/403 as "The API token cannot read: …". The list is derived from the REST calls the installer and `wrangler deploy` make; names are the dashboard's permission groups, and those marked (unverified) are the nearest match, so adjust if the dashboard words them differently.
 
 - **Account → Account Settings → Read** (list accounts)
 - **Account → Workers Scripts → Edit** (deploy, secrets, worker settings, workers.dev subdomain, Workflows)
@@ -101,7 +101,7 @@ yarn saasmail install
 - **Account → Workflows → Edit** (unverified; Workers Scripts may cover it)
 - **Account → Email Sending → Edit** (unverified; only with `--send-domain`)
 - **Zone → Zone → Read** (every zone)
-- **Zone → DNS → Edit** (reads MX and DNS records everywhere; Email Routing writes its own records; a custom hostname's DNS record is created at deploy)
+- **Zone → DNS → Edit** (Email Routing writes its own records; a custom hostname's DNS record is created at deploy)
 - **Zone → Workers Routes → Edit** (only with `--hostname`)
 - **Zone → Email Routing Rules → Edit** (unverified; only with `--inbound-domain`)
 

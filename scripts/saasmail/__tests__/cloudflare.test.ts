@@ -188,20 +188,32 @@ describe("restCloudflare", () => {
     expect(hit.calls[0]!.url.pathname).toMatch(/\/objects\/k\/x$/);
   });
 
-  it("dnsRecords filters by exact name and returns type and content", async () => {
-    const { fetch, calls } = fakeFetch(() =>
-      ok([{ name: "mail.example.com", type: "A", content: "192.0.2.1" }]),
+  it("dnsRecords and mxRecords read public DNS, never the zone API, and send no token", async () => {
+    const { fetch, calls } = fakeFetch((c) =>
+      Response.json({
+        Status: 0,
+        Answer:
+          c.url.searchParams.get("type") === "MX"
+            ? [
+                {
+                  name: "example.com.",
+                  type: 15,
+                  data: "10 route1.mx.cloudflare.net.",
+                },
+              ]
+            : [],
+      }),
     );
+    const cf = restCloudflare("secret-token", fetch, noSleep);
+    expect(await cf.mxRecords("z1", "example.com")).toEqual([
+      { content: "route1.mx.cloudflare.net.", priority: 10 },
+    ]);
+    expect(await cf.dnsRecords("z1", "example.com")).toEqual([
+      { type: "MX", content: "route1.mx.cloudflare.net." },
+    ]);
     expect(
-      await restCloudflare("t", fetch, noSleep).dnsRecords(
-        "z1",
-        "mail.example.com",
-      ),
-    ).toEqual([{ type: "A", content: "192.0.2.1" }]);
-    expect(calls[0]!.url.pathname).toBe("/client/v4/zones/z1/dns_records");
-    expect(calls[0]!.url.searchParams.get("name.exact")).toBe(
-      "mail.example.com",
-    );
+      calls.every((c) => c.url.origin === "https://cloudflare-dns.com"),
+    ).toBe(true);
   });
 
   it("workerRoutes lists the zone routes with their script", async () => {
@@ -442,26 +454,6 @@ describe("restCloudflare: Email Routing", () => {
       actions: [{ type: "worker", value: ["saasmail"] }],
       enabled: true,
     });
-  });
-
-  it("mxRecords filters by type MX and exact name", async () => {
-    const { fetch, calls } = fakeFetch(() =>
-      ok([
-        {
-          name: "example.com",
-          type: "MX",
-          content: "route1.mx.cloudflare.net",
-          priority: 10,
-        },
-      ]),
-    );
-    expect(
-      await restCloudflare("t", fetch, noSleep).mxRecords("z1", "example.com"),
-    ).toEqual([{ content: "route1.mx.cloudflare.net", priority: 10 }]);
-    expect(calls[0]!.url.pathname).toBe("/client/v4/zones/z1/dns_records");
-    expect(calls[0]!.url.searchParams.get("type")).toBe("MX");
-    expect(calls[0]!.url.searchParams.get("name.exact")).toBe("example.com");
-    expect(calls[0]!.url.searchParams.get("per_page")).toBe("100");
   });
 });
 
