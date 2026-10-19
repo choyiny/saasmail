@@ -138,6 +138,10 @@ export function fakeCloudflare(seed: FakeCloudflareSeed = {}): FakeCloudflare {
       }
       return null;
     },
+    async listZones(a) {
+      await enter("listZones", [a]);
+      return (seed.zones ?? []).map((z) => ({ ...z }));
+    },
     async workerDomains(a) {
       await enter("workerDomains", [a]);
       return seed.workerDomains ?? [];

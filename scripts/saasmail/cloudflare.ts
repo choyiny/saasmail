@@ -76,6 +76,7 @@ export interface Cloudflare {
     a: string,
     hostname: string,
   ): Promise<{ id: string; name: string; status: string } | null>;
+  listZones(a: string): Promise<{ id: string; name: string; status: string }[]>;
   workerDomains(a: string): Promise<{ hostname: string; service: string }[]>;
   dnsRecords(
     zoneId: string,
@@ -374,6 +375,15 @@ export function restCloudflare(
         if (z) return { id: z.id, name: z.name, status: z.status };
       }
       return null;
+    },
+
+    // GET /zones?account.id= (Cloudflare API docs: zones list), every page.
+    async listZones(a) {
+      const rows = await list<{ id: string; name: string; status: string }>(
+        "/zones",
+        { perPage: 50, query: { "account.id": a } },
+      );
+      return rows.map((z) => ({ id: z.id, name: z.name, status: z.status }));
     },
 
     // GET /accounts/{a}/workers/domains (wrangler cloudflare@5.2 resources/workers/domains).

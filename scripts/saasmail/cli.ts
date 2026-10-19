@@ -485,12 +485,14 @@ type MailFlags = Pick<
 
 /**
  * Inbound domains → provider → send domains: flag, else (in a terminal without --yes) a prompt,
- * else none / `defaultProvider`. The provider prompt offers `defaultProvider` first.
+ * else none / `defaultProvider`. The provider prompt offers `defaultProvider` first. Without
+ * `askDomains` the domains come from the flags only.
  */
 async function resolveMail(
   f: MailFlags,
   io: Io,
   defaultProvider: Provider,
+  askDomains = true,
 ): Promise<Pick<Resolved, "inboundDomains" | "provider" | "sendDomains">> {
   const asking = io.tty && !f.yes;
   const domainList = async (
@@ -498,7 +500,7 @@ async function resolveMail(
     message: string,
   ): Promise<string[]> => {
     if (flag !== undefined) return normaliseDomains(flag);
-    if (!asking) return [];
+    if (!asking || !askDomains) return [];
     const v = await answer(io, message, { validate: domainsProblem });
     const bad = domainsProblem(v);
     if (bad) throw new UsageError(bad);
@@ -1101,8 +1103,8 @@ export function adoptCommand(
 
 /**
  * `adopt --worker <name>`: reads the worker from Cloudflare and records it under <home>/<name>/.
- * The mail inputs are collected as install collects them; the provider defaults to what the
- * worker uses.
+ * The provider is collected as install collects it, defaulting to what the worker uses; mail
+ * domains not given as flags are found on Cloudflare (planAdoptWorker), never prompted for.
  */
 async function runAdoptWorker(
   f: AdoptFlags,
@@ -1152,10 +1154,14 @@ async function runAdoptWorker(
       asking && f.provider === undefined
         ? detectProvider(settings.bindings)
         : DEFAULT_PROVIDER;
-    const mail = await resolveMail(f, io, detected);
+    const mail = await resolveMail(f, io, detected, false);
     const inputs: AdoptInputs = {
-      inboundDomains: mail.inboundDomains,
-      sendDomains: mail.sendDomains,
+      ...(f["inbound-domain"] !== undefined
+        ? { inboundDomains: mail.inboundDomains }
+        : {}),
+      ...(f["send-domain"] !== undefined
+        ? { sendDomains: mail.sendDomains }
+        : {}),
       ...(f.provider !== undefined || asking
         ? { provider: mail.provider }
         : {}),
@@ -1170,6 +1176,7 @@ async function runAdoptWorker(
       }
       const p = await planAdoptWorker(ctx, { accountId, worker, inputs });
       io.print(p.report);
+      for (const n of p.notes) io.print(`\n${n}`);
       io.print(`\nPlan ${p.digest}\n\nTo apply it:`);
       io.print(adoptCommand(p.state, p.digest, deps.source));
       return 0;

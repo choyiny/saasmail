@@ -1893,6 +1893,34 @@ describe("adopt --worker", () => {
     expect(apply.deploys).toHaveLength(0);
   });
 
+  it("--plan without domain flags uses the ones found on Cloudflare, and its command applies", async () => {
+    const mailSeed: FakeCloudflareSeed = {
+      ...seed,
+      workers: {
+        acme: [...seed.workers!.acme!, { type: "send_email", name: "EMAIL" }],
+      },
+      zones: [{ id: "z1", name: "acme.dev", status: "active" }],
+      routing: { z1: { enabled: true, status: "ready" } },
+      catchAll: {
+        z1: { enabled: true, actions: [{ type: "worker", value: ["acme"] }] },
+      },
+      sending: { z1: [{ id: "s1", name: "acme.dev", enabled: true }] },
+    };
+    const h = harness({ home: home(), seed: mailSeed, tty: false });
+    expect(await main(["adopt", "--worker", "acme", "--plan"], h.deps)).toBe(0);
+    const text = h.text();
+    const digest = /Plan ([0-9a-f]{12})/.exec(text)![1]!;
+    const command = `npx saasmail@${VERSION} adopt --worker acme --account ${ACCOUNT} --inbound-domain acme.dev --provider cloudflare --send-domain acme.dev --cookie-prefix acme --expect-plan ${digest} --yes`;
+    expect(text).toContain(command);
+
+    const apply = harness({ home: home(), seed: mailSeed, tty: false });
+    const argv = command.split(" ").slice(2);
+    expect(await main(argv, apply.deps)).toBe(0);
+    const s = listStates(join(home(), "acme"))[0]!;
+    expect(s.inputs.inboundDomains).toEqual(["acme.dev"]);
+    expect(s.inputs.sendDomains).toEqual(["acme.dev"]);
+  });
+
   it("without a terminal and --yes exits 2; checkout mode points at npx", async () => {
     const h = harness({ home: home(), seed });
     expect(await main(["adopt", "--worker", "acme"], h.deps)).toBe(2);

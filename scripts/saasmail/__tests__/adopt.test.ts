@@ -624,12 +624,65 @@ describe("adoptWorker: stops beyond the template mapping", () => {
     const h = workerHarness({
       seed: workerSeed(
         {},
-        withVar("TRUSTED_ORIGINS", `http://localhost:8080,${W_BASE}`),
+        withVar("TRUSTED_ORIGINS", `https://admin.example.com,${W_BASE}`),
       ),
     });
     await expect(plan(h)).rejects.toThrow(
-      `  TRUSTED_ORIGINS  "http://localhost:8080,${W_BASE}" -> "${W_BASE}"`,
+      `  TRUSTED_ORIGINS  "https://admin.example.com,${W_BASE}" -> "${W_BASE}"`,
     );
+  });
+
+  it("dropping local development origins from TRUSTED_ORIGINS is reported, not a stop", async () => {
+    const value = `http://localhost:8080, http://127.0.0.1:8788,http://[::1]:5173,${W_BASE}`;
+    const h = workerHarness({
+      seed: workerSeed({}, withVar("TRUSTED_ORIGINS", value)),
+    });
+    const p = await plan(h);
+    expect(p.report).toContain(
+      "The first upgrade drops these vars (the worker does not need them):",
+    );
+    expect(p.report).toContain(
+      `  TRUSTED_ORIGINS  ${JSON.stringify(value)} -> "${W_BASE}" (drops local development origins)`,
+    );
+  });
+
+  it("TRUSTED_ORIGINS without the URL the upgrade keeps stops, even if the rest is local", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, withVar("TRUSTED_ORIGINS", "http://localhost:8080")),
+    });
+    await expect(plan(h)).rejects.toThrow(
+      `  TRUSTED_ORIGINS  "http://localhost:8080" -> "${W_BASE}"`,
+    );
+  });
+
+  it("retired vars (APP_NAME, APP_LOGO_LETTER) are reported as dropped, not a stop", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, [
+        ...BINDINGS,
+        { type: "plain_text", name: "APP_NAME", text: "cmail" },
+        { type: "plain_text", name: "APP_LOGO_LETTER", text: "c" },
+      ]),
+    });
+    const p = await plan(h);
+    expect(p.report).toContain(
+      '  APP_LOGO_LETTER  "c" -> removed (saasmail no longer reads it)',
+    );
+    expect(p.report).toContain(
+      '  APP_NAME  "cmail" -> removed (saasmail no longer reads it)',
+    );
+  });
+
+  it("a retired var next to one that stops: only the stop is listed", async () => {
+    const h = workerHarness({
+      seed: workerSeed({}, [
+        ...BINDINGS,
+        { type: "plain_text", name: "APP_NAME", text: "cmail" },
+        { type: "plain_text", name: "FEATURE_X", text: "on" },
+      ]),
+    });
+    const err = (await plan(h).catch((e: Error) => e)) as Error;
+    expect(err.message).toContain('  FEATURE_X  "on"');
+    expect(err.message).not.toContain("APP_NAME");
   });
 
   it("every such var is listed in one stop, and adopt writes nothing", async () => {
@@ -670,5 +723,100 @@ describe("adoptWorker: stops beyond the template mapping", () => {
   it("no custom domain and no workers.dev subdomain stops", async () => {
     const h = workerHarness({ seed: workerSeed({ subdomain: null }) });
     await expect(plan(h)).rejects.toThrow("no workers.dev subdomain");
+  });
+});
+
+describe("adoptWorker: mail domains found on Cloudflare", () => {
+  const zones = [
+    { id: "z1", name: "acme.dev", status: "active" },
+    { id: "z2", name: "other.org", status: "active" },
+    { id: "z3", name: "off.net", status: "active" },
+    { id: "z4", name: "plain.com", status: "active" },
+  ];
+  const ours = {
+    enabled: true,
+    actions: [{ type: "worker", value: ["acme"] }],
+  };
+  const mailSeed = (over: Partial<FakeCloudflareSeed> = {}) =>
+    workerSeed({
+      zones,
+      routing: {
+        z1: { enabled: true, status: "ready" },
+        z2: { enabled: true, status: "ready" },
+        z3: { enabled: false, status: "unconfigured" },
+      },
+      catchAll: {
+        z1: ours,
+        z2: { enabled: true, actions: [{ type: "worker", value: ["other"] }] },
+        z3: ours,
+      },
+      sending: {
+        z1: [
+          { id: "s1", name: "acme.dev", enabled: true },
+          { id: "s2", name: "mail.acme.dev", enabled: true },
+          { id: "s3", name: "old.acme.dev", enabled: false },
+        ],
+        z2: [{ id: "s4", name: "other.org", enabled: true }],
+      },
+      ...over,
+    });
+  const plan = (h: ReturnType<typeof workerHarness>, inputs = {}) =>
+    planAdoptWorker(h.ctx, { accountId: W_ACCOUNT, worker: "acme", inputs });
+
+  it("inbound: zones whose catch-all goes to the worker with routing on; send: enabled subdomains in them", async () => {
+    const h = workerHarness({ seed: mailSeed() });
+    const p = await plan(h);
+    expect(p.state.inputs.inboundDomains).toEqual(["acme.dev"]);
+    expect(p.state.inputs.provider).toBe("cloudflare");
+    expect(p.state.inputs.sendDomains).toEqual(["acme.dev", "mail.acme.dev"]);
+    expect(p.report).toContain("  Inbound        acme.dev");
+    expect(p.report).toContain("  Send domains   acme.dev, mail.acme.dev");
+    expect(p.report).toContain("  acme.dev  ok");
+    // Sending subdomains are read only in zones that receive this worker's mail.
+    expect(
+      new Set(
+        h.cf.calls
+          .filter((c) => c.method === "listSendingSubdomains")
+          .map((c) => c.args[0]),
+      ),
+    ).toEqual(new Set(["z1"]));
+    expect(h.cf.calls.filter((c) => WRITES.includes(c.method))).toEqual([]);
+  });
+
+  it("flags win: given domains are not looked up, and the report is the same as when found", async () => {
+    const found = await plan(workerHarness({ seed: mailSeed() }));
+    const h = workerHarness({ seed: mailSeed() });
+    const flagged = await plan(h, {
+      inboundDomains: ["acme.dev"],
+      sendDomains: ["acme.dev", "mail.acme.dev"],
+    });
+    expect(flagged.digest).toBe(found.digest);
+    expect(h.cf.calls.some((c) => c.method === "listZones")).toBe(false);
+
+    const none = workerHarness({ seed: mailSeed() });
+    const p = await plan(none, { inboundDomains: [] });
+    expect(p.state.inputs.inboundDomains).toEqual([]);
+    expect(p.state.inputs.sendDomains).toEqual([]);
+  });
+
+  it("a catch-all to the worker with Email Routing off is a note, not an inbound domain", async () => {
+    const h = workerHarness({ seed: mailSeed() });
+    const p = await plan(h);
+    expect(p.state.inputs.inboundDomains).not.toContain("off.net");
+    expect(p.notes).toEqual([
+      "Note: off.net's catch-all sends mail to acme, but Email Routing is off there, so it is not an inbound domain. Add --inbound-domain off.net to have the first upgrade turn Email Routing on (that changes off.net's MX records).",
+    ]);
+    expect(p.report).not.toContain("off.net");
+    const flagged = await plan(workerHarness({ seed: mailSeed() }), {
+      inboundDomains: ["acme.dev"],
+    });
+    expect(flagged.notes).toEqual([]);
+  });
+
+  it("a provider other than Email Sending finds no send domains", async () => {
+    const h = workerHarness({ seed: mailSeed() });
+    const p = await plan(h, { provider: "resend" });
+    expect(p.state.inputs.inboundDomains).toEqual(["acme.dev"]);
+    expect(p.state.inputs.sendDomains).toEqual([]);
   });
 });
