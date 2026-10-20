@@ -55,7 +55,7 @@ yarn db:migrate:dev      # local D1 (.wrangler/state/v3/d1)
 yarn db:migrate:prod     # remote D1 — needs a wrangler login
 ```
 
-Both call `wrangler d1 migrations apply saasmail-db` under the hood.
+Both call `wrangler d1 migrations apply DB` (the binding, so any database name works) under the hood.
 Migrations execute in `idx` order from `_journal.json`.
 
 ## History: the snapshot collision (resolved)

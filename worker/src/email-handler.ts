@@ -22,6 +22,7 @@ import {
 import { sanitizeFilename } from "./lib/sanitize-filename";
 import { buildWebhookPayload, deliverWebhook } from "./lib/webhook-delivery";
 import { forwardInbound } from "./lib/inbound-forward";
+import { messagePreview } from "./lib/push-preview";
 
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_BYTES = 25 * 1024 * 1024; // 25 MB
@@ -366,7 +367,7 @@ export async function ingestParsedEmail(
           personId: actualPersonId,
           senderName: parsed.from.name || fromAddressCanonical,
           subject: parsed.subject ?? "",
-          bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
+          bodyPreview: messagePreview(parsed.bodyText, parsed.bodyHtml),
         });
         const results = await Promise.allSettled(
           userIds.map((userId) => {

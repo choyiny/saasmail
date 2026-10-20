@@ -8,6 +8,7 @@ type Status = "checking" | "available" | "unavailable" | "migration-required";
 
 type SetupStatusResponse = {
   setupRequired?: boolean;
+  codeRequired?: boolean;
   error?: string;
   code?: string;
   command?: string;
@@ -17,6 +18,8 @@ export default function OnboardingPage() {
   const navigate = useNavigate();
   const { passkeyRequired } = useBranding();
   const [status, setStatus] = useState<Status>("checking");
+  const [codeRequired, setCodeRequired] = useState(false);
+  const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -37,6 +40,7 @@ export default function OnboardingPage() {
           setStatus("migration-required");
           return;
         }
+        setCodeRequired(data.codeRequired === true);
         setStatus(data.setupRequired ? "available" : "unavailable");
       } catch {
         if (!cancelled) setStatus("unavailable");
@@ -55,7 +59,12 @@ export default function OnboardingPage() {
       const res = await fetch("/api/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          ...(codeRequired ? { code: code.trim() } : {}),
+        }),
       });
       if (!res.ok) {
         const data = (await res
@@ -102,11 +111,11 @@ export default function OnboardingPage() {
             {migrationRequired?.command || "yarn db:migrate:prod"}
           </div>
           <p className="mt-4 text-xs font-light text-white/40">
-            For a guided first deploy, run{" "}
+            To continue setup, run{" "}
             <code className="rounded bg-white/10 px-1 py-0.5 text-white/70">
-              /saasmail-onboarding
-            </code>{" "}
-            in Claude Code, then reload this page.
+              yarn saasmail install --resume
+            </code>
+            , then reload this page.
           </p>
         </div>
       </div>
@@ -148,6 +157,29 @@ export default function OnboardingPage() {
           </p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {codeRequired && (
+            <div className="space-y-1.5">
+              <label
+                htmlFor="onboarding-code"
+                className="text-xs font-medium uppercase tracking-wider text-white/50"
+              >
+                Setup code
+              </label>
+              <input
+                id="onboarding-code"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                required
+                autoComplete="one-time-code"
+                autoCapitalize="characters"
+                spellCheck={false}
+                className={INPUT_CLASS}
+              />
+              <p className="text-xs font-light text-white/40">
+                Printed at the end of <code>yarn saasmail install</code>.
+              </p>
+            </div>
+          )}
           <div className="space-y-1.5">
             <label
               htmlFor="onboarding-name"
