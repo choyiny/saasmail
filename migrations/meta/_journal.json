@@ -330,6 +330,20 @@
       "when": 1792257090585,
       "tag": "0046_careless_silhouette",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1792507069952,
+      "tag": "0047_newsletter_module",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1792507070531,
+      "tag": "0048_newsletter_custom_indexes",
+      "breakpoints": true
     }
   ]
 }

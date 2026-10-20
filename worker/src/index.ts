@@ -30,20 +30,27 @@ import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
 import { apiKeysRouter } from "./routers/api-keys-router";
 import { sequencesRouter } from "./routers/sequences-router";
-import { handleScheduled, handleQueueBatch } from "./lib/sequence-processor";
-import type { SequenceEmailMessage } from "./lib/sequence-processor";
+import { handleScheduled } from "./lib/sequence-processor";
+import { handleQueueBatch } from "./lib/queue-router";
 import { processOutbox } from "./lib/outbox";
 import { syncAllGmailAccounts } from "./lib/gmail/sync";
 import { ensureBackfillJobs } from "./lib/gmail/backfill-job";
 import { drizzle } from "drizzle-orm/d1";
 import { schema } from "./db/schema";
+import { runNewsletterMaintenance } from "./lib/newsletter-cron";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
 import { webhooksRouter } from "./routers/webhooks-router";
+import { contactsRouter } from "./routers/contacts-router";
+import { publicTrackRouter } from "./routers/public-track-router";
 import { unsubscribeRouter } from "./routers/unsubscribe-router";
 import { outboxRouter } from "./routers/outbox-router";
 import { draftsRouter } from "./routers/drafts-router";
+import { listsRouter } from "./routers/lists-router";
+import { campaignsRouter } from "./routers/campaigns-router";
+import { newsletterAssetsRouter } from "./routers/newsletter-assets-router";
+import { publicAssetsRouter } from "./routers/public-assets-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 export { GmailBackfillWorkflow } from "./lib/gmail/backfill-job";
@@ -251,6 +258,14 @@ app.route("/api/notifications", notificationsRouter);
 app.route("/api/blocklist", blocklistRouter);
 app.route("/api/outbox", outboxRouter);
 app.route("/api/drafts", draftsRouter);
+app.route("/api/lists", listsRouter);
+app.route("/api/campaigns", campaignsRouter);
+app.route("/api/newsletter-assets", newsletterAssetsRouter);
+
+// Subject-access and erasure. Admin only: these read and rewrite an
+// identified person's whole newsletter history.
+app.use("/api/contacts/*", requireAdmin);
+app.route("/api/contacts", contactsRouter);
 
 // Admin routes (require admin role)
 app.use("/api/admin/*", requireAdmin);
@@ -285,6 +300,18 @@ app.route("/api/unsubscribe", unsubscribeRouter);
 // RFC 8058 one-click POSTs from mail clients like Fastmail / Gmail / Apple Mail.
 // GET requests don't match the router and fall through to the SPA assets handler.
 app.route("/unsubscribe", unsubscribeRouter);
+
+// Open pixel and click redirect. Must be reachable by anyone holding a valid
+// token — the requests come from mail clients and image proxies, which carry
+// no session — so this is mounted outside `/api` alongside the other public
+// token-authenticated routes.
+app.route("/track", publicTrackRouter);
+
+// Newsletter images. Fetched by subscribers' mail clients months after a
+// send, with no session and no API key, so this sits outside `/api` for the
+// same reason `/track` does. NOT mounted at `/assets` — that is where Vite
+// emits the SPA bundle. Hardening lives in the router.
+app.route("/newsletter-images", publicAssetsRouter);
 
 // Public bootstrap routes (no auth) — documented in OpenAPI under Bootstrap tag
 app.route("/api", bootstrapRouter);
@@ -343,7 +370,11 @@ export default {
     ctx.waitUntil(
       handleScheduled(env)
         .catch((err) => console.error("[cron] sequence dispatch failed:", err))
-        .then(() => processOutbox(env)),
+        .then(() => processOutbox(env))
+        // Newsletter campaign pass and retention sweeps. Chained after the
+        // delivery work and separately caught so a cleanup failure can never
+        // stop mail going out.
+        .then(() => runNewsletterMaintenance(env, event.scheduledTime)),
     );
     // Isolated from sequence dispatch / outbox processing above: a Gmail
     // sync failure must not be able to break either. `syncAllGmailAccounts`
@@ -377,10 +408,7 @@ export default {
       ),
     );
   },
-  async queue(
-    batch: MessageBatch<SequenceEmailMessage>,
-    env: CloudflareBindings,
-  ) {
+  async queue(batch: MessageBatch<unknown>, env: CloudflareBindings) {
     await handleQueueBatch(batch, env);
   },
 };

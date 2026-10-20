@@ -11,7 +11,9 @@ import {
   Users,
   Ban,
   ShieldBan,
+  ShieldAlert,
   Send,
+  Megaphone,
   Menu,
   User,
   LogOut,
@@ -42,6 +44,8 @@ const PRIMARY_NAV: NavItem[] = [
   { label: "Inbox", path: "/", icon: Mail, end: true },
   { label: "Templates", path: "/templates", icon: FileText },
   { label: "Sequences", path: "/sequences", icon: ListOrdered },
+  { label: "Lists", path: "/lists", icon: Users },
+  { label: "Campaigns", path: "/campaigns", icon: Megaphone },
 ];
 
 export default function TopNav() {
@@ -204,6 +208,13 @@ export default function TopNav() {
                       <Ban className="h-4 w-4" />
                       Suppressions
                     </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => navigate("/admin/contacts")}
+                      className="cursor-pointer"
+                    >
+                      <ShieldAlert className="h-4 w-4" />
+                      Contact data
+                    </DropdownMenuItem>
                   </>
                 )}
                 <DropdownMenuItem
@@ -339,6 +350,13 @@ export default function TopNav() {
                   >
                     <Ban className="h-4 w-4" />
                     Suppressions
+                  </button>
+                  <button
+                    onClick={() => navigate("/admin/contacts")}
+                    className="flex items-center gap-2 px-4 py-2.5 text-sm text-white/60 hover:text-white"
+                  >
+                    <ShieldAlert className="h-4 w-4" />
+                    Contact data
                   </button>
                 </>
               )}
