@@ -75,7 +75,7 @@ function NotificationsSection() {
     setBusy(true);
     try {
       const result = await enablePush();
-      if (!result.ok) {
+      if (result.ok === false) {
         setError(result.reason);
         return;
       }

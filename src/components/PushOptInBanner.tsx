@@ -10,11 +10,11 @@ export function PushOptInBanner({ onClose }: { onClose: () => void }) {
     setError(null);
     const result = await enablePush();
     setBusy(false);
-    if (result.ok) {
+    if (result.ok === false) {
+      setError(result.reason);
+    } else {
       markPromptDismissed();
       onClose();
-    } else {
-      setError(result.reason);
     }
   }
 

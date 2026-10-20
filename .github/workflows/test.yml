@@ -23,7 +23,7 @@ jobs:
       - name: Create empty assets dir (referenced by wrangler.jsonc)
         run: mkdir -p dist/client
       - name: Type check
-        run: yarn tsc --noEmit
+        run: yarn tsc -b
       - name: Type check the installer CLI
         run: yarn typecheck:cli
       - run: yarn test

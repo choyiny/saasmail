@@ -78,7 +78,7 @@ export default function OnboardingPage() {
         if (res.status === 403) setStatus("unavailable");
         return;
       }
-      const result = await signIn.emailAndPassword({ email, password });
+      const result = await signIn.email({ email, password });
       if (result.error) {
         navigate("/login", { replace: true });
         return;
