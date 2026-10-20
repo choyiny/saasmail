@@ -62,6 +62,13 @@ const SKIP_LABELS = new Set(["DRAFT", "TRASH", "SPAM"]);
  */
 const SENT_LABEL = "SENT";
 
+/**
+ * The only received mail that is ingested. Everything else without SENT —
+ * scheduled sends, archived mail, chats — is skipped. Checked after the SENT
+ * branch, so a message sent to oneself (SENT and INBOX) is still a mirror.
+ */
+const INBOX_LABEL = "INBOX";
+
 export type GmailAccountRow = typeof gmailAccounts.$inferSelect;
 
 /** One Gmail history record: the messages it added, under its own id. */
@@ -755,6 +762,8 @@ async function processMessage(
       ? { ingested: 0, mirrored: 1, skipped: 0, at }
       : { ...SKIPPED, at };
   }
+
+  if (!message.labelIds.includes(INBOX_LABEL)) return { ...SKIPPED, at };
 
   const targets = resolveInboundInboxes(inboxes, account.emailAddress, [
     ...headerAddresses(parsed.recipientHeaders.to),

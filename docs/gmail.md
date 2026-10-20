@@ -308,7 +308,7 @@ whatever budget live mail leaves each tick (at most 4,800 messages a day on the
 takes days for a busy mailbox.
 Add the block to get the job.
 
-Spam and Trash are not imported. Mailboxes connected before the import
+Spam and Trash are not imported, and neither is anything outside the Inbox and Sent (see [Limits](#limits)). Mailboxes connected before the import
 existed import their last year on the first tick after upgrading. A mailbox
 that already imported the three months an earlier build covered imports only
 the nine months before them, and one still part-way through restarts over the
@@ -618,6 +618,12 @@ at least once.
 - **`DRAFT`, `TRASH` and `SPAM` messages are skipped**, and that skip beats
   the Sent mirror — a message that was sent and then trashed is dropped
   rather than mirrored.
+- **Only the Inbox is received mail.** A message is ingested only if it
+  carries `INBOX` (or mirrored if it carries `SENT`). Scheduled sends,
+  archived mail, chats and mail a filter files past the Inbox are skipped, by
+  the live sync and the one-year import alike. Labels are read when the
+  message is fetched, so mail archived before the next cron tick reads it is
+  skipped too.
 - **Only newly added messages are polled.** The sync asks Gmail's history API
   for `messageAdded` and nothing else, so label changes, and mail a filter
   moves into the mailbox after it arrived, are never seen.

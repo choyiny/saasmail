@@ -680,6 +680,42 @@ describe("syncAccount — skipping", () => {
     expect(sent[0].gmailMessageId).toBe("m1");
   });
 
+  // Only the Inbox is received mail. A scheduled send, archived mail and chats
+  // carry no INBOX label and must not land on a timeline as if they arrived.
+  it.each([
+    ["a scheduled send", ["SCHEDULED"]],
+    ["archived mail", ["Label_1", "CATEGORY_UPDATES"]],
+    ["a chat", ["CHAT"]],
+  ])("skips %s, which is not in the Inbox", async (_, labelIds) => {
+    await seedAccount();
+    await seedInbox("support@acme.dev", null);
+    stubGmail({
+      historyIds: ["m1"],
+      messages: {
+        m1: {
+          labelIds,
+          raw: rawEmail({
+            from: "collector@acme.dev",
+            deliveredTo: "support@acme.dev",
+            messageId: "<n1@example.com>",
+          }),
+        },
+      },
+    });
+
+    const res = await syncAccount(
+      getDb(),
+      await account(),
+      env as unknown as CloudflareBindings,
+      fakeCtx(),
+      CFG,
+    );
+    expect(res.ingested).toBe(0);
+    expect(res.skipped).toBe(1);
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+    expect(await getDb().select().from(sentEmails)).toHaveLength(0);
+  });
+
   it("tolerates a message deleted between the history page and the fetch", async () => {
     await seedAccount();
     await seedInbox("support@acme.dev", null);
