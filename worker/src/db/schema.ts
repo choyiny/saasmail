@@ -19,6 +19,7 @@ import { outboxEmails } from "./outbox-emails.schema";
 import { drafts } from "./drafts.schema";
 import { gmailAccounts } from "./gmail-accounts.schema";
 import { outlookAccounts } from "./outlook-accounts.schema";
+import { installState } from "./install-state.schema";
 
 export const schema = {
   ...authSchema,
@@ -42,4 +43,5 @@ export const schema = {
   drafts,
   gmailAccounts,
   outlookAccounts,
+  installState,
 } as const;

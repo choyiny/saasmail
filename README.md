@@ -25,19 +25,30 @@ SaaS teams that want a self-hosted email stack on Cloudflare Workers — one sha
 
 ## Quickstart
 
-**Prerequisites:** a domain on Cloudflare with Email Routing available, the Workers Paid plan, and [Node.js](https://nodejs.org/) v18+.
+**Prerequisites:** [Node.js](https://nodejs.org/) 22 or newer, a Cloudflare account on the Workers Paid plan, and a domain on Cloudflare for mail (any domains you will use must be active zones).
 
-The fastest path is the Claude Code onboarding skill — it provisions every Cloudflare resource, fills out your config, runs migrations, and deploys for you:
+One command provisions every Cloudflare resource, writes your config, runs migrations, generates the secrets, deploys, and wires up Email Routing and Email Sending. No clone needed:
 
 ```bash
-git clone https://github.com/choyiny/saasmail.git
-cd saasmail
-claude   # then run /saasmail-onboarding
+npx saasmail install   # not signed in? it prints the login command to run first
 ```
 
-**First successful result:** your worker is live at your domain, and visiting it prompts you to create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+Sign in to Cloudflare with the login command the installer prints (its pinned wrangler), or set `CLOUDFLARE_API_TOKEN`.
 
-Prefer to wire it up by hand? See [Setup](docs/setup.md) (~8 steps).
+Your install's state and generated `wrangler.jsonc` live in `~/.saasmail/<name>/` (`SAASMAIL_HOME` overrides), never in a repository. Later:
+
+```bash
+npx saasmail@latest upgrade   # move to the newest release
+npx saasmail status           # what is installed, what is latest
+```
+
+Installed from a clone before? `npx saasmail adopt --from <checkout>` moves it; see [Updating](docs/updating.md). Running a fork or modified code? Clone the repo and use `yarn saasmail install` instead ([Setup](docs/setup.md#install-from-a-clone)).
+
+Prefer a guide? Clone the repo, run `claude` and then `/saasmail-onboarding`.
+
+**First successful result:** your worker is live, the installer prints a one-time setup code, and `/onboarding` on your URL asks for it before you create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+
+Prefer to wire it up by hand? See [Setup](docs/setup.md#manual-setup) (~8 steps).
 
 ## Documentation
 

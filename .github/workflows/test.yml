@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   vitest:
     runs-on: ubuntu-latest
@@ -21,5 +24,58 @@ jobs:
         run: mkdir -p dist/client
       - name: Type check
         run: yarn tsc --noEmit
+      - name: Type check the installer CLI
+        run: yarn typecheck:cli
       - run: yarn test
       - run: yarn test:web
+
+  # The npm package: pack it, prove the shipped build deploys from a generated config, then install
+  # the tarball like a user would (npm/npx on purpose) and run it on the package's Node floor.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - name: Build the package
+        run: yarn pack:npm
+      - name: Pack the tarball
+        run: |
+          mkdir -p "$RUNNER_TEMP/pkg"
+          file=$(npm pack ./build/npm --pack-destination "$RUNNER_TEMP/pkg" | tail -n 1)
+          echo "TARBALL=$RUNNER_TEMP/pkg/$file" >> "$GITHUB_ENV"
+      - name: Generate an install's config for the package
+        run: node scripts/saasmail/smoke-config.ts build/npm "$RUNNER_TEMP/smoke"
+      - name: The shipped build deploys with the generated config (dry run)
+        run: npx wrangler deploy --dry-run --outdir "$RUNNER_TEMP/o" --config "$RUNNER_TEMP/smoke/wrangler.jsonc"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.0.0
+      - name: Install the tarball on Node 22.0.0
+        run: |
+          node --version
+          mkdir -p "$RUNNER_TEMP/app"
+          cd "$RUNNER_TEMP/app"
+          npm init -y > /dev/null
+          npm install "$TARBALL"
+      - name: saasmail --help
+        working-directory: ${{ runner.temp }}/app
+        run: |
+          npx saasmail --help | tee help.txt
+          grep -E '^  upgrade ' help.txt
+          grep -E '^  adopt ' help.txt
+      - name: saasmail install --plan stops without a Cloudflare login
+        working-directory: ${{ runner.temp }}/app
+        env:
+          SAASMAIL_HOME: ${{ runner.temp }}/h
+        run: |
+          set +e
+          npx saasmail install --plan --name smoke < /dev/null > out.txt 2>&1
+          code=$?
+          set -e
+          cat out.txt
+          if [ "$code" -eq 0 ]; then echo "::error::expected a non-zero exit"; exit 1; fi
+          grep -Eiq 'login|token' out.txt || { echo "::error::expected the login/token message"; exit 1; }

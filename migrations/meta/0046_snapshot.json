@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e0d0d00e-1e98-4051-9dce-bdada91e2a80",
+  "id": "b46d013d-fef4-4bf9-8bc8-49893353c606",
   "prevId": "9a199ce2-6e13-460c-bb5f-484fd03bfa2e",
   "tables": {
     "accounts": {
@@ -1442,13 +1442,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "outlook_message_id": {
-          "name": "outlook_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "received_at": {
           "name": "received_at",
           "type": "integer",
@@ -1611,13 +1604,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "outlook_message_id": {
-          "name": "outlook_message_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "sent_at": {
           "name": "sent_at",
           "type": "integer",
@@ -1661,14 +1647,6 @@
           "name": "sent_emails_gmail_message_from_unique",
           "columns": [
             "gmail_message_id",
-            "from_address"
-          ],
-          "isUnique": true
-        },
-        "sent_emails_outlook_message_from_unique": {
-          "name": "sent_emails_outlook_message_from_unique",
-          "columns": [
-            "outlook_message_id",
             "from_address"
           ],
           "isUnique": true
@@ -2294,13 +2272,6 @@
         },
         "gmail_group_address": {
           "name": "gmail_group_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "outlook_account_id": {
-          "name": "outlook_account_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -2953,172 +2924,35 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "outlook_accounts": {
-      "name": "outlook_accounts",
+    "install_state": {
+      "name": "install_state",
       "columns": {
-        "id": {
-          "name": "id",
+        "installation_id": {
+          "name": "installation_id",
           "type": "text",
           "primaryKey": true,
           "notNull": true,
           "autoincrement": false
         },
-        "email_address": {
-          "name": "email_address",
+        "ownership_nonce": {
+          "name": "ownership_nonce",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "refresh_token_encrypted": {
-          "name": "refresh_token_encrypted",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "access_token": {
-          "name": "access_token",
+        "version": {
+          "name": "version",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "inbox_cursor": {
-          "name": "inbox_cursor",
+        "manifest_json": {
+          "name": "manifest_json",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
-          "autoincrement": false
-        },
-        "inbox_cursor_offset": {
-          "name": "inbox_cursor_offset",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "sent_cursor": {
-          "name": "sent_cursor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sent_cursor_offset": {
-          "name": "sent_cursor_offset",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "sync_from": {
-          "name": "sync_from",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "last_synced_at": {
-          "name": "last_synced_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_gap_at": {
-          "name": "last_gap_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backfill_until": {
-          "name": "backfill_until",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backfill_since": {
-          "name": "backfill_since",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backfill_link": {
-          "name": "backfill_link",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backfill_offset": {
-          "name": "backfill_offset",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "backfill_count": {
-          "name": "backfill_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "backfill_completed_at": {
-          "name": "backfill_completed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backfill_reached": {
-          "name": "backfill_reached",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "backfill_job_id": {
-          "name": "backfill_job_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "connected_by": {
-          "name": "connected_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
           "autoincrement": false
         },
         "updated_at": {
@@ -3129,15 +2963,7 @@
           "autoincrement": false
         }
       },
-      "indexes": {
-        "outlook_accounts_email_address_unique": {
-          "name": "outlook_accounts_email_address_unique",
-          "columns": [
-            "email_address"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

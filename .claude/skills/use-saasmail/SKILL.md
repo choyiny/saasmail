@@ -97,7 +97,7 @@ const res = await fetch(`${SAASMAIL_URL}/api/send`, {
 const { id, resendId, status, attachmentIds } = await res.json();
 ```
 
-A successful response is `201` with `{ id, resendId, status, attachmentIds }`. `status` is `"sent"` on success, `"retrying"` if the provider failed transiently (saasmail retries hourly for up to 24 attempts; check GET /api/outbox or the Outbox tab for the outcome), `"failed"` if the provider rejected permanently, `"suppressed"` if every recipient was on the suppression list.
+A successful response is `201` with `{ id, resendId, status, attachmentIds }`. `status` is `"sent"` on success, `"retrying"` if the provider failed transiently (saasmail retries every 15 minutes for about 24 hours; check GET /api/outbox or the Outbox tab for the outcome), `"failed"` if the provider rejected permanently, `"suppressed"` if every recipient was on the suppression list.
 
 ### Side effect to know about
 
