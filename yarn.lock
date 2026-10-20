@@ -3628,10 +3628,10 @@ hono-rate-limiter@^0.5.3:
   resolved "https://registry.yarnpkg.com/hono-rate-limiter/-/hono-rate-limiter-0.5.3.tgz#29ee906b904edd38651f623630342b249d884b34"
   integrity sha512-M0DxbVMpPELEzLi0AJg1XyBHLGJXz7GySjsPoK+gc5YeeBsdGDGe+2RvVuCAv8ydINiwlbxqYMNxUEyYfRji/A==
 
-hono@^4.11.4, hono@^4.13.7:
-  version "4.13.7"
-  resolved "https://registry.yarnpkg.com/hono/-/hono-4.13.7.tgz#80fdab8326f03d02f049117fd968101933493600"
-  integrity sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ==
+hono@^4.11.4, hono@^4.13.11:
+  version "4.13.11"
+  resolved "https://registry.yarnpkg.com/hono/-/hono-4.13.11.tgz#2f3210e81a1e831837422aa9ad2780b2f3e1525c"
+  integrity sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg==
 
 html-encoding-sniffer@^6.0.0:
   version "6.0.0"
