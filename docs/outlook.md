@@ -66,7 +66,7 @@ maps. Several inboxes can share one mailbox, routed by `To:`/`Cc:` exactly as
   Each folder has its own Graph delta cursor, saved after every page and
   mid-page when the budget runs out.
 - Mail a rule files straight into another folder, without passing through the
-  Inbox, is not seen live. The import (below) does cover every folder.
+  Inbox, is not synced — by the live sync or the import.
 - **No sync gaps.** A first sync starts at the moment of connection. If Graph
   expires a delta cursor — after a long outage, say — the sync starts a fresh
   round from five minutes before the last successful sync rather than from
@@ -82,9 +82,10 @@ row, running as the `GMAIL_BACKFILL` Workflow (the binding name predates
 Outlook). **One import runs at a time across Gmail and Outlook together**; the
 others wait their turn.
 
-It reads every folder except **Junk Email**, **Deleted Items** and **Drafts**.
-Messages in **Sent Items** are mirrored as sent mail; everything else —
-Inbox, Archive, your own folders — is inbound.
+It reads the same two folders as the live sync: **Inbox** is inbound, and
+**Sent Items** is mirrored as sent mail. Every other folder — Archive, Junk
+Email, Deleted Items, Drafts, your own folders, even ones under the Inbox — is
+skipped.
 
 ## Replies
 

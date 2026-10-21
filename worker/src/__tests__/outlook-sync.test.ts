@@ -458,7 +458,7 @@ describe("Outlook one-year import", () => {
     );
   }
 
-  it("imports every folder but Junk, Deleted and Drafts, quietly, newest first", async () => {
+  it("imports only the Inbox and Sent Items, quietly, newest first", async () => {
     const requests: string[] = [];
     stubGraph({
       list: [
@@ -495,13 +495,12 @@ describe("Outlook one-year import", () => {
 
     expect(res).toEqual({ status: "done", handled: 4 });
     const inbox = await getDb().select().from(emails);
-    expect(inbox.map((r) => r.outlookMessageId).sort()).toEqual([
-      "archived1",
-      "in1",
-    ]);
+    expect(inbox.map((r) => r.outlookMessageId)).toEqual(["in1"]);
     expect(inbox.every((r) => r.isRead === 1)).toBe(true);
     expect(await getDb().select().from(sentEmails)).toHaveLength(1);
     expect(requests.some((r) => r.includes("junk1/$value"))).toBe(false);
+    // Archive is a folder like any other outside the Inbox: never fetched.
+    expect(requests.some((r) => r.includes("archived1/$value"))).toBe(false);
 
     const listing = new URL(
       requests.find((r) => new URL(r).pathname.endsWith("/me/messages"))!,

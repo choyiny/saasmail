@@ -25,9 +25,10 @@ import type {
  * the import at that message for the next run to retry.
  *
  * It lists `/me/messages`, which spans every folder, so each message's
- * folder decides what it is: Sent Items is mirrored as sent mail, Junk,
- * Deleted Items and Drafts are skipped, and anything else — Inbox, Archive,
- * user folders — is inbound.
+ * folder decides what it is: Inbox is inbound, Sent Items is mirrored as sent
+ * mail, and every other folder — Archive, Junk, Deleted Items, Drafts, user
+ * folders, even ones under the Inbox — is skipped, like the live sync, which
+ * reads only those two.
  *
  * The resume point is Graph's `@odata.nextLink` for the page plus an offset
  * into it, like Gmail's page token.
@@ -39,14 +40,12 @@ function kindOf(
 ): OutlookMessageKind | null {
   if (item.isDraft) return null;
   switch (item.parentFolderId) {
+    case folders.inbox:
+      return "inbound";
     case folders.sentitems:
       return "sent";
-    case folders.junkemail:
-    case folders.deleteditems:
-    case folders.drafts:
-      return null;
     default:
-      return "inbound";
+      return null;
   }
 }
 

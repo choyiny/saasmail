@@ -200,16 +200,14 @@ export async function listPage(
 
 /** Ids of the folders the import needs to tell apart. */
 export type FolderIds = {
+  inbox: string;
   sentitems: string;
-  junkemail: string;
-  deleteditems: string;
-  drafts: string;
 };
 
 export async function wellKnownFolderIds(
   accessToken: string,
 ): Promise<FolderIds> {
-  const names = ["sentitems", "junkemail", "deleteditems", "drafts"] as const;
+  const names = ["inbox", "sentitems"] as const;
   const ids = await Promise.all(
     names.map(async (name) => {
       const payload = await getJson(
@@ -227,12 +225,7 @@ export async function wellKnownFolderIds(
       return payload.id as string;
     }),
   );
-  return {
-    sentitems: ids[0],
-    junkemail: ids[1],
-    deleteditems: ids[2],
-    drafts: ids[3],
-  };
+  return { inbox: ids[0], sentitems: ids[1] };
 }
 
 /** A message's MIME, or null when it has been deleted since it was listed. */
