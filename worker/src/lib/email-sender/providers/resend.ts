@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { toBase64 } from "../shared";
+import { inlineDataImages } from "../inline-images";
 import { classifyErrorMessage } from "../classify";
 
 export class ResendSender implements EmailSender {
@@ -11,7 +12,8 @@ export class ResendSender implements EmailSender {
     this.client = new Resend(apiKey);
   }
 
-  async send(params: SendEmailParams): Promise<SendEmailResult> {
+  async send(input: SendEmailParams): Promise<SendEmailResult> {
+    const params = inlineDataImages(input);
     const result = await this.client.emails.send({
       from: params.from,
       to: params.to,
@@ -25,6 +27,7 @@ export class ResendSender implements EmailSender {
             attachments: params.attachments.map((a) => ({
               filename: a.filename,
               content: toBase64(a.content),
+              ...(a.contentId ? { contentId: a.contentId } : {}),
             })),
           }
         : {}),

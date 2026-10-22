@@ -7,14 +7,16 @@ import { EmailMessage } from "cloudflare:email";
 import { createMimeMessage, Mailbox } from "mimetext/browser";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { parseFrom, toBase64 } from "../shared";
+import { inlineDataImages } from "../inline-images";
 import { classifyErrorMessage } from "../classify";
 
 export class CloudflareSender implements EmailSender {
   readonly provider = "cloudflare" as const;
   constructor(private binding: SendEmail) {}
 
-  async send(params: SendEmailParams): Promise<SendEmailResult> {
+  async send(input: SendEmailParams): Promise<SendEmailResult> {
     try {
+      const params = inlineDataImages(input);
       const { name, address } = parseFrom(params.from);
       const msg = createMimeMessage();
       msg.setSender(name ? { name, addr: address } : { addr: address });
@@ -46,6 +48,9 @@ export class CloudflareSender implements EmailSender {
             filename: a.filename,
             contentType: a.contentType,
             data: toBase64(a.content),
+            ...(a.contentId
+              ? { inline: true, headers: { "Content-ID": `<${a.contentId}>` } }
+              : {}),
           });
         }
       }

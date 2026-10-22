@@ -1,6 +1,7 @@
 import { createMimeMessage, Mailbox } from "mimetext/browser";
 import type { SendEmailParams } from "../types";
 import { parseFrom, toBase64 } from "../shared";
+import { inlineDataImages } from "../inline-images";
 
 /**
  * A reply as a raw RFC 5322 message, for the providers that take MIME rather
@@ -9,7 +10,8 @@ import { parseFrom, toBase64 } from "../shared";
  * written as given, which is what threads the reply and what lets the
  * provider's Sent copy be recognised as saasmail's own.
  */
-export function buildMimeMessage(params: SendEmailParams): string {
+export function buildMimeMessage(input: SendEmailParams): string {
+  const params = inlineDataImages(input);
   const { name, address } = parseFrom(params.from);
   const msg = createMimeMessage();
   msg.setSender(name ? { name, addr: address } : { addr: address });
@@ -37,6 +39,9 @@ export function buildMimeMessage(params: SendEmailParams): string {
         filename: a.filename,
         contentType: a.contentType,
         data: toBase64(a.content),
+        ...(a.contentId
+          ? { inline: true, headers: { "Content-ID": `<${a.contentId}>` } }
+          : {}),
       });
     }
   }

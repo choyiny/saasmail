@@ -3,6 +3,11 @@ export interface SendEmailAttachment {
   contentType: string;
   /** Raw bytes. */
   content: ArrayBuffer | Uint8Array;
+  /**
+   * Set for an image the html references as `cid:<contentId>`: the part is
+   * sent inline rather than as a downloadable attachment.
+   */
+  contentId?: string;
 }
 
 export interface SendEmailParams {
