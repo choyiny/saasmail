@@ -1333,10 +1333,10 @@
   dependencies:
     zod "^4.2.0"
 
-"@modelcontextprotocol/sdk@^1.32.0":
-  version "1.32.0"
-  resolved "https://registry.yarnpkg.com/@modelcontextprotocol/sdk/-/sdk-1.32.0.tgz#534d2c2793fd38a621edbca3238580fdb56898bc"
-  integrity sha512-8BviX/hK4Gd2eL1KdTwm0gfl4d3wdoErW0Jd00h6nomUAtk6IJk5vwQJc6kfWtJTzN5OEV/lgIiJKI8fiDGAlA==
+"@modelcontextprotocol/sdk@^1.32.1":
+  version "1.32.1"
+  resolved "https://registry.yarnpkg.com/@modelcontextprotocol/sdk/-/sdk-1.32.1.tgz#853286b3240b6d8143f5f8e6d58af85c77d475ab"
+  integrity sha512-2DdE+SJDtzLEEWzY1ZjY7Q+VcPhcV1KisD3zI4u0XZyktsjHum1mwbMI+JaulUBi2OZk+KJAi2uPXzxichPkdw==
   dependencies:
     "@hono/node-server" "^1.19.9 || ^2.0.5"
     ajv "^8.17.1"
