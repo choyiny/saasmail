@@ -563,14 +563,6 @@ export function analyzeTemplate(...sources: string[]): TemplateAnalysis {
   };
 }
 
-/**
- * Names a caller must supply. Kept as the pre-rewrite entry point so existing
- * call sites keep working; it is exactly the analysis's `required` set.
- */
-export function extractVariables(template: string): string[] {
-  return analyzeTemplate(template).required;
-}
-
 export type RenderTemplateResult =
   | { ok: true; subject: string; bodyHtml: string }
   | {

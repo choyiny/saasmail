@@ -48,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docs split out of the README.** The 790-line README is now a 135-line overview — what saasmail is, quickstart, screenshots, cost, and a linked feature index — and the reference material moved into [`docs/`](docs/README.md) as 14 cross-linked pages with an index at `docs/README.md`: setup, email providers, configuration, updating, architecture, local development, inboxes, templates, sequences, suppressions, users and API keys, MCP, WebMCP, and webhooks. Every page carries a breadcrumb back to the index. Prose is unchanged apart from rewritten cross-links; nothing was dropped. Old deep links still work: every heading the README used to carry is redeclared as an anchor on the line that replaced it, so `README.md#template-syntax` lands on the Email templates entry and `README.md#local-development` on the documentation index.
 - The README's ASCII architecture sketch is now a rendered diagram, in light and dark variants selected with `prefers-color-scheme`. It is generated rather than hand-drawn: self-contained HTML sources live in `docs/diagrams/`, skinned with the product's own design tokens from `src/index.css` (lime primary, violet for external provider calls), and exported to PNG at 2×.
 
+### Removed
+
+- **`npx saasmail adopt` is gone**, along with `status --from <checkout>`. Installs already adopted keep upgrading with `npx saasmail@latest upgrade`; a clone or hand-made install that was never adopted should either keep updating its checkout (see [Forks and modified code](docs/updating.md#forks-and-modified-code)) or adopt with a v1.x CLI (`npx saasmail@1 adopt …`) before upgrading.
+- `GET /api/outbox` no longer accepts a bare `createdAt` cursor; pass back the `nextCursor` it returned. A malformed cursor is a `400`.
+
 ### Security
 
 - Attachment responses now carry `X-Content-Type-Options: nosniff` and a sandboxing `Content-Security-Policy`, and `GET /api/attachments/{id}/inline` serves only raster image types inline. An attachment's Content-Type is chosen by its sender, so an SVG or HTML file previously opened from that route rendered on the app's own origin; it now downloads instead.

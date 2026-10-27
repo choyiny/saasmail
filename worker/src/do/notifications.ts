@@ -32,18 +32,6 @@ export class NotificationsHub implements DurableObject {
       return this.handleDeliver(request);
     }
 
-    // Back-compat: /notify falls through to WS-only delivery. Remove once the
-    // email-handler is fully migrated (Task 9) and no callers remain.
-    if (url.pathname === "/notify" && request.method === "POST") {
-      const { inbox } = (await request.json()) as { inbox: string };
-      for (const ws of this.ctx.getWebSockets()) {
-        try {
-          ws.send(JSON.stringify({ type: "email_received", inbox }));
-        } catch {}
-      }
-      return new Response("ok");
-    }
-
     return new Response("Not found", { status: 404 });
   }
 
@@ -61,7 +49,7 @@ export class NotificationsHub implements DurableObject {
     const sockets = this.ctx.getWebSockets();
     const wsCount = sockets.length;
     if (wsCount > 0) {
-      // Back-compat frame shape — useRealtimeUpdates already handles this.
+      // The live-update frame src/hooks/useRealtimeUpdates.ts consumes.
       const frame = JSON.stringify({
         type: "email_received",
         inbox: payload.inbox,
