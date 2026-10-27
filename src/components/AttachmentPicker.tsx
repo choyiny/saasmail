@@ -68,7 +68,7 @@ export default function AttachmentPicker({
         onClick={() => inputRef.current?.click()}
         className={
           buttonClassName ??
-          "inline-flex items-center gap-1 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+          "inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
         }
         aria-label="Attach files"
       >

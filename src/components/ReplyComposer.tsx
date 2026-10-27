@@ -29,6 +29,9 @@ import {
   type CcEntry,
 } from "@/lib/api";
 import { dispatchEmailSent } from "@/lib/email-events";
+import { sendWithUndo } from "@/lib/undo-send";
+import { useCommonSettings } from "@/lib/default-layout-settings";
+import { showToast } from "@/lib/toast";
 import { serverErrorMessage } from "@/lib/error-message";
 import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { getFromLabel } from "@/lib/format";
@@ -52,6 +55,11 @@ interface ReplyComposerProps {
   internalDomains?: string[];
   onClose: () => void;
   onSent: () => void;
+  /**
+   * Pre-fill CC from the original message ("Reply all"). Defaults to true,
+   * which is the long-standing behaviour; pass false for a plain Reply.
+   */
+  replyAll?: boolean;
 }
 
 type Tab = "freeform" | "template";
@@ -65,6 +73,7 @@ export default function ReplyComposer({
   internalDomains = [],
   onClose,
   onSent,
+  replyAll = true,
 }: ReplyComposerProps) {
   const [tab, setTab] = useState<Tab>("freeform");
   const [fromAddress, setFromAddress] = useState(recipients[0] ?? "");
@@ -82,6 +91,18 @@ export default function ReplyComposer({
   const totalAttachmentBytes = files.reduce((s, f) => s + f.size, 0);
   // Compact tray vs. full-viewport. Toggled by the maximize button.
   const [fullscreen, setFullscreen] = useState(false);
+  // Undo Send: while a send is held (or in flight) the tray is hidden but
+  // stays mounted, so Undo or a failure brings it back exactly as it was.
+  const [held, setHeld] = useState(false);
+  const [undoneOnce, setUndoneOnce] = useState(false);
+  const [{ undoSendSeconds }] = useCommonSettings();
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Set once a saved reply draft has been restored, so the reply-all CC
   // default below yields to the draft's own CC regardless of which async
@@ -93,9 +114,13 @@ export default function ReplyComposer({
   const bodyIsEmpty = !bodyHtml || bodyHtml === "<p></p>";
   const { clear: clearDraft } = useDraftAutosave({
     contextKey: `reply:${emailId}`,
-    enabled: true,
+    // Hiding the tray for Undo Send flushes the draft to the server, so it
+    // survives until the send really goes out.
+    enabled: !held,
     isEmpty: bodyIsEmpty,
-    restore: true,
+    // After an Undo the tray already holds the content; don't let an older
+    // copy of the draft overwrite it.
+    restore: !undoneOnce,
     values: { fromAddress, cc, bodyHtml, bodyText, replyToEmailId: emailId },
     onRestore: (draft) => {
       draftRestoredRef.current = true;
@@ -152,7 +177,12 @@ export default function ReplyComposer({
       .then(async (email) => {
         if (cancelled) return;
         setOriginalEmail(email);
-        if (email.cc && email.cc.length > 0 && !draftRestoredRef.current) {
+        if (
+          replyAll &&
+          email.cc &&
+          email.cc.length > 0 &&
+          !draftRestoredRef.current
+        ) {
           // Drop our own inbox addresses from the suggested CC list — we
           // don't want to CC ourselves on a reply we're sending.
           const ours = new Set(recipients.map((r) => r.toLowerCase()));
@@ -237,65 +267,88 @@ export default function ReplyComposer({
       .finally(() => setTemplatesLoading(false));
   }, [tab, templates.length]);
 
-  async function handleSend() {
-    setSending(true);
+  function handleSend() {
+    if (sending || held) return;
+    if (tab === "template" && !selectedSlug) {
+      setError("Select a template");
+      return;
+    }
     setError("");
     const ccPayload = cc.length > 0 ? cc : undefined;
-    try {
-      if (tab === "freeform") {
-        // Wrap the signature in a marker div so the chat-feed "hide
-        // signatures" toggle can strip it cleanly. Skip when the inbox has
-        // none configured. Templates already include their own boilerplate
-        // so we don't append.
-        const finalBody = safeSignatureHtml
-          ? `${bodyHtml}<div data-signature>${safeSignatureHtml}</div>`
-          : bodyHtml;
-        await replyToEmail(emailId, {
-          bodyHtml: finalBody,
-          ...(bodyText.trim() ? { bodyText } : {}),
-          fromAddress,
-          ...(ccPayload ? { cc: ccPayload } : {}),
-          ...(files.length > 0
-            ? { files: files.map((file) => ({ file })) }
-            : {}),
-        });
-      } else {
-        if (!selectedSlug) {
-          setError("Select a template");
+    const filesPayload =
+      files.length > 0 ? { files: files.map((file) => ({ file })) } : {};
+    // Wrap the signature in a marker div so the chat-feed "hide
+    // signatures" toggle can strip it cleanly. Skip when the inbox has
+    // none configured. Templates already include their own boilerplate
+    // so we don't append.
+    const payload =
+      tab === "freeform"
+        ? {
+            bodyHtml: safeSignatureHtml
+              ? `${bodyHtml}<div data-signature>${safeSignatureHtml}</div>`
+              : bodyHtml,
+            ...(bodyText.trim() ? { bodyText } : {}),
+            fromAddress,
+            ...(ccPayload ? { cc: ccPayload } : {}),
+            ...filesPayload,
+          }
+        : {
+            templateSlug: selectedSlug,
+            variables: templateVars,
+            fromAddress,
+            ...(ccPayload ? { cc: ccPayload } : {}),
+            ...filesPayload,
+          };
+    const from = fromAddress;
+
+    setHeld(true);
+    setSending(true);
+    sendWithUndo({
+      seconds: undoSendSeconds,
+      label: "Sending reply…",
+      send: () => replyToEmail(emailId, payload).then(() => undefined),
+      onUndo: () => {
+        if (mountedRef.current) {
+          setUndoneOnce(true);
           setSending(false);
-          return;
+          setHeld(false);
+        } else {
+          // The conversation was closed meanwhile; the draft is saved.
+          showToast({
+            kind: "info",
+            message: "Reply not sent",
+            description:
+              "It's saved as a draft. Open Reply on the message to finish it.",
+          });
         }
-        await replyToEmail(emailId, {
-          templateSlug: selectedSlug,
-          variables: templateVars,
-          fromAddress,
-          ...(ccPayload ? { cc: ccPayload } : {}),
-          ...(files.length > 0
-            ? { files: files.map((file) => ({ file })) }
-            : {}),
+      },
+      onSent: () => {
+        // The reply went out — discard its draft so it doesn't reappear.
+        clearDraft();
+        // Notify the rest of the app — PersonDetail uses this to
+        // auto-switch the active inbox tab when the user replied from a
+        // different inbox than the one they were viewing.
+        dispatchEmailSent({
+          fromAddress: from,
+          to: personEmail,
+          origin: "reply",
         });
-      }
-      setFiles([]);
-      // The reply went out — discard its draft so it doesn't reappear.
-      clearDraft();
-      // Notify the rest of the app — PersonDetail uses this to
-      // auto-switch the active inbox tab when the user replied from a
-      // different inbox than the one they were viewing.
-      dispatchEmailSent({
-        fromAddress,
-        to: personEmail,
-        origin: "reply",
-      });
-      onSent();
-      onClose();
-    } catch (e) {
-      // The server's own words when it has any: a Gmail reply it refused was
-      // *not* queued, so the user has to send it again — a generic "failed"
-      // would leave them waiting for a retry that isn't coming.
-      setError(serverErrorMessage(e) ?? "Failed to send reply");
-    } finally {
-      setSending(false);
-    }
+        if (!mountedRef.current) return;
+        setFiles([]);
+        setSending(false);
+        onSent();
+        onClose();
+      },
+      onError: (e) => {
+        if (!mountedRef.current) return;
+        setSending(false);
+        setHeld(false);
+        // The server's own words when it has any: a Gmail reply it refused
+        // was *not* queued, so the user has to send it again — a generic
+        // "failed" would leave them waiting for a retry that isn't coming.
+        setError(serverErrorMessage(e) ?? "Failed to send reply");
+      },
+    });
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -308,6 +361,9 @@ export default function ReplyComposer({
   const recipientLabel = personName
     ? `${personName} <${personEmail}>`
     : personEmail;
+
+  // Held for Undo Send: hidden, but kept mounted with all its content.
+  if (held) return null;
 
   return (
     // Non-modal tray (Gmail-style): page behind stays interactive, only
@@ -328,12 +384,11 @@ export default function ReplyComposer({
           className={trayContentClass({ fullscreen, width: "compose" })}
         >
           {/* Slim single-row header. */}
-          <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-3 pl-4">
+          <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card px-2.5 pl-4">
             <div className="flex min-w-0 items-center gap-2">
               <ReplyIcon
-                size={13}
-                className="shrink-0"
-                style={{ color: "#7c5cfc" }}
+                size={15}
+                className="shrink-0 text-text-secondary"
                 aria-hidden
               />
               <DialogPrimitive.Title className="truncate text-sm font-semibold text-text-primary">
@@ -347,7 +402,7 @@ export default function ReplyComposer({
                 onToggle={() => setFullscreen((v) => !v)}
               />
               <DialogPrimitive.Close
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
                 aria-label="Close"
               >
                 <X size={14} />
@@ -356,12 +411,12 @@ export default function ReplyComposer({
           </div>
 
           {/* Compact metadata: From / To / Cc. */}
-          <div className="shrink-0 divide-y divide-border/60 border-b border-border bg-bg-subtle/30">
+          <div className="shrink-0 divide-y divide-border-subtle border-b border-border bg-card">
             <TrayMetaRow label="From">
               <select
                 value={fromAddress}
                 onChange={(e) => setFromAddress(e.target.value)}
-                className="w-full bg-transparent py-2 pr-3 text-sm text-text-primary outline-none"
+                className="w-full bg-transparent py-2.5 pr-3 text-sm text-text-primary outline-none"
               >
                 {recipients.map((r) => (
                   <option key={r} value={r}>
@@ -371,7 +426,7 @@ export default function ReplyComposer({
               </select>
             </TrayMetaRow>
             <TrayMetaRow label="To">
-              <span className="block truncate py-2 pr-3 text-sm text-text-primary">
+              <span className="block truncate py-2.5 pr-3 text-sm text-text-primary">
                 {recipientLabel}
               </span>
             </TrayMetaRow>
@@ -401,7 +456,7 @@ export default function ReplyComposer({
                 {!originalEmail && contextError && (
                   <div
                     role="status"
-                    className="rounded-[8px] border border-amber-300/40 bg-amber-100/40 px-4 py-2.5 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+                    className="rounded-xl border border-warning-border bg-warning-bg px-4 py-2.5 text-[13px] text-warning"
                   >
                     Couldn't load the original message — it may have been
                     deleted. You can still send your reply.
@@ -434,7 +489,7 @@ export default function ReplyComposer({
                       <div
                         data-signature
                         data-testid="reply-signature-preview"
-                        className="mt-4 border-t border-border/60 pt-3 opacity-70"
+                        className="mt-4 border-t border-border-subtle pt-3 text-text-secondary opacity-80"
                         // Pre-sanitized via sanitizeEmailHtml above.
                         dangerouslySetInnerHTML={{ __html: safeSignatureHtml }}
                       />
@@ -445,7 +500,7 @@ export default function ReplyComposer({
             ) : (
               <div className="space-y-4 px-4 py-3 sm:px-5">
                 {templatesLoading ? (
-                  <p className="text-sm font-light text-text-tertiary">
+                  <p className="text-sm text-text-tertiary">
                     Loading templates…
                   </p>
                 ) : templatesError ? (
@@ -453,13 +508,13 @@ export default function ReplyComposer({
                 ) : (
                   <>
                     <div>
-                      <label className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+                      <label className="font-label mb-1.5 block text-text-tertiary">
                         Template
                       </label>
                       <select
                         value={selectedSlug}
                         onChange={(e) => setSelectedSlug(e.target.value)}
-                        className="w-full rounded-[8px] border border-border bg-card px-3 py-2 text-sm text-text-primary outline-none focus:ring-2 focus:ring-text-primary/15"
+                        className="h-9 w-full rounded-lg border border-border-strong bg-card px-3 text-sm text-text-primary shadow-card outline-none focus:border-accent focus:ring-3 focus:ring-accent/15"
                       >
                         <option value="">Select a template…</option>
                         {templates.map((t) => (
@@ -472,19 +527,19 @@ export default function ReplyComposer({
 
                     {selectedTemplate && (
                       <>
-                        <div className="rounded-[8px] bg-bg-subtle/60 p-4 ring-1 ring-border">
-                          <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+                        <div className="rounded-xl border border-border bg-bg-subtle p-4">
+                          <p className="font-label mb-1 text-text-tertiary">
                             Subject
                           </p>
                           <p className="text-sm font-medium text-text-primary">
                             {selectedTemplate.subject}
                           </p>
                           <div className="mt-3 border-t border-border pt-3">
-                            <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+                            <p className="font-label mb-1 text-text-tertiary">
                               Body preview
                             </p>
                             <div
-                              className="prose prose-sm max-h-48 max-w-none overflow-auto text-sm text-text-secondary"
+                              className="email-surface max-h-48 max-w-none overflow-auto rounded-lg px-3 py-2 text-sm"
                               dangerouslySetInnerHTML={{
                                 __html: selectedTemplate.bodyHtml,
                               }}
@@ -494,7 +549,7 @@ export default function ReplyComposer({
 
                         {requiredVars.length > 0 && (
                           <div>
-                            <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+                            <p className="font-label mb-2 text-text-tertiary">
                               Variables
                             </p>
                             <div className="space-y-2">
@@ -503,7 +558,7 @@ export default function ReplyComposer({
                                   key={v}
                                   className="grid grid-cols-[120px_1fr] items-center gap-3"
                                 >
-                                  <label className="truncate font-mono text-xs text-text-tertiary">
+                                  <label className="font-code truncate text-xs text-text-secondary">
                                     {templateAnalysis
                                       ? chipLabel(v, templateAnalysis)
                                       : `{{${v}}}`}
@@ -516,7 +571,7 @@ export default function ReplyComposer({
                                         [v]: e.target.value,
                                       }))
                                     }
-                                    className="rounded-[6px] border border-border bg-card px-2.5 py-1.5 text-sm text-text-primary outline-none focus:ring-2 focus:ring-text-primary/15"
+                                    className="h-8 rounded-lg border border-border-strong bg-card px-2.5 text-sm text-text-primary shadow-card outline-none focus:border-accent focus:ring-3 focus:ring-accent/15"
                                   />
                                 </div>
                               ))}
@@ -524,7 +579,7 @@ export default function ReplyComposer({
                             {[...sectionVarNames].some((n) =>
                               requiredVars.includes(n),
                             ) && (
-                              <p className="mt-2 text-[11px] font-light text-text-tertiary">
+                              <p className="mt-2 text-xs text-text-tertiary">
                                 Section variables (#) need an array of objects —
                                 this form can only send plain text, so send
                                 those via the API instead.
@@ -541,18 +596,23 @@ export default function ReplyComposer({
           </div>
 
           {/* Slim footer — single row, send + cancel + hint. */}
-          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-4 py-2.5 sm:px-5">
-            <div className="min-w-0 truncate text-[11px] font-light text-text-tertiary">
+          <div
+            className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-4 pt-2.5 sm:px-5"
+            style={{
+              paddingBottom: "max(0.625rem, env(safe-area-inset-bottom))",
+            }}
+          >
+            <div className="min-w-0 truncate text-xs text-text-tertiary">
               {error ? (
                 <span className="text-destructive" role="alert">
                   {error}
                 </span>
               ) : (
                 <span className="hidden sm:inline">
-                  <kbd className="rounded border border-border bg-bg-muted px-1 font-mono text-[10px]">
+                  <kbd className="rounded border border-border bg-bg-subtle px-1 font-sans text-[11px]">
                     ⌘
                   </kbd>
-                  <kbd className="ml-1 rounded border border-border bg-bg-muted px-1 font-mono text-[10px]">
+                  <kbd className="ml-1 rounded border border-border bg-bg-subtle px-1 font-sans text-[11px]">
                     Enter
                   </kbd>{" "}
                   to send
@@ -564,12 +624,12 @@ export default function ReplyComposer({
                 onFilesAdded={(added) =>
                   setFiles((prev) => [...prev, ...added])
                 }
-                buttonClassName="inline-flex items-center justify-center rounded-[6px] p-1.5 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                buttonClassName="inline-flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
               />
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-[6px] border border-border bg-card px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                className="inline-flex h-9 items-center rounded-lg px-3 text-[13.5px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
               >
                 Cancel
               </button>
@@ -580,9 +640,9 @@ export default function ReplyComposer({
                 disabled={
                   sending || totalAttachmentBytes > ATTACHMENT_CAP_BYTES
                 }
-                className="inline-flex items-center gap-1.5 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-4 text-[13.5px] font-medium text-accent-foreground shadow-card transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Send size={12} />
+                <Send size={14} />
                 {sending ? "Sending…" : "Send reply"}
               </button>
             </div>
@@ -600,7 +660,7 @@ export default function ReplyComposer({
  */
 function ModePillToggle({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   return (
-    <div className="mr-1 inline-flex rounded-[6px] bg-bg-muted/70 p-0.5 ring-1 ring-border">
+    <div className="pt-seg mr-1 !p-0.5">
       <ModePill
         active={tab === "freeform"}
         onClick={() => onTab("freeform")}
@@ -632,14 +692,10 @@ function ModePill({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "inline-flex h-6 items-center gap-1 rounded-[4px] px-2 text-[11px] font-medium transition-all",
-        active
-          ? "bg-card text-text-primary shadow-sm"
-          : "text-text-secondary hover:text-text-primary",
-      )}
+      className={cn("!h-7 !px-2 !text-xs", active && "on")}
+      aria-pressed={active}
     >
-      <Icon size={11} />
+      <Icon size={13} />
       <span className="hidden sm:inline">{label}</span>
     </button>
   );
@@ -670,15 +726,13 @@ function ThreadContext({
   }, [thread, original.id]);
 
   return (
-    <div className="rounded-[8px] bg-bg-subtle/60 ring-1 ring-border">
+    <div className="overflow-hidden rounded-xl border border-border bg-bg-subtle">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <ReplyIcon size={13} className="shrink-0 text-text-tertiary" />
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
-            Replying to
-          </span>
+          <span className="font-label text-text-tertiary">Replying to</span>
           {original.subject && (
-            <span className="truncate text-xs font-medium text-text-secondary">
+            <span className="truncate text-[13px] font-medium text-text-secondary">
               · {original.subject}
             </span>
           )}
@@ -687,7 +741,7 @@ function ThreadContext({
           <button
             type="button"
             onClick={onToggle}
-            className="inline-flex items-center gap-1 rounded-[6px] px-2 py-1 text-[11px] font-medium text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
           >
             {expanded ? (
               <>
@@ -706,7 +760,7 @@ function ThreadContext({
 
       <div className="max-h-[360px] overflow-y-auto smooth-scroll">
         {expanded && olderEmails.length > 0 && (
-          <div className="divide-y divide-border/60">
+          <div className="divide-y divide-border-subtle">
             {olderEmails.map((e) => (
               <ThreadMessage key={e.id} email={e} muted />
             ))}

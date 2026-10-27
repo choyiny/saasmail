@@ -21,3 +21,5 @@ export * from "./gmail-accounts.schema";
 export * from "./outlook-accounts.schema";
 export * from "./install-state.schema";
 export * from "./schema";
+export * from "./user-preferences.schema";
+export * from "./mail-item-states.schema";

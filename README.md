@@ -86,13 +86,15 @@ https://github.com/user-attachments/assets/870186a2-840f-4b95-b859-4acd44863263
 
 ![Unified customer timeline](docs/screenshots/inbox-timeline.jpg)
 
-**Agent Plan (WebMCP)** — connect a browser AI agent and watch it work the inbox: it reads a playbook, lays out a live plan, and ticks steps off while a bottom-right feed groups each tool call as it runs.
-
-![Agent Plan with live plan and activity feed](docs/screenshots/agent-plan.jpg)
-
 **Table overview** — stat tiles plus a sortable people table spanning every inbox, with unread and attachment indicators.
 
 ![Table overview](docs/screenshots/table-view.jpg)
+
+**Gmail- and Outlook-style layouts** — each user can switch to a familiar layout in Settings → Appearance: Gmail-style with category tabs and labels per inbox, or Outlook-style with Focused/Other, a ribbon and a reading pane.
+
+![Gmail-style layout](docs/screenshots/gmail-layout.jpg)
+
+![Outlook-style layout](docs/screenshots/outlook-layout.jpg)
 
 **Templates & sequences** — reusable `{{variable}}` email templates and multi-step drip campaigns you enroll contacts into.
 

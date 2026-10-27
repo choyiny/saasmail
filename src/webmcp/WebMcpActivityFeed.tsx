@@ -129,12 +129,10 @@ export function WebMcpActivityFeed() {
       aria-live="polite"
       aria-label="WebMCP agent activity"
     >
-      <div className="flex items-center gap-1.5 self-end rounded-full border border-border bg-card/90 px-2.5 py-1 text-[11px] font-medium text-text-tertiary shadow-sm backdrop-blur">
-        <Bot size={12} className="text-violet" />
+      <div className="flex items-center gap-1.5 self-end rounded-full border border-border-strong bg-popover px-2.5 py-1 text-xs font-medium text-text-secondary shadow-card">
+        <Bot size={13} className="text-text-secondary" />
         <span>Agent activity</span>
-        {anyRunning && (
-          <span className="ml-0.5 h-1.5 w-1.5 animate-pulse rounded-full bg-violet" />
-        )}
+        {anyRunning && <span className="pt-sdot accent ml-0.5 animate-pulse" />}
       </div>
       {visibleKeys.map((key) => {
         const groupItems = groups.get(key)!;
@@ -166,7 +164,7 @@ function cardPhase(items: Item[]): WebMcpActivityPhase {
 }
 
 const cardShell =
-  "webmcp-activity-enter pointer-events-auto rounded-[10px] border border-border bg-card px-3.5 py-3 shadow-lg ring-1 ring-black/5";
+  "webmcp-activity-enter pointer-events-auto rounded-xl border border-border-strong bg-popover px-3.5 py-3 text-text-primary shadow-overlay";
 
 function SingleCard({
   activity,
@@ -185,12 +183,12 @@ function SingleCard({
             {label}
           </p>
           {phase !== "running" && typeof durationMs === "number" && (
-            <span className="mt-0.5 shrink-0 text-[10px] tabular-nums text-text-tertiary">
+            <span className="tabular mt-0.5 shrink-0 text-[11px] text-text-tertiary">
               {formatDuration(durationMs)}
             </span>
           )}
         </div>
-        <p className="mt-0.5 break-all font-mono text-[11px] text-text-tertiary">
+        <p className="font-code mt-0.5 break-all text-[11px] text-text-tertiary">
           {tool}
         </p>
         {phase === "error" && detail && (
@@ -253,7 +251,7 @@ function DismissButton({ onDismiss }: { onDismiss: () => void }) {
       type="button"
       onClick={onDismiss}
       aria-label="Dismiss"
-      className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-text-tertiary/70 transition-colors hover:bg-bg-muted hover:text-text-primary"
+      className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
     >
       <X size={13} />
     </button>
@@ -263,20 +261,20 @@ function DismissButton({ onDismiss }: { onDismiss: () => void }) {
 function PhaseIcon({ phase }: { phase: WebMcpActivityPhase }) {
   if (phase === "running") {
     return (
-      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-violet/10 ring-1 ring-violet/30">
-        <Loader2 size={12} className="animate-spin text-violet" />
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-subtle">
+        <Loader2 size={12} className="animate-spin text-accent" />
       </span>
     );
   }
   if (phase === "success") {
     return (
-      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/10 ring-1 ring-emerald-500/30">
-        <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
+      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-success-subtle">
+        <Check size={12} className="text-success" />
       </span>
     );
   }
   return (
-    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive/10 ring-1 ring-destructive/30">
+    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive-subtle">
       <AlertCircle size={12} className="text-destructive" />
     </span>
   );
@@ -285,16 +283,11 @@ function PhaseIcon({ phase }: { phase: WebMcpActivityPhase }) {
 function BulletIcon({ phase }: { phase: WebMcpActivityPhase }) {
   if (phase === "running") {
     return (
-      <Loader2 size={11} className="mt-0.5 shrink-0 animate-spin text-violet" />
+      <Loader2 size={11} className="mt-0.5 shrink-0 animate-spin text-accent" />
     );
   }
   if (phase === "success") {
-    return (
-      <Check
-        size={11}
-        className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-      />
-    );
+    return <Check size={11} className="mt-0.5 shrink-0 text-success" />;
   }
   return <AlertCircle size={11} className="mt-0.5 shrink-0 text-destructive" />;
 }

@@ -10,7 +10,7 @@ interface CcChipsProps {
   cc: CcEntry[];
   /**
    * Domains we consider "internal" — anyone CC'd from these domains gets
-   * a lime accent, others get neutral. Pass the set of sender-identity
+   * a accent tint, others get neutral. Pass the set of sender-identity
    * domains so the visual mapping matches the inbox you actually run.
    */
   internalDomains?: string[];
@@ -40,7 +40,7 @@ function labelOf(c: CcEntry): string {
 
 /**
  * Inline list of CC'd people, rendered as small pill chips.
- * Internal contacts (matching one of `internalDomains`) get a lime
+ * Internal contacts (matching one of `internalDomains`) get an accent
  * accent; external contacts stay neutral. Empty list renders nothing.
  */
 export default function CcChips({
@@ -59,8 +59,8 @@ export default function CcChips({
         className,
       )}
     >
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
-        <Users size={10} />
+      <span className="font-label inline-flex items-center gap-1 text-[10.5px] text-text-tertiary">
+        <Users size={11} />
         Cc
       </span>
       {cc.map((c) => {
@@ -70,12 +70,11 @@ export default function CcChips({
             key={c.email}
             title={c.email}
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+              "inline-flex items-center gap-1 h-5 rounded-full border px-2 text-[11.5px] font-medium leading-none",
               internal
-                ? "border-lime-400/40 bg-lime-400/10 text-lime-700"
-                : "border-border bg-bg-muted/60 text-text-secondary",
+                ? "border-accent-subtle bg-accent-subtle text-accent-subtle-fg"
+                : "border-border bg-bg-subtle text-text-secondary",
             )}
-            style={internal ? { color: "#5b7700" } : undefined}
           >
             {labelOf(c)}
           </span>
@@ -120,7 +119,7 @@ export function RosterDiffNotice({
               internalDomains={internalDomains}
             />
           ))}
-          <span className="font-light">added</span>
+          <span>added</span>
         </span>
       )}
       {joined.length > 0 && left.length > 0 && (
@@ -136,7 +135,7 @@ export function RosterDiffNotice({
               internalDomains={internalDomains}
             />
           ))}
-          <span className="font-light">removed</span>
+          <span>removed</span>
         </span>
       )}
     </div>
@@ -155,12 +154,11 @@ function ChipPlain({
     <span
       title={entry.email}
       className={cn(
-        "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium leading-none",
+        "inline-flex items-center h-5 rounded-full border px-2 text-[11.5px] font-medium leading-none",
         internal
-          ? "border-lime-400/40 bg-lime-400/10"
-          : "border-border bg-bg-muted/60 text-text-secondary",
+          ? "border-accent-subtle bg-accent-subtle text-accent-subtle-fg"
+          : "border-border bg-bg-subtle text-text-secondary",
       )}
-      style={internal ? { color: "#5b7700" } : undefined}
     >
       {labelOf(entry)}
     </span>

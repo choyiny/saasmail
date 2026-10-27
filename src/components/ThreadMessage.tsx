@@ -41,17 +41,11 @@ export default function ThreadMessage({
         muted && "opacity-90",
       )}
     >
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px]">
+      <div className="mb-2 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
         <span
           className={cn(
-            "inline-flex items-center gap-1 rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider",
-            failedToSend
-              ? "bg-red-500/10 text-red-500"
-              : retrying
-                ? "bg-amber-500/10 text-amber-600"
-                : isSent
-                  ? "bg-bg-muted text-text-secondary"
-                  : "bg-violet/10 text-violet",
+            "pt-chip",
+            failedToSend ? "bad" : retrying ? "warn" : isSent ? "" : "accent",
           )}
           data-testid={retrying ? "message-retrying-badge" : undefined}
           title={
@@ -59,42 +53,42 @@ export default function ThreadMessage({
               ? "The email provider rejected this send; it will be retried automatically. See the Outbox for details."
               : undefined
           }
-          style={!isSent ? { color: "#7c5cfc" } : undefined}
         >
           {failedToSend ? (
             <>
-              <AlertTriangle size={9} />
+              <AlertTriangle size={11} />
               Failed to send
             </>
           ) : retrying ? (
             <>
-              <Clock size={9} />
+              <Clock size={11} />
               Retrying
             </>
           ) : isSent ? (
             <>
-              <Send size={9} />
+              <Send size={11} />
               Sent
             </>
           ) : (
             <>
-              <InboxIcon size={9} />
+              <InboxIcon size={11} />
               Received
             </>
           )}
         </span>
-        <span className="truncate font-medium text-text-primary">{sender}</span>
+        <span className="truncate text-[13px] font-semibold text-text-primary">
+          {sender}
+        </span>
         {recipient && (
           <span className="truncate text-text-tertiary">→ {recipient}</span>
         )}
-        <span className="ml-auto shrink-0 text-text-tertiary">{fullStamp}</span>
+        <span className="tabular ml-auto shrink-0 text-text-tertiary">
+          {fullStamp}
+        </span>
       </div>
       {email.bodyHtml ? (
         <div
-          className={cn(
-            "prose prose-sm max-w-none text-[13px] leading-relaxed [&_p]:my-1.5",
-            highlight ? "text-text-primary" : "text-text-secondary",
-          )}
+          className="email-surface max-w-none overflow-x-auto rounded-lg px-3 py-2.5 text-[13px] leading-relaxed [&_img]:max-w-full [&_p]:my-1.5"
           dangerouslySetInnerHTML={{
             __html: sanitizeEmailHtml(email.bodyHtml),
           }}

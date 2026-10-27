@@ -5,6 +5,7 @@ import type { OutboxItem } from "@/lib/api";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 import { SectionHeader } from "@/components/PageForm";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 function relativeTime(ts: number): string {
   const diff = ts - Date.now() / 1000;
@@ -18,15 +19,8 @@ function relativeTime(ts: number): string {
 
 function StatusChip({ status }: { status: OutboxItem["status"] }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1",
-        status === "pending"
-          ? "bg-amber-50 text-amber-700 ring-amber-200"
-          : "bg-rose-50 text-rose-700 ring-rose-200",
-      )}
-    >
-      {status === "pending" ? <Clock size={10} /> : <X size={10} />}
+    <span className={cn("pt-chip", status === "pending" ? "warn" : "bad")}>
+      {status === "pending" ? <Clock /> : <X />}
       {status === "pending" ? "Retrying" : "Failed"}
     </span>
   );
@@ -117,8 +111,8 @@ export default function OutboxPage() {
         subtitle="Sends the provider rejected. Retrying items are re-attempted every hour; failed items gave up and need a manual retry."
       />
 
-      <div className="space-y-6">
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+      <div className="max-w-4xl space-y-6">
+        <section className="overflow-hidden rounded-2xl bg-card border border-border shadow-card">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
               icon={Send}
@@ -128,7 +122,7 @@ export default function OutboxPage() {
           </div>
 
           {error && (
-            <div className="border-b border-border bg-rose-50/60 px-5 py-2 text-xs font-medium text-rose-700">
+            <div className="border-b border-border bg-destructive-subtle px-5 py-2 text-xs font-medium text-destructive">
               {error}
             </div>
           )}
@@ -139,32 +133,37 @@ export default function OutboxPage() {
           )}
 
           {loading ? (
-            <p className="px-5 py-6 text-xs font-light text-text-tertiary">
-              Loading…
-            </p>
+            <div className="space-y-3 px-5 py-5" aria-busy="true">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="pt-skel block h-4 w-full" />
+              ))}
+            </div>
           ) : items.length === 0 ? (
-            <p className="px-5 py-10 text-center text-sm text-text-tertiary">
-              Nothing waiting to send.
-            </p>
+            <div className="pt-empty">
+              <span className="ic">
+                <Send size={18} />
+              </span>
+              <p>Nothing waiting to send. Every message went out.</p>
+            </div>
           ) : (
             <>
-              <ul className="divide-y divide-border/60">
+              <ul className="divide-y divide-border-subtle">
                 {items.map((item) => (
                   <li
                     key={item.id}
-                    className="flex items-start gap-3 px-5 py-3"
+                    className="flex flex-wrap items-start gap-3 px-5 py-3.5 sm:flex-nowrap"
                   >
                     <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-muted">
-                      <Send size={14} className="text-text-tertiary" />
+                      <Send size={15} className="text-text-secondary" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium text-text-primary">
+                        <p className="truncate text-[14px] font-medium text-text-primary">
                           {item.subject}
                         </p>
                         <StatusChip status={item.status} />
                       </div>
-                      <p className="truncate text-xs font-light text-text-tertiary">
+                      <p className="mt-0.5 truncate text-[13px] text-text-tertiary">
                         To {item.toAddress} · from {item.fromAddress} ·{" "}
                         {item.attempts} attempt{item.attempts === 1 ? "" : "s"}
                         {item.status === "pending" && item.nextRetryAt
@@ -172,43 +171,46 @@ export default function OutboxPage() {
                           : ""}
                       </p>
                       {item.lastError && (
-                        <p className="mt-0.5 truncate text-xs font-light text-rose-600">
+                        <p className="font-code mt-1 truncate text-xs text-destructive">
                           {item.lastError}
                         </p>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
+                    <div className="flex shrink-0 items-center gap-1 max-sm:ml-12">
+                      <Button
+                        variant="outline"
+                        size="sm"
                         onClick={() => handleRetry(item)}
                         disabled={busyId === item.id}
-                        className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-60"
                       >
                         <RefreshCw
-                          size={12}
                           className={busyId === item.id ? "animate-spin" : ""}
                         />
                         Retry now
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => handleCancel(item)}
                         disabled={busyId === item.id}
-                        className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60"
+                        className="hover:bg-destructive-subtle hover:text-destructive"
                       >
-                        <X size={12} />
+                        <X />
                         Cancel
-                      </button>
+                      </Button>
                     </div>
                   </li>
                 ))}
               </ul>
               {nextCursor && (
                 <div className="border-t border-border px-5 py-3">
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={loadMore}
-                    className="w-full rounded-[6px] border border-border bg-card py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                    className="w-full"
                   >
                     Load more
-                  </button>
+                  </Button>
                 </div>
               )}
             </>

@@ -368,7 +368,7 @@ export default function ConnectedMailboxes({
           <h2 className="text-sm font-semibold text-text-primary">
             Connected {ui.label} mailboxes
           </h2>
-          <p className="mt-0.5 text-xs font-light text-text-tertiary">
+          <p className="mt-0.5 text-xs text-text-tertiary">
             Mail is pulled from each connected mailbox {SYNC_INTERVAL_LABEL}, so
             a freshly connected mailbox can look idle for a quarter of an hour.
           </p>
@@ -381,7 +381,7 @@ export default function ConnectedMailboxes({
           onClick={() => handleStartConnect()}
           disabled={connecting}
           data-testid={`${ui.key}-connect-button`}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[6px] bg-text-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:opacity-50"
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-4 text-sm font-medium text-accent-foreground shadow-card transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
           {connecting ? (
             <Loader2 size={14} className="animate-spin" />
@@ -397,7 +397,7 @@ export default function ConnectedMailboxes({
       {(connectResult === "error" || connectError !== null) && (
         <div
           data-testid={`${ui.key}-connect-error`}
-          className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
+          className="flex gap-2 rounded-lg bg-destructive-subtle px-4 py-3 text-xs text-destructive ring-1 ring-destructive/25"
         >
           <AlertTriangle size={14} className="mt-px shrink-0" />
           {connectError !== null ? (
@@ -423,7 +423,7 @@ export default function ConnectedMailboxes({
       {connectResult === "wrong_account" && wrongAccount !== null && (
         <div
           data-testid={`${ui.key}-wrong-account`}
-          className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
+          className="flex gap-2 rounded-lg bg-destructive-subtle px-4 py-3 text-xs text-destructive ring-1 ring-destructive/25"
         >
           <AlertTriangle size={14} className="mt-px shrink-0" />
           <span>
@@ -445,7 +445,7 @@ export default function ConnectedMailboxes({
       {connectResult === "wrong_admin" && (
         <div
           data-testid={`${ui.key}-wrong-admin`}
-          className="flex gap-2 rounded-[8px] bg-destructive/10 px-4 py-3 text-xs text-destructive ring-1 ring-destructive/20"
+          className="flex gap-2 rounded-lg bg-destructive-subtle px-4 py-3 text-xs text-destructive ring-1 ring-destructive/25"
         >
           <AlertTriangle size={14} className="mt-px shrink-0" />
           <span>
@@ -463,7 +463,7 @@ export default function ConnectedMailboxes({
       {connectResult === "connected" && (
         <div
           data-testid={`${ui.key}-connect-success`}
-          className="flex gap-2 rounded-[8px] bg-emerald-500/10 px-4 py-3 text-xs text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-400"
+          className="flex gap-2 rounded-lg bg-success-subtle px-4 py-3 text-xs text-success ring-1 ring-success/25"
         >
           <CheckCircle2 size={14} className="mt-px shrink-0" />
           <span>
@@ -474,14 +474,12 @@ export default function ConnectedMailboxes({
         </div>
       )}
 
-      {loading && (
-        <p className="text-sm font-light text-text-tertiary">Loading…</p>
-      )}
+      {loading && <p className="text-sm text-text-tertiary">Loading…</p>}
 
       {!loading && loadError && (
         <div
           data-testid={`${ui.key}-load-error`}
-          className="rounded-[8px] bg-card p-4 text-sm text-destructive ring-1 ring-border"
+          className="rounded-2xl bg-card p-4 text-sm text-destructive border border-border shadow-card"
         >
           Couldn&apos;t load the connected mailboxes ({loadError}). This is not
           the same as having none connected — reload before changing anything.
@@ -491,15 +489,15 @@ export default function ConnectedMailboxes({
       {!loading && !loadError && accounts.length === 0 && (
         <div
           data-testid={`${ui.key}-empty-state`}
-          className="rounded-[8px] bg-card p-10 text-center ring-1 ring-border"
+          className="rounded-2xl bg-card p-10 text-center border border-border shadow-card"
         >
-          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet/10">
-            <Mail size={20} style={{ color: "#7c5cfc" }} />
+          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-subtle">
+            <Mail size={20} className="text-text-secondary" />
           </span>
           <p className="mb-1 text-sm font-medium text-text-primary">
             No {ui.label} mailbox connected
           </p>
-          <p className="mx-auto max-w-lg text-xs font-light text-text-tertiary">
+          <p className="mx-auto max-w-lg text-xs text-text-tertiary">
             Connecting a mailbox lets saasmail read its mail and send as that
             address. New mail syncs going forward, and the last year is imported
             once in the background.
@@ -508,7 +506,7 @@ export default function ConnectedMailboxes({
       )}
 
       {!loading && !loadError && accounts.length > 0 && (
-        <div className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <div className="overflow-hidden rounded-2xl bg-card border border-border shadow-card">
           {disconnectError && (
             <div className="border-b border-border px-4 py-2 text-xs text-destructive">
               {disconnectError}
@@ -531,7 +529,7 @@ export default function ConnectedMailboxes({
                       </div>
                       <div
                         data-testid={`${ui.key}-synced-${account.id}`}
-                        className="mt-0.5 text-xs font-light text-text-tertiary"
+                        className="mt-0.5 text-xs text-text-tertiary"
                       >
                         {account.lastSyncedAt === null
                           ? "Not synced yet — the first sync runs within 15 minutes."
@@ -539,7 +537,7 @@ export default function ConnectedMailboxes({
                       </div>
                       <div
                         data-testid={`${ui.key}-provenance-${account.id}`}
-                        className="mt-0.5 text-xs font-light text-text-tertiary"
+                        className="mt-0.5 text-xs text-text-tertiary"
                       >
                         {connectedByLabel(account)}
                       </div>
@@ -555,7 +553,7 @@ export default function ConnectedMailboxes({
                             }
                             disabled={connecting}
                             data-testid={`${ui.key}-reconnect-${account.id}`}
-                            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-black/[0.03] disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-bg-subtle disabled:opacity-50"
                           >
                             {connecting ? (
                               <Loader2 size={12} className="animate-spin" />
@@ -572,7 +570,7 @@ export default function ConnectedMailboxes({
                             onClick={() => handleDisconnect(account)}
                             disabled={busy}
                             data-testid={`${ui.key}-confirm-disconnect-${account.id}`}
-                            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-destructive px-3 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-destructive px-3 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
                           >
                             {busy && (
                               <Loader2 size={12} className="animate-spin" />
@@ -584,7 +582,7 @@ export default function ConnectedMailboxes({
                             onClick={() => setConfirmingId(null)}
                             disabled={busy}
                             data-testid={`${ui.key}-cancel-disconnect-${account.id}`}
-                            className="inline-flex h-8 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-black/[0.03] hover:text-text-primary disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-subtle hover:text-text-primary disabled:opacity-50"
                           >
                             <X size={12} />
                             Cancel
@@ -595,7 +593,7 @@ export default function ConnectedMailboxes({
                           type="button"
                           onClick={() => setConfirmingId(account.id)}
                           data-testid={`${ui.key}-disconnect-${account.id}`}
-                          className="inline-flex h-8 items-center rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-black/[0.03]"
+                          className="inline-flex h-8 items-center rounded-lg border border-border bg-card px-3 text-xs font-medium text-text-primary transition-colors hover:bg-bg-subtle"
                         >
                           Disconnect
                         </button>
@@ -604,7 +602,7 @@ export default function ConnectedMailboxes({
                   </div>
 
                   {confirming && (
-                    <p className="mt-2 text-xs font-light text-text-tertiary">
+                    <p className="mt-2 text-xs text-text-tertiary">
                       This deletes the stored credentials for this mailbox and
                       stops it syncing. Mail already synced stays; nothing new
                       arrives. It does <span className="font-medium">not</span>{" "}
@@ -614,7 +612,7 @@ export default function ConnectedMailboxes({
                   )}
 
                   {account.lastError !== null && (
-                    <div className="mt-2 rounded-[6px] bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    <div className="mt-2 rounded-lg bg-destructive-subtle px-3 py-2 text-xs text-destructive">
                       <span className="font-medium">
                         This mailbox has stopped syncing.
                       </span>{" "}
@@ -638,7 +636,7 @@ export default function ConnectedMailboxes({
                   />
 
                   {account.lastGapAt !== null && (
-                    <div className="mt-2 flex gap-2 rounded-[6px] bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    <div className="mt-2 flex gap-2 rounded-lg bg-warning-bg px-3 py-2 text-xs text-warning">
                       <AlertTriangle size={14} className="mt-px shrink-0" />
                       <span>
                         <span className="font-medium">
@@ -694,10 +692,7 @@ function BackfillProgress({
 
   if (backfill.status === "done") {
     return (
-      <p
-        className="mt-2 text-xs font-light text-text-tertiary"
-        data-testid={testId}
-      >
+      <p className="mt-2 text-xs text-text-tertiary" data-testid={testId}>
         Imported the last year ({backfill.count.toLocaleString()} messages).
       </p>
     );
@@ -705,10 +700,7 @@ function BackfillProgress({
 
   if (backfill.status === "pending") {
     return (
-      <p
-        className="mt-2 text-xs font-light text-text-tertiary"
-        data-testid={testId}
-      >
+      <p className="mt-2 text-xs text-text-tertiary" data-testid={testId}>
         {importingNow
           ? `Importing the last year starts after ${importingNow.emailAddress} finishes — one mailbox at a time.`
           : "Importing the last year starts shortly."}
@@ -719,7 +711,7 @@ function BackfillProgress({
   const pct = Math.floor(backfill.progress * 100);
   return (
     <div className="mt-2" data-testid={testId}>
-      <div className="mb-1 flex items-baseline justify-between gap-3 text-xs font-light text-text-tertiary">
+      <div className="mb-1 flex items-baseline justify-between gap-3 text-xs text-text-tertiary">
         <span>
           Importing the last year
           {backfill.reachedAt !== null && (
@@ -739,7 +731,7 @@ function BackfillProgress({
         aria-valuenow={pct}
       >
         <div
-          className="h-full rounded-full bg-violet transition-[width] duration-500 ease-out"
+          className="h-full rounded-full bg-accent transition-[width] duration-500 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>

@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, Check, ShieldCheck } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
+import { WordmarkLarge } from "@/components/Wordmark";
 
 /**
  * Copy shown for each scope on the authorization screen. Anything not listed
@@ -27,8 +28,7 @@ const SCOPE_DESCRIPTIONS: Record<string, string> = {
  */
 const ELEVATED_SCOPES = new Set(["email:send", "email:manage"]);
 
-const CARD =
-  "rounded-2xl bg-white/10 p-8 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl";
+const CARD = "pt-auth-card";
 
 export default function ConsentPage() {
   const { brandName } = useBranding();
@@ -90,10 +90,13 @@ export default function ConsentPage() {
 
   if (!clientId) {
     return (
-      <div className="relative z-10 mx-4 w-full max-w-sm">
+      <div className="flex w-full max-w-[420px] flex-col items-center gap-7">
+        <WordmarkLarge />
         <div className={`${CARD} text-center`}>
-          <h1 className="text-lg font-semibold text-white">Invalid request</h1>
-          <p className="mt-2 text-sm font-light text-white/50">
+          <h1 className="text-[18px] font-semibold tracking-[-0.015em] text-text-primary">
+            Invalid request
+          </h1>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-text-secondary">
             This authorization request is missing information or has expired.
             Start again from the application you were connecting.
           </p>
@@ -104,12 +107,13 @@ export default function ConsentPage() {
 
   if (result) {
     return (
-      <div className="relative z-10 mx-4 w-full max-w-sm">
+      <div className="flex w-full max-w-[420px] flex-col items-center gap-7">
+        <WordmarkLarge />
         <div className={`${CARD} text-center`}>
-          <h1 className="text-lg font-semibold text-white">
+          <h1 className="text-[18px] font-semibold tracking-[-0.015em] text-text-primary">
             {result === "allowed" ? "Access granted" : "Access denied"}
           </h1>
-          <p className="mt-2 text-sm font-light text-white/50">
+          <p className="mt-2 text-[13.5px] leading-relaxed text-text-secondary">
             You can close this window and return to the application.
           </p>
         </div>
@@ -118,26 +122,24 @@ export default function ConsentPage() {
   }
 
   return (
-    <div className="relative z-10 mx-4 w-full max-w-sm">
+    <div className="flex w-full max-w-[420px] flex-col items-center gap-7">
+      <WordmarkLarge />
       <div className={CARD}>
-        <div className="mb-8 text-center">
-          <ShieldCheck
-            className="mx-auto mb-4 h-12 w-12"
-            strokeWidth={2}
-            style={{ color: "#BFFF00" }}
-            aria-hidden
-          />
-          <h1 className="text-2xl font-extrabold uppercase tracking-tight text-white">
-            Authorize
+        <div className="mb-6">
+          <span className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-accent-subtle text-accent-subtle-fg">
+            <ShieldCheck className="h-5 w-5" strokeWidth={2} aria-hidden />
+          </span>
+          <h1 className="text-[20px] font-semibold leading-tight tracking-[-0.02em] text-text-primary">
+            Authorize access
           </h1>
-          <p className="mt-2 text-sm font-light text-white/50">
-            <span className="font-medium text-white/80">
+          <p className="mt-2 text-[13.5px] leading-relaxed text-text-secondary">
+            <span className="font-medium text-text-primary">
               {clientName ?? clientId}
             </span>{" "}
             wants access to your {brandName} account.
           </p>
           {clientName && (
-            <p className="mt-1 font-mono text-[11px] text-white/30">
+            <p className="font-code mt-1 text-[11px] text-text-tertiary">
               {clientId}
             </p>
           )}
@@ -146,15 +148,13 @@ export default function ConsentPage() {
         {error && (
           <p
             role="alert"
-            className="mb-4 rounded-md bg-red-500/15 px-3 py-2 text-center text-xs text-red-200 ring-1 ring-red-500/25"
+            className="mb-4 rounded-lg border border-destructive/25 bg-destructive-subtle px-3 py-2 text-[13px] text-destructive"
           >
             {error}
           </p>
         )}
 
-        <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-white/50">
-          It will be able to
-        </p>
+        <p className="font-label mb-2 text-text-tertiary">It will be able to</p>
         <ul className="mb-4 space-y-2">
           {scopes.map((s) => {
             const elevated = ELEVATED_SCOPES.has(s);
@@ -163,29 +163,28 @@ export default function ConsentPage() {
                 key={s}
                 className={
                   elevated
-                    ? "flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 ring-1 ring-amber-400/30"
-                    : "flex items-start gap-2 rounded-md bg-white/5 px-3 py-2 ring-1 ring-white/10"
+                    ? "flex items-start gap-2 rounded-lg border border-warning-border bg-warning-bg px-3 py-2"
+                    : "flex items-start gap-2 rounded-lg border border-border bg-bg-subtle px-3 py-2"
                 }
               >
                 {elevated ? (
                   <AlertTriangle
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-300"
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning"
                     strokeWidth={2.5}
                     aria-hidden
                   />
                 ) : (
                   <Check
-                    className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success"
                     strokeWidth={2.5}
-                    style={{ color: "#BFFF00" }}
                     aria-hidden
                   />
                 )}
                 <span
                   className={
                     elevated
-                      ? "text-xs text-amber-100"
-                      : "text-xs text-white/80"
+                      ? "text-[13px] text-warning-text"
+                      : "text-[13px] text-text-primary"
                   }
                 >
                   {SCOPE_DESCRIPTIONS[s] ?? s}
@@ -196,7 +195,7 @@ export default function ConsentPage() {
         </ul>
 
         {scopes.some((s) => ELEVATED_SCOPES.has(s)) && (
-          <p className="mb-8 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-100 ring-1 ring-amber-400/30">
+          <p className="mb-6 rounded-lg border border-warning-border bg-warning-bg px-3 py-2 text-xs leading-relaxed text-warning-text">
             This app can act on your mailbox, not just read it. Anything it
             reads — including mail sent to you by strangers — can influence what
             it does next. Only continue if you trust it with sending and
@@ -204,12 +203,12 @@ export default function ConsentPage() {
           </p>
         )}
 
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <button
             type="button"
             onClick={() => handleConsent(true)}
             disabled={loading !== null}
-            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-[#0a0a0a] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-[13.5px] font-medium text-accent-foreground shadow-card transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading === "allow" ? "Authorizing…" : "Authorize"}
           </button>
@@ -217,13 +216,13 @@ export default function ConsentPage() {
             type="button"
             onClick={() => handleConsent(false)}
             disabled={loading !== null}
-            className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#24292f] px-4 text-sm font-semibold text-white ring-1 ring-white/15 transition-colors hover:bg-[#24292f]/80 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-card px-4 text-[13.5px] font-medium text-text-primary shadow-card ring-1 ring-inset ring-border-strong transition-colors hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading === "deny" ? "Denying…" : "Deny"}
           </button>
         </div>
 
-        <p className="mt-6 text-center text-[11px] font-light text-white/40">
+        <p className="mt-6 border-t border-border pt-4 text-center text-xs text-text-tertiary">
           Only authorize applications you trust. You can revoke access later.
         </p>
       </div>

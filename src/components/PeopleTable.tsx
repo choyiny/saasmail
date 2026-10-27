@@ -5,10 +5,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Users,
+  Pin,
   ArrowDown,
   ArrowUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { avatarColor, initials } from "@/lib/avatar";
+import {
+  MailActionButtons,
+  StarToggle,
+  type MailActionHandlers,
+} from "@/components/MailActions";
 import {
   defaultDirectionFor,
   type GroupedItem,
@@ -49,6 +56,8 @@ interface PeopleTableProps {
   /** Aggregates over the *filtered* set so stat tiles show the truth
    *  about the whole result, not just the visible page. */
   aggregates?: InboxAggregates;
+  /** Star / pin / archive / snooze handlers per row. */
+  mailActions?: (item: GroupedItem) => MailActionHandlers;
 }
 
 /**
@@ -92,7 +101,7 @@ function SortHeader({
       className={cn(
         "inline-flex items-center gap-1 transition-colors",
         align === "right" && "flex-row-reverse",
-        clickable && "cursor-pointer hover:text-text-secondary",
+        clickable && "cursor-pointer hover:text-text-primary",
         isActive && "text-text-primary",
         !clickable && "cursor-default",
       )}
@@ -106,32 +115,14 @@ function SortHeader({
     >
       <span>{label}</span>
       {isActive && active.direction === "asc" ? (
-        <ArrowUp size={10} className="shrink-0" aria-hidden />
+        <ArrowUp size={11} className="shrink-0" aria-hidden />
       ) : isActive ? (
-        <ArrowDown size={10} className="shrink-0" aria-hidden />
+        <ArrowDown size={11} className="shrink-0" aria-hidden />
       ) : null}
     </button>
   );
 }
 
-const AVATAR_PALETTE = [
-  { bg: "rgba(124, 92, 252, 0.12)", fg: "#5b3ce6" },
-  { bg: "rgba(34, 197, 94, 0.12)", fg: "#15803d" },
-  { bg: "rgba(244, 114, 182, 0.14)", fg: "#be185d" },
-  { bg: "rgba(251, 146, 60, 0.14)", fg: "#c2410c" },
-  { bg: "rgba(56, 189, 248, 0.14)", fg: "#0369a1" },
-  { bg: "rgba(168, 85, 247, 0.14)", fg: "#7e22ce" },
-];
-function avatarColor(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
-}
-function initials(name: string | null, email: string) {
-  const source = name || email.split("@")[0];
-  const parts = source.split(/[\s.\-_]+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
-}
 function relTime(ts: number): string {
   const d = new Date(ts * 1000);
   const now = new Date();
@@ -163,8 +154,8 @@ function RowCheckbox({ checked, onChange, ariaLabel }: RowCheckboxProps) {
       className={cn(
         "flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
         checked
-          ? "border-text-primary bg-text-primary text-white"
-          : "border-border bg-card hover:border-text-primary/40",
+          ? "border-accent bg-accent text-accent-foreground"
+          : "border-border-strong bg-card hover:border-text-tertiary",
       )}
     >
       {checked && (
@@ -206,6 +197,7 @@ export default function PeopleTable({
   pageSize,
   onPageChange,
   aggregates,
+  mailActions,
 }: PeopleTableProps) {
   // Person rows used for the bulk-select header checkbox.
   // Group rows are still rendered, just not eligible for bulk selection
@@ -230,19 +222,16 @@ export default function PeopleTable({
     let unread = 0;
     let withAttachments = 0;
     let multiInbox = 0;
-    let groupCount = 0;
     for (const it of items) {
       if (it.type === "group") {
         if (it.unreadCount > 0) unread++;
         if (it.hasAttachment === 1) withAttachments++;
-        groupCount++;
         continue;
       }
       if (it.unreadCount > 0) unread++;
       if (it.hasAttachment === 1) withAttachments++;
       if (it.recipientCount > 1) multiInbox++;
     }
-    void groupCount; // currently unused; kept for parity with prior behavior
     return {
       total: items.length,
       unread,
@@ -280,7 +269,7 @@ export default function PeopleTable({
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {/* Stats strip */}
-      <div className="grid shrink-0 grid-cols-4 gap-px border-b border-border bg-border">
+      <div className="grid shrink-0 grid-cols-2 border-b border-border sm:grid-cols-4">
         <StatTile label="People" value={stats.total} />
         <StatTile label="Unread" value={stats.unread} accent />
         <StatTile label="Multi-inbox" value={stats.multiInbox} />
@@ -290,24 +279,29 @@ export default function PeopleTable({
       {/* Table */}
       <div className="smooth-scroll min-h-0 flex-1 overflow-auto">
         {loading ? (
-          <div className="flex h-full items-center justify-center text-sm text-text-tertiary">
-            Loading…
+          <div className="flex flex-col gap-3 p-5" aria-busy="true">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <span key={i} className="pt-skel h-8 w-full" />
+            ))}
           </div>
         ) : items.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-            <p className="text-sm font-medium text-text-primary">
+          <div className="pt-empty h-full">
+            <p className="font-medium text-text-primary">
               No people match your filters
             </p>
-            <p className="text-xs font-light text-text-tertiary">
+            <p className="text-[13px]">
               Try clearing a filter or broadening your search.
             </p>
           </div>
         ) : (
-          <table className="w-full text-left text-sm">
-            <thead className="sticky top-0 z-10 bg-card/90 backdrop-blur-sm">
-              <tr className="border-b border-border text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+          <table
+            // Rows follow the density setting (--sm-row-pad), like the list.
+            className="pt-table [&_tbody_td]:py-[var(--sm-row-pad)]"
+          >
+            <thead>
+              <tr>
                 {selectedIds !== undefined && (
-                  <th className="w-10 px-4 py-2.5">
+                  <th className="w-10 !pr-0">
                     <RowCheckbox
                       checked={allOnPageSelected}
                       onChange={() => onToggleSelectAll?.()}
@@ -322,8 +316,13 @@ export default function PeopleTable({
                     )}
                   </th>
                 )}
-                <th className="px-4 py-2.5 font-semibold">Person</th>
-                <th className="px-3 py-2.5 font-semibold">
+                {mailActions && (
+                  <th className="w-8 !px-0">
+                    <span className="sr-only">Starred</span>
+                  </th>
+                )}
+                <th>Person</th>
+                <th>
                   <SortHeader
                     label="Inboxes"
                     sortKey="inbox"
@@ -331,7 +330,7 @@ export default function PeopleTable({
                     onClick={onSortChange}
                   />
                 </th>
-                <th className="px-3 py-2.5 text-right font-semibold">
+                <th className="!text-right">
                   <SortHeader
                     label="Emails"
                     sortKey="attachments"
@@ -340,7 +339,7 @@ export default function PeopleTable({
                     align="right"
                   />
                 </th>
-                <th className="px-3 py-2.5 text-right font-semibold">
+                <th className="!text-right">
                   <SortHeader
                     label="Unread"
                     sortKey="unread"
@@ -349,7 +348,7 @@ export default function PeopleTable({
                     align="right"
                   />
                 </th>
-                <th className="px-3 py-2.5 text-right font-semibold">
+                <th className="!text-right">
                   <SortHeader
                     label="Last"
                     sortKey="recency"
@@ -358,6 +357,11 @@ export default function PeopleTable({
                     align="right"
                   />
                 </th>
+                {mailActions && (
+                  <th className="w-[148px]">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -374,25 +378,25 @@ export default function PeopleTable({
                         selectedConversationIds?.has(item.id) ?? false
                       }
                       onToggleSelected={onToggleSelectedConversation}
+                      actions={mailActions?.(item)}
                     />
                   );
                 }
                 const person = item;
                 const color = avatarColor(person.email);
                 const isSelected = selectedIds?.has(person.id) ?? false;
+                const actions = mailActions?.(person);
                 return (
                   <tr
                     key={person.id}
                     onClick={() => onSelectPerson(person)}
                     className={cn(
-                      "group cursor-pointer border-b border-border/60 transition-colors",
-                      isSelected
-                        ? "bg-text-primary/[0.04]"
-                        : "hover:bg-text-primary/[0.025]",
+                      "group cursor-pointer",
+                      isSelected && "!bg-accent-subtle/60",
                     )}
                   >
                     {selectedIds !== undefined && (
-                      <td className="w-10 px-4 py-2.5">
+                      <td className="w-10 !pr-0">
                         <RowCheckbox
                           checked={isSelected}
                           onChange={() => onToggleSelected?.(person.id)}
@@ -400,10 +404,19 @@ export default function PeopleTable({
                         />
                       </td>
                     )}
-                    <td className="px-4 py-2.5">
+                    {actions && (
+                      <td className="w-8 !px-0">
+                        <StarToggle
+                          starred={person.starred}
+                          onToggle={actions.onToggleStar}
+                          className="h-7 w-7"
+                        />
+                      </td>
+                    )}
+                    <td>
                       <div className="flex items-center gap-3">
                         <span
-                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
                           style={{
                             backgroundColor: color.bg,
                             color: color.fg,
@@ -412,37 +425,49 @@ export default function PeopleTable({
                           {initials(person.name, person.email)}
                         </span>
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-text-primary">
-                            {person.name || person.email}
+                          <p
+                            className={cn(
+                              "flex items-center gap-1.5 truncate text-[13.5px] text-text-primary",
+                              person.unreadCount > 0
+                                ? "font-semibold"
+                                : "font-medium",
+                            )}
+                          >
+                            {person.pinned && (
+                              <Pin
+                                size={12}
+                                className="shrink-0 text-accent"
+                                aria-label="Pinned"
+                              />
+                            )}
+                            <span className="truncate">
+                              {person.name || person.email}
+                            </span>
                           </p>
                           {person.name && (
-                            <p className="truncate text-xs font-light text-text-tertiary">
+                            <p className="truncate text-xs text-text-tertiary">
                               {person.email}
                             </p>
                           )}
                         </div>
                       </div>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td>
                       <div className="flex flex-wrap gap-1">
                         {(person.recipients ?? []).slice(0, 3).map((r) => (
-                          <span
-                            key={r}
-                            className="inline-flex items-center rounded-[5px] bg-bg-muted px-2 py-0.5 text-[11px] font-medium text-text-secondary"
-                            title={r}
-                          >
+                          <span key={r} className="pt-chip" title={r}>
                             {r.split("@")[0]}
                           </span>
                         ))}
                         {(person.recipients?.length ?? 0) > 3 && (
-                          <span className="inline-flex items-center rounded-[5px] px-2 py-0.5 text-[11px] font-medium text-text-tertiary">
+                          <span className="inline-flex items-center px-1 text-xs text-text-tertiary">
                             +{(person.recipients?.length ?? 0) - 3}
                           </span>
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <span className="inline-flex items-center gap-1.5 text-xs tabular-nums text-text-secondary">
+                    <td className="text-right">
+                      <span className="inline-flex items-center gap-1.5 text-[13px] tabular-nums text-text-secondary">
                         {person.hasAttachment === 1 && (
                           <Paperclip
                             size={11}
@@ -453,7 +478,7 @@ export default function PeopleTable({
                         {person.totalCount}
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="text-right">
                       {person.unreadCount > 0 ? (
                         <button
                           type="button"
@@ -462,8 +487,7 @@ export default function PeopleTable({
                             onMarkPersonRead?.(person.id);
                           }}
                           title="Mark all as read"
-                          className="group/badge inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums text-white transition-all hover:scale-110"
-                          style={{ backgroundColor: "#7c5cfc" }}
+                          className="group/badge tabular inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-foreground"
                         >
                           <span className="group-hover/badge:hidden">
                             {person.unreadCount}
@@ -474,14 +498,26 @@ export default function PeopleTable({
                           />
                         </button>
                       ) : (
-                        <span className="text-xs text-text-tertiary">—</span>
+                        <span className="text-[13px] text-text-tertiary">
+                          —
+                        </span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className="text-xs font-light tabular-nums text-text-tertiary">
+                    <td className="text-right">
+                      <span className="tabular text-[13px] text-text-tertiary">
                         {relTime(person.lastEmailAt)}
                       </span>
                     </td>
+                    {actions && (
+                      <td className="!py-0">
+                        <MailActionButtons
+                          state={person}
+                          handlers={actions}
+                          showStar={false}
+                          className="justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+                        />
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -528,8 +564,8 @@ function PageFooter({
   const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const end = total === 0 ? 0 : Math.min(start + visibleCount - 1, total);
   return (
-    <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-bg-subtle/40 px-4 py-2">
-      <span className="text-[11px] font-medium text-text-tertiary">
+    <div className="flex h-11 shrink-0 items-center justify-between gap-3 border-t border-border px-4">
+      <span className="tabular text-xs text-text-tertiary">
         {total === 0
           ? "No results"
           : `Showing ${start}–${end} of ${total.toLocaleString()}`}
@@ -539,18 +575,18 @@ function PageFooter({
           <button
             onClick={() => onPageChange(Math.max(1, page - 1))}
             disabled={page <= 1}
-            className="flex h-7 w-7 items-center justify-center rounded-[6px] text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
             aria-label="Previous page"
           >
             <ChevronLeft size={14} />
           </button>
-          <span className="text-[11px] font-medium text-text-tertiary tabular-nums">
+          <span className="tabular text-xs text-text-tertiary">
             {page} / {totalPages}
           </span>
           <button
             onClick={() => onPageChange(Math.min(totalPages, page + 1))}
             disabled={page >= totalPages}
-            className="flex h-7 w-7 items-center justify-center rounded-[6px] text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
             aria-label="Next page"
           >
             <ChevronRight size={14} />
@@ -561,27 +597,6 @@ function PageFooter({
   );
 }
 
-// Solid palette for stacked group avatars — see GroupRow.tsx for the
-// rationale (transparent overlapping circles look muddy). These are the
-// opaque equivalents of PersonList's rgba(_, 0.12-0.16) values
-// composited over a white card, so groups visually match the rest of
-// the avatars when viewed solo.
-const GROUP_AVATAR_PALETTE = [
-  { bg: "#efebff", fg: "#5b3ce6" },
-  { bg: "#e4f8ec", fg: "#15803d" },
-  { bg: "#fdebf5", fg: "#be185d" },
-  { bg: "#fef0e4", fg: "#c2410c" },
-  { bg: "#e3f6fe", fg: "#0369a1" },
-  { bg: "#f3e7fe", fg: "#7e22ce" },
-  { bg: "#def5f3", fg: "#0f766e" },
-  { bg: "#fcf3d7", fg: "#a16207" },
-];
-function groupAvatarColor(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return GROUP_AVATAR_PALETTE[h % GROUP_AVATAR_PALETTE.length];
-}
-
 interface GroupTableRowProps {
   group: GroupedConversation;
   onSelect: () => void;
@@ -589,6 +604,7 @@ interface GroupTableRowProps {
   hasCheckboxColumn: boolean;
   isSelected?: boolean;
   onToggleSelected?: (id: string) => void;
+  actions?: MailActionHandlers;
 }
 
 /**
@@ -603,6 +619,7 @@ function GroupTableRow({
   hasCheckboxColumn,
   isSelected = false,
   onToggleSelected,
+  actions,
 }: GroupTableRowProps) {
   const visible = group.participants.slice(0, 3);
   const overflow = Math.max(0, group.participants.length - visible.length);
@@ -626,14 +643,14 @@ function GroupTableRow({
     <tr
       onClick={onSelect}
       className={cn(
-        "group cursor-pointer border-b border-border/60 transition-colors",
-        isSelected ? "bg-text-primary/[0.04]" : "hover:bg-text-primary/[0.025]",
+        "group cursor-pointer",
+        isSelected && "!bg-accent-subtle/60",
       )}
       data-testid="group-row"
       data-conversation-id={group.id}
     >
       {hasCheckboxColumn && (
-        <td className="w-10 px-4 py-2.5">
+        <td className="w-10 !pr-0">
           <RowCheckbox
             checked={isSelected}
             onChange={() => onToggleSelected?.(group.id)}
@@ -641,19 +658,28 @@ function GroupTableRow({
           />
         </td>
       )}
-      <td className="px-4 py-2.5">
+      {actions && (
+        <td className="w-8 !px-0">
+          <StarToggle
+            starred={group.starred}
+            onToggle={actions.onToggleStar}
+            className="h-7 w-7"
+          />
+        </td>
+      )}
+      <td>
         <div className="flex items-center gap-3">
           <span
             className="relative shrink-0"
             style={{ width: stackWidth, height: AVATAR }}
           >
             {visible.map((p, i) => {
-              const color = groupAvatarColor(p.email);
+              const color = avatarColor(p.email);
               return (
                 <span
                   key={p.id}
                   title={p.name || p.email}
-                  className="absolute flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold"
+                  className="absolute flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold ring-2 ring-card"
                   style={{
                     backgroundColor: color.bg,
                     color: color.fg,
@@ -668,7 +694,7 @@ function GroupTableRow({
             })}
             {overflow > 0 && (
               <span
-                className="absolute flex h-7 w-7 items-center justify-center rounded-full bg-bg-muted text-[10px] font-semibold text-text-secondary"
+                className="absolute flex h-7 w-7 items-center justify-center rounded-full bg-bg-muted text-[10px] font-semibold text-text-secondary ring-2 ring-card"
                 style={{
                   left: visible.length * (AVATAR - OVERLAP),
                   top: 0,
@@ -681,36 +707,33 @@ function GroupTableRow({
             )}
           </span>
           <div className="min-w-0">
-            <p className="flex items-center gap-1.5 truncate text-sm font-medium text-text-primary">
+            <p className="flex items-center gap-1.5 truncate text-[13.5px] font-medium text-text-primary">
               <Users size={11} className="shrink-0 text-text-tertiary" />
               <span className="truncate">
                 {namesLine}
                 {namesOverflow > 0 ? `, +${namesOverflow}` : ""}
               </span>
             </p>
-            <p className="truncate text-xs font-light text-text-tertiary">
+            <p className="truncate text-xs text-text-tertiary">
               {group.participants.length} participants
             </p>
           </div>
         </div>
       </td>
-      <td className="px-3 py-2.5">
-        <span
-          className="inline-flex items-center rounded-[5px] bg-bg-muted px-2 py-0.5 text-[11px] font-medium text-text-secondary"
-          title={group.inbox}
-        >
+      <td>
+        <span className="pt-chip" title={group.inbox}>
           {group.inbox.split("@")[0]}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-right">
-        <span className="inline-flex items-center gap-1.5 text-xs tabular-nums text-text-secondary">
+      <td className="text-right">
+        <span className="inline-flex items-center gap-1.5 text-[13px] tabular-nums text-text-secondary">
           {group.hasAttachment === 1 && (
             <Paperclip size={11} className="text-text-tertiary" />
           )}
           {group.totalCount}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-right">
+      <td className="text-right">
         {group.unreadCount > 0 ? (
           <button
             type="button"
@@ -719,20 +742,29 @@ function GroupTableRow({
               onMarkRead?.(group.id);
             }}
             title="Mark all as read"
-            className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums text-white transition-all hover:scale-110"
-            style={{ backgroundColor: "#7c5cfc" }}
+            className="tabular inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-foreground"
           >
             {group.unreadCount}
           </button>
         ) : (
-          <span className="text-xs text-text-tertiary">—</span>
+          <span className="text-[13px] text-text-tertiary">—</span>
         )}
       </td>
-      <td className="px-4 py-2.5 text-right">
-        <span className="text-xs font-light tabular-nums text-text-tertiary">
+      <td className="text-right">
+        <span className="tabular text-[13px] text-text-tertiary">
           {relTime(group.lastEmailAt)}
         </span>
       </td>
+      {actions && (
+        <td className="!py-0">
+          <MailActionButtons
+            state={group}
+            handlers={actions}
+            showStar={false}
+            className="justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          />
+        </td>
+      )}
     </tr>
   );
 }
@@ -744,15 +776,13 @@ interface StatTileProps {
 }
 function StatTile({ label, value, accent }: StatTileProps) {
   return (
-    <div className="bg-card px-4 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
-        {label}
-      </p>
+    <div className="border-r border-border px-5 py-3.5 last:border-r-0 max-sm:[&:nth-child(2)]:border-r-0 max-sm:[&:nth-child(-n+2)]:border-b">
+      <p className="font-label text-text-tertiary">{label}</p>
       <p
         className={cn(
-          "mt-0.5 text-xl font-extrabold tabular-nums tracking-tight text-text-primary",
+          "tabular mt-1 text-[22px] font-semibold leading-tight tracking-[-0.02em] text-text-primary",
+          accent && value > 0 && "text-accent",
         )}
-        style={accent && value > 0 ? { color: "#7c5cfc" } : undefined}
       >
         {value.toLocaleString()}
       </p>

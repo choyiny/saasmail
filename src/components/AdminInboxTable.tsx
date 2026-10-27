@@ -432,7 +432,7 @@ export default function AdminInboxTable({
   }
 
   if (loading) {
-    return <p className="text-sm font-light text-text-tertiary">Loading…</p>;
+    return <p className="text-sm text-text-tertiary">Loading…</p>;
   }
 
   return (
@@ -440,11 +440,9 @@ export default function AdminInboxTable({
       {/* Create form — always visible */}
       <form
         onSubmit={handleCreate}
-        className="rounded-[8px] bg-card p-4 ring-1 ring-border"
+        className="rounded-2xl bg-card p-4 border border-border shadow-card"
       >
-        <div className="mb-2 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-          Create inbox
-        </div>
+        <div className="font-label mb-2 text-text-tertiary">Create inbox</div>
         <div className="flex flex-col gap-2 md:flex-row">
           <input
             type="email"
@@ -453,7 +451,7 @@ export default function AdminInboxTable({
             onChange={(e) => setNewEmail(e.currentTarget.value)}
             placeholder="inbox@example.com"
             data-testid="inbox-create-email"
-            className="h-9 flex-1 rounded-[6px] border border-border bg-card px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/15"
+            className="h-9 w-full rounded-lg border border-border-strong bg-card px-3 text-sm text-text-primary shadow-card transition-[border-color,box-shadow] placeholder:text-text-tertiary hover:border-text-tertiary/60 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15 flex-1"
           />
           <input
             type="text"
@@ -461,13 +459,13 @@ export default function AdminInboxTable({
             onChange={(e) => setNewDisplayName(e.currentTarget.value)}
             placeholder="Display name (optional)"
             data-testid="inbox-create-display-name"
-            className="h-9 flex-1 rounded-[6px] border border-border bg-card px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/15"
+            className="h-9 w-full rounded-lg border border-border-strong bg-card px-3 text-sm text-text-primary shadow-card transition-[border-color,box-shadow] placeholder:text-text-tertiary hover:border-text-tertiary/60 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15 flex-1"
           />
           <button
             type="submit"
             data-testid="inbox-create-button"
             disabled={creating || newEmail.trim() === ""}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[6px] bg-text-primary px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:opacity-50"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-4 text-sm font-medium text-accent-foreground shadow-card transition-colors hover:bg-accent-hover disabled:opacity-50"
           >
             <Plus size={14} />
             {creating ? "Creating…" : "Create"}
@@ -480,18 +478,18 @@ export default function AdminInboxTable({
 
       {/* Bulk action bar — visible when selection ≥ 1 */}
       {selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-[8px] bg-text-primary px-3 py-2 text-sm text-white shadow-lg ring-1 ring-text-primary/20">
-          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-white/15 px-2 text-xs font-bold tabular-nums">
+        <div className="flex flex-wrap items-center gap-1 rounded-xl border border-border-strong bg-popover py-1 pl-3 pr-1 text-sm text-text-primary shadow-overlay">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-accent px-2 text-xs font-semibold tabular-nums text-accent-foreground">
             {selected.size}
           </span>
           <span className="font-medium">selected</span>
 
-          <span className="mx-1 h-4 w-px bg-white/15" aria-hidden />
+          <span className="mx-1 h-5 w-px bg-border" aria-hidden />
 
           <button
             onClick={() => handleBulkSetMode("thread")}
             disabled={bulkBusy}
-            className="inline-flex items-center gap-1.5 rounded-[6px] bg-white/[0.08] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-white/[0.14] disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-50"
           >
             <MessageSquare size={12} />
             Thread mode
@@ -499,7 +497,7 @@ export default function AdminInboxTable({
           <button
             onClick={() => handleBulkSetMode("chat")}
             disabled={bulkBusy}
-            className="inline-flex items-center gap-1.5 rounded-[6px] bg-white/[0.08] px-2.5 py-1.5 text-xs font-medium transition-colors hover:bg-white/[0.14] disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-50"
           >
             <MessageCircle size={12} />
             Chat mode
@@ -507,7 +505,7 @@ export default function AdminInboxTable({
           <button
             onClick={() => handleDelete(Array.from(selected))}
             disabled={bulkBusy}
-            className="inline-flex items-center gap-1.5 rounded-[6px] bg-red-500/[0.16] px-2.5 py-1.5 text-xs font-medium text-red-200 transition-colors hover:bg-red-500/[0.25] disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-destructive transition-colors hover:bg-destructive-subtle disabled:opacity-50"
           >
             {bulkBusy ? (
               <Loader2 size={12} className="animate-spin" />
@@ -519,7 +517,7 @@ export default function AdminInboxTable({
 
           <button
             onClick={clearSelection}
-            className="ml-auto inline-flex items-center gap-1 rounded-[6px] px-2 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.08] hover:text-white"
+            className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-50"
             aria-label="Clear selection"
           >
             <X size={12} />
@@ -530,14 +528,14 @@ export default function AdminInboxTable({
 
       {/* Empty state */}
       {inboxes.length === 0 && (
-        <div className="rounded-[8px] bg-card p-10 text-center ring-1 ring-border">
-          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet/10">
-            <InboxIcon size={20} style={{ color: "#7c5cfc" }} />
+        <div className="rounded-2xl bg-card p-10 text-center border border-border shadow-card">
+          <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-subtle">
+            <InboxIcon size={20} className="text-text-secondary" />
           </span>
           <p className="mb-1 text-sm font-medium text-text-primary">
             No inboxes yet
           </p>
-          <p className="text-xs font-light text-text-tertiary">
+          <p className="text-xs text-text-tertiary">
             Use the form above to create your first inbox.
           </p>
         </div>
@@ -559,11 +557,11 @@ export default function AdminInboxTable({
 
       {/* Table */}
       {inboxes.length > 0 && (
-        <div className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <div className="overflow-hidden rounded-2xl bg-card border border-border shadow-card">
           <div className="overflow-auto smooth-scroll">
             <table className="w-full text-left text-sm">
               <thead className="bg-bg-subtle/40">
-                <tr className="border-b border-border text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                <tr className="font-label border-b border-border text-text-tertiary">
                   <th className="w-10 px-4 py-2.5">
                     <Checkbox
                       checked={allSelected}
@@ -592,7 +590,7 @@ export default function AdminInboxTable({
                       data-testid="inbox-row"
                       data-inbox-email={inbox.email}
                       className={cn(
-                        "border-b border-border/60 transition-colors",
+                        "border-b border-border-subtle transition-colors",
                         isSelected
                           ? "bg-text-primary/[0.04]"
                           : "hover:bg-text-primary/[0.02]",
@@ -609,7 +607,7 @@ export default function AdminInboxTable({
                       {/* Address */}
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-2">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-bg-muted">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-bg-muted">
                             <InboxIcon
                               size={12}
                               className="text-text-tertiary"
@@ -636,20 +634,15 @@ export default function AdminInboxTable({
                           data-testid="inbox-signature-edit-button"
                           onClick={() => setSignatureEditingFor(inbox.email)}
                           className={cn(
-                            "inline-flex h-7 items-center gap-1.5 rounded-[6px] border px-2 text-[11px] font-medium transition-colors",
+                            "inline-flex h-7 items-center gap-1.5 rounded-lg border px-2 text-[11px] font-medium transition-colors",
                             inbox.signatureHtml
-                              ? "border-violet/30 bg-violet/10 text-violet"
+                              ? "border-accent-subtle bg-accent-subtle text-accent-subtle-fg"
                               : "border-border bg-bg-muted/40 text-text-tertiary hover:border-text-primary/30 hover:text-text-secondary",
                           )}
-                          style={
-                            inbox.signatureHtml
-                              ? { color: "#7c5cfc" }
-                              : undefined
-                          }
                         >
                           <Pen size={11} />
                           {inbox.signatureHtml ? "Set" : "—"}
-                          <span className="ml-0.5 text-[10px] font-light opacity-70">
+                          <span className="ml-0.5 text-[10px] opacity-70">
                             Edit
                           </span>
                         </button>
@@ -657,7 +650,7 @@ export default function AdminInboxTable({
 
                       {/* Mode */}
                       <td className="px-3 py-2.5">
-                        <div className="inline-flex h-7 rounded-[5px] bg-bg-muted/60 p-0.5 ring-1 ring-border">
+                        <div className="inline-flex h-7 rounded-md bg-bg-muted/60 p-0.5 ring-1 ring-border">
                           {(["thread", "chat"] as const).map((m) => {
                             const active = inbox.displayMode === m;
                             const Icon =
@@ -712,7 +705,7 @@ export default function AdminInboxTable({
                       {/* Members — inline chip toggles */}
                       <td className="px-3 py-2.5">
                         {members.length === 0 ? (
-                          <span className="text-xs font-light italic text-text-tertiary">
+                          <span className="text-xs italic text-text-tertiary">
                             Admins only
                           </span>
                         ) : (
@@ -733,10 +726,9 @@ export default function AdminInboxTable({
                                   className={cn(
                                     "inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[11px] font-medium transition-colors",
                                     on
-                                      ? "border-violet/30 bg-violet/10 text-violet"
+                                      ? "border-accent-subtle bg-accent-subtle text-accent-subtle-fg"
                                       : "border-border bg-bg-muted/40 text-text-tertiary hover:border-text-primary/30 hover:text-text-secondary",
                                   )}
-                                  style={on ? { color: "#7c5cfc" } : undefined}
                                 >
                                   <span className="flex h-4 w-4 items-center justify-center rounded-full bg-current/10 text-[9px] font-semibold">
                                     {(u.name || u.email)[0]?.toUpperCase()}
@@ -758,7 +750,7 @@ export default function AdminInboxTable({
                           data-testid="inbox-delete-button"
                           onClick={() => handleDelete([inbox.email])}
                           aria-label={`Delete inbox ${inbox.email}`}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-[5px] text-text-tertiary opacity-60 transition-all hover:bg-destructive/10 hover:text-destructive hover:opacity-100"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-tertiary opacity-60 transition-all hover:bg-destructive/10 hover:text-destructive hover:opacity-100"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -773,7 +765,7 @@ export default function AdminInboxTable({
       )}
 
       {inboxes.length > 0 && (
-        <p className="px-1 text-xs font-light leading-relaxed text-text-tertiary">
+        <p className="px-1 text-xs leading-relaxed text-text-tertiary">
           <span className="font-medium text-text-secondary">Forward to</span>{" "}
           sends a copy of every message this inbox receives on to another
           address, using your configured sending provider. Prefer it over a
@@ -823,7 +815,7 @@ function DisplayNameInput({ inbox, onCommit }: DisplayNameInputProps) {
       }}
       placeholder="Set a name…"
       data-testid="inbox-display-name-input"
-      className="h-8 w-full rounded-[6px] border border-transparent bg-transparent px-2 text-sm text-text-primary placeholder:font-light placeholder:italic placeholder:text-text-tertiary hover:border-border focus:border-border focus:bg-card focus:outline-none focus:ring-2 focus:ring-text-primary/15"
+      className="h-8 w-full rounded-lg border border-border-strong bg-card px-3 text-sm text-text-primary shadow-card transition-[border-color,box-shadow] placeholder:text-text-tertiary hover:border-text-tertiary/60 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15 border-transparent bg-transparent px-2 placeholder:font-light placeholder:italic hover:border-border focus:border-border focus:bg-card"
     />
   );
 }
@@ -932,7 +924,7 @@ function SourceSelect({
         data-testid="inbox-source-select"
         data-inbox-email={inbox.email}
         className={cn(
-          "h-8 w-full rounded-[6px] border bg-transparent px-2 text-xs text-text-primary focus:bg-card focus:outline-none focus:ring-2 disabled:opacity-60",
+          "h-8 w-full rounded-lg border bg-transparent px-2 text-xs text-text-primary focus:bg-card focus:outline-none focus:ring-2 disabled:opacity-60",
           error
             ? "border-destructive focus:ring-destructive/20"
             : "border-transparent hover:border-border focus:border-border focus:ring-text-primary/15",
@@ -986,7 +978,7 @@ function SourceSelect({
         // the column is sized to.
         <div
           data-testid="inbox-source-error"
-          className="mt-1 w-[260px] max-w-[60vw] rounded-[6px] bg-destructive/10 px-2 py-1.5 text-xs font-light leading-relaxed text-destructive"
+          className="mt-1 w-[260px] max-w-[60vw] rounded-lg bg-destructive-subtle px-2 py-1.5 text-xs leading-relaxed text-destructive"
         >
           {error}
         </div>
@@ -1033,7 +1025,7 @@ function ForwardToInput({ inbox, error, onCommit }: ForwardToInputProps) {
         aria-invalid={error ? true : undefined}
         data-testid="inbox-forward-to-input"
         className={cn(
-          "h-8 w-full rounded-[6px] border bg-transparent px-2 font-mono text-xs text-text-primary placeholder:font-sans placeholder:text-sm placeholder:font-light placeholder:italic placeholder:text-text-tertiary focus:bg-card focus:outline-none focus:ring-2",
+          "h-8 w-full rounded-lg border bg-transparent px-2 font-mono text-xs text-text-primary placeholder:font-sans placeholder:text-sm placeholder:font-light placeholder:italic placeholder:text-text-tertiary focus:bg-card focus:outline-none focus:ring-2",
           error
             ? "border-destructive focus:ring-destructive/20"
             : "border-transparent hover:border-border focus:border-border focus:ring-text-primary/15",
@@ -1042,7 +1034,7 @@ function ForwardToInput({ inbox, error, onCommit }: ForwardToInputProps) {
       {error && (
         <div
           data-testid="inbox-forward-to-error"
-          className="mt-1 text-[10px] font-light text-destructive"
+          className="mt-1 text-[10px] text-destructive"
         >
           {error}
         </div>
@@ -1078,13 +1070,11 @@ function SignatureEditor({ inbox, onCancel, onSave }: SignatureEditorProps) {
   return (
     <div
       data-testid="inbox-signature-editor"
-      className="rounded-[8px] bg-card p-4 ring-1 ring-border"
+      className="rounded-2xl bg-card p-4 border border-border shadow-card"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-            Signature
-          </div>
+          <div className="font-label mb-0.5 text-text-tertiary">Signature</div>
           <p className="truncate text-xs text-text-secondary">
             <span className="font-mono">{inbox.email}</span>
           </p>
@@ -1092,13 +1082,13 @@ function SignatureEditor({ inbox, onCancel, onSave }: SignatureEditorProps) {
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-[6px] p-1 text-text-tertiary hover:bg-bg-muted hover:text-text-primary"
+          className="rounded-lg p-1 text-text-tertiary hover:bg-bg-muted hover:text-text-primary"
           aria-label="Close signature editor"
         >
           <X size={14} />
         </button>
       </div>
-      <div className="max-h-[200px] overflow-auto rounded-[6px] border border-border bg-card">
+      <div className="max-h-[200px] overflow-auto rounded-lg border border-border bg-card">
         <TiptapEditor
           content={html}
           onUpdate={setHtml}
@@ -1109,7 +1099,7 @@ function SignatureEditor({ inbox, onCancel, onSave }: SignatureEditorProps) {
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-[6px] border border-border bg-card px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-card font-medium text-text-primary transition-colors hover:bg-bg-subtle hover:text-text-primary h-8 px-3 text-[13px] shadow-card"
         >
           Cancel
         </button>
@@ -1118,7 +1108,7 @@ function SignatureEditor({ inbox, onCancel, onSave }: SignatureEditorProps) {
           data-testid="inbox-signature-save-button"
           onClick={handleSave}
           disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 disabled:opacity-50"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-medium text-accent-foreground shadow-card transition-colors hover:bg-accent-hover disabled:opacity-50 h-8 px-3 text-[13px]"
         >
           {saving ? (
             <Loader2 size={12} className="animate-spin" />
@@ -1149,9 +1139,9 @@ function Checkbox({ checked, onChange, ariaLabel }: CheckboxProps) {
         onChange();
       }}
       className={cn(
-        "flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border transition-colors",
+        "flex h-4 w-4 shrink-0 items-center justify-center rounded-md border transition-colors",
         checked
-          ? "border-text-primary bg-text-primary text-white"
+          ? "border-text-primary bg-accent text-accent-foreground"
           : "border-border bg-card hover:border-text-primary/40",
       )}
     >

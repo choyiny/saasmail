@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Bell } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { enablePush, markPromptDismissed } from "@/lib/push";
 
 export function PushOptInBanner({ onClose }: { onClose: () => void }) {
@@ -24,36 +26,32 @@ export function PushOptInBanner({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="mx-4 mt-3 flex items-center justify-between rounded-md border border-border bg-bg-subtle px-4 py-3 text-sm shadow-sm">
-      <div>
-        <p className="font-medium text-text-primary">
-          Get notified even when this tab is closed
-        </p>
-        {error ? (
-          <p className="mt-1 text-xs text-red-600">
-            Couldn&apos;t enable notifications: {error}
+    <div className="mx-3 mt-3 flex flex-col gap-3 rounded-xl border border-border bg-card px-3.5 py-3 text-sm shadow-card">
+      <div className="flex gap-2.5">
+        <Bell size={16} className="mt-0.5 shrink-0 text-text-secondary" />
+        <div>
+          <p className="text-[13.5px] font-medium text-text-primary">
+            Get notified even when this tab is closed
           </p>
-        ) : (
-          <p className="mt-1 text-xs text-text-secondary">
-            saasmail can send browser push notifications when a new email
-            arrives.
-          </p>
-        )}
+          {error ? (
+            <p className="mt-1 text-xs text-destructive">
+              Couldn&apos;t enable notifications: {error}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-text-secondary">
+              saasmail can send browser push notifications when a new email
+              arrives.
+            </p>
+          )}
+        </div>
       </div>
-      <div className="flex gap-2">
-        <button
-          className="rounded-md bg-black px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-          disabled={busy}
-          onClick={handleEnable}
-        >
+      <div className="flex gap-2 pl-[26px]">
+        <Button size="sm" disabled={busy} onClick={handleEnable}>
           {busy ? "…" : "Enable"}
-        </button>
-        <button
-          className="rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-primary"
-          onClick={handleDismiss}
-        >
+        </Button>
+        <Button size="sm" variant="ghost" onClick={handleDismiss}>
           Not now
-        </button>
+        </Button>
       </div>
     </div>
   );

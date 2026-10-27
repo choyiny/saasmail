@@ -22,11 +22,10 @@ import type { ComposePrefill } from "@/pages/ComposeModal";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import {
-  HIDE_SIGNATURES_EVENT,
-  readHideSignatures,
   stripSignatureFromHtml,
   stripSignatureFromText,
 } from "@/lib/signatures";
+import { useCommonSettings } from "@/lib/default-layout-settings";
 
 interface ChatInboxSectionProps {
   group: ThreadInboxGroup;
@@ -132,24 +131,10 @@ function Bubble({
   const isSent = email.type === "sent";
   const isUnread = email.type === "received" && email.isRead === 0;
 
-  // Subscribe to the local "Hide signatures in chat" preference. When on,
+  // "Hide signatures in chat" (Settings, saved to the account). When on,
   // we strip the trailing signature block from each bubble's body so the
-  // chat feed stays scannable. Updates instantly on toggle thanks to a
-  // custom event from `lib/signatures.ts`.
-  const [hideSignatures, setHideSignatures] = useState(() =>
-    readHideSignatures(),
-  );
-  useEffect(() => {
-    function refresh() {
-      setHideSignatures(readHideSignatures());
-    }
-    window.addEventListener(HIDE_SIGNATURES_EVENT, refresh);
-    window.addEventListener("storage", refresh);
-    return () => {
-      window.removeEventListener(HIDE_SIGNATURES_EVENT, refresh);
-      window.removeEventListener("storage", refresh);
-    };
-  }, []);
+  // chat feed stays scannable.
+  const [{ hideSignatures }] = useCommonSettings();
 
   // Apply the strip to a per-bubble copy of the email so downstream useMemos
   // operate on the pruned text/html rather than the raw originals.
@@ -204,7 +189,7 @@ function Bubble({
       id={messageDomId(email.id)}
       data-testid="chat-bubble"
       data-email-id={email.id}
-      className={`group flex flex-col px-4 py-1 sm:px-6 scroll-mt-20 ${
+      className={`group flex flex-col px-4 py-1.5 sm:px-6 scroll-mt-20 ${
         isSent ? "items-end" : "items-start"
       }`}
       onClick={handleClick}
@@ -212,7 +197,7 @@ function Bubble({
     >
       {senderLabel && (
         <span
-          className="mb-0.5 max-w-[85%] truncate px-2 text-[10px] font-medium uppercase tracking-wider text-text-tertiary sm:max-w-[78%]"
+          className="mb-1 max-w-[85%] truncate px-1 text-xs font-medium text-text-secondary sm:max-w-[78%]"
           title={senderOverride?.email}
         >
           {senderLabel}
@@ -221,8 +206,8 @@ function Bubble({
       {showHtmlPreview ? (
         <div
           data-testid="chat-html-preview"
-          className={`relative w-full max-w-[85%] overflow-hidden rounded-2xl bg-white text-left text-text-primary shadow-sm ring-1 ring-border sm:max-w-[78%] ${
-            isUnread ? "outline outline-2 outline-violet/40" : ""
+          className={`email-surface relative w-full max-w-[85%] overflow-hidden rounded-2xl text-left shadow-card ring-1 ring-border sm:max-w-[78%] ${
+            isUnread ? "outline outline-2 outline-accent/50" : ""
           }`}
         >
           {/* Sanitized inline preview. Images render at their natural
@@ -230,17 +215,17 @@ function Bubble({
               is preserved — capping height made hero/inline images
               unreadably small. */}
           <div
-            className="prose prose-sm relative max-w-none px-4 py-3 text-xs text-text-secondary [&_*]:max-w-full [&_a]:pointer-events-none [&_img]:h-auto [&_img]:max-w-full [&_table]:!w-full [&_table]:!table-fixed"
+            className="relative max-w-none px-4 py-3 text-[13px] leading-relaxed [&_*]:max-w-full [&_a]:pointer-events-none [&_img]:h-auto [&_img]:max-w-full [&_table]:!w-full [&_table]:!table-fixed"
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
           />
         </div>
       ) : (
         <div
-          className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed shadow-sm sm:max-w-[78%] ${
+          className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed shadow-card sm:max-w-[78%] ${
             isSent
-              ? "bg-text-primary text-white"
-              : "bg-white text-text-primary ring-1 ring-border"
-          } ${isUnread ? "outline outline-2 outline-violet/40" : ""}`}
+              ? "rounded-br-md bg-accent text-accent-foreground"
+              : "rounded-bl-md border border-border bg-card text-text-primary"
+          } ${isUnread ? "outline outline-2 outline-offset-1 outline-accent/50" : ""}`}
         >
           {displayText ? (
             <p className="whitespace-pre-wrap break-words">{displayText}</p>
@@ -255,7 +240,7 @@ function Bubble({
                 setExpanded(!expanded);
               }}
               className={`mt-1.5 text-xs font-medium underline-offset-2 hover:underline ${
-                isSent ? "text-white/85" : "text-text-secondary"
+                isSent ? "text-accent-foreground/85" : "text-text-secondary"
               }`}
             >
               {expanded ? "Show less" : "Show more"}
@@ -298,9 +283,9 @@ function Bubble({
               key={att.id}
               href={`/api/attachments/${att.id}`}
               onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-1 rounded-[6px] border border-border bg-card px-2 py-1 text-[11px] text-text-secondary transition-colors hover:bg-bg-muted"
+              className="pt-chip h-6 hover:bg-bg-muted"
             >
-              <Paperclip size={11} />
+              <Paperclip size={12} />
               {att.filename}
             </a>
           ))}
@@ -308,7 +293,7 @@ function Bubble({
       )}
 
       <div
-        className={`mt-1 flex items-center gap-2 text-[10px] text-text-tertiary ${isSent ? "flex-row-reverse" : ""}`}
+        className={`tabular mt-1 flex items-center gap-2 px-1 text-xs text-text-tertiary ${isSent ? "flex-row-reverse" : ""}`}
       >
         <span>{stamp}</span>
         {isSent && <Check size={11} className="text-text-tertiary" />}
@@ -319,10 +304,10 @@ function Bubble({
               e.stopPropagation();
               onOpenHtml(email);
             }}
-            className="flex items-center gap-1 hover:text-text-secondary"
+            className="flex items-center gap-1 hover:text-text-primary"
             title="View original"
           >
-            <Maximize2 size={10} />
+            <Maximize2 size={12} />
             View original
           </button>
         )}
@@ -333,10 +318,10 @@ function Bubble({
             void copyMessageLink(email.id);
           }}
           data-testid="message-copy-link"
-          className="flex items-center gap-1 opacity-0 transition-opacity hover:text-text-secondary group-hover:opacity-100"
+          className="flex items-center gap-1 rounded p-0.5 transition-opacity hover:text-text-primary [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
           title="Copy link to this message"
         >
-          <Link2 size={10} />
+          <Link2 size={13} />
         </button>
         {onReassign && (
           <button
@@ -346,10 +331,10 @@ function Bubble({
               onReassign(email);
             }}
             data-testid="message-reassign"
-            className="flex items-center gap-1 opacity-0 transition-opacity hover:text-text-secondary group-hover:opacity-100"
+            className="flex items-center gap-1 rounded p-0.5 transition-opacity hover:text-text-primary [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
             title="Reassign to another person"
           >
-            <UserPen size={10} />
+            <UserPen size={13} />
           </button>
         )}
         <button
@@ -358,15 +343,15 @@ function Bubble({
             e.stopPropagation();
             onDelete(email.id);
           }}
-          className="flex items-center gap-1 opacity-0 transition-opacity hover:text-red-500 group-hover:opacity-100"
+          className="flex items-center gap-1 rounded p-0.5 transition-opacity hover:text-destructive [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100"
           title="Delete email"
         >
-          <Trash2 size={10} />
+          <Trash2 size={13} />
         </button>
         {isUnread && !isSent && (
           <span
-            className="h-1.5 w-1.5 rounded-full"
-            style={{ backgroundColor: "#7c5cfc" }}
+            className="h-2 w-2 rounded-full bg-accent"
+            aria-label="Unread"
           />
         )}
       </div>
@@ -381,7 +366,7 @@ function DaySeparator({ label }: DaySeparatorProps) {
   return (
     <div className="flex items-center gap-2 px-6 py-3">
       <span className="h-px flex-1 bg-border" />
-      <span className="rounded-full bg-bg-muted px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+      <span className="font-label rounded-full border border-border bg-card px-2.5 py-0.5 text-[10.5px] text-text-tertiary">
         {label}
       </span>
       <span className="h-px flex-1 bg-border" />
@@ -553,10 +538,10 @@ export default function ChatInboxSection({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-bg-subtle/40">
+    <div className="flex h-full min-h-0 flex-col bg-bg-subtle">
       {/* Inbox header — sticky at top of section. Slim, just the address. */}
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-border bg-card/80 px-3 py-1.5 backdrop-blur-sm">
-        <Inbox size={11} className="text-text-tertiary" />
+      <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-border bg-card px-4 sm:px-5">
+        <Inbox size={13} className="text-text-secondary" />
         <span className="text-xs font-medium text-text-secondary">
           {group.inbox}
         </span>
@@ -566,7 +551,7 @@ export default function ChatInboxSection({
       <div className="relative flex min-h-0 flex-1 flex-col">
         {/* Top fade — hints at scrollable content above */}
         <div
-          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-bg-subtle/60 to-transparent"
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-bg-subtle to-transparent"
           aria-hidden
         />
 
@@ -604,7 +589,7 @@ export default function ChatInboxSection({
         {/* Bottom fade — hints at scrollable content below */}
         {!isAtBottom && (
           <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-12 bg-gradient-to-t from-bg-subtle/70 to-transparent"
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-12 bg-gradient-to-t from-bg-subtle to-transparent"
             aria-hidden
           />
         )}
@@ -614,10 +599,10 @@ export default function ChatInboxSection({
           <button
             type="button"
             onClick={() => scrollToBottom("smooth")}
-            className={`absolute bottom-3 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium shadow-lg transition-all ${
+            className={`absolute bottom-3 left-1/2 z-20 flex h-8 -translate-x-1/2 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium shadow-overlay transition-colors ${
               hasNewBelow
-                ? "bg-text-primary text-white"
-                : "bg-card text-text-primary ring-1 ring-border"
+                ? "bg-accent text-accent-foreground"
+                : "border border-border-strong bg-card text-text-primary"
             }`}
           >
             <ArrowDown size={12} />

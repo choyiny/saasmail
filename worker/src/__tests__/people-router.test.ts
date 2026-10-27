@@ -452,6 +452,100 @@ describe("people router", () => {
     });
   });
 
+  describe("GET /api/people/grouped?drafts=1 — forward drafts", () => {
+    // The Gmail inline composer keys a forward as `forward:<emailId>` and
+    // leaves reply_to_email_id null.
+    const forwardDraft = (id: string, emailId: string) => ({
+      id,
+      userId: "test-user-1",
+      contextKey: `forward:${emailId}`,
+      toAddress: "someone@else.test",
+      subject: "Fwd: hi",
+      replyToEmailId: null,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+
+    it("shows the person whose email is being forwarded", async () => {
+      await createTestPerson({ id: "p-fwd", email: "f@test.com" });
+      await createTestEmail({
+        id: "e-fwd",
+        personId: "p-fwd",
+        messageId: "m-f@test.com",
+      });
+      await createTestPerson({ id: "p-other", email: "o@test.com" });
+      await createTestEmail({
+        id: "e-other",
+        personId: "p-other",
+        messageId: "m-o@test.com",
+      });
+      await getDb().insert(drafts).values(forwardDraft("df1", "e-fwd"));
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.map((r: { id: string }) => r.id)).toEqual(["p-fwd"]);
+      // The Drafts folder count reads `total`.
+      expect(body.total).toBe(1);
+    });
+
+    it("shows the group conversation being forwarded", async () => {
+      await createTestPerson({ id: "pg", email: "g@test.com" });
+      await createTestEmail({
+        id: "eg",
+        personId: "pg",
+        conversationId: "conv-fwd",
+        messageId: "mg@test.com",
+      });
+      await getDb().insert(drafts).values(forwardDraft("dfg", "eg"));
+
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      const data = (await res.json()).data as Array<{
+        id: string;
+        type: string;
+      }>;
+      expect(data).toEqual([
+        expect.objectContaining({ id: "conv-fwd", type: "group" }),
+      ]);
+    });
+
+    it("counts a reply and a forward of one thread as one row", async () => {
+      await createTestPerson({ id: "p1", email: "a@test.com" });
+      await createTestEmail({
+        id: "e1",
+        personId: "p1",
+        messageId: "m1@test.com",
+      });
+      await getDb()
+        .insert(drafts)
+        .values([
+          forwardDraft("df", "e1"),
+          {
+            id: "dr",
+            userId: "test-user-1",
+            contextKey: "reply:e1",
+            replyToEmailId: "e1",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ]);
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect((await res.json()).total).toBe(1);
+    });
+
+    it("ignores a forward draft for an email that no longer exists", async () => {
+      await createTestPerson({ id: "p1", email: "a@test.com" });
+      await createTestEmail({
+        id: "e1",
+        personId: "p1",
+        messageId: "m1@test.com",
+      });
+      await getDb().insert(drafts).values(forwardDraft("df", "gone"));
+      const res = await authFetch("/api/people/grouped?drafts=1", { apiKey });
+      expect((await res.json()).data).toHaveLength(0);
+    });
+  });
+
   describe("GET /api/people/grouped?sequenced=1 — sequence filter", () => {
     const enrollment = (id: string, personId: string, status = "active") => ({
       id,

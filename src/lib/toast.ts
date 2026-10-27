@@ -4,8 +4,7 @@
  * the same custom event and renders the queue.
  *
  * Custom events keep the wiring zero-dependency — no React context,
- * no prop-drilling — and align with how `lib/signatures.ts` already
- * dispatches in this codebase (HIDE_SIGNATURES_EVENT).
+ * no prop-drilling.
  */
 
 export const TOAST_EVENT = "saasmail:toast";

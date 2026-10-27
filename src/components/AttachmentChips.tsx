@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 
 export interface AttachmentChipsProps {
   files: File[];
-  /** Cap in bytes; total > cap → red text. */
+  /** Cap in bytes; total > cap → destructive text. */
   capBytes: number;
   onRemove: (index: number) => void;
 }
@@ -27,14 +27,16 @@ export default function AttachmentChips({
       {files.map((f, idx) => (
         <span
           key={`${f.name}-${idx}`}
-          className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-700"
+          className="inline-flex h-6 items-center gap-1 rounded-full border border-border bg-bg-subtle pl-2 pr-1 text-xs font-medium text-text-primary"
         >
           <span className="max-w-[180px] truncate">{f.name}</span>
-          <span className="text-gray-500">· {formatBytes(f.size)}</span>
+          <span className="tabular text-text-tertiary">
+            · {formatBytes(f.size)}
+          </span>
           <button
             type="button"
             onClick={() => onRemove(idx)}
-            className="ml-0.5 rounded hover:bg-gray-200"
+            className="ml-0.5 rounded-full p-0.5 text-text-tertiary hover:bg-bg-muted hover:text-text-primary"
             aria-label={`Remove ${f.name}`}
           >
             <X className="h-3 w-3" />
@@ -42,7 +44,7 @@ export default function AttachmentChips({
         </span>
       ))}
       <span
-        className={`ml-auto text-xs ${over ? "text-red-600 font-medium" : "text-gray-500"}`}
+        className={`tabular ml-auto text-xs ${over ? "font-medium text-destructive" : "text-text-tertiary"}`}
       >
         {formatBytes(total)} / {formatBytes(capBytes)}
       </span>

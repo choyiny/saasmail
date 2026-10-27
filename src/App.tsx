@@ -8,13 +8,14 @@ import {
 } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrandingProvider, useBranding } from "@/lib/branding";
+import { PreferencesProvider } from "@/lib/preferences";
 import { useSession } from "@/lib/auth-client";
 import { fetchPasskeyStatus } from "@/lib/api";
 import { useEffect, useState } from "react";
 import LoginPage from "@/pages/LoginPage";
 import ConsentPage from "@/pages/ConsentPage";
 import OnboardingPage from "@/pages/OnboardingPage";
-import InboxPage from "@/pages/InboxPage";
+import { ThemedInbox } from "@/themes";
 import TemplatesPage from "@/pages/TemplatesPage";
 import TemplateEditorPage from "@/pages/TemplateEditorPage";
 import SetupPasskeyPage from "@/pages/SetupPasskeyPage";
@@ -64,8 +65,12 @@ function AuthGuard() {
     (session && !brandingLoaded)
   ) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-bg">
-        <p className="text-text-secondary">Loading...</p>
+      <div
+        className="pt-auth items-center justify-center"
+        aria-busy="true"
+        aria-label="Loading"
+      >
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-chrome-line border-t-chrome-accent" />
       </div>
     );
   }
@@ -116,70 +121,84 @@ function NotificationClickListener() {
 function App() {
   return (
     <BrandingProvider>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <NotificationClickListener />
-          <Routes>
-            {/* Public routes — shared dark backdrop + footer shell */}
-            <Route element={<PublicLayout />}>
-              <Route path="/login" element={<LoginPage />} />
-              {/* OAuth consent. Not behind AuthGuard: the provider redirects
+      <PreferencesProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <NotificationClickListener />
+            <Routes>
+              {/* Public routes — shared dark backdrop + footer shell */}
+              <Route element={<PublicLayout />}>
+                <Route path="/login" element={<LoginPage />} />
+                {/* OAuth consent. Not behind AuthGuard: the provider redirects
                   to /login first when there is no session, then back here. */}
-              <Route path="/consent" element={<ConsentPage />} />
-              <Route path="/onboarding" element={<OnboardingPage />} />
-              <Route path="/invite/:token" element={<InviteAcceptPage />} />
-              <Route path="/setup-passkey" element={<SetupPasskeyPage />} />
-            </Route>
+                <Route path="/consent" element={<ConsentPage />} />
+                <Route path="/onboarding" element={<OnboardingPage />} />
+                <Route path="/invite/:token" element={<InviteAcceptPage />} />
+                <Route path="/setup-passkey" element={<SetupPasskeyPage />} />
+              </Route>
 
-            {/* Public legal pages — light readable layout, no auth */}
-            <Route path="/terms" element={<TermsPage />} />
-            <Route path="/privacy" element={<PrivacyPage />} />
+              {/* Public legal pages — light readable layout, no auth */}
+              <Route path="/terms" element={<TermsPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
 
-            {/* Public unsubscribe landing — token-authenticated, no session.
+              {/* Public unsubscribe landing — token-authenticated, no session.
                 Lives outside AuthGuard so recipients (who are never logged in)
                 can land here from email links. See worker/src/routers/
                 unsubscribe-router.ts for the API. */}
-            <Route path="/unsubscribe" element={<UnsubscribePage />} />
+              <Route path="/unsubscribe" element={<UnsubscribePage />} />
 
-            {/* Authenticated routes with shared layout */}
-            <Route element={<AuthGuard />}>
-              <Route element={<DashboardLayout />}>
-                <Route path="/admin/users" element={<AdminUsersPage />} />
-                <Route
-                  path="/admin/suppressions"
-                  element={<SuppressionsPage />}
-                />
-                <Route path="/templates" element={<TemplatesPage />} />
-                <Route path="/templates/new" element={<TemplateEditorPage />} />
-                <Route
-                  path="/templates/:slug/edit"
-                  element={<TemplateEditorPage />}
-                />
-                <Route path="/sequences" element={<SequencesPage />} />
-                <Route path="/sequences/new" element={<SequenceEditorPage />} />
-                <Route
-                  path="/sequences/:id/edit"
-                  element={<SequenceEditorPage />}
-                />
-                <Route path="/sequences/:id" element={<SequenceDetailPage />} />
-                <Route path="/api-keys" element={<ApiKeysPage />} />
-                <Route path="/inboxes" element={<InboxesPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/blocklist" element={<BlocklistPage />} />
-                <Route path="/outbox" element={<OutboxPage />} />
-                {/* Deep link from Web Push notifications — see
+              {/* Authenticated routes with shared layout */}
+              <Route element={<AuthGuard />}>
+                <Route element={<DashboardLayout />}>
+                  <Route path="/admin/users" element={<AdminUsersPage />} />
+                  <Route
+                    path="/admin/suppressions"
+                    element={<SuppressionsPage />}
+                  />
+                  <Route path="/templates" element={<TemplatesPage />} />
+                  <Route
+                    path="/templates/new"
+                    element={<TemplateEditorPage />}
+                  />
+                  <Route
+                    path="/templates/:slug/edit"
+                    element={<TemplateEditorPage />}
+                  />
+                  <Route path="/sequences" element={<SequencesPage />} />
+                  <Route
+                    path="/sequences/new"
+                    element={<SequenceEditorPage />}
+                  />
+                  <Route
+                    path="/sequences/:id/edit"
+                    element={<SequenceEditorPage />}
+                  />
+                  <Route
+                    path="/sequences/:id"
+                    element={<SequenceDetailPage />}
+                  />
+                  <Route path="/api-keys" element={<ApiKeysPage />} />
+                  <Route path="/inboxes" element={<InboxesPage />} />
+                  <Route path="/settings" element={<SettingsPage />} />
+                  <Route path="/blocklist" element={<BlocklistPage />} />
+                  <Route path="/outbox" element={<OutboxPage />} />
+                  {/* Deep link from Web Push notifications — see
                     worker/src/do/notifications.ts where data.url is set. */}
-                <Route path="/inbox/:inbox/:personId" element={<InboxPage />} />
-                {/* Shareable link to a specific message — resolves the
+                  <Route
+                    path="/inbox/:inbox/:personId"
+                    element={<ThemedInbox />}
+                  />
+                  {/* Shareable link to a specific message — resolves the
                     email's person/inbox and forwards to the route above
                     with a `#m=<id>` hash for scroll/flash. */}
-                <Route path="/m/:emailId" element={<MessageLinkPage />} />
-                <Route path="/*" element={<InboxPage />} />
+                  <Route path="/m/:emailId" element={<MessageLinkPage />} />
+                  <Route path="/*" element={<ThemedInbox />} />
+                </Route>
               </Route>
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
+            </Routes>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </PreferencesProvider>
     </BrandingProvider>
   );
 }

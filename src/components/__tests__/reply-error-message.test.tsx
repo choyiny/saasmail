@@ -39,6 +39,15 @@ vi.mock("@/lib/api", () => ({
   deleteDraft: vi.fn(),
 }));
 
+// Undo Send off: these tests are about what a failed send says, so the send
+// runs at once instead of waiting out the undo window (see undo-send.test).
+vi.mock("@/lib/default-layout-settings", () => ({
+  useCommonSettings: () => [
+    { undoSendSeconds: 0, hideSignatures: false },
+    () => {},
+  ],
+}));
+
 // The real editor pulls in ProseMirror; this suite only cares about what the
 // footer says after a send fails.
 vi.mock("@/components/TiptapEditor", () => ({

@@ -1,5 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Users } from "lucide-react";
+import { ArrowLeft, Users } from "lucide-react";
+import {
+  MailActionButtons,
+  type MailActionHandlers,
+  type MailStateLike,
+} from "@/components/MailActions";
 import MarkAllReadButton from "@/components/MarkAllReadButton";
 import {
   fetchConversationEmails,
@@ -27,6 +32,11 @@ interface ConversationDetailProps {
    * subject) so the drawer opens with the reply context applied.
    */
   onOpenCompose?: (prefill?: ComposePrefill) => void;
+  /** Star / pin / archive / snooze state and handlers for the header. */
+  mailState?: MailStateLike;
+  mailActions?: MailActionHandlers;
+  /** Shows a back arrow in the header (mobile, table view). */
+  onBack?: () => void;
 }
 
 function inboxLabel(email: string): string {
@@ -48,21 +58,41 @@ export default function ConversationDetail({
   refreshKey,
   internalDomains = [],
   onOpenCompose,
+  mailState,
+  mailActions,
+  onBack,
 }: ConversationDetailProps) {
   const [data, setData] = useState<ConversationDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [htmlPreviewEmail, setHtmlPreviewEmail] = useState<Email | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Only the response for the conversation on screen is applied; a slower
+  // request from before the user switched rows is dropped.
+  const currentIdRef = useRef(conversation.id);
+  currentIdRef.current = conversation.id;
+
   function refetch() {
-    fetchConversationEmails(conversation.id).then(setData);
+    const forId = conversation.id;
+    fetchConversationEmails(forId).then((d) => {
+      if (currentIdRef.current === forId) setData(d);
+    });
   }
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
+    setData(null);
     fetchConversationEmails(conversation.id)
-      .then(setData)
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (!cancelled) setData(d);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [conversation.id]);
 
   useEffect(() => {
@@ -156,8 +186,15 @@ export default function ConversationDetail({
 
   if (loading || !data || !group) {
     return (
-      <div className="flex h-full items-center justify-center text-text-tertiary">
-        <span className="text-sm">Loading…</span>
+      <div
+        className="flex h-full flex-col gap-4 p-5"
+        aria-busy="true"
+        aria-label="Loading conversation"
+      >
+        <span className="pt-skel h-5 w-1/3" />
+        <span className="pt-skel h-3 w-1/4" />
+        <span className="pt-skel mt-4 h-20 w-3/4 rounded-xl" />
+        <span className="pt-skel ml-auto h-20 w-2/3 rounded-xl" />
       </div>
     );
   }
@@ -172,25 +209,47 @@ export default function ConversationDetail({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Conversation header — overlapping avatars + comma-separated names */}
-      <div className="shrink-0 border-b border-border bg-card px-4 pb-2.5 pt-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h2 className="flex items-center gap-1.5 truncate text-base font-extrabold tracking-tight text-text-primary">
-              <Users size={14} className="shrink-0 text-text-tertiary" />
-              {participantNames || "Group conversation"}
+      {/* Conversation header — names, inbox and meta; actions on the right. */}
+      <div className="shrink-0 border-b border-border bg-card px-4 py-3 sm:px-5">
+        <div className="flex items-start gap-3">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Back to list"
+              className="-ml-1.5 mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-bg-muted hover:text-text-primary"
+            >
+              <ArrowLeft size={17} />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 className="flex items-center gap-2 truncate text-[17px] font-semibold leading-snug tracking-[-0.015em] text-text-primary">
+              <Users size={16} className="shrink-0 text-text-secondary" />
+              <span className="truncate">
+                {participantNames || "Group conversation"}
+              </span>
             </h2>
-            <span className="truncate text-xs font-light text-text-tertiary">
-              {conversation.inbox}
-            </span>
-            <span className="text-[11px] text-text-tertiary">
-              · {data.emails.length} message
+            <p className="tabular mt-0.5 truncate text-[13px] text-text-tertiary">
+              <span className="text-text-secondary">
+                {inboxLabel(conversation.inbox)}
+              </span>
+              {" · "}
+              {data.emails.length} message
               {data.emails.length !== 1 ? "s" : ""}
               {" · "}
               {conversation.participants.length} participants
-            </span>
+            </p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          {mailState && mailActions && (
+            <MailActionButtons
+              state={mailState}
+              handlers={mailActions}
+              className="-mr-1 shrink-0"
+            />
+          )}
+        </div>
+        {totalUnread > 0 && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
             <MarkAllReadButton
               unreadCount={totalUnread}
               scopeLabel={conversation.inbox}
@@ -204,12 +263,7 @@ export default function ConversationDetail({
               }}
             />
           </div>
-        </div>
-      </div>
-
-      {/* Inbox label — slim, just shows which of OUR inboxes this thread lives in */}
-      <div className="shrink-0 border-b border-border bg-bg-subtle/40 px-4 py-1.5 text-[11px] text-text-tertiary">
-        {inboxLabel(conversation.inbox)}@
+        )}
       </div>
 
       {/* The merged timeline. Use chat-mode by default for groups since it

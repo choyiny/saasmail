@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Mail } from "lucide-react";
+import { WordmarkSmall } from "@/components/Wordmark";
 import { Button } from "@/components/ui/button";
 import Footer from "@/components/Footer";
 
@@ -67,39 +67,22 @@ export default function UnsubscribePage() {
   }
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-background">
-      <div className="dashboard-backdrop" aria-hidden />
-      <div className="dashboard-backdrop-mask" aria-hidden />
-
-      {/* Brand strip — mirrors LegalLayout so the page sits next to /terms
-          and /privacy stylistically. */}
-      <header className="relative z-10">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-6 md:px-6">
-          <Link
-            to="/"
-            className="flex items-center gap-2 text-text-primary transition-opacity hover:opacity-80"
-          >
-            <Mail
-              className="h-5 w-5"
-              strokeWidth={2.5}
-              style={{ color: "#7c5cfc" }}
-              aria-hidden
-            />
-            <span className="text-lg font-extrabold uppercase tracking-tight">
-              saasmail
-            </span>
-          </Link>
-        </div>
+    <div className="pt-auth">
+      {/* Brand strip — mirrors LegalLayout. */}
+      <header className="mx-auto flex w-full max-w-[1000px] items-center px-4 py-4 md:px-6">
+        <Link to="/" className="transition-opacity hover:opacity-85">
+          <WordmarkSmall />
+        </Link>
       </header>
 
-      <main className="relative z-10 flex flex-1 items-center justify-center px-4 pb-16">
-        <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+      <main className="flex flex-1 items-center justify-center px-4 pb-16 pt-6">
+        <div className="pt-auth-card !max-w-[460px] text-center">
           {state.kind === "loading" && (
             <>
-              <h1 className="text-xl font-semibold tracking-tight text-text-primary">
+              <h1 className="text-[18px] font-semibold leading-tight tracking-[-0.015em] text-text-primary">
                 Processing your request…
               </h1>
-              <p className="mt-2 text-sm text-text-secondary">
+              <p className="mt-2 text-[14px] leading-relaxed text-text-secondary">
                 One moment while we update your preferences.
               </p>
             </>
@@ -107,10 +90,10 @@ export default function UnsubscribePage() {
 
           {state.kind === "suppressed" && (
             <>
-              <h1 className="text-2xl font-extrabold tracking-tight text-text-primary">
+              <h1 className="text-[20px] font-semibold leading-tight tracking-[-0.02em] text-text-primary">
                 You've been unsubscribed
               </h1>
-              <p className="mt-3 break-all text-sm text-text-secondary">
+              <p className="mt-3 break-all text-[14px] leading-relaxed text-text-secondary">
                 <span className="font-medium text-text-primary">
                   {state.email}
                 </span>{" "}
@@ -135,10 +118,10 @@ export default function UnsubscribePage() {
 
           {state.kind === "subscribed" && (
             <>
-              <h1 className="text-2xl font-extrabold tracking-tight text-text-primary">
+              <h1 className="text-[20px] font-semibold leading-tight tracking-[-0.02em] text-text-primary">
                 You're subscribed again
               </h1>
-              <p className="mt-3 break-all text-sm text-text-secondary">
+              <p className="mt-3 break-all text-[14px] leading-relaxed text-text-secondary">
                 <span className="font-medium text-text-primary">
                   {state.email}
                 </span>{" "}
@@ -149,10 +132,10 @@ export default function UnsubscribePage() {
 
           {state.kind === "error" && (
             <>
-              <h1 className="text-xl font-semibold tracking-tight text-text-primary">
+              <h1 className="text-[18px] font-semibold leading-tight tracking-[-0.015em] text-text-primary">
                 This unsubscribe link is invalid or expired
               </h1>
-              <p className="mt-3 text-sm text-text-secondary">
+              <p className="mt-3 text-[14px] leading-relaxed text-text-secondary">
                 If you keep receiving unwanted emails, reply to one of them and
                 let the sender know directly.
               </p>
@@ -161,9 +144,7 @@ export default function UnsubscribePage() {
         </div>
       </main>
 
-      <div className="relative z-10">
-        <Footer variant="light" />
-      </div>
+      <Footer />
     </div>
   );
 }

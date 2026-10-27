@@ -34,18 +34,18 @@ export const TEST_IDS = {
   personUnreadBadge: "person-unread-badge",
   personKebabMenu: "person-kebab-menu",
   personDeleteButton: "person-delete-button",
+  mailTrashItem: "mail-trash-item",
+  mailRestoreItem: "mail-restore-item",
   personSearchInput: "person-search-input",
   personSearchClear: "person-search-clear",
 
   // Compose
   composeSendButton: "compose-send-button",
-  composeBody: "compose-body",
 
   // Reply
   replySendButton: "reply-send-button",
   replyComposer: "reply-composer",
 
   // API keys
-  apiKeyRow: "api-key-row",
   apiKeyRevealed: "api-key-revealed",
 } as const;

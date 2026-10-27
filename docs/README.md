@@ -21,6 +21,7 @@ Everything that used to live in one very long README. Start at
 | Page                                              | What's in it                                                                                           |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | [Inboxes and timelines](inboxes.md)               | One timeline per customer, team permissions, thread-vs-chat mode, forwarding                           |
+| [Appearance and mail layouts](appearance.md)      | Default, Gmail-style and Outlook-style layouts, dark mode, star, pin, archive and snooze               |
 | [Gmail integration](gmail.md)                     | Reading and replying from a Google Workspace mailbox over the Gmail API, and mirroring its Sent folder |
 | [Gmail on a local instance](gmail-local-setup.md) | Google Cloud, the local redirect URI and secrets, and how to fire the sync cron by hand                |
 | [Outlook integration](outlook.md)                 | The same for Microsoft 365 and outlook.com mailboxes, over Microsoft Graph                             |

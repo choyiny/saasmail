@@ -1,75 +1,558 @@
 @import "tailwindcss";
+@import "./styles/portal.css";
 
-@theme {
-  /* ──────────────────────────────────────────────────────────────
-     Brand palette — matches givefeedback.dev
-     Lime primary + violet accent on near-white surfaces.
-     ──────────────────────────────────────────────────────────── */
+/* ──────────────────────────────────────────────────────────────
+   Design tokens
 
+   Utilities read semantic colour names (bg-card, text-text-primary,
+   bg-accent …) through `@theme inline`, which points each one at a raw
+   variable below. The raw variables change with two attributes on <html>,
+   set by PreferencesProvider (src/lib/preferences.tsx) and by the
+   pre-paint script in index.html:
+
+     data-ui="default | gmail | outlook"   which mail client to emulate
+     data-mode="light | dark"              resolved colour mode
+
+   "default" is the cite-met portal design system: navy chrome around a
+   light paper panel, Inter, indigo accent; dark is "Midnight" (emerald).
+   Never hard-code hex in components — add a token here instead.
+   ──────────────────────────────────────────────────────────── */
+
+@theme inline {
   /* Surfaces */
-  --color-background: hsl(0 0% 99%);
-  --color-bg: hsl(0 0% 99%);
-  --color-bg-subtle: hsl(220 14% 96%);
-  --color-bg-muted: hsl(220 13% 91%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222 47% 11%);
+  --color-background: var(--sm-bg);
+  --color-bg: var(--sm-bg);
+  --color-bg-subtle: var(--sm-surface-2);
+  --color-bg-muted: var(--sm-surface-3);
+  --color-card: var(--sm-surface);
+  --color-card-foreground: var(--sm-ink);
+  --color-popover: var(--sm-surface);
+  --color-popover-foreground: var(--sm-ink);
 
   /* Borders */
-  --color-border: hsl(220 13% 91%);
-  --color-border-subtle: hsl(220 14% 96%);
-  --color-input: hsl(220 13% 91%);
+  --color-border: var(--sm-line);
+  --color-border-subtle: var(--sm-line-soft);
+  --color-border-strong: var(--sm-line-2);
+  --color-input: var(--sm-line-2);
 
   /* Text */
-  --color-foreground: hsl(222 47% 11%);
-  --color-text-primary: hsl(222 47% 11%);
-  --color-text-secondary: hsl(215 16% 47%);
-  --color-text-tertiary: hsl(215 16% 65%);
-  --color-muted-foreground: hsl(215 16% 47%);
+  --color-foreground: var(--sm-ink);
+  --color-text-primary: var(--sm-ink);
+  --color-text-secondary: var(--sm-muted);
+  --color-text-tertiary: var(--sm-faint);
+  --color-muted-foreground: var(--sm-muted);
 
-  /* Primary (lime) — used for CTAs */
-  --color-primary: hsl(75 100% 32%);
-  --color-primary-foreground: hsl(0 0% 100%);
+  /* Primary / accent (one accent per theme) */
+  --color-primary: var(--sm-accent);
+  --color-primary-foreground: var(--sm-on-accent);
+  --color-accent: var(--sm-accent);
+  --color-accent-hover: var(--sm-accent-2);
+  --color-accent-subtle: var(--sm-accent-tint);
+  --color-accent-subtle-fg: var(--sm-accent-ink);
+  --color-accent-foreground: var(--sm-on-accent);
+  --color-ring: var(--sm-accent);
+  --color-unread: var(--sm-accent);
 
-  /* Saasmail's existing 'accent' name aliases the primary lime
-     so existing components (bg-accent, text-accent) inherit the
-     new brand color without rewriting every call site. */
-  --color-accent: hsl(75 100% 32%);
-  --color-accent-hover: hsl(75 100% 26%);
-  --color-accent-subtle: hsl(75 70% 94%);
-  --color-accent-subtle-fg: hsl(75 100% 22%);
-  --color-accent-foreground: hsl(0 0% 100%);
+  /* Semantic */
+  --color-secondary: var(--sm-surface-3);
+  --color-secondary-foreground: var(--sm-ink);
+  --color-muted: var(--sm-surface-2);
+  --color-destructive: var(--sm-bad);
+  --color-destructive-foreground: var(--sm-on-accent);
+  --color-destructive-subtle: var(--sm-bad-bg);
+  --color-success: var(--sm-ok);
+  --color-success-subtle: var(--sm-ok-bg);
+  --color-warning: var(--sm-warn);
+  --color-warning-bg: var(--sm-warn-bg);
+  --color-warning-border: var(--sm-warn-line);
+  --color-warning-text: var(--sm-warn);
+  --color-info: var(--sm-run);
+  --color-info-subtle: var(--sm-run-bg);
+  --color-star: var(--sm-star);
 
-  /* Brand pure-tones (used for the ✦ sparkle and footer brand line) */
+  /* Shell chrome (rail + top band in the default theme; suite bar in
+     Outlook). */
+  --color-chrome: var(--chrome-bg);
+  --color-chrome-edge: var(--chrome-edge);
+  --color-chrome-fg: var(--chrome-fg);
+  --color-chrome-fg-2: var(--chrome-fg-2);
+  --color-chrome-dim: var(--chrome-dim);
+  --color-chrome-hover: var(--chrome-hover);
+  --color-chrome-on: var(--chrome-on);
+  --color-chrome-line: var(--chrome-line);
+  --color-chrome-accent: var(--chrome-accent);
+
+  /* Brand pure-tones (wordmark only) */
   --color-lime: #bfff00;
   --color-violet: #7c5cfc;
 
-  /* Violet accent — focus rings, highlights, unread indicators */
-  --color-ring: hsl(254 95% 55%);
-  --color-unread: hsl(254 95% 55%);
-
-  /* Semantic */
-  --color-secondary: hsl(220 14% 96%);
-  --color-secondary-foreground: hsl(222 47% 11%);
-  --color-muted: hsl(220 14% 96%);
-  --color-destructive: hsl(0 72% 51%);
-  --color-destructive-subtle: hsl(0 72% 95%);
-  --color-success: hsl(142 60% 38%);
-  --color-warning-bg: hsl(48 100% 96%);
-  --color-warning-border: hsl(48 96% 76%);
-  --color-warning-text: hsl(35 91% 33%);
-
   /* Fonts */
-  --font-sans:
-    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    Helvetica, Arial, sans-serif;
+  --font-sans: var(--sm-font-sans);
+  --font-mono: var(--sm-font-mono);
   --font-script: "Caveat", cursive;
 
   /* Radii */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --radius-sm: var(--sm-radius-sm);
+  --radius-md: var(--sm-radius-md);
+  --radius-lg: var(--sm-radius-lg);
+  --radius-xl: var(--sm-radius-xl);
+  --radius-2xl: var(--sm-radius-2xl);
+
+  /* Shadows */
+  --shadow-card: var(--sm-sh);
+  --shadow-raised: var(--sm-sh-md);
+  --shadow-overlay: var(--sm-sh-lg);
+}
+
+/* ── Default: cite-met portal, light ("Navy") ─────────────────── */
+:root {
+  color-scheme: light;
+  --sm-font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --sm-font-mono:
+    "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --sm-bg: rgb(242 244 247);
+  --sm-surface: rgb(255 255 255);
+  --sm-surface-2: rgb(248 250 252);
+  --sm-surface-3: rgb(238 241 245);
+  --sm-ink: rgb(20 23 28);
+  --sm-ink-2: rgb(56 62 72);
+  --sm-muted: rgb(97 104 115);
+  --sm-faint: rgb(153 161 174);
+  --sm-line: rgb(230 233 238);
+  --sm-line-soft: rgb(238 241 245);
+  --sm-line-2: rgb(211 216 224);
+  --sm-accent: rgb(55 48 163);
+  --sm-accent-2: rgb(40 33 118);
+  --sm-accent-tint: rgb(238 240 251);
+  --sm-accent-tint-2: rgb(220 223 247);
+  --sm-accent-ink: rgb(55 48 163);
+  --sm-on-accent: rgb(255 255 255);
+  --sm-ok: rgb(15 114 69);
+  --sm-ok-bg: rgb(230 245 237);
+  --sm-warn: rgb(150 97 11);
+  --sm-warn-bg: rgb(253 243 223);
+  --sm-warn-line: rgb(236 215 164);
+  --sm-bad: rgb(179 49 42);
+  --sm-bad-bg: rgb(253 236 235);
+  --sm-run: rgb(10 106 117);
+  --sm-run-bg: rgb(228 244 246);
+  --sm-star: rgb(217 144 0);
+
+  --sm-radius-sm: 6px;
+  --sm-radius-md: 8px;
+  --sm-radius-lg: 10px;
+  --sm-radius-xl: 12px;
+  --sm-radius-2xl: 16px;
+
+  --sm-sh: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --sm-sh-md:
+    0 1px 3px rgba(16, 24, 40, 0.07), 0 10px 24px -16px rgba(16, 24, 40, 0.22);
+  --sm-sh-lg: 0 18px 50px -18px rgba(16, 24, 40, 0.3);
+  --sm-ease: cubic-bezier(0.3, 0.8, 0.3, 1);
+
+  --chrome-bg: #16203a;
+  --chrome-edge: #2c3a5c;
+  --chrome-fg: #ffffff;
+  --chrome-fg-2: rgba(232, 236, 246, 0.74);
+  --chrome-dim: rgba(232, 236, 246, 0.52);
+  --chrome-faint: rgba(232, 236, 246, 0.38);
+  --chrome-soft: rgba(255, 255, 255, 0.06);
+  --chrome-hover: rgba(255, 255, 255, 0.09);
+  --chrome-on: rgba(255, 255, 255, 0.15);
+  --chrome-line: rgba(255, 255, 255, 0.07);
+  --chrome-line-2: rgba(255, 255, 255, 0.13);
+  --chrome-accent: #a5b4fc;
+  --chrome-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23g)' opacity='0.055'/%3E%3C/svg%3E");
+}
+
+/* ── Default, dark ("Midnight") ───────────────────────────────── */
+:root[data-mode="dark"] {
+  color-scheme: dark;
+  --sm-bg: rgb(20 23 29);
+  --sm-surface: rgb(27 31 38);
+  --sm-surface-2: rgb(33 38 46);
+  --sm-surface-3: rgb(42 48 58);
+  --sm-ink: rgb(242 244 248);
+  --sm-ink-2: rgb(200 207 218);
+  --sm-muted: rgb(152 161 176);
+  --sm-faint: rgb(134 143 160);
+  --sm-line: rgb(39 45 55);
+  --sm-line-soft: rgb(33 38 46);
+  --sm-line-2: rgb(52 60 72);
+  --sm-accent: rgb(52 211 153);
+  --sm-accent-2: rgb(110 231 183);
+  --sm-accent-tint: rgb(18 41 31);
+  --sm-accent-tint-2: rgb(23 57 42);
+  --sm-accent-ink: rgb(110 231 183);
+  --sm-on-accent: rgb(20 23 29);
+  --sm-ok: rgb(74 222 128);
+  --sm-ok-bg: rgb(17 41 28);
+  --sm-warn: rgb(251 191 36);
+  --sm-warn-bg: rgb(44 34 12);
+  --sm-warn-line: rgb(87 67 26);
+  --sm-bad: rgb(248 113 113);
+  --sm-bad-bg: rgb(46 23 25);
+  --sm-run: rgb(56 189 248);
+  --sm-run-bg: rgb(16 38 47);
+  --sm-star: rgb(251 191 36);
+  --sm-sh: 0 1px 2px rgba(0, 0, 0, 0.44);
+  --sm-sh-md:
+    0 1px 3px rgba(0, 0, 0, 0.5), 0 10px 24px -16px rgba(0, 0, 0, 0.7);
+  --sm-sh-lg: 0 18px 50px -18px rgba(0, 0, 0, 0.78);
+
+  --chrome-bg: #0b0e13;
+  --chrome-edge: #262c36;
+  --chrome-fg: #f2f4f8;
+  --chrome-fg-2: rgba(242, 244, 248, 0.76);
+  --chrome-dim: rgba(242, 244, 248, 0.54);
+  --chrome-faint: rgba(242, 244, 248, 0.38);
+  --chrome-soft: rgba(255, 255, 255, 0.05);
+  --chrome-hover: rgba(255, 255, 255, 0.08);
+  --chrome-on: rgba(255, 255, 255, 0.14);
+  --chrome-line: rgba(255, 255, 255, 0.07);
+  --chrome-line-2: rgba(255, 255, 255, 0.12);
+  --chrome-accent: #34d399;
+  --chrome-grain: none;
+}
+
+/* ── Default layout colour themes (Settings → Appearance) ─────────
+   Navy is :root above. Each palette recolours the chrome and the one
+   accent; surfaces stay neutral so every page keeps its contrast. */
+:root[data-ui="default"][data-palette="ink"] {
+  --chrome-bg: #101113;
+  --chrome-edge: #292b30;
+  --chrome-accent: #d8d5cf;
+  --sm-accent: rgb(24 24 27);
+  --sm-accent-2: rgb(9 9 11);
+  --sm-accent-ink: rgb(24 24 27);
+  --sm-accent-tint: rgb(241 241 243);
+  --sm-accent-tint-2: rgb(228 228 231);
+}
+:root[data-ui="default"][data-palette="ink"][data-mode="dark"] {
+  --chrome-bg: #09090b;
+  --chrome-edge: #232326;
+  --chrome-accent: #e4e4e7;
+  --sm-accent: rgb(228 228 231);
+  --sm-accent-2: rgb(250 250 250);
+  --sm-accent-ink: rgb(250 250 250);
+  --sm-accent-tint: rgb(39 39 42);
+  --sm-accent-tint-2: rgb(52 52 56);
+  --sm-on-accent: rgb(9 9 11);
+}
+:root[data-ui="default"][data-palette="slate"] {
+  --chrome-bg: #1e242b;
+  --chrome-edge: #363f4a;
+  --chrome-accent: #9fd0e8;
+  --sm-accent: rgb(14 116 144);
+  --sm-accent-2: rgb(21 94 117);
+  --sm-accent-ink: rgb(14 116 144);
+  --sm-accent-tint: rgb(231 245 249);
+  --sm-accent-tint-2: rgb(207 236 244);
+}
+:root[data-ui="default"][data-palette="slate"][data-mode="dark"] {
+  --chrome-bg: #0d1116;
+  --chrome-edge: #26303a;
+  --chrome-accent: #67e8f9;
+  --sm-accent: rgb(103 232 249);
+  --sm-accent-2: rgb(165 243 252);
+  --sm-accent-ink: rgb(165 243 252);
+  --sm-accent-tint: rgb(12 42 52);
+  --sm-accent-tint-2: rgb(16 58 72);
+  --sm-on-accent: rgb(8 24 32);
+}
+:root[data-ui="default"][data-palette="indigo"] {
+  --chrome-bg: #241f52;
+  --chrome-edge: #3f3782;
+  --chrome-accent: #c7d2fe;
+  --sm-accent: rgb(79 70 229);
+  --sm-accent-2: rgb(67 56 202);
+  --sm-accent-ink: rgb(79 70 229);
+  --sm-accent-tint: rgb(238 240 255);
+  --sm-accent-tint-2: rgb(224 231 255);
+}
+:root[data-ui="default"][data-palette="indigo"][data-mode="dark"] {
+  --chrome-bg: #12102a;
+  --chrome-edge: #2c2758;
+  --chrome-accent: #a5b4fc;
+  --sm-accent: rgb(165 180 252);
+  --sm-accent-2: rgb(199 210 254);
+  --sm-accent-ink: rgb(199 210 254);
+  --sm-accent-tint: rgb(30 27 75);
+  --sm-accent-tint-2: rgb(39 35 99);
+  --sm-on-accent: rgb(18 16 42);
+}
+:root[data-ui="default"][data-palette="forest"] {
+  --chrome-bg: #122a1f;
+  --chrome-edge: #234a37;
+  --chrome-accent: #86efac;
+  --sm-accent: rgb(21 128 61);
+  --sm-accent-2: rgb(22 101 52);
+  --sm-accent-ink: rgb(21 128 61);
+  --sm-accent-tint: rgb(234 247 238);
+  --sm-accent-tint-2: rgb(209 240 220);
+}
+:root[data-ui="default"][data-palette="forest"][data-mode="dark"] {
+  --chrome-bg: #08140f;
+  --chrome-edge: #1c3328;
+  --chrome-accent: #4ade80;
+  --sm-accent: rgb(74 222 128);
+  --sm-accent-2: rgb(134 239 172);
+  --sm-accent-ink: rgb(134 239 172);
+  --sm-accent-tint: rgb(14 43 28);
+  --sm-accent-tint-2: rgb(18 58 37);
+  --sm-on-accent: rgb(6 20 13);
+}
+:root[data-ui="default"][data-palette="claret"] {
+  --chrome-bg: #2c1419;
+  --chrome-edge: #52272f;
+  --chrome-accent: #fda4af;
+  --sm-accent: rgb(190 18 60);
+  --sm-accent-2: rgb(159 18 57);
+  --sm-accent-ink: rgb(190 18 60);
+  --sm-accent-tint: rgb(253 237 241);
+  --sm-accent-tint-2: rgb(251 216 226);
+}
+:root[data-ui="default"][data-palette="claret"][data-mode="dark"] {
+  --chrome-bg: #150a0d;
+  --chrome-edge: #3a1c22;
+  --chrome-accent: #fb7185;
+  --sm-accent: rgb(251 113 133);
+  --sm-accent-2: rgb(253 164 175);
+  --sm-accent-ink: rgb(253 164 175);
+  --sm-accent-tint: rgb(52 16 26);
+  --sm-accent-tint-2: rgb(70 22 35);
+  --sm-on-accent: rgb(26 8 12);
+}
+:root[data-ui="default"][data-palette="paper"] {
+  --chrome-bg: #dee2ea;
+  --chrome-edge: #c6ccd8;
+  --chrome-fg: #14161f;
+  --chrome-fg-2: rgba(20, 22, 31, 0.78);
+  --chrome-dim: rgba(20, 22, 31, 0.68);
+  --chrome-faint: rgba(20, 22, 31, 0.62);
+  --chrome-soft: rgba(20, 22, 31, 0.05);
+  --chrome-hover: rgba(20, 22, 31, 0.075);
+  --chrome-on: rgba(20, 22, 31, 0.11);
+  --chrome-line: rgba(20, 22, 31, 0.09);
+  --chrome-line-2: rgba(20, 22, 31, 0.14);
+  --chrome-accent: #3730a3;
+  --chrome-grain: none;
+}
+:root[data-ui="default"][data-palette="paper"][data-mode="dark"] {
+  --chrome-bg: #16181d;
+  --chrome-edge: #2a2e36;
+  --chrome-fg: #f2f4f8;
+  --chrome-fg-2: rgba(242, 244, 248, 0.76);
+  --chrome-dim: rgba(242, 244, 248, 0.54);
+  --chrome-faint: rgba(242, 244, 248, 0.38);
+  --chrome-soft: rgba(255, 255, 255, 0.05);
+  --chrome-hover: rgba(255, 255, 255, 0.08);
+  --chrome-on: rgba(255, 255, 255, 0.14);
+  --chrome-line: rgba(255, 255, 255, 0.07);
+  --chrome-line-2: rgba(255, 255, 255, 0.12);
+  --chrome-accent: #a5b4fc;
+  --sm-accent: rgb(165 180 252);
+  --sm-accent-2: rgb(199 210 254);
+  --sm-accent-ink: rgb(199 210 254);
+  --sm-accent-tint: rgb(30 27 75);
+  --sm-accent-tint-2: rgb(39 35 99);
+  --sm-on-accent: rgb(18 16 42);
+}
+
+/* ── Gmail (Material 3), light ────────────────────────────────── */
+:root[data-ui="gmail"] {
+  /* Roboto, not "Google Sans": a machine with only the italic cut of
+     Google Sans installed renders everything italic. gmail.css adds an
+     upright-only alias in front of this once the Gmail chunk loads. */
+  --sm-font-sans: Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sm-font-mono: "Roboto Mono", ui-monospace, Menlo, monospace;
+  --sm-bg: #f6f8fc;
+  --sm-surface: #ffffff;
+  --sm-surface-2: #f2f6fc;
+  --sm-surface-3: #eaf1fb;
+  --sm-ink: #1f1f1f;
+  --sm-ink-2: #3c4043;
+  --sm-muted: #444746;
+  --sm-faint: #747775;
+  --sm-line: #e0e3e7;
+  --sm-line-soft: #f1f3f4;
+  --sm-line-2: #c4c7c5;
+  --sm-accent: #0b57d0;
+  --sm-accent-2: #0842a0;
+  --sm-accent-tint: #d3e3fd;
+  --sm-accent-tint-2: #c2e7ff;
+  --sm-accent-ink: #041e49;
+  --sm-on-accent: #ffffff;
+  --sm-ok: #146c2e;
+  --sm-ok-bg: #c4eed0;
+  --sm-warn: #8c5000;
+  --sm-warn-bg: #ffdf99;
+  --sm-warn-line: #f6c26b;
+  --sm-bad: #b3261e;
+  --sm-bad-bg: #f9dedc;
+  --sm-run: #0b57d0;
+  --sm-run-bg: #d3e3fd;
+  --sm-star: #f4b400;
+  --sm-radius-sm: 4px;
+  --sm-radius-md: 8px;
+  --sm-radius-lg: 16px;
+  --sm-radius-xl: 16px;
+  --sm-radius-2xl: 24px;
+  --sm-sh:
+    0 1px 2px 0 rgba(60, 64, 67, 0.3), 0 1px 3px 1px rgba(60, 64, 67, 0.15);
+  --sm-sh-md:
+    0 1px 3px 0 rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+  --sm-sh-lg:
+    0 4px 8px 3px rgba(60, 64, 67, 0.15), 0 1px 3px rgba(60, 64, 67, 0.3);
+  --chrome-bg: #f6f8fc;
+  --chrome-fg: #1f1f1f;
+  --chrome-fg-2: #444746;
+  --chrome-dim: #5e5e5e;
+  --chrome-hover: rgba(68, 71, 70, 0.08);
+  --chrome-on: #d3e3fd;
+  --chrome-line: #e0e3e7;
+  --chrome-accent: #0b57d0;
+  --chrome-grain: none;
+}
+
+/* ── Gmail, dark ──────────────────────────────────────────────── */
+:root[data-ui="gmail"][data-mode="dark"] {
+  --sm-bg: #1b1b1b;
+  --sm-surface: #1f1f1f;
+  --sm-surface-2: #282a2c;
+  --sm-surface-3: #333537;
+  --sm-ink: #e3e3e3;
+  --sm-ink-2: #c4c7c5;
+  --sm-muted: #c4c7c5;
+  --sm-faint: #8e918f;
+  --sm-line: #3c4043;
+  --sm-line-soft: #2d2f31;
+  --sm-line-2: #5f6368;
+  --sm-accent: #a8c7fa;
+  --sm-accent-2: #d3e3fd;
+  --sm-accent-tint: #004a77;
+  --sm-accent-tint-2: #004a77;
+  --sm-accent-ink: #c2e7ff;
+  --sm-on-accent: #062e6f;
+  --sm-ok: #6dd58c;
+  --sm-ok-bg: #0f5223;
+  --sm-warn: #ffb951;
+  --sm-warn-bg: #4a3000;
+  --sm-bad: #f2b8b5;
+  --sm-bad-bg: #601410;
+  --sm-run: #a8c7fa;
+  --sm-run-bg: #004a77;
+  --sm-star: #fdd663;
+  --sm-sh: 0 1px 2px 0 rgba(0, 0, 0, 0.6), 0 1px 3px 1px rgba(0, 0, 0, 0.3);
+  --sm-sh-md: 0 1px 3px 0 rgba(0, 0, 0, 0.6), 0 4px 8px 3px rgba(0, 0, 0, 0.3);
+  --sm-sh-lg: 0 4px 8px 3px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.6);
+  --chrome-bg: #1b1b1b;
+  --chrome-fg: #e3e3e3;
+  --chrome-fg-2: #c4c7c5;
+  --chrome-dim: #8e918f;
+  --chrome-hover: rgba(227, 227, 227, 0.08);
+  --chrome-on: #004a77;
+  --chrome-line: #3c4043;
+  --chrome-accent: #a8c7fa;
+}
+
+/* ── Outlook (Fluent 2), light ────────────────────────────────── */
+:root[data-ui="outlook"] {
+  --sm-font-sans:
+    "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
+    Roboto, "Helvetica Neue", sans-serif;
+  --sm-font-mono: Consolas, "Cascadia Mono", ui-monospace, Menlo, monospace;
+  --sm-bg: #f0f0f0;
+  --sm-surface: #ffffff;
+  --sm-surface-2: #fafafa;
+  --sm-surface-3: #f5f5f5;
+  --sm-ink: #242424;
+  --sm-ink-2: #424242;
+  --sm-muted: #616161;
+  --sm-faint: #707070;
+  --sm-line: #e0e0e0;
+  --sm-line-soft: #f0f0f0;
+  --sm-line-2: #d1d1d1;
+  --sm-accent: #0f6cbd;
+  --sm-accent-2: #115ea3;
+  --sm-accent-tint: #ebf3fc;
+  --sm-accent-tint-2: #cfe4fa;
+  --sm-accent-ink: #0f548c;
+  --sm-on-accent: #ffffff;
+  --sm-ok: #107c10;
+  --sm-ok-bg: #f1faf1;
+  --sm-warn: #bc4b09;
+  --sm-warn-bg: #fff9f5;
+  --sm-warn-line: #fdcfb4;
+  --sm-bad: #c50f1f;
+  --sm-bad-bg: #fdf3f4;
+  --sm-run: #0f6cbd;
+  --sm-run-bg: #ebf3fc;
+  --sm-star: #c50f1f; /* Outlook "flag" red */
+  --sm-radius-sm: 2px;
+  --sm-radius-md: 4px;
+  --sm-radius-lg: 4px;
+  --sm-radius-xl: 8px;
+  --sm-radius-2xl: 8px;
+  --sm-sh: 0 0 2px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.14);
+  --sm-sh-md: 0 0 2px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.14);
+  --sm-sh-lg: 0 0 8px rgba(0, 0, 0, 0.12), 0 14px 28px rgba(0, 0, 0, 0.14);
+  /* The blue suite header */
+  --chrome-bg: #0f6cbd;
+  --chrome-edge: #0f548c;
+  --chrome-fg: #ffffff;
+  --chrome-fg-2: rgba(255, 255, 255, 0.9);
+  --chrome-dim: rgba(255, 255, 255, 0.72);
+  --chrome-hover: rgba(255, 255, 255, 0.12);
+  --chrome-on: rgba(255, 255, 255, 0.2);
+  --chrome-line: rgba(255, 255, 255, 0.2);
+  --chrome-accent: #ffffff;
+  --chrome-grain: none;
+}
+
+/* ── Outlook, dark ────────────────────────────────────────────── */
+:root[data-ui="outlook"][data-mode="dark"] {
+  --sm-bg: #141414;
+  --sm-surface: #292929;
+  --sm-surface-2: #1f1f1f;
+  --sm-surface-3: #333333;
+  --sm-ink: #ffffff;
+  --sm-ink-2: #d6d6d6;
+  --sm-muted: #adadad;
+  --sm-faint: #8f8f8f;
+  --sm-line: #3d3d3d;
+  --sm-line-soft: #2e2e2e;
+  --sm-line-2: #525252;
+  --sm-accent: #479ef5;
+  --sm-accent-2: #62abf5;
+  --sm-accent-tint: #082338;
+  --sm-accent-tint-2: #0e4775;
+  --sm-accent-ink: #96c6fa;
+  --sm-on-accent: #ffffff;
+  --sm-ok: #54b054;
+  --sm-ok-bg: #052505;
+  --sm-warn: #fa9e65;
+  --sm-warn-bg: #411200;
+  --sm-bad: #f1707b;
+  --sm-bad-bg: #3b0509;
+  --sm-run: #479ef5;
+  --sm-run-bg: #082338;
+  --sm-star: #f1707b;
+  --sm-sh: 0 0 2px rgba(0, 0, 0, 0.24), 0 1px 2px rgba(0, 0, 0, 0.28);
+  --sm-sh-md: 0 0 2px rgba(0, 0, 0, 0.24), 0 4px 8px rgba(0, 0, 0, 0.28);
+  --sm-sh-lg: 0 0 8px rgba(0, 0, 0, 0.24), 0 14px 28px rgba(0, 0, 0, 0.28);
+  --chrome-bg: #0a2e4a;
+  --chrome-edge: #082338;
+}
+
+/* Compact density: themes read this to tighten list and table rows. */
+:root[data-density="compact"] {
+  --sm-row-pad: 4px;
+}
+:root {
+  --sm-row-pad: 10px;
 }
 
 html {
@@ -124,94 +607,7 @@ body {
   font-family: var(--font-script);
 }
 
-/* Subtle animated grain backdrop for public/auth surfaces */
-.brand-backdrop {
-  background-color: #0a0a0a;
-  background-image:
-    radial-gradient(
-      ellipse 80% 60% at 20% 10%,
-      rgba(124, 92, 252, 0.35),
-      transparent 60%
-    ),
-    radial-gradient(
-      ellipse 70% 50% at 80% 20%,
-      rgba(191, 255, 0, 0.12),
-      transparent 60%
-    ),
-    radial-gradient(
-      ellipse 60% 60% at 50% 100%,
-      rgba(99, 102, 241, 0.25),
-      transparent 70%
-    );
-}
-
-/* Animated faded-out backdrop for the dashboard.
-   Matches givefeedback.dev's app — soft lavender + lime + indigo bloom
-   that gently drifts. CSS-only, no shader runtime, no extra deps. */
-.dashboard-backdrop {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  background-color: #f8f8f8;
-  background-image:
-    radial-gradient(
-      ellipse 50% 40% at 8% 12%,
-      rgba(196, 181, 253, 0.55),
-      transparent 65%
-    ),
-    radial-gradient(
-      ellipse 45% 35% at 92% 8%,
-      rgba(163, 230, 53, 0.35),
-      transparent 65%
-    ),
-    radial-gradient(
-      ellipse 55% 40% at 100% 65%,
-      rgba(129, 140, 248, 0.4),
-      transparent 65%
-    ),
-    radial-gradient(
-      ellipse 60% 45% at 35% 90%,
-      rgba(233, 213, 255, 0.55),
-      transparent 65%
-    );
-  background-size:
-    140% 140%,
-    140% 140%,
-    140% 140%,
-    140% 140%;
-  background-position:
-    0% 0%,
-    100% 0%,
-    100% 50%,
-    0% 100%;
-  animation: backdrop-drift 28s ease-in-out infinite alternate;
-  filter: blur(40px) saturate(1.05);
-  z-index: 0;
-}
-
-.dashboard-backdrop::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.45'/%3E%3C/svg%3E");
-  mix-blend-mode: overlay;
-  opacity: 0.25;
-  pointer-events: none;
-}
-
-/* Static variant — same gradient, no drift / no expensive blur / no
-   noise overlay. Used by useReducedAnimations() on low-spec devices. */
-.dashboard-backdrop-static {
-  animation: none !important;
-  filter: blur(24px) saturate(1) !important;
-}
-.dashboard-backdrop-static::after {
-  display: none !important;
-}
-
-/* Honor the user's reduced-motion preference globally — kills CSS
-   animations + transitions, drops scroll smoothing, neutralizes the
-   dashboard-backdrop drift and noise overlay. */
+/* Honor the user's reduced-motion preference globally. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -221,30 +617,6 @@ body {
     transition-duration: 0.05ms !important;
     scroll-behavior: auto !important;
   }
-  .dashboard-backdrop {
-    animation: none !important;
-    filter: blur(24px) saturate(1) !important;
-  }
-  .dashboard-backdrop::after {
-    display: none !important;
-  }
-}
-
-/* Fade the backdrop from full strength at top to plain background at bottom,
-   so content lower on the page reads on a clean white surface. Stops at
-   ~60vh so the footer area remains transparent (not painted over). */
-.dashboard-backdrop-mask {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(248, 248, 248, 0.35) 35%,
-    rgba(248, 248, 248, 0.7) 60%,
-    rgba(248, 248, 248, 0.7) 100%
-  );
 }
 
 /* Slide-in / slide-out keyframes for the right-side drawer.
@@ -361,7 +733,7 @@ body {
    non-jarring scroll. */
 .smooth-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+  scrollbar-color: var(--sm-line-2) transparent;
   scroll-behavior: smooth;
   overscroll-behavior: contain;
 }
@@ -373,31 +745,14 @@ body {
   background: transparent;
 }
 .smooth-scroll::-webkit-scrollbar-thumb {
-  background-color: rgba(15, 23, 42, 0.14);
+  background-color: var(--sm-line-2);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
   transition: background-color 200ms ease;
 }
 .smooth-scroll:hover::-webkit-scrollbar-thumb {
-  background-color: rgba(15, 23, 42, 0.28);
-}
-
-@keyframes backdrop-drift {
-  0% {
-    background-position:
-      0% 0%,
-      100% 0%,
-      100% 50%,
-      0% 100%;
-  }
-  100% {
-    background-position:
-      20% 15%,
-      80% 20%,
-      85% 65%,
-      15% 85%;
-  }
+  background-color: var(--sm-faint);
 }
 
 /* ── Rich Text Editor Styles ── */
@@ -487,7 +842,7 @@ body {
 }
 
 .notion-editor pre {
-  background: #f8fafc;
+  background: var(--sm-surface-2);
   border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 16px;
@@ -498,17 +853,17 @@ body {
 }
 
 .notion-editor pre code {
-  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, monospace;
+  font-family: var(--sm-font-mono);
   color: var(--color-text-primary);
 }
 
 .notion-editor code {
-  background: #f1f5f9;
-  border-radius: 3px;
+  background: var(--sm-code-bg);
+  border-radius: 4px;
   padding: 2px 5px;
   font-size: 0.9em;
-  font-family: "SF Mono", "Fira Code", "Fira Mono", Menlo, monospace;
-  color: #e11d48;
+  font-family: var(--sm-font-mono);
+  color: var(--sm-code-ink);
 }
 
 .notion-editor hr {
@@ -536,7 +891,7 @@ body {
 
 .notion-editor img.ProseMirror-selectednode,
 .notion-editor .notion-image-wrapper[data-selected="true"] .notion-image {
-  outline: 2px solid var(--color-accent, #7c5cfc);
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
@@ -555,8 +910,8 @@ body {
   bottom: -6px;
   width: 12px;
   height: 12px;
-  background: var(--color-accent, #7c5cfc);
-  border: 2px solid var(--color-bg, #fff);
+  background: var(--color-accent);
+  border: 2px solid var(--color-card);
   border-radius: 2px;
   cursor: nwse-resize;
   opacity: 0;
@@ -574,15 +929,29 @@ body {
    which message the link pointed at. */
 @keyframes message-link-flash {
   0% {
-    box-shadow: 0 0 0 2px rgba(124, 92, 252, 0.55);
-    background-color: rgba(124, 92, 252, 0.12);
+    box-shadow: 0 0 0 2px var(--sm-accent);
+    background-color: var(--sm-accent-tint);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(124, 92, 252, 0);
+    box-shadow: 0 0 0 0 transparent;
     background-color: transparent;
   }
 }
 .message-link-flash {
   animation: message-link-flash 2200ms ease-out 1;
   border-radius: 6px;
+}
+
+/* Phones: lift toasts above an open thread's reply bar. */
+@media (max-width: 639.98px) {
+  html:has([data-thread-open]) .sm-toaster {
+    bottom: calc(env(safe-area-inset-bottom) + 108px) !important;
+  }
+}
+
+/* The mobile Compose button would cover an open thread's reply bar or the
+   selection bar. */
+html:has([data-thread-open]) .compose-fab,
+html:has([data-selecting]) .compose-fab {
+  display: none;
 }

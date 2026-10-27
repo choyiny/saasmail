@@ -26,7 +26,7 @@ test.describe.serial("compose & send", () => {
     await expect(page.getByText("Alice Anderson")).toBeVisible();
 
     // Click Compose button in sidebar
-    await page.getByRole("button", { name: "Compose" }).click();
+    await page.getByRole("button", { name: "Compose", exact: true }).click();
 
     // Wait for the compose dialog to open. The slim tray header now
     // reads "New message" (or "New message · <recipient>" once To is
@@ -162,7 +162,7 @@ test.describe.serial("compose & send", () => {
     await expect(page.getByText("Alice Anderson")).toBeVisible();
 
     // Open Compose
-    await page.getByRole("button", { name: "Compose" }).click();
+    await page.getByRole("button", { name: "Compose", exact: true }).click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -184,7 +184,8 @@ test.describe.serial("compose & send", () => {
     await expect(sendButton).toBeEnabled();
 
     // Clear the text (select all, delete)
-    await page.keyboard.press("Control+a");
+    // ControlOrMeta: on macOS, Control+A moves to line start in ProseMirror.
+    await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.press("Backspace");
 
     // Send button should be disabled again

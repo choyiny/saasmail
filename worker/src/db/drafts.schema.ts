@@ -13,6 +13,8 @@ import { users } from "./auth.schema";
  * autosaved draft per composing surface:
  *   - `"compose"`         — the new-message composer (one per user)
  *   - `"reply:<emailId>"` — a reply to a specific email
+ *   - `"forward:<emailId>"` — a forward of a specific email (the Gmail
+ *     layout's inline composer; `replyToEmailId` stays null)
  *
  * The unique index enforces that identity and lets the router upsert with a
  * single `onConflictDoUpdate`. Attachments are intentionally not persisted —

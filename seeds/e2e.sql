@@ -13,6 +13,10 @@ DELETE FROM sent_emails;
 DELETE FROM people;
 DELETE FROM inbox_permissions;
 DELETE FROM sender_identities;
+-- Per-user mail state and tab corrections would otherwise survive a reseed
+-- (Trash, archive, stars hide seeded rows from later specs).
+DELETE FROM mail_item_states;
+DELETE FROM category_overrides;
 
 -- Inboxes
 INSERT INTO sender_identities (email, display_name, display_mode, created_at, updated_at)

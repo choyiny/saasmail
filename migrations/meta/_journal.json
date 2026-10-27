@@ -337,6 +337,27 @@
       "when": 1792518701225,
       "tag": "0047_outlook_mailboxes",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1793039906439,
+      "tag": "0048_user_prefs_mail_states",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1793048428762,
+      "tag": "0049_user_prefs_palette",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1793058112612,
+      "tag": "0050_trash_overrides_layout_settings",
+      "breakpoints": true
     }
   ]
 }

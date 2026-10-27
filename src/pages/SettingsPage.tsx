@@ -6,12 +6,11 @@ import {
   disablePush,
 } from "@/lib/push";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
-import {
-  HIDE_SIGNATURES_EVENT,
-  HIDE_SIGNATURES_STORAGE_KEY,
-  readHideSignatures,
-  writeHideSignatures,
-} from "@/lib/signatures";
+import AppearanceSettings from "@/components/AppearanceSettings";
+import { useLocation } from "react-router-dom";
+import { Send } from "lucide-react";
+import { useCommonSettings } from "@/lib/default-layout-settings";
+import { UNDO_SEND_CHOICES } from "@/lib/undo-send";
 import { useSession } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
 
@@ -25,20 +24,88 @@ interface Subscription {
 export default function SettingsPage() {
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "admin";
+  const { hash } = useLocation();
+
+  // Deep links such as /settings#appearance scroll to their section.
+  useEffect(() => {
+    if (!hash) return;
+    const el = document.getElementById(hash.slice(1));
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ block: "start" }));
+  }, [hash]);
 
   return (
     <PageContainer>
       <PageHeader
         title="Settings"
-        subtitle="Manage notifications, display preferences, and (admin only) app branding."
+        subtitle="Appearance, sending, notifications and display preferences follow your account to every device. Admins also set the app branding."
       />
 
       <div className="max-w-3xl space-y-8">
+        <AppearanceSettings />
+        <SendingSection />
         <NotificationsSection />
         <DisplayPreferencesSection />
         {isAdmin && <AppBrandingSection />}
       </div>
     </PageContainer>
+  );
+}
+
+/* ------------------------------------ Sending ------------------------------------- */
+
+function undoLabel(n: number) {
+  return n === 0 ? "Off" : `${n} s`;
+}
+
+/** Undo Send delay — shared by every mail layout and every send button. */
+function SendingSection() {
+  const [{ undoSendSeconds }, setCommon] = useCommonSettings();
+  return (
+    <section id="sending" className="scroll-mt-6 space-y-3">
+      <div>
+        <h2 className="text-base font-semibold tracking-[-0.01em] text-text-primary">
+          Sending
+        </h2>
+        <p className="mt-0.5 text-[13px] text-text-secondary">
+          Saved to your account, so it applies on every device and in every mail
+          layout.
+        </p>
+      </div>
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-2 text-sm font-medium text-text-primary">
+              <Send size={14} className="text-text-secondary" aria-hidden />
+              Undo send
+            </h3>
+            <p className="mt-1 text-xs text-text-secondary">
+              After you press Send, the message waits this long with an Undo
+              button before it goes out. Undo reopens it with everything you
+              wrote. Keep this tab open until it has gone.
+            </p>
+          </div>
+          <div
+            className="pt-seg shrink-0 self-start"
+            role="radiogroup"
+            aria-label="Undo send delay"
+            data-testid="undo-send-delay"
+          >
+            {UNDO_SEND_CHOICES.map((n) => (
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={undoSendSeconds === n}
+                aria-label={n === 0 ? "Off" : `${n} seconds`}
+                onClick={() => setCommon({ undoSendSeconds: n })}
+              >
+                {undoLabel(n)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -124,20 +191,20 @@ function NotificationsSection() {
         </p>
       ) : (
         <div className="space-y-5">
-          <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+          <div className="rounded-2xl bg-card p-5 border border-border shadow-card">
             <h3 className="text-sm font-semibold text-text-primary">
               This browser
             </h3>
-            <p className="mt-1 text-xs font-light text-text-secondary">
+            <p className="mt-1 text-xs text-text-secondary">
               {subscribedHere
                 ? "Push is on for this browser."
                 : "Push is off for this browser."}
             </p>
-            {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+            {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
             <div className="mt-3">
               {subscribedHere ? (
                 <button
-                  className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary"
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary"
                   disabled={busy || !vapidPublicKey}
                   onClick={onDisable}
                 >
@@ -145,7 +212,7 @@ function NotificationsSection() {
                 </button>
               ) : (
                 <button
-                  className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-medium text-accent-foreground hover:bg-accent-hover h-8 px-3 text-[13px]"
                   disabled={busy || !vapidPublicKey}
                   onClick={onEnable}
                 >
@@ -155,18 +222,16 @@ function NotificationsSection() {
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+          <div className="overflow-hidden rounded-2xl bg-card border border-border shadow-card">
             <div className="border-b border-border px-5 py-3">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-text-tertiary">
+              <h3 className="font-label text-text-tertiary">
                 All subscribed browsers
               </h3>
             </div>
             {subs.length === 0 ? (
-              <p className="px-5 py-4 text-xs font-light text-text-tertiary">
-                None yet.
-              </p>
+              <p className="px-5 py-4 text-xs text-text-tertiary">None yet.</p>
             ) : (
-              <ul className="divide-y divide-border/60 text-xs">
+              <ul className="divide-y divide-border-subtle text-xs">
                 {subs.map((s) => (
                   <li
                     key={s.id}
@@ -176,7 +241,7 @@ function NotificationsSection() {
                       <div className="truncate text-sm font-medium text-text-primary">
                         {s.userAgent ?? "Unknown browser"}
                       </div>
-                      <div className="text-xs font-light text-text-tertiary">
+                      <div className="text-xs text-text-tertiary">
                         added {new Date(s.createdAt * 1000).toLocaleString()}
                         {s.lastUsedAt
                           ? ` · last used ${new Date(s.lastUsedAt * 1000).toLocaleString()}`
@@ -184,7 +249,7 @@ function NotificationsSection() {
                       </div>
                     </div>
                     <button
-                      className="rounded-[6px] border border-border px-2 py-1 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary"
+                      className="rounded-lg border border-border px-2 py-1 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary"
                       disabled={busy}
                       onClick={() => onRevoke(s.id)}
                     >
@@ -204,33 +269,11 @@ function NotificationsSection() {
 /* ------------------------------ 2. Display preferences ----------------------------- */
 
 function DisplayPreferencesSection() {
-  const [hideSignatures, setHideSignatures] = useState(() =>
-    readHideSignatures(),
-  );
-
-  // Stay in sync with other tabs (cross-tab) AND with the in-tab event the
-  // signatures lib dispatches.
-  useEffect(() => {
-    function onStorage(e: StorageEvent) {
-      if (e.key === HIDE_SIGNATURES_STORAGE_KEY) {
-        setHideSignatures(readHideSignatures());
-      }
-    }
-    function onCustom() {
-      setHideSignatures(readHideSignatures());
-    }
-    window.addEventListener("storage", onStorage);
-    window.addEventListener(HIDE_SIGNATURES_EVENT, onCustom);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener(HIDE_SIGNATURES_EVENT, onCustom);
-    };
-  }, []);
+  // Saved to the account (layoutSettings.common), so it follows the user.
+  const [{ hideSignatures }, setCommon] = useCommonSettings();
 
   function toggle() {
-    const next = !hideSignatures;
-    setHideSignatures(next);
-    writeHideSignatures(next);
+    setCommon({ hideSignatures: !hideSignatures });
   }
 
   return (
@@ -239,13 +282,13 @@ function DisplayPreferencesSection() {
         Display preferences
       </h2>
 
-      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+      <div className="rounded-2xl bg-card p-5 border border-border shadow-card">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="text-sm font-medium text-text-primary">
               Hide signatures in chat
             </h3>
-            <p className="mt-1 text-xs font-light text-text-secondary">
+            <p className="mt-1 text-xs text-text-secondary">
               Strip the signature block from chat-mode bubbles to keep the feed
               clean.
             </p>
@@ -261,7 +304,7 @@ function DisplayPreferencesSection() {
             }`}
           >
             <span
-              className={`h-4 w-4 rounded-full bg-white shadow transition-transform ${
+              className={`h-4 w-4 rounded-full bg-card shadow-card transition-transform ${
                 hideSignatures ? "translate-x-4" : "translate-x-0"
               }`}
             />
@@ -340,15 +383,15 @@ function AppBrandingSection() {
         App branding
       </h2>
 
-      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
-        <p className="text-xs font-light text-text-secondary">
+      <div className="rounded-2xl bg-card p-5 border border-border shadow-card">
+        <p className="text-xs text-text-secondary">
           The app name appears in the top-nav wordmark, the login screen, and
           invitation emails. Defaults to <code>saasmail</code>.
         </p>
         <div className="mt-4 space-y-2">
           <label
             htmlFor="branding-app-name"
-            className="text-xs font-medium uppercase tracking-wider text-text-tertiary"
+            className="font-label text-text-tertiary"
           >
             App name
           </label>
@@ -359,18 +402,18 @@ function AppBrandingSection() {
             onChange={(e) => setValue(e.target.value)}
             maxLength={40}
             disabled={busy}
-            className="h-10 w-full max-w-sm rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
+            className="h-10 w-full max-w-sm rounded-lg border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
           />
         </div>
 
         {error && (
-          <p className="mt-3 text-xs text-red-600" role="alert">
+          <p className="mt-3 text-xs text-destructive" role="alert">
             {error}
           </p>
         )}
         {success && (
           <p
-            className="mt-3 text-xs text-emerald-600"
+            className="mt-3 text-xs text-success"
             data-testid="branding-success"
           >
             {success}
@@ -382,7 +425,7 @@ function AppBrandingSection() {
             type="button"
             onClick={onSave}
             disabled={busy}
-            className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-medium text-accent-foreground hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60 h-8 px-3 text-[13px]"
           >
             {busy ? "Saving…" : "Save"}
           </button>
@@ -390,7 +433,7 @@ function AppBrandingSection() {
             type="button"
             onClick={onReset}
             disabled={busy}
-            className="text-xs font-light text-text-secondary hover:text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+            className="text-xs text-text-secondary hover:text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60"
           >
             Reset to default
           </button>

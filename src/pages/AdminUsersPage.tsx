@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import {
   Check,
   Copy,
@@ -37,6 +37,9 @@ import {
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 import { SectionHeader } from "@/components/PageForm";
 import { cn } from "@/lib/utils";
+import { avatarColor, initials } from "@/lib/avatar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 function formatDate(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString();
@@ -54,35 +57,6 @@ function relativeTime(ts: number): string {
   return diff < 0 ? `${days}d ago` : `in ${days}d`;
 }
 
-function avatarColor(seed: string): { bg: string; fg: string } {
-  // Same opaque palette as the group-thread avatars so identity colors
-  // feel consistent across the app.
-  const PALETTE = [
-    { bg: "#efebff", fg: "#5b3ce6" },
-    { bg: "#e4f8ec", fg: "#15803d" },
-    { bg: "#fdebf5", fg: "#be185d" },
-    { bg: "#fef0e4", fg: "#c2410c" },
-    { bg: "#e3f6fe", fg: "#0369a1" },
-    { bg: "#f3e7fe", fg: "#7e22ce" },
-    { bg: "#def5f3", fg: "#0f766e" },
-    { bg: "#fcf3d7", fg: "#a16207" },
-  ];
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  }
-  return PALETTE[Math.abs(hash) % PALETTE.length];
-}
-
-function initials(name: string, email: string): string {
-  const source = name.trim() || email;
-  const parts = source
-    .split(/[\s.@]+/)
-    .filter(Boolean)
-    .slice(0, 2);
-  return parts.map((p) => p.charAt(0).toUpperCase()).join("") || "?";
-}
-
 type InviteStatus = "pending" | "used" | "expired";
 function inviteStatus(invite: Invite): InviteStatus {
   if (invite.usedBy) return "used";
@@ -92,23 +66,11 @@ function inviteStatus(invite: Invite): InviteStatus {
 
 const INVITE_STATUS_META: Record<
   InviteStatus,
-  { label: string; chipClass: string; color: string }
+  { label: string; chip: string }
 > = {
-  pending: {
-    label: "Pending",
-    chipClass: "bg-emerald-50 ring-emerald-200/60 dark:bg-emerald-500/10",
-    color: "#047857",
-  },
-  used: {
-    label: "Accepted",
-    chipClass: "bg-violet/10 ring-violet/20",
-    color: "#7c5cfc",
-  },
-  expired: {
-    label: "Expired",
-    chipClass: "bg-bg-muted ring-border",
-    color: "#6b7280",
-  },
+  pending: { label: "Pending", chip: "ok" },
+  used: { label: "Accepted", chip: "accent" },
+  expired: { label: "Expired", chip: "" },
 };
 
 export default function AdminUsersPage() {
@@ -117,6 +79,23 @@ export default function AdminUsersPage() {
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
+  // `?invite=1` (the command palette's "Invite a teammate") opens the
+  // invite dialog, on arrival or while already on this page. The param is
+  // dropped once read, so asking again changes the URL and reopens it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const inviteParam = searchParams.get("invite") === "1";
+  useEffect(() => {
+    if (!inviteParam) return;
+    setInviteDialogOpen(true);
+    setSearchParams(
+      (prev) => {
+        const sp = new URLSearchParams(prev);
+        sp.delete("invite");
+        return sp;
+      },
+      { replace: true },
+    );
+  }, [inviteParam, setSearchParams]);
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteExpiry, setInviteExpiry] = useState("7");
@@ -204,21 +183,21 @@ export default function AdminUsersPage() {
             }}
           >
             <DialogTrigger asChild>
-              <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90">
-                <Plus size={14} />
+              <Button>
+                <Plus />
                 Invite user
-              </button>
+              </Button>
             </DialogTrigger>
-            <DialogContent className="border-border bg-card text-text-primary ring-1 ring-border">
+            <DialogContent>
               <DialogHeader>
-                <DialogTitle className="text-text-primary">
+                <DialogTitle>
                   {generatedLink ? "Invitation ready" : "Create invitation"}
                 </DialogTitle>
               </DialogHeader>
               {!generatedLink ? (
                 <div className="space-y-4">
                   <div className="space-y-1.5">
-                    <span className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+                    <span className="block text-[13px] font-medium text-text-primary">
                       Role
                     </span>
                     <div className="grid grid-cols-2 gap-2">
@@ -240,20 +219,21 @@ export default function AdminUsersPage() {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="invite-email"
-                      className="block text-[11px] font-medium uppercase tracking-wider text-text-tertiary"
+                      className="block text-[13px] font-medium text-text-primary"
                     >
                       Email{" "}
-                      <span className="text-text-tertiary/60">— optional</span>
+                      <span className="font-normal text-text-tertiary">
+                        (optional)
+                      </span>
                     </label>
-                    <input
+                    <Input
                       id="invite-email"
                       type="email"
                       value={inviteEmail}
                       onChange={(e) => setInviteEmail(e.target.value)}
                       placeholder="user@example.com"
-                      className="h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/20"
                     />
-                    <p className="text-[11px] font-light text-text-tertiary">
+                    <p className="text-xs text-text-tertiary">
                       Lock the invite to one address, or leave blank for any
                       teammate to accept.
                     </p>
@@ -262,48 +242,46 @@ export default function AdminUsersPage() {
                   <div className="space-y-1.5">
                     <label
                       htmlFor="invite-expiry"
-                      className="block text-[11px] font-medium uppercase tracking-wider text-text-tertiary"
+                      className="block text-[13px] font-medium text-text-primary"
                     >
                       Expires in (days)
                     </label>
-                    <input
+                    <Input
                       id="invite-expiry"
                       type="number"
                       min="1"
                       max="30"
                       value={inviteExpiry}
                       onChange={(e) => setInviteExpiry(e.target.value)}
-                      className="h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/20"
+                      className="tabular"
                     />
                   </div>
 
-                  <button
+                  <Button
                     onClick={handleCreateInvite}
                     disabled={inviteLoading}
-                    className="w-full rounded-[8px] bg-text-primary py-2 text-sm font-medium text-white transition-colors hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                    size="lg"
+                    className="w-full"
                   >
                     {inviteLoading ? "Creating…" : "Create invite"}
-                  </button>
+                  </Button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <p className="text-xs font-light text-text-secondary">
+                  <p className="text-[13px] text-text-secondary">
                     Share this link — it expires in {inviteExpiry} day
                     {inviteExpiry === "1" ? "" : "s"}.
                   </p>
                   <div className="flex gap-2">
-                    <input
+                    <Input
                       value={generatedLink}
                       readOnly
-                      className="h-10 flex-1 rounded-[6px] border border-border bg-bg-subtle px-3 text-xs text-text-primary focus:outline-none"
+                      className="font-code flex-1 bg-bg-subtle text-xs"
                     />
-                    <button
-                      onClick={handleCopy}
-                      className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-[6px] border border-border bg-card px-3 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-                    >
-                      {copied ? <Check size={12} /> : <Copy size={12} />}
+                    <Button variant="outline" onClick={handleCopy}>
+                      {copied ? <Check /> : <Copy />}
                       {copied ? "Copied" : "Copy"}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
@@ -312,9 +290,9 @@ export default function AdminUsersPage() {
         }
       />
 
-      <div className="max-w-4xl space-y-6">
+      <div className="max-w-4xl space-y-5">
         {/* --- Members --- */}
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
               icon={Users}
@@ -324,9 +302,17 @@ export default function AdminUsersPage() {
           </div>
 
           {loading ? (
-            <p className="px-5 py-6 text-xs font-light text-text-tertiary">
-              Loading…
-            </p>
+            <div className="space-y-3 px-5 py-4" aria-busy="true">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="pt-skel h-9 w-9 rounded-full" />
+                  <span className="flex-1 space-y-1.5">
+                    <span className="pt-skel h-3 w-1/3" />
+                    <span className="pt-skel h-2.5 w-1/2" />
+                  </span>
+                </div>
+              ))}
+            </div>
           ) : users.length === 0 ? (
             <EmptyState
               icon={Users}
@@ -334,7 +320,7 @@ export default function AdminUsersPage() {
               hint="Invite your first teammate above."
             />
           ) : (
-            <ul className="divide-y divide-border/60">
+            <ul className="divide-y divide-border-subtle">
               {users.map((user) => {
                 const color = avatarColor(user.email);
                 const isMe = user.id === session?.user?.id;
@@ -356,16 +342,12 @@ export default function AdminUsersPage() {
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium text-text-primary">
+                        <p className="truncate text-[14px] font-medium text-text-primary">
                           {user.name || user.email}
                         </p>
-                        {isMe && (
-                          <span className="inline-flex items-center rounded-full bg-bg-muted px-1.5 py-0.5 text-[10px] font-medium text-text-tertiary">
-                            you
-                          </span>
-                        )}
+                        {isMe && <span className="pt-chip">You</span>}
                       </div>
-                      <p className="truncate text-xs font-light text-text-tertiary">
+                      <p className="truncate text-[13px] text-text-tertiary">
                         {user.email} · joined {formatDate(user.createdAt)}
                       </p>
                     </div>
@@ -390,15 +372,12 @@ export default function AdminUsersPage() {
                         <DropdownMenuTrigger asChild>
                           <button
                             aria-label="More actions"
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary data-[state=open]:bg-bg-muted"
                           >
-                            <MoreHorizontal size={14} />
+                            <MoreHorizontal size={16} />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className="border-border bg-card text-text-primary ring-1 ring-border"
-                        >
+                        <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             onClick={() =>
                               handleRoleChange(
@@ -406,13 +385,12 @@ export default function AdminUsersPage() {
                                 isAdmin ? "member" : "admin",
                               )
                             }
-                            className="text-xs text-text-secondary focus:bg-bg-muted focus:text-text-primary"
                           >
                             Make {isAdmin ? "member" : "admin"}
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => handleDelete(user.id)}
-                            className="text-xs text-destructive focus:bg-bg-muted"
+                            className="text-destructive focus:bg-destructive-subtle focus:text-destructive"
                           >
                             Delete user
                           </DropdownMenuItem>
@@ -427,7 +405,7 @@ export default function AdminUsersPage() {
         </section>
 
         {/* --- Invitations --- */}
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <section className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
               icon={Mail}
@@ -443,7 +421,7 @@ export default function AdminUsersPage() {
               hint="Create one above to onboard your first teammate."
             />
           ) : (
-            <ul className="divide-y divide-border/60">
+            <ul className="divide-y divide-border-subtle">
               {invites.map((invite) => {
                 const status = inviteStatus(invite);
                 const meta = INVITE_STATUS_META[status];
@@ -453,24 +431,18 @@ export default function AdminUsersPage() {
                     className="flex items-center gap-3 px-5 py-3"
                   >
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-muted">
-                      <Mail size={14} className="text-text-tertiary" />
+                      <Mail size={15} className="text-text-secondary" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium text-text-primary">
+                        <p className="truncate text-[14px] font-medium text-text-primary">
                           {invite.email || "Open invite"}
                         </p>
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1",
-                            meta.chipClass,
-                          )}
-                          style={{ color: meta.color }}
-                        >
+                        <span className={cn("pt-chip", meta.chip)}>
                           {meta.label}
                         </span>
                       </div>
-                      <p className="truncate text-xs font-light text-text-tertiary">
+                      <p className="truncate text-[13px] text-text-tertiary">
                         {invite.role} ·{" "}
                         {status === "expired"
                           ? `expired ${formatDate(invite.expiresAt)}`
@@ -484,18 +456,15 @@ export default function AdminUsersPage() {
                         <DropdownMenuTrigger asChild>
                           <button
                             aria-label="More actions"
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary data-[state=open]:bg-bg-muted"
                           >
-                            <MoreHorizontal size={14} />
+                            <MoreHorizontal size={16} />
                           </button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="end"
-                          className="border-border bg-card text-text-primary ring-1 ring-border"
-                        >
+                        <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             onClick={() => handleRevoke(invite.id)}
-                            className="text-xs text-destructive focus:bg-bg-muted"
+                            className="text-destructive focus:bg-destructive-subtle focus:text-destructive"
                           >
                             Revoke invitation
                           </DropdownMenuItem>
@@ -529,25 +498,20 @@ function RoleButton({
   return (
     <button
       type="button"
+      role="radio"
+      aria-checked={active}
       onClick={onClick}
       className={cn(
-        "rounded-[8px] border px-3 py-2 text-left transition-colors",
+        "rounded-xl border px-3 py-2.5 text-left transition-[border-color,box-shadow,background-color]",
         active
-          ? "border-text-primary/30 bg-text-primary/5"
-          : "border-border bg-card hover:bg-bg-muted",
+          ? "border-accent bg-accent-subtle/50 shadow-[0_0_0_1px_var(--sm-accent)]"
+          : "border-border bg-card hover:border-border-strong",
       )}
     >
-      <span
-        className={cn(
-          "block text-xs font-semibold",
-          active ? "text-text-primary" : "text-text-secondary",
-        )}
-      >
+      <span className="block text-[13.5px] font-semibold text-text-primary">
         {label}
       </span>
-      <span className="block text-[11px] font-light text-text-tertiary">
-        {hint}
-      </span>
+      <span className="block text-xs text-text-secondary">{hint}</span>
     </button>
   );
 }
@@ -564,16 +528,8 @@ function UserBadge({
   labelOff: string;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1",
-        active
-          ? "bg-violet/10 ring-violet/20"
-          : "bg-bg-muted ring-border text-text-tertiary",
-      )}
-      style={active ? { color: "#7c5cfc" } : undefined}
-    >
-      <Icon size={9} />
+    <span className={cn("pt-chip", active ? "accent" : "")}>
+      <Icon />
       {active ? labelOn : labelOff}
     </span>
   );
@@ -589,12 +545,12 @@ function EmptyState({
   hint: string;
 }) {
   return (
-    <div className="px-5 py-10 text-center">
-      <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-violet/10">
-        <Icon size={16} style={{ color: "#7c5cfc" }} />
+    <div className="pt-empty">
+      <span className="ic">
+        <Icon size={18} />
       </span>
-      <p className="text-sm font-medium text-text-primary">{title}</p>
-      <p className="mt-1 text-xs font-light text-text-tertiary">{hint}</p>
+      <p className="font-medium text-text-primary">{title}</p>
+      <p className="-mt-2 text-[13px]">{hint}</p>
     </div>
   );
 }

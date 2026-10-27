@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Mail, Fingerprint, ArrowRight } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
-import { useBranding } from "@/lib/branding";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { AuthCard, AuthError } from "@/components/Wordmark";
 
 export default function LoginPage() {
-  const { brandName } = useBranding();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
@@ -32,7 +34,7 @@ export default function LoginPage() {
   if (setupRequired === null) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
-        <p className="animate-pulse text-sm text-white/40">Loading…</p>
+        <p className="animate-pulse text-sm text-chrome-dim">Loading…</p>
       </div>
     );
   }
@@ -77,139 +79,96 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative z-10 mx-4 w-full max-w-sm">
-      <div className="rounded-2xl bg-white/10 p-8 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl">
-        {/* Brand block — matches givefeedback's auth layout exactly */}
-        <div className="mb-8 text-center">
-          <Mail
-            className="mx-auto mb-4 h-12 w-12"
-            strokeWidth={2}
-            style={{ color: "#BFFF00" }}
-            aria-hidden
-          />
-          <h1 className="text-2xl font-extrabold uppercase tracking-tight text-white">
-            {brandName}
-          </h1>
-          <p className="mt-2 text-sm font-light text-white/50">
-            One unified timeline per customer
-          </p>
+    <AuthCard title="Sign in" subtitle="One unified timeline per customer.">
+      {error && <AuthError>{error}</AuthError>}
+
+      {mode === "passkey" ? (
+        <div className="space-y-2.5">
+          <Button
+            type="button"
+            size="lg"
+            onClick={handlePasskeyLogin}
+            disabled={loading}
+            className="w-full"
+          >
+            <Fingerprint strokeWidth={2.25} />
+            {loading ? "Signing in…" : "Continue with passkey"}
+          </Button>
+
+          <Button
+            type="button"
+            size="lg"
+            variant="outline"
+            onClick={() => {
+              setError("");
+              setMode("password");
+            }}
+            className="w-full"
+          >
+            <Mail strokeWidth={2.25} />
+            Sign in with email instead
+          </Button>
         </div>
-
-        {error && (
-          <p
-            role="alert"
-            className="text-destructive mb-4 rounded-md bg-red-500/15 px-3 py-2 text-center text-xs text-red-200 ring-1 ring-red-500/25"
-          >
-            {error}
-          </p>
-        )}
-
-        {mode === "passkey" ? (
-          <div className="space-y-3">
-            <button
-              type="button"
-              onClick={handlePasskeyLogin}
-              disabled={loading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-[#0a0a0a] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Fingerprint className="h-4 w-4" strokeWidth={2.25} />
-              {loading ? "Signing in…" : "Continue with passkey"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setError("");
-                setMode("password");
-              }}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-[#24292f] px-4 text-sm font-semibold text-white ring-1 ring-white/15 transition-colors hover:bg-[#24292f]/80"
-            >
-              <Mail className="h-4 w-4" strokeWidth={2.25} />
-              Sign in with email instead
-            </button>
+      ) : (
+        <form onSubmit={handlePasswordLogin} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="login-email">Email</Label>
+            <Input
+              id="login-email"
+              type="email"
+              placeholder="Email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="h-10"
+            />
           </div>
-        ) : (
-          <form onSubmit={handlePasswordLogin} className="space-y-3">
-            <div className="space-y-1.5">
-              <label
-                htmlFor="login-email"
-                className="text-[11px] font-medium uppercase tracking-wider text-white/50"
-              >
-                Email
-              </label>
-              <input
-                id="login-email"
-                type="email"
-                placeholder="Email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className={INPUT_CLASS}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label
-                htmlFor="login-password"
-                className="text-[11px] font-medium uppercase tracking-wider text-white/50"
-              >
-                Password
-              </label>
-              <input
-                id="login-password"
-                type="password"
-                placeholder="Password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className={INPUT_CLASS}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-md bg-white px-4 text-sm font-semibold text-[#0a0a0a] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? (
-                "Signing in…"
-              ) : (
-                <>
-                  <span>Sign in</span>
-                  <ArrowRight
-                    className="h-4 w-4"
-                    strokeWidth={2.25}
-                    aria-hidden
-                  />
-                </>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setError("");
-                setMode("passkey");
-              }}
-              className="block w-full text-center text-xs font-light text-white/50 transition-colors hover:text-white/80"
-            >
-              Sign in with passkey instead
-            </button>
-          </form>
-        )}
-
-        <p className="mt-6 text-center text-xs font-light text-white/30">
-          By signing in, you agree to our{" "}
-          <a
-            href="/terms"
-            className="underline-offset-2 hover:text-white/60 hover:underline"
+          <div className="space-y-1.5">
+            <Label htmlFor="login-password">Password</Label>
+            <Input
+              id="login-password"
+              type="password"
+              placeholder="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="h-10"
+            />
+          </div>
+          <Button type="submit" size="lg" disabled={loading} className="w-full">
+            {loading ? (
+              "Signing in…"
+            ) : (
+              <>
+                <span>Sign in</span>
+                <ArrowRight strokeWidth={2.25} aria-hidden />
+              </>
+            )}
+          </Button>
+          <button
+            type="button"
+            onClick={() => {
+              setError("");
+              setMode("passkey");
+            }}
+            className="block w-full text-center text-[13px] text-text-secondary transition-colors hover:text-text-primary"
           >
-            Terms of Service
-          </a>
-        </p>
-      </div>
-    </div>
+            Sign in with passkey instead
+          </button>
+        </form>
+      )}
+
+      <p className="mt-6 border-t border-border pt-4 text-center text-xs text-text-tertiary">
+        By signing in, you agree to our{" "}
+        <a
+          href="/terms"
+          className="font-medium text-text-secondary underline-offset-2 hover:text-text-primary hover:underline"
+        >
+          Terms of Service
+        </a>
+      </p>
+    </AuthCard>
   );
 }
-
-const INPUT_CLASS =
-  "h-11 w-full rounded-md border-0 bg-white/5 px-3 text-sm text-white ring-1 ring-white/15 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/40";

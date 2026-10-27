@@ -1252,6 +1252,13 @@
   dependencies:
     "@lezer/common" "^1.3.0"
 
+"@lezer/highlight@^1.2.3":
+  version "1.2.5"
+  resolved "https://registry.yarnpkg.com/@lezer/highlight/-/highlight-1.2.5.tgz#af43ba19f2cd50713eb045ab827085a0aa6d8592"
+  integrity sha512-O1GMVKgtf5YspFaRzpmqkVgMtIk2HG9uMAbH6wdAIdNh3TVzCsch/+cRi+6l2//UGDKe6NB9BW3cvuR5ezMQ0w==
+  dependencies:
+    "@lezer/common" "^1.3.0"
+
 "@lezer/html@^1.3.12":
   version "1.3.13"
   resolved "https://registry.yarnpkg.com/@lezer/html/-/html-1.3.13.tgz#6a1305ae3bd2c9c01f877f8a8dc1e15ec652d01c"
@@ -1390,18 +1397,6 @@
   version "1.40.0"
   resolved "https://registry.npmjs.org/@opentelemetry/semantic-conventions/-/semantic-conventions-1.40.0.tgz"
   integrity sha512-cifvXDhcqMwwTlTK04GBNeIe7yyo28Mfby85QXFe1Yk8nmi36Ab/5UQwptOx84SsoGNRg+EVSjwzfSZMy6pmlw==
-
-"@paper-design/shaders-react@^0.0.76":
-  version "0.0.76"
-  resolved "https://registry.yarnpkg.com/@paper-design/shaders-react/-/shaders-react-0.0.76.tgz#c574c2e75b8e7b40a1c50d2e919cd10f16be469a"
-  integrity sha512-uPJWrYRf6cJdO2H+fuXlahaqz0QjYglNAyUTaRfIInpzCa/d6guxBIK003soAZQFuQ035yg9FhtfFzKNWm+a5A==
-  dependencies:
-    "@paper-design/shaders" "0.0.76"
-
-"@paper-design/shaders@0.0.76":
-  version "0.0.76"
-  resolved "https://registry.yarnpkg.com/@paper-design/shaders/-/shaders-0.0.76.tgz#85788f66ac94067af284d3ba4ccb33f8df6b531c"
-  integrity sha512-AcNDY4J66YQHUfQYFInkCP7M9VOje0od7wLpOR7LtCmc532opJy6ll+h1W9zBovz8tt9U7OADUmJ/qKEXyOX/A==
 
 "@peculiar/asn1-android@^2.6.0":
   version "2.6.0"
@@ -1563,11 +1558,6 @@
   resolved "https://registry.npmjs.org/@poppinss/exception/-/exception-1.2.3.tgz"
   integrity sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==
 
-"@radix-ui/number@1.1.3":
-  version "1.1.3"
-  resolved "https://registry.yarnpkg.com/@radix-ui/number/-/number-1.1.3.tgz#9661c4bb44de93355993e1e09fed4fc8dfa9f7a6"
-  integrity sha512-Road2bidD0uu/1BGDOWNdPI06g0lIRy6IF9GZcIrDK2KGItfor8IQwQa+yM2ERgHM1MmHxaxpTzk0/Jp42lNfA==
-
 "@radix-ui/primitive@1.2.0":
   version "1.2.0"
   resolved "https://registry.yarnpkg.com/@radix-ui/primitive/-/primitive-1.2.0.tgz#8ddb41310edbef7e064b1e5fd65a6dde31d8b5cc"
@@ -1579,18 +1569,6 @@
   integrity sha512-67jjcVvxjXCCStnTW3Z+M7jmaFMuMR7M2JgpDzH4w7JSRrikmzhjfYgP/09ECb8n7whnsgh1ifJ+Ie96qEj+pQ==
   dependencies:
     "@radix-ui/react-primitive" "2.2.0"
-
-"@radix-ui/react-avatar@^1.3.1":
-  version "1.3.1"
-  resolved "https://registry.yarnpkg.com/@radix-ui/react-avatar/-/react-avatar-1.3.1.tgz#4059819311d39dfe782abf59e7a0e2e226ab8767"
-  integrity sha512-ssZOkfQNkFpYVmCPQlr978xSaU7moSrGXdwg4j2Xs2WlGl/1KsSZtfpK+WnLnx0Rwll1BAh6oUrAy/uR31SBvQ==
-  dependencies:
-    "@radix-ui/primitive" "1.2.0"
-    "@radix-ui/react-context" "1.3.0"
-    "@radix-ui/react-primitive" "2.2.0"
-    "@radix-ui/react-use-callback-ref" "1.1.5"
-    "@radix-ui/react-use-is-hydrated" "0.1.3"
-    "@radix-ui/react-use-layout-effect" "1.1.4"
 
 "@radix-ui/react-collection@1.2.0":
   version "1.2.0"
@@ -1769,29 +1747,6 @@
     "@radix-ui/react-use-controllable-state" "1.3.0"
     "@radix-ui/react-use-is-hydrated" "0.1.3"
     "@radix-ui/react-use-layout-effect" "1.1.4"
-
-"@radix-ui/react-scroll-area@^1.4.0":
-  version "1.4.0"
-  resolved "https://registry.yarnpkg.com/@radix-ui/react-scroll-area/-/react-scroll-area-1.4.0.tgz#2441c06836b6f81b086a28ce5e6a2da64d0c43e2"
-  integrity sha512-CFrLqHNejWq5FhKAcj9V/WPGRsol76HBQto81NdOBVFEOqIEkJkKIJt0Z824A/9hHLCtoiR/Kw3euRgzXP2pxg==
-  dependencies:
-    "@radix-ui/number" "1.1.3"
-    "@radix-ui/primitive" "1.2.0"
-    "@radix-ui/react-compose-refs" "1.1.5"
-    "@radix-ui/react-context" "1.3.0"
-    "@radix-ui/react-direction" "1.2.0"
-    "@radix-ui/react-presence" "1.1.11"
-    "@radix-ui/react-primitive" "2.2.0"
-    "@radix-ui/react-slot" "1.5.0"
-    "@radix-ui/react-use-callback-ref" "1.1.5"
-    "@radix-ui/react-use-layout-effect" "1.1.4"
-
-"@radix-ui/react-separator@^1.2.0":
-  version "1.2.0"
-  resolved "https://registry.yarnpkg.com/@radix-ui/react-separator/-/react-separator-1.2.0.tgz#80d3c20ae4913de75764faac461c1049c2c4cf0e"
-  integrity sha512-1jUAap0wZEqVP05Ou7kJgRxe/W+Qftng+rUNWGa0qkKbv9r5pWTG3E7a3ELKo2eJoHKMECnzuYrZpSyO1YgcYQ==
-  dependencies:
-    "@radix-ui/react-primitive" "2.2.0"
 
 "@radix-ui/react-slot@1.5.0", "@radix-ui/react-slot@^1.2.4":
   version "1.5.0"

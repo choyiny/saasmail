@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import {
   fetchEmail,
@@ -94,19 +95,23 @@ export default function ReassignPersonModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-md rounded-xl border border-border bg-white ring-1 ring-gray-200 p-6">
-        <h2 className="mb-1 text-lg font-semibold text-text-primary">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--chrome-scrim)] p-4 backdrop-blur-[2px]">
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="w-full max-w-md rounded-2xl border border-border-strong bg-card p-6 shadow-overlay"
+      >
+        <h2 className="mb-1 text-base font-semibold tracking-[-0.01em] text-text-primary">
           Reassign message
         </h2>
-        <p className="mb-4 text-sm text-text-secondary">
+        <p className="mb-4 text-[13.5px] text-text-secondary">
           Attribute this message to a different person so replies reach them.
           Currently under{" "}
           <span className="font-medium text-text-primary">{currentSender}</span>
           .
         </p>
 
-        <label className="mb-1 block text-xs font-medium text-text-secondary">
+        <label className="mb-1.5 block text-[13px] font-medium text-text-primary">
           Person's email
         </label>
         <input
@@ -121,7 +126,7 @@ export default function ReassignPersonModal({
             if (e.key === "Enter") void handleSubmit();
           }}
           placeholder="real.person@example.com"
-          className="mb-1 w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-sm text-text-primary"
+          className={`mb-1 ${"w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-sm text-text-primary shadow-card placeholder:text-text-tertiary focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15"}`}
         />
         {prefilledFromReplyTo && (
           <p className="mb-3 text-[11px] text-text-tertiary">
@@ -129,7 +134,7 @@ export default function ReassignPersonModal({
           </p>
         )}
 
-        <label className="mb-1 mt-3 block text-xs font-medium text-text-secondary">
+        <label className="mb-1.5 mt-3 block text-[13px] font-medium text-text-primary">
           Name <span className="text-text-tertiary">(optional)</span>
         </label>
         <input
@@ -140,25 +145,21 @@ export default function ReassignPersonModal({
             if (e.key === "Enter") void handleSubmit();
           }}
           placeholder="Jane Doe"
-          className="w-full rounded-md border border-border bg-white ring-1 ring-gray-200 px-3 py-2 text-sm text-text-primary"
+          className="w-full rounded-lg border border-border-strong bg-card px-3 py-2 text-sm text-text-primary shadow-card placeholder:text-text-tertiary focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15"
         />
 
-        {error && <p className="mt-3 text-xs text-red-400">{error}</p>}
+        {error && <p className="mt-3 text-xs text-destructive">{error}</p>}
 
-        <div className="mt-5 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-text-secondary hover:bg-bg-muted"
-          >
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button
+          </Button>
+          <Button
             onClick={handleSubmit}
             disabled={submitting || !toEmail.trim()}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent/90 disabled:opacity-50"
           >
             {submitting ? "Reassigning..." : "Reassign"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

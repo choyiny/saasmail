@@ -50,24 +50,24 @@ export default function ThreadInboxSection({
   const olderChronological = group.emails.slice(1).reverse();
 
   return (
-    <section className="border-b-4 border-border-subtle">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg-subtle px-4 sm:px-6 py-2">
-        <Inbox size={12} className="text-text-tertiary" />
-        <span className="text-[11px] font-medium text-text-secondary">
+    <section>
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-bg-subtle/95 px-4 py-2 backdrop-blur-sm sm:px-6">
+        <Inbox size={13} className="text-text-secondary" />
+        <span className="text-[13px] font-medium text-text-primary">
           {group.inbox}
         </span>
-        <span className="text-[11px] text-text-tertiary">
+        <span className="tabular text-xs text-text-tertiary">
           · {group.emails.length} email{group.emails.length !== 1 ? "s" : ""}
         </span>
       </div>
-      <div className="divide-y divide-border-subtle">
+      <div className="flex flex-col gap-3 px-3 py-4 sm:px-6">
         {olderChronological.length > 0 && (
-          <div className="px-4 sm:px-6 py-2">
+          <div>
             <button
               onClick={onToggleOlder}
-              className="flex items-center gap-1.5 text-xs text-accent hover:underline"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-card px-3 text-[13px] font-medium text-text-secondary shadow-card transition-colors hover:text-text-primary"
             >
-              <MessageSquare size={12} />
+              <MessageSquare size={13} />
               {isOlderExpanded ? "Hide" : "Show"} {olderChronological.length}{" "}
               previous message{olderChronological.length !== 1 ? "s" : ""}
             </button>

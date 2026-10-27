@@ -20,8 +20,13 @@ import { drafts } from "./drafts.schema";
 import { gmailAccounts } from "./gmail-accounts.schema";
 import { outlookAccounts } from "./outlook-accounts.schema";
 import { installState } from "./install-state.schema";
+import { userPreferences } from "./user-preferences.schema";
+import { mailItemStates, categoryOverrides } from "./mail-item-states.schema";
 
 export const schema = {
+  userPreferences,
+  mailItemStates,
+  categoryOverrides,
   ...authSchema,
   invitations,
   people,

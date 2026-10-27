@@ -18,7 +18,7 @@ export function WebMcpStatusBadge({ toolCount }: { toolCount: number }) {
   if (!active) return null;
   return (
     <span
-      className="hidden items-center gap-1 rounded-full bg-white/[0.08] px-2 py-0.5 text-[10px] font-medium text-white/60 sm:inline-flex"
+      className="hidden h-6 items-center gap-1.5 rounded-full border border-chrome-line px-2 text-[11px] font-medium text-chrome-dim md:inline-flex"
       title={`Your AI agent can use ${toolCount} saasmail tools on this page.`}
     >
       <Bot className="h-3 w-3" />

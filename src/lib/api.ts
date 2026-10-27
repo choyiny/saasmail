@@ -22,6 +22,20 @@ export interface GroupedPerson {
   recipientCount: number;
   recipients: string[];
   hasAttachment: number;
+  /** Per-user mail state and list-row extras (see mail_item_states). */
+  starred: boolean;
+  pinned: boolean;
+  /** Unix seconds; set only while the row is archived. */
+  archivedAt: number | null;
+  /** Unix seconds; set only while the row is snoozed. */
+  snoozedUntil: number | null;
+  /** Unix seconds; set only while the row is in this user's Trash. */
+  trashedAt: number | null;
+  hasSent: boolean;
+  latestSubject: string | null;
+  snippet: string | null;
+  /** Gmail-style tab: bulk mail = promotions, social networks, automated = updates. */
+  category: MailCategory;
 }
 
 /**
@@ -47,7 +61,36 @@ export interface GroupedConversation {
   unreadCount: number;
   totalCount: number;
   hasAttachment: number;
+  /** Per-user mail state and list-row extras (see mail_item_states). */
+  starred: boolean;
+  pinned: boolean;
+  /** Unix seconds; set only while the row is archived. */
+  archivedAt: number | null;
+  /** Unix seconds; set only while the row is snoozed. */
+  snoozedUntil: number | null;
+  /** Unix seconds; set only while the row is in this user's Trash. */
+  trashedAt: number | null;
+  hasSent: boolean;
+  latestSubject: string | null;
+  snippet: string | null;
+  /** Gmail-style tab: bulk mail = promotions, social networks, automated = updates. */
+  category: MailCategory;
 }
+
+/** Row state for a grouped item built on the client (not from the list). */
+export const EMPTY_MAIL_ROW_STATE = {
+  starred: false,
+  pinned: false,
+  archivedAt: null,
+  snoozedUntil: null,
+  trashedAt: null,
+  hasSent: false,
+  latestSubject: null,
+  snippet: null,
+  category: "primary",
+} as const;
+
+export type MailCategory = "primary" | "promotions" | "social" | "updates";
 
 /** Discriminated union — anything that shows up in the inbox sidebar/table. */
 export type GroupedItem = GroupedPerson | GroupedConversation;
@@ -105,6 +148,8 @@ export interface Stats {
   totalEmails: number;
   unreadCount: number;
   recipients: string[];
+  /** Unread received emails per inbox address. */
+  inboxUnread: Record<string, number>;
   senderIdentities: Array<{
     email: string;
     displayName: string | null;
@@ -187,6 +232,8 @@ export interface PaginatedGroupedPeople {
   limit: number;
   /** Aggregates over the *filtered* set so stat tiles don't lie when paged. */
   aggregates: InboxAggregates;
+  /** Present when withTabCounts was requested. */
+  tabCounts?: Record<MailCategory, { unread: number; new: number }> | null;
 }
 
 export type InboxSort = "recency" | "unread" | "inbox" | "attachments";
@@ -204,36 +251,180 @@ export function defaultDirectionFor(key: InboxSort): InboxSortDirection {
   return key === "inbox" ? "asc" : "desc";
 }
 
+export type MailFolder =
+  | "all"
+  | "inbox"
+  | "starred"
+  | "snoozed"
+  | "archive"
+  | "sent"
+  | "trash";
+
+export type MailItemRef = { type: "person" | "group"; id: string };
+
+export interface MailItemState {
+  type: "person" | "group";
+  id: string;
+  starred: boolean;
+  pinned: boolean;
+  archivedAt: number | null;
+  snoozedUntil: number | null;
+  trashedAt: number | null;
+}
+
+/**
+ * Star, pin, archive or snooze inbox rows for the signed-in user.
+ * `snoozedUntil` is unix seconds; null wakes the row.
+ */
+export async function updateMailState(
+  items: MailItemRef[],
+  patch: {
+    starred?: boolean;
+    pinned?: boolean;
+    archived?: boolean;
+    snoozedUntil?: number | null;
+    /** Per-user Trash; permanent delete is deletePerson. */
+    trashed?: boolean;
+  },
+): Promise<{ data: MailItemState[] }> {
+  return apiFetch(`/api/mail-state`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items, ...patch }),
+  });
+}
+
+export type UiTheme = "default" | "gmail" | "outlook";
+export type ColorMode = "light" | "dark" | "system";
+export type Density = "comfortable" | "compact";
+export type Palette =
+  | "navy"
+  | "ink"
+  | "slate"
+  | "indigo"
+  | "forest"
+  | "claret"
+  | "paper";
+
+export interface UserPreferences {
+  uiTheme: UiTheme;
+  colorMode: ColorMode;
+  density: Density;
+  /** Colour theme of the default layout. */
+  palette: Palette;
+  /** Per-layout view settings, keyed by layout. */
+  layoutSettings: Record<string, Record<string, unknown>>;
+  /** Unix seconds each inbox tab was last viewed. */
+  tabSeen: Partial<Record<MailCategory, number>>;
+}
+
+export async function fetchPreferences(): Promise<UserPreferences> {
+  return apiFetch(`/api/user/preferences`);
+}
+
+export async function updatePreferences(
+  patch: Partial<UserPreferences>,
+): Promise<UserPreferences> {
+  return apiFetch(`/api/user/preferences`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+}
+
+export type GroupedQuery = NonNullable<
+  Parameters<typeof fetchGroupedPeople>[0]
+>;
+
+/**
+ * Every row matching a list query (capped at 5000), for whole-folder
+ * actions like "Mark all as read" or "Archive all".
+ */
+function groupedQueryString(params: GroupedQuery): URLSearchParams {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.recipient) qs.set("recipient", params.recipient);
+  if (params.unread) qs.set("unread", "1");
+  if (params.drafts) qs.set("drafts", "1");
+  if (params.sequenced) qs.set("sequenced", "1");
+  if (params.folder && params.folder !== "all") qs.set("folder", params.folder);
+  if (params.hasAttachment) qs.set("hasAttachment", "1");
+  if (params.from) qs.set("from", params.from);
+  if (params.category) qs.set("category", params.category);
+  if (params.starred) qs.set("starred", "1");
+  if (params.pinned) qs.set("pinned", "1");
+  if (params.after !== undefined) qs.set("after", String(params.after));
+  if (params.before !== undefined) qs.set("before", String(params.before));
+  if (params.subject) qs.set("subject", params.subject);
+  if (params.withTabCounts) qs.set("withTabCounts", "1");
+  if (params.sort && params.sort !== "recency") qs.set("sort", params.sort);
+  // Only send direction when it differs from the natural default —
+  // keeps the URL stable for the common case and avoids cache-busting.
+  if (
+    params.sort &&
+    params.direction &&
+    params.direction !== defaultDirectionFor(params.sort)
+  ) {
+    qs.set("direction", params.direction);
+  }
+  if (params.page) qs.set("page", params.page.toString());
+  if (params.limit) qs.set("limit", params.limit.toString());
+  return qs;
+}
+
+export async function fetchGroupedIds(
+  params: Omit<GroupedQuery, "page" | "limit" | "withTabCounts">,
+): Promise<{
+  data: Array<{ type: "person" | "group"; id: string; unread: boolean }>;
+  total: number;
+  truncated: boolean;
+}> {
+  const qs = groupedQueryString(params);
+  return apiFetch(`/api/people/grouped/ids?${qs}`);
+}
+
+/** Move senders to a tab for this user ("Move to Primary"); null clears. */
+export async function setCategoryOverride(
+  senders: string[],
+  category: MailCategory | null,
+): Promise<void> {
+  await apiFetch(`/api/people/category`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ senders, category }),
+  });
+}
+
 export async function fetchGroupedPeople(params?: {
   q?: string;
   recipient?: string;
   unread?: boolean;
   drafts?: boolean;
   sequenced?: boolean;
+  /** Mail folder; omitted means "all" (ignores star/archive/snooze). */
+  folder?: MailFolder;
+  /** Only rows with a real (non-inline) attachment. */
+  hasAttachment?: boolean;
+  /** Sender name or address contains this. */
+  from?: string;
+  category?: MailCategory;
+  starred?: boolean;
+  pinned?: boolean;
+  /** Unix seconds: only rows with activity at or after. */
+  after?: number;
+  /** Unix seconds: only rows whose latest activity is before. */
+  before?: number;
+  /** A message subject contains this. */
+  subject?: string;
+  /** Also return per-tab unread / new counts (inbox). */
+  withTabCounts?: boolean;
   sort?: InboxSort;
   /** Optional explicit direction. Server applies the natural default if omitted. */
   direction?: InboxSortDirection;
   page?: number;
   limit?: number;
 }): Promise<PaginatedGroupedPeople> {
-  const qs = new URLSearchParams();
-  if (params?.q) qs.set("q", params.q);
-  if (params?.recipient) qs.set("recipient", params.recipient);
-  if (params?.unread) qs.set("unread", "1");
-  if (params?.drafts) qs.set("drafts", "1");
-  if (params?.sequenced) qs.set("sequenced", "1");
-  if (params?.sort && params.sort !== "recency") qs.set("sort", params.sort);
-  // Only send direction when it differs from the natural default —
-  // keeps the URL stable for the common case and avoids cache-busting.
-  if (
-    params?.sort &&
-    params?.direction &&
-    params.direction !== defaultDirectionFor(params.sort)
-  ) {
-    qs.set("direction", params.direction);
-  }
-  if (params?.page) qs.set("page", params.page.toString());
-  if (params?.limit) qs.set("limit", params.limit.toString());
+  const qs = groupedQueryString(params ?? {});
   return apiFetch(`/api/people/grouped?${qs}`);
 }
 

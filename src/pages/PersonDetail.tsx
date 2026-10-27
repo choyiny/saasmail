@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ShieldBan } from "lucide-react";
+import { ArrowLeft, ListPlus, ShieldBan } from "lucide-react";
 import {
   fetchPersonEmails,
   markEmailRead,
@@ -36,6 +36,12 @@ import type { ComposePrefill } from "@/pages/ComposeModal";
 import { onEmailSent } from "@/lib/email-events";
 import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import {
+  MailActionButtons,
+  type MailActionHandlers,
+  type MailStateLike,
+} from "@/components/MailActions";
+import { Button } from "@/components/ui/button";
 
 interface PersonDetailProps {
   person: GroupedPerson;
@@ -54,6 +60,11 @@ interface PersonDetailProps {
    * "no mail selected" — the thread is now hidden from the inbox.
    */
   onBlock?: () => void;
+  /** Star / pin / archive / snooze state and handlers for the header. */
+  mailState?: MailStateLike;
+  mailActions?: MailActionHandlers;
+  /** Shows a back arrow in the header (mobile, table view). */
+  onBack?: () => void;
 }
 
 function inboxOf(email: Email): string {
@@ -90,15 +101,7 @@ function inboxColor(seed: string) {
   // Stable but per-inbox accent so the active tab feels distinct.
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  const palette = [
-    "#7c5cfc",
-    "#0f766e",
-    "#0369a1",
-    "#a16207",
-    "#be185d",
-    "#7e22ce",
-  ];
-  return palette[h % palette.length];
+  return `var(--sm-av-${(h % 8) + 1}-fg)`;
 }
 
 function unreadIn(group: ThreadInboxGroup): number {
@@ -122,6 +125,9 @@ export default function PersonDetail({
   refreshKey,
   onOpenCompose,
   onBlock,
+  mailState,
+  mailActions,
+  onBack,
 }: PersonDetailProps) {
   const navigate = useNavigate();
   const [emails, setEmails] = useState<Email[]>([]);
@@ -178,8 +184,16 @@ export default function PersonDetail({
     }
   }
 
+  // The person whose emails should be on screen. Responses for any other
+  // person (a slower request from before the user switched rows) are
+  // dropped, so a reply can never target the previous person's email.
+  const currentPersonRef = useRef(person.id);
+  currentPersonRef.current = person.id;
+
   function refetchEmails() {
-    fetchPersonEmails(person.id).then((res) => {
+    const forId = person.id;
+    fetchPersonEmails(forId).then((res) => {
+      if (currentPersonRef.current !== forId) return;
       setEmails(res.emails);
       setInboxModeMap(
         new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
@@ -188,18 +202,26 @@ export default function PersonDetail({
   }
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
+    setEmails([]);
     setReplyToEmailId(null);
     setExpandedOlder({});
     setActiveInbox(null);
     fetchPersonEmails(person.id)
       .then((res) => {
+        if (cancelled) return;
         setEmails(res.emails);
         setInboxModeMap(
           new Map(res.inboxes.map((i) => [i.email, i.displayMode])),
         );
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [person.id]);
 
   useEffect(() => {
@@ -207,7 +229,14 @@ export default function PersonDetail({
   }, [refreshKey]);
 
   useEffect(() => {
-    fetchPersonEnrollment(person.id).then(setEnrollmentInfo);
+    let cancelled = false;
+    setEnrollmentInfo(null);
+    fetchPersonEnrollment(person.id).then((info) => {
+      if (!cancelled) setEnrollmentInfo(info);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [person.id]);
 
   useEffect(() => {
@@ -217,7 +246,10 @@ export default function PersonDetail({
   }, []);
 
   function refreshEnrollment() {
-    fetchPersonEnrollment(person.id).then(setEnrollmentInfo);
+    const forId = person.id;
+    fetchPersonEnrollment(forId).then((info) => {
+      if (currentPersonRef.current === forId) setEnrollmentInfo(info);
+    });
   }
 
   async function handleMarkRead(email: Email) {
@@ -403,80 +435,103 @@ export default function PersonDetail({
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-text-tertiary">
-        <span className="text-sm">Loading…</span>
+      <div
+        className="flex h-full flex-col gap-4 p-5"
+        aria-busy="true"
+        aria-label="Loading conversation"
+      >
+        <span className="pt-skel h-5 w-1/3" />
+        <span className="pt-skel h-3 w-1/4" />
+        <span className="pt-skel mt-4 h-24 w-full rounded-xl" />
+        <span className="pt-skel h-24 w-5/6 rounded-xl" />
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Person header — name + email + meta on a single visual block */}
-      <div className="shrink-0 border-b border-border bg-card px-4 pb-2.5 pt-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h2 className="truncate text-base font-extrabold tracking-tight text-text-primary">
+      {/* Person header — name, address and meta, actions on the right. */}
+      <div className="shrink-0 border-b border-border bg-card px-4 py-3 sm:px-5">
+        <div className="flex items-start gap-3">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label="Back to list"
+              className="-ml-1.5 mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-bg-muted hover:text-text-primary"
+            >
+              <ArrowLeft size={17} />
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-[17px] font-semibold leading-snug tracking-[-0.015em] text-text-primary">
               {person.name || person.email}
             </h2>
-            {person.name && (
-              <span className="truncate text-xs font-light text-text-tertiary">
-                {person.email}
+            <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-[13px] text-text-secondary">
+              {person.name && <span className="truncate">{person.email}</span>}
+              {person.name && <span aria-hidden>·</span>}
+              <span className="tabular text-text-tertiary">
+                {person.totalCount} message
+                {person.totalCount !== 1 ? "s" : ""}
+                {inboxGroups.length > 1
+                  ? ` · ${inboxGroups.length} inboxes`
+                  : ""}
               </span>
-            )}
-            <span className="text-[11px] text-text-tertiary">
-              · {person.totalCount} message
-              {person.totalCount !== 1 ? "s" : ""}
-              {inboxGroups.length > 1 ? ` · ${inboxGroups.length} inboxes` : ""}
-            </span>
+            </p>
           </div>
+          {mailState && mailActions && (
+            <MailActionButtons
+              state={mailState}
+              handlers={mailActions}
+              className="-mr-1 shrink-0"
+            />
+          )}
+        </div>
 
-          <div className="flex shrink-0 items-center gap-2">
-            {activeGroup && (
-              <MarkAllReadButton
-                unreadCount={unreadIn(activeGroup)}
-                scopeLabel={activeGroup.inbox}
-                onMarkAllRead={() => handleMarkInboxRead(activeGroup.inbox)}
-              />
-            )}
-            {enrollmentInfo?.enrollment ? (
-              <SequenceStatus
-                personId={person.id}
-                onStatusChange={refreshEnrollment}
-              />
-            ) : (
-              <button
-                onClick={() => setEnrollModalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-card px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          {activeGroup && (
+            <MarkAllReadButton
+              unreadCount={unreadIn(activeGroup)}
+              scopeLabel={activeGroup.inbox}
+              onMarkAllRead={() => handleMarkInboxRead(activeGroup.inbox)}
+            />
+          )}
+          {enrollmentInfo?.enrollment ? (
+            <SequenceStatus
+              personId={person.id}
+              onStatusChange={refreshEnrollment}
+            />
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEnrollModalOpen(true)}
+            >
+              <ListPlus />
+              Add to sequence
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                aria-label="Block sender"
+                className="hover:text-destructive"
               >
-                Add to sequence
-              </button>
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  aria-label="Block sender"
-                  className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-card px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-rose-50 hover:text-rose-600"
-                >
-                  <ShieldBan size={13} />
-                  Block
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => handleBlock("email")}
-                >
-                  Block {person.email}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="cursor-pointer"
-                  onClick={() => handleBlock("domain")}
-                >
-                  Block entire domain
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+                <ShieldBan />
+                Block
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => handleBlock("email")}>
+                Block {person.email}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleBlock("domain")}>
+                Block entire domain
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -485,9 +540,9 @@ export default function PersonDetail({
           On mobile: horizontal scroll with snap (native-app feel).
           On desktop: wraps onto multiple lines. */}
       {inboxGroups.length > 0 && (
-        <div className="shrink-0 border-b border-border bg-card/60">
+        <div className="shrink-0 border-b border-border bg-card">
           <div
-            className="smooth-scroll flex gap-0.5 overflow-x-auto px-2 py-1 sm:flex-wrap sm:overflow-visible"
+            className="smooth-scroll flex gap-1 overflow-x-auto px-3 py-1.5 sm:flex-wrap sm:overflow-visible sm:px-4"
             style={{ scrollSnapType: "x proximity" }}
           >
             {inboxGroups.map((group) => {
@@ -504,10 +559,10 @@ export default function PersonDetail({
                   title={`${group.inbox} · ${mode} mode`}
                   style={{ scrollSnapAlign: "start" }}
                   className={cn(
-                    "inline-flex shrink-0 items-center gap-1.5 rounded-[5px] px-2 py-1 text-xs transition-all",
+                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] transition-colors",
                     isActive
-                      ? "bg-text-primary/[0.05] text-text-primary ring-1 ring-text-primary/10"
-                      : "text-text-secondary hover:bg-bg-muted/70 hover:text-text-primary",
+                      ? "bg-card text-text-primary shadow-card ring-1 ring-border-strong"
+                      : "text-text-secondary hover:bg-bg-muted hover:text-text-primary",
                   )}
                 >
                   {/* Mode-aware accent dot — color stable per inbox */}
@@ -520,13 +575,12 @@ export default function PersonDetail({
                     aria-hidden
                   />
                   <span className="font-medium">{label}</span>
-                  <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-bg-muted px-1 text-[10px] font-semibold tabular-nums text-text-secondary">
+                  <span className="tabular inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-bg-muted px-1 text-[11px] font-medium text-text-secondary">
                     {group.emails.length}
                   </span>
                   {unread > 0 && (
                     <span
-                      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums text-white"
-                      style={{ backgroundColor: "#7c5cfc" }}
+                      className="tabular inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-accent px-1 text-[11px] font-semibold text-accent-foreground"
                       aria-label={`${unread} unread`}
                     >
                       {unread}
@@ -583,8 +637,8 @@ export default function PersonDetail({
             );
           })()
         ) : (
-          <div className="flex flex-1 items-center justify-center text-sm text-text-tertiary">
-            No emails found.
+          <div className="pt-empty flex-1">
+            No messages with this person yet.
           </div>
         )}
 
