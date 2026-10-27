@@ -17,6 +17,11 @@ interface TiptapEditorProps {
   className?: string;
   /** Override the default 2 MB per-image cap. */
   maxImageBytes?: number;
+  /**
+   * Place the cursor at the end of the content once the editor mounts.
+   * Doesn't scroll — the caller owns positioning the editor on screen.
+   */
+  autoFocus?: boolean;
 }
 
 const DEFAULT_MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -80,6 +85,7 @@ export default function TiptapEditor({
   placeholder: placeholderText,
   className,
   maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
+  autoFocus = false,
 }: TiptapEditorProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Inline error surface for rejected images (oversize / wrong type).
@@ -107,6 +113,7 @@ export default function TiptapEditor({
     content,
     onCreate: ({ editor }) => {
       editorRef.current = editor as Editor;
+      if (autoFocus) editor.commands.focus("end", { scrollIntoView: false });
     },
     onUpdate: ({ editor }) => {
       onUpdate(editor.getHTML(), editor.getText());
