@@ -8,6 +8,8 @@
     "baseUrl": ".",
     "paths": { "@/*": ["./src/*"], "@worker/*": ["./worker/src/*"] },
     "strict": false,
+    // better-auth's client types infer the session as `never` without it.
+    "strictNullChecks": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "noEmit": true
