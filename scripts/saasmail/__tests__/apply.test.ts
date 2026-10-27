@@ -1122,7 +1122,7 @@ describe("resumeInstalled", () => {
     expect(out.status).toBe("installed");
   });
 
-  it("a differing package version points at upgrade, not adopt", async () => {
+  it("a differing package version points at upgrade", async () => {
     const { s, seed } = installedFixture();
     const h = harness({ seed, setupStatus: closed, pkg: true });
     await resumeInstalled(
@@ -1135,7 +1135,6 @@ describe("resumeInstalled", () => {
     expect(text).toContain(
       `Run ${h.ctx.source.command(`upgrade --name ${s.names.worker}`)} to move it to 1.0.0.`,
     );
-    expect(text).not.toContain("adopt --from");
   });
 
   it("adds an inbound domain: routing only, no deploy", async () => {
@@ -1354,7 +1353,9 @@ describe("resumeInstalled", () => {
     expect(existsSync(join(cwd, "wrangler.jsonc"))).toBe(false);
     const out = h.printed.join("\n");
     expect(out).toContain("Nothing to do.");
-    expect(out).toContain("Upgrades: run npx saasmail adopt --from");
+    expect(out).toContain(
+      "To update it, see docs/updating.md#forks-and-modified-code.",
+    );
   });
 
   it("refuses credentials that would need an upgrade deploy", async () => {

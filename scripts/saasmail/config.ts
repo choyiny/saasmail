@@ -42,15 +42,6 @@ function parseConfig(text: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** The top-level `vars` of a wrangler.jsonc text (string values as they deploy). */
-export function configVars(text: string): Record<string, string> {
-  const vars = parseConfig(text).vars;
-  const out: Record<string, string> = {};
-  if (vars && typeof vars === "object")
-    for (const [k, v] of Object.entries(vars)) out[k] = String(v);
-  return out;
-}
-
 /**
  * `VAPID_SUBJECT`: the one frozen in the state, else `mailto:admin@` the hostname, the first send
  * domain, the first inbound domain, or the base URL's host.

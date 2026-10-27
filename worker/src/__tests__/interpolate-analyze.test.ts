@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  analyzeTemplate,
-  extractVariables,
-  renderTemplate,
-} from "../lib/interpolate";
+import { analyzeTemplate, renderTemplate } from "../lib/interpolate";
 
 describe("analyzeTemplate — the validation split", () => {
   it("does NOT mark a section-body variable as required", () => {
@@ -138,15 +134,6 @@ describe("analyzeTemplate — the validation split", () => {
     );
     expect(a.sections).toEqual([
       { name: "items", inverted: false, variables: ["price", "qty"] },
-    ]);
-  });
-});
-
-describe("extractVariables", () => {
-  it("returns the required set, preserving the pre-rewrite contract", () => {
-    expect(extractVariables("Hi {{name}}, {{email}}")).toEqual([
-      "name",
-      "email",
     ]);
   });
 });

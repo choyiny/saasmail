@@ -81,7 +81,7 @@ export async function signVapidJwt(args: {
   return `${signingInput}.${b64urlEncode(sig)}`;
 }
 
-// ---- Placeholder exports for Task 4 (keeps imports valid) ----
+// ---- The subscription and payload types sendPush takes ----
 export interface PushSubscriptionRecord {
   endpoint: string;
   p256dh: string;

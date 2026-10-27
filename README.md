@@ -42,7 +42,7 @@ npx saasmail@latest upgrade   # move to the newest release
 npx saasmail status           # what is installed, what is latest
 ```
 
-Installed from a clone before? `npx saasmail adopt --from <checkout>` moves it; see [Updating](docs/updating.md). Running a fork or modified code? Clone the repo and use `yarn saasmail install` instead ([Setup](docs/setup.md#install-from-a-clone)).
+Running a fork or modified code? Clone the repo and use `yarn saasmail install` instead ([Setup](docs/setup.md#install-from-a-clone)); a clone's install is updated from the clone ([Updating](docs/updating.md#forks-and-modified-code)).
 
 Prefer a guide? Clone the repo, run `claude` and then `/saasmail-onboarding`.
 
