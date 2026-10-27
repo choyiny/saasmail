@@ -74,6 +74,10 @@ Everything runs inside a single Cloudflare Worker — no separate mail server to
 <a href="https://givefeedback.dev/saas"><img width="200" height="44" alt="givefeedback.dev" src="https://github.com/user-attachments/assets/7da9ef06-cc47-4aa5-94b1-2108a302439c" /></a>
 GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks and prevent scope creep.
 
+## Demo Video
+
+https://github.com/user-attachments/assets/100196d0-a4d7-4d11-848c-ebf0ffebbff4
+
 ## Screenshots
 
 **Table overview** — stat tiles plus a sortable people table spanning every inbox, with unread and attachment indicators.
