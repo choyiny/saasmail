@@ -227,6 +227,19 @@ test.describe.serial("shell navigation", () => {
           page.getByRole("button", { name: STATE_CONTROL }),
         ).toHaveCount(0);
 
+        // A bookmarked state folder falls back to the inbox.
+        for (const folder of [
+          "starred",
+          "snoozed",
+          "archive",
+          "trash",
+          "flagged",
+          "deleted",
+        ]) {
+          await page.goto(`/?folder=${folder}`);
+          await expect(page.getByText("Alice Anderson").first()).toBeVisible();
+        }
+
         // Open a conversation: its header has none either.
         await page.goto("/inbox/support%40e2e.test/p_alice");
         await expect(
