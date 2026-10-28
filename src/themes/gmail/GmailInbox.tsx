@@ -32,6 +32,7 @@ import type { ComposePrefill } from "@/pages/ComposeModal";
 import { cn } from "@/lib/utils";
 import "./gmail.css";
 import {
+  availableCommand,
   buildListSearch,
   CATEGORY_LABELS,
   FOLDER_LABELS,
@@ -88,6 +89,7 @@ import {
   startRowDrag,
 } from "./dnd";
 import type { InlineMode } from "./InlineComposer";
+import { mailStateOptionAvailable } from "@/lib/mail-state-gates";
 
 type Patch = Partial<
   Pick<
@@ -164,7 +166,11 @@ export default function GmailInbox() {
     tabsOn && state.folder === "inbox" && !state.label && !searching;
   const activeTab: MailCategory = state.tab ?? "primary";
   const inboxType =
-    state.folder === "inbox" && !searching ? view.inboxType : "default";
+    state.folder === "inbox" &&
+    !searching &&
+    mailStateOptionAvailable(view.inboxType)
+      ? view.inboxType
+      : "default";
 
   const list = useGmailList({
     folder: fq.folder,
@@ -944,7 +950,7 @@ export default function GmailInbox() {
         e.preventDefault();
         return;
       }
-      const cmd = res.cmd;
+      const cmd = availableCommand(res.cmd);
       if (!cmd) return;
       const targets = s.openItem
         ? [s.openItem]

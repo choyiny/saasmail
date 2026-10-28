@@ -31,6 +31,8 @@ import { formatListDate, type GmailFolder } from "./lib";
 import { inInboxView, type RowActions } from "./actions";
 import type { SwipeAction } from "./state";
 import { Avatar, GmMenu, GmMenuItem } from "./ui";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
+import { gateSwipe } from "@/lib/mail-state-gates";
 
 /* ── Swipeable row ─────────────────────────────────────────────────── */
 
@@ -74,7 +76,7 @@ function MobileRow({
   const inView = inInboxView(item);
 
   const actionFor = (dir: number): SwipeAction =>
-    dir > 0 ? swipeRight : swipeLeft;
+    gateSwipe(dir > 0 ? swipeRight : swipeLeft);
   /** Archive leaves the list; the others act and the row springs back. */
   const runSwipe = (a: SwipeAction) => {
     if (a === "archive") {
@@ -317,25 +319,29 @@ function MobileRow({
                 {item.snippet || " "}
               </p>
             </div>
-            <button
-              type="button"
-              className="-mr-2 -mt-1 flex h-9 w-9 flex-none items-center justify-center text-text-secondary"
-              aria-label={item.starred ? "Starred" : "Not starred"}
-              aria-pressed={item.starred}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (suppressClick.current) {
-                  suppressClick.current = false;
-                  return;
-                }
-                act.star([item]);
-              }}
-            >
-              <Star
-                size={20}
-                className={item.starred ? "fill-current text-star" : undefined}
-              />
-            </button>
+            {MAIL_STATE_ACTIONS_ENABLED && (
+              <button
+                type="button"
+                className="-mr-2 -mt-1 flex h-9 w-9 flex-none items-center justify-center text-text-secondary"
+                aria-label={item.starred ? "Starred" : "Not starred"}
+                aria-pressed={item.starred}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (suppressClick.current) {
+                    suppressClick.current = false;
+                    return;
+                  }
+                  act.star([item]);
+                }}
+              >
+                <Star
+                  size={20}
+                  className={
+                    item.starred ? "fill-current text-star" : undefined
+                  }
+                />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -473,7 +479,7 @@ export function MobileSelectionBar({
         <X size={24} />
       </button>
       <span className="flex-1 text-[20px] font-medium">{selected.length}</span>
-      {inTrash ? (
+      {!MAIL_STATE_ACTIONS_ENABLED ? null : inTrash ? (
         <button
           type="button"
           className="gm-icon-btn"
@@ -505,7 +511,7 @@ export function MobileSelectionBar({
         </button>
       )}
       {/* In Trash, Delete means delete forever: admins only. */}
-      {(!inTrash || act.canDeleteForever) && (
+      {(!inTrash || act.canDeleteForever) && MAIL_STATE_ACTIONS_ENABLED && (
         <button
           type="button"
           className="gm-icon-btn"
@@ -554,18 +560,21 @@ export function MobileSelectionBar({
         <GmMenuItem
           icon={<Clock size={20} />}
           onSelect={() => act.pickSnooze(selected, onClear)}
+          stateAction
         >
           Snooze
         </GmMenuItem>
         <GmMenuItem
           icon={<Star size={20} />}
           onSelect={done(() => act.star(selected, !allStarred))}
+          stateAction
         >
           {allStarred ? "Remove star" : "Add star"}
         </GmMenuItem>
         <GmMenuItem
           icon={<Pin size={20} />}
           onSelect={done(() => act.pin(selected, !allPinned))}
+          stateAction
         >
           {allPinned ? "Unpin" : "Pin"}
         </GmMenuItem>
@@ -573,6 +582,7 @@ export function MobileSelectionBar({
           <GmMenuItem
             icon={<InboxIcon size={20} />}
             onSelect={done(() => act.moveToInbox(selected))}
+            stateAction
           >
             Move to inbox
           </GmMenuItem>

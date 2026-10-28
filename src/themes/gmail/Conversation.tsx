@@ -80,6 +80,7 @@ import {
   LabelChip,
   SnoozeMenu,
 } from "./ui";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 
 /* ── helpers ───────────────────────────────────────────────────────── */
 
@@ -762,7 +763,8 @@ export default function Conversation({
   // Delete moves to Trash; inside Trash only people can be deleted forever.
   const canDelete = !trashed || item.type === "person";
   // Delete forever is admin-only (it removes the person for the whole team).
-  const showDelete = !trashed || act.canDeleteForever;
+  const showDelete =
+    (!trashed || act.canDeleteForever) && MAIL_STATE_ACTIONS_ENABLED;
   const deleteLabel = !trashed
     ? "Delete"
     : canDelete
@@ -770,7 +772,17 @@ export default function Conversation({
       : "Group conversations stay in Trash";
 
   /* ── toolbar ── */
+  const STATE = { stateAction: true };
   const tb = (
+    label: string,
+    icon: ReactNode,
+    onClick: () => void,
+    opts?: { disabled?: boolean; testId?: string; stateAction?: boolean },
+  ) =>
+    opts?.stateAction && !MAIL_STATE_ACTIONS_ENABLED
+      ? null
+      : anyTb(label, icon, onClick, opts);
+  const anyTb = (
     label: string,
     icon: ReactNode,
     onClick: () => void,
@@ -808,12 +820,14 @@ export default function Conversation({
           <GmMenuItem
             icon={<Clock size={20} />}
             onSelect={() => act.pickSnooze([item])}
+            stateAction
           >
             Snooze
           </GmMenuItem>
           <GmMenuItem
             icon={<Star size={20} />}
             onSelect={() => act.star([item])}
+            stateAction
           >
             {item.starred ? "Remove star" : "Add star"}
           </GmMenuItem>
@@ -823,13 +837,18 @@ export default function Conversation({
               onSelect={() => {
                 act.moveToInbox([item]);
               }}
+              stateAction
             >
               Move to inbox
             </GmMenuItem>
           )}
         </>
       )}
-      <GmMenuItem icon={<Pin size={20} />} onSelect={() => act.pin([item])}>
+      <GmMenuItem
+        icon={<Pin size={20} />}
+        onSelect={() => act.pin([item])}
+        stateAction
+      >
         {item.pinned ? "Unpin" : "Pin"}
       </GmMenuItem>
       <GmMenuItem icon={<Forward size={20} />} onSelect={() => forward(latest)}>
@@ -872,11 +891,24 @@ export default function Conversation({
       {tb("Back", <ArrowLeft size={24} />, onBack, { testId: "gmail-back" })}
       <div className="flex-1" />
       {trashed
-        ? tb("Restore", <ArchiveRestore size={22} />, () => act.restore([item]))
+        ? tb(
+            "Restore",
+            <ArchiveRestore size={22} />,
+            () => act.restore([item]),
+            STATE,
+          )
         : inView
-          ? tb("Archive", <Archive size={22} />, () => act.archive([item]))
-          : tb("Move to inbox", <InboxIcon size={22} />, () =>
-              act.moveToInbox([item]),
+          ? tb(
+              "Archive",
+              <Archive size={22} />,
+              () => act.archive([item]),
+              STATE,
+            )
+          : tb(
+              "Move to inbox",
+              <InboxIcon size={22} />,
+              () => act.moveToInbox([item]),
+              STATE,
             )}
       {showDelete &&
         tb(deleteLabel, <Trash2 size={22} />, () => act.requestDelete([item]), {
@@ -901,14 +933,19 @@ export default function Conversation({
             () => act.restore([item]),
             {
               testId: "gmail-conv-restore",
+              stateAction: true,
             },
           )
         : inView
           ? tb("Archive", <Archive size={20} />, () => act.archive([item]), {
               testId: "gmail-conv-archive",
+              stateAction: true,
             })
-          : tb("Move to inbox", <InboxIcon size={20} />, () =>
-              act.moveToInbox([item]),
+          : tb(
+              "Move to inbox",
+              <InboxIcon size={20} />,
+              () => act.moveToInbox([item]),
+              STATE,
             )}
       {showDelete &&
         tb(deleteLabel, <Trash2 size={20} />, () => act.requestDelete([item]), {
@@ -940,6 +977,7 @@ export default function Conversation({
           className={item.starred ? "fill-current text-star" : undefined}
         />,
         () => act.star([item]),
+        STATE,
       )}
       {moreMenu}
       <div className="flex-1" />
@@ -1039,7 +1077,7 @@ export default function Conversation({
               )}
             </div>
           )}
-          {mobile && (
+          {mobile && MAIL_STATE_ACTIONS_ENABLED && (
             <button
               type="button"
               className="gm-icon-btn ml-auto"

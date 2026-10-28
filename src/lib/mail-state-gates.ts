@@ -54,3 +54,18 @@ export function mailStateShortcutAvailable(keys: string[]): boolean {
     MAIL_STATE_ACTIONS_ENABLED || !STATE_SHORTCUTS.includes(keys.join(" "))
   );
 }
+
+/** Swipe or select options that need the mail state. */
+const STATE_OPTIONS = ["archive", "delete", "snooze", "starred", "unstarred"];
+
+/** A swipe action, or "none" when it needs the mail state and that waits. */
+export function gateSwipe<T extends string>(action: T): T | "none" {
+  return MAIL_STATE_ACTIONS_ENABLED || !STATE_OPTIONS.includes(action)
+    ? action
+    : "none";
+}
+
+/** Whether a swipe or "Select" option can be offered. */
+export function mailStateOptionAvailable(option: string): boolean {
+  return MAIL_STATE_ACTIONS_ENABLED || !STATE_OPTIONS.includes(option);
+}

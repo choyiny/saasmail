@@ -25,6 +25,7 @@ import { snoozePresets } from "@/hooks/useMailList";
 import { itemTitle } from "@/hooks/useMailList";
 import { canMoveToTab, inInboxView, type RowActions } from "./actions";
 import { CATEGORIES, CATEGORY_LABELS } from "./lib";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 
 export interface RowMenuState {
   x: number;
@@ -39,13 +40,17 @@ function Item({
   onSelect,
   disabled,
   hint,
+  stateAction,
 }: {
   icon: ReactNode;
   children: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
   hint?: string;
+  /** Stars, pins, archives, snoozes or trashes: hidden while that waits. */
+  stateAction?: boolean;
 }) {
+  if (stateAction && !MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <Menu.Item className="gm-menu-item" onSelect={onSelect} disabled={disabled}>
       {icon}
@@ -64,12 +69,16 @@ function Sub({
   label,
   children,
   disabled,
+  stateAction,
 }: {
   icon: ReactNode;
   label: string;
   children: ReactNode;
   disabled?: boolean;
+  /** Stars, pins, archives, snoozes or trashes: hidden while that waits. */
+  stateAction?: boolean;
 }) {
+  if (stateAction && !MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <Menu.Sub>
       <Menu.SubTrigger className="gm-menu-item" disabled={disabled}>
@@ -114,7 +123,8 @@ export function RowMenu({
   const anyTrashed = items.some((i) => !!i.trashedAt);
   const canDelete = !anyTrashed || items.some((i) => i.type === "person");
   // In Trash, Delete means delete forever: admins only.
-  const showDelete = !anyTrashed || act.canDeleteForever;
+  const showDelete =
+    (!anyTrashed || act.canDeleteForever) && MAIL_STATE_ACTIONS_ENABLED;
   const canMoveTab = canMoveToTab(items);
   const run = (fn: () => void) => () => {
     onClose();
@@ -183,6 +193,7 @@ export function RowMenu({
             <Item
               icon={<ArchiveRestore size={18} />}
               onSelect={run(() => act.restore(items))}
+              stateAction
             >
               Restore from Trash
             </Item>
@@ -190,6 +201,7 @@ export function RowMenu({
             <Item
               icon={<InboxIcon size={18} />}
               onSelect={run(() => act.moveToInbox(items))}
+              stateAction
             >
               Move to inbox
             </Item>
@@ -198,6 +210,7 @@ export function RowMenu({
               icon={<Archive size={18} />}
               onSelect={run(() => act.archive(items))}
               hint="e"
+              stateAction
             >
               Archive
             </Item>
@@ -229,7 +242,7 @@ export function RowMenu({
               Mark as unread
             </Item>
           )}
-          <Sub icon={<Clock size={18} />} label="Snooze">
+          <Sub icon={<Clock size={18} />} label="Snooze" stateAction>
             {snoozePresets().map((p) => (
               <Menu.Item
                 key={p.id}
@@ -265,16 +278,18 @@ export function RowMenu({
             }
             onSelect={run(() => act.star(items, !allStarred))}
             hint="s"
+            stateAction
           >
             {allStarred ? "Remove star" : "Add star"}
           </Item>
           <Item
             icon={<Pin size={18} />}
             onSelect={run(() => act.pin(items, !allPinned))}
+            stateAction
           >
             {allPinned ? "Unpin" : "Pin to top"}
           </Item>
-          <Sub icon={<FolderInput size={18} />} label="Move to">
+          <Sub icon={<FolderInput size={18} />} label="Move to" stateAction>
             <Menu.Item
               className="gm-menu-item"
               onSelect={run(() => act.moveToInbox(items))}
