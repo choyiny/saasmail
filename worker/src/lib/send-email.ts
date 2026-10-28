@@ -212,6 +212,26 @@ async function senderForInbox(
   }
 }
 
+/** The error's name for a log line: its message may carry bound values. */
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : typeof error;
+}
+
+/** Discards a reply's staged attachments; a failure is logged, never thrown. */
+async function discardStagedBestEffort(
+  db: Db,
+  env: CloudflareBindings,
+  sentEmailId: string,
+): Promise<void> {
+  try {
+    await discardSentAttachments(db, env, sentEmailId);
+  } catch (error) {
+    console.error(
+      `[send] staged attachments of ${sentEmailId} kept: ${errorName(error)}`,
+    );
+  }
+}
+
 /**
  * One send through a Gmail or Outlook mailbox: no outbox row, so nothing is
  * retried later through another transport. Null `failure` when it went out
@@ -236,21 +256,47 @@ async function sendThroughMailbox(input: {
   send: SendOutput;
   failure: { message: string; uncertain: boolean } | null;
 }> {
-  const send = await sendWithSuppressionCheck({
-    db: input.db,
-    env: input.env,
-    sender: input.sender,
-    from: input.from,
-    to: input.to,
-    cc: input.cc,
-    subject: input.subject,
-    html: input.html,
-    ...(input.text !== undefined ? { text: input.text } : {}),
-    headers: input.headers,
-    ...(input.attachments ? { attachments: input.attachments } : {}),
-    ...(input.threadId ? { threadId: input.threadId } : {}),
-    transactional: input.transactional,
-  });
+  // Whether the provider was called: a throw after that may hide a send.
+  let requested = false;
+  const tracked: EmailSender = Object.create(input.sender);
+  tracked.send = (params) => {
+    requested = true;
+    return input.sender.send(params);
+  };
+  let send: SendOutput;
+  try {
+    send = await sendWithSuppressionCheck({
+      db: input.db,
+      env: input.env,
+      sender: tracked,
+      from: input.from,
+      to: input.to,
+      cc: input.cc,
+      subject: input.subject,
+      html: input.html,
+      ...(input.text !== undefined ? { text: input.text } : {}),
+      headers: input.headers,
+      ...(input.attachments ? { attachments: input.attachments } : {}),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      transactional: input.transactional,
+    });
+  } catch (error) {
+    if (!requested) throw error;
+    console.error(
+      `[send] ${input.sender.provider} send ${input.sentEmailId} threw after its request: ${errorName(error)}`,
+    );
+    return {
+      send: { delivered: [], suppressed: [] },
+      failure: directSendFailure(input.sender, {
+        id: null,
+        error: {
+          message: "the request failed before its answer was read",
+          transient: true,
+          uncertain: true,
+        },
+      })!,
+    };
+  }
   if (send.delivered.length === 0) return { send, failure: null };
   const failure = directSendFailure(input.sender, send.result!);
   if (!failure) {
@@ -737,11 +783,12 @@ export async function replyToEmail(
         threadId: gmailThreadId,
       }));
     } catch (err) {
-      await discardSentAttachments(db, env, id);
+      await discardStagedBestEffort(db, env, id);
       throw err;
     }
     if (failure) {
-      await discardSentAttachments(db, env, id);
+      // Never in the way of the answer: an uncertain one keeps its key.
+      await discardStagedBestEffort(db, env, id);
       return {
         ok: false,
         code: "SEND_FAILED",
@@ -777,116 +824,141 @@ export async function replyToEmail(
     }
   }
 
-  // Compute conversation_id for this reply.
-  const conversationIdReply = await outboundConversationId(
-    db,
-    fromAddress,
-    threadTo,
-    threadCc,
-  );
+  let stored = false;
+  const finish = async (): Promise<ReplyEmailResult> => {
+    // Compute conversation_id for this reply.
+    const conversationIdReply = await outboundConversationId(
+      db,
+      fromAddress,
+      threadTo,
+      threadCc,
+    );
 
-  // In a headers-mode inbox, a reply joins the thread of what it answers:
-  // the original's own thread when it is in this inbox (even without a
-  // Message-ID to cite), else whatever its Message-ID resolves to.
-  const storedReplyId = deliveredMessageId(messageId, sendResult.result);
-  const replyThreadKey =
-    origThreadKey &&
-    origInbox.toLowerCase() === fromAddress.toLowerCase() &&
-    (await threadingModeOf(db, fromAddress)) === "headers"
-      ? origThreadKey
-      : await threadKeyForNewMessage(db, {
-          inbox: fromAddress,
-          messageId: storedReplyId,
-          citedIds: citedIdsOf(origInReplyToMessageId, null),
+    // In a headers-mode inbox, a reply joins the thread of what it answers:
+    // the original's own thread when it is in this inbox (even without a
+    // Message-ID to cite), else whatever its Message-ID resolves to.
+    const storedReplyId = deliveredMessageId(messageId, sendResult.result);
+    const replyThreadKey =
+      origThreadKey &&
+      origInbox.toLowerCase() === fromAddress.toLowerCase() &&
+      (await threadingModeOf(db, fromAddress)) === "headers"
+        ? origThreadKey
+        : await threadKeyForNewMessage(db, {
+            inbox: fromAddress,
+            messageId: storedReplyId,
+            citedIds: citedIdsOf(origInReplyToMessageId, null),
+          });
+
+    // Store sent email: a Gmail or Outlook reply's row replaces the Sent copy
+    // a sync may already have mirrored (lib/direct-send.ts).
+    await insertSentRowReplacingEcho(db, env, sender, {
+      id,
+      personId: origPersonId,
+      fromAddress,
+      toAddress,
+      subject: finalSubject,
+      bodyHtml: finalBodyHtml,
+      bodyText: bodyText ?? null,
+      inReplyTo: origInReplyToMessageId,
+      messageId: storedReplyId,
+      resendId: sendResult.result?.id ?? null,
+      ...providerIdsOf(sender, sendResult.result),
+      status: outcome,
+      cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
+      conversationId: conversationIdReply,
+      threadKey: replyThreadKey,
+      sentAt: now,
+      createdAt: now,
+    });
+    stored = true;
+
+    // Attachments were staged above, before the provider call.
+    // Replies are transactional, so they are never suppressed; if a future change
+    // adds a suppressed branch here it must call discardSentAttachments too.
+
+    // Cancel any active sequences for this person
+    await cancelSequencesForPerson(db, origPersonId);
+    await auditMailSent(db, {
+      id,
+      from: fromAddress,
+      to: toAddress,
+      otherRecipients: cc?.length ?? 0,
+      subject: finalSubject,
+      status: outcome,
+      templateSlug,
+      repliedTo,
+    });
+
+    if (replyToBackfill) {
+      // Best effort: the next reply and every read then use the column instead
+      // of parsing raw_headers again.
+      // Only while the row is as it was read: a re-attribution during the send
+      // cleared its Reply-To on purpose, and this must not bring it back.
+      try {
+        await db
+          .update(emails)
+          .set({ replyTo: JSON.stringify(replyToBackfill) })
+          .where(
+            and(
+              eq(emails.id, emailId),
+              isNull(emails.replyTo),
+              eq(emails.personId, origPersonId),
+            ),
+          );
+      } catch (err) {
+        console.warn(`[reply] Reply-To not stored for ${emailId}:`, err);
+      }
+    }
+
+    // A person answering a received message says it is not junk: that trains
+    // the inbox's learning filter, unless somebody already labelled it (an
+    // explicit junk mark wins over a reply). Never a rule, the agent or the
+    // system.
+    if (receivedRow.length > 0) {
+      const actor = currentAuditActor();
+      if (HUMAN_ACTORS.has(actor.actorType)) {
+        await trainMessages(db, {
+          refs: [{ kind: "received", id: emailId }],
+          label: "ham",
+          userId: actor.actorUserId,
+          onlyIfUntrained: true,
         });
-
-  // Store sent email: a Gmail or Outlook reply's row replaces the Sent copy
-  // a sync may already have mirrored (lib/direct-send.ts).
-  await insertSentRowReplacingEcho(db, env, sender, {
-    id,
-    personId: origPersonId,
-    fromAddress,
-    toAddress,
-    subject: finalSubject,
-    bodyHtml: finalBodyHtml,
-    bodyText: bodyText ?? null,
-    inReplyTo: origInReplyToMessageId,
-    messageId: storedReplyId,
-    resendId: sendResult.result?.id ?? null,
-    ...providerIdsOf(sender, sendResult.result),
-    status: outcome,
-    cc: cc && cc.length > 0 ? JSON.stringify(cc) : null,
-    conversationId: conversationIdReply,
-    threadKey: replyThreadKey,
-    sentAt: now,
-    createdAt: now,
-  });
-
-  // Attachments were staged above, before the provider call.
-  // Replies are transactional, so they are never suppressed; if a future change
-  // adds a suppressed branch here it must call discardSentAttachments too.
-
-  // Cancel any active sequences for this person
-  await cancelSequencesForPerson(db, origPersonId);
-  await auditMailSent(db, {
-    id,
-    from: fromAddress,
-    to: toAddress,
-    otherRecipients: cc?.length ?? 0,
-    subject: finalSubject,
-    status: outcome,
-    templateSlug,
-    repliedTo,
-  });
-
-  if (replyToBackfill) {
-    // Best effort: the next reply and every read then use the column instead
-    // of parsing raw_headers again.
-    // Only while the row is as it was read: a re-attribution during the send
-    // cleared its Reply-To on purpose, and this must not bring it back.
-    try {
-      await db
-        .update(emails)
-        .set({ replyTo: JSON.stringify(replyToBackfill) })
-        .where(
-          and(
-            eq(emails.id, emailId),
-            isNull(emails.replyTo),
-            eq(emails.personId, origPersonId),
-          ),
-        );
-    } catch (err) {
-      console.warn(`[reply] Reply-To not stored for ${emailId}:`, err);
+      }
     }
-  }
 
-  // A person answering a received message says it is not junk: that trains
-  // the inbox's learning filter, unless somebody already labelled it (an
-  // explicit junk mark wins over a reply). Never a rule, the agent or the
-  // system.
-  if (receivedRow.length > 0) {
-    const actor = currentAuditActor();
-    if (HUMAN_ACTORS.has(actor.actorType)) {
-      await trainMessages(db, {
-        refs: [{ kind: "received", id: emailId }],
-        label: "ham",
-        userId: actor.actorUserId,
-        onlyIfUntrained: true,
-      });
-    }
-  }
-
-  return {
-    ok: true,
-    id,
-    resendId: sendResult.result?.id ?? null,
-    status: outcome,
-    attachmentIds,
-    to: toAddress,
-    cc: (cc ?? []).map((entry) => entry.email),
-    repliedTo,
-    ...(sendResult.result?.error?.paused ? { paused: true as const } : {}),
+    return {
+      ok: true,
+      id,
+      resendId: sendResult.result?.id ?? null,
+      status: outcome,
+      attachmentIds,
+      to: toAddress,
+      cc: (cc ?? []).map((entry) => entry.email),
+      repliedTo,
+      ...(sendResult.result?.error?.paused ? { paused: true as const } : {}),
+    };
   };
+  if (!direct) return finish();
+  try {
+    return await finish();
+  } catch (err) {
+    // The mailbox has the message: a throw here must not release the key or
+    // the daily slot, or a retry would send it again.
+    console.error(
+      `[reply] ${sender.provider} reply ${id} sent, bookkeeping failed: ${errorName(err)}`,
+    );
+    if (!stored) await discardStagedBestEffort(db, env, id);
+    return {
+      ok: false,
+      code: "SEND_FAILED",
+      message:
+        `${sender.provider === "outlook" ? "Outlook" : "Gmail"} sent this ` +
+        "message, but saasmail could not finish recording it" +
+        (stored ? "" : ", so it is not in Sent") +
+        ". Do not send it again.",
+      keepIdempotencyKey: true,
+    };
+  }
 }
 
 /**
