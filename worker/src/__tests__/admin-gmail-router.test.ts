@@ -886,7 +886,8 @@ describe("with the Gmail variables unset", () => {
       const connect = await authFetch("/api/admin/gmail/connect", { apiKey });
       expect(connect.status).toBe(503);
       expect(await connect.json()).toEqual({
-        error: "Gmail integration is not configured",
+        error:
+          "Google is not set up yet. Add its OAuth client ID and secret under Inboxes → Connected mailboxes → Google settings.",
       });
 
       const list = await authFetch("/api/admin/gmail", { apiKey });

@@ -246,21 +246,13 @@ describe("CloudflareSender", () => {
     });
 
     expect(result.error).toBeNull();
-    const sent = fakeBinding.send.mock.calls[0][0] as Record<string, string>;
-    const raw = sent["EmailMessage::raw"];
-    const lines = raw.split(/\r?\n/);
-    const ccIndex = lines.findIndex((l) => l.toLowerCase().startsWith("cc:"));
-    expect(ccIndex).toBeGreaterThanOrEqual(0);
-    // A long Cc header is RFC 822 "folded" across multiple lines, each
-    // continuation starting with whitespace — join them back together
-    // before asserting on the full recipient list.
-    let ccBlock = lines[ccIndex];
-    for (let i = ccIndex + 1; i < lines.length && /^\s/.test(lines[i]); i++) {
-      ccBlock += lines[i];
-    }
-    expect(ccBlock).toContain("a@x.com");
-    expect(ccBlock).toContain("b@y.com");
-    expect(ccBlock).toContain("c@z.com");
+    // The structured send API, not a raw MIME message: every Cc is its own
+    // entry of the call's `cc` list.
+    const sent = fakeBinding.send.mock.calls[0][0] as { cc?: unknown[] };
+    expect(JSON.stringify(sent.cc)).toContain("a@x.com");
+    expect(JSON.stringify(sent.cc)).toContain("b@y.com");
+    expect(JSON.stringify(sent.cc)).toContain("c@z.com");
+    expect(sent.cc).toHaveLength(3);
   });
 });
 
