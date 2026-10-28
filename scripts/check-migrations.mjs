@@ -53,7 +53,9 @@ for (const [number, files] of byNumber) {
 
 let journal;
 try {
-  journal = JSON.parse(readFileSync(path.join(metaDir, "_journal.json"), "utf8"));
+  journal = JSON.parse(
+    readFileSync(path.join(metaDir, "_journal.json"), "utf8"),
+  );
 } catch (error) {
   console.error("Unable to read migrations/meta/_journal.json.");
   throw error;
