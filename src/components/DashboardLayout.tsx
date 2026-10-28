@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import PortalShell from "@/components/shell/PortalShell";
 import SendingPausedBanner from "@/components/SendingPausedBanner";
@@ -10,6 +17,8 @@ import { WebMcpBridgeProvider } from "@/webmcp/bridge";
 import { WebMcpTools } from "@/webmcp/registerTools";
 import AgentPanel from "@/components/AgentPanel";
 import { AgentContextProvider } from "@/agent/AgentContext";
+import { AgentPanelContext } from "@/agent/AgentPanelToggle";
+import { useUiTheme } from "@/lib/preferences";
 
 const AGENT_PANEL_STORAGE_KEY = "saasmail.agentPanelOpen";
 
@@ -20,9 +29,6 @@ function initialAgentPanelOpen(): boolean {
     return false;
   }
 }
-import { AgentPanelContext } from "@/agent/AgentPanelToggle";
-import { lazy, Suspense } from "react";
-import { useUiTheme } from "@/lib/preferences";
 
 const GmailShell = lazy(() => import("@/themes/gmail/GmailShell"));
 const OutlookShell = lazy(() => import("@/themes/outlook/OutlookShell"));

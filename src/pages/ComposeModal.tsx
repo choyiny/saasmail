@@ -72,7 +72,7 @@ interface ComposeModalProps {
    * composer closes as soon as Send is pressed and comes back on Undo or
    * when the send fails. Without it, sends go out at once (no Undo).
    */
-  onReopen?: (prefill: ComposePrefill) => void;
+  onReopen?: (prefill: ComposePrefill, contextKey?: string) => void;
 }
 
 /**
@@ -313,7 +313,7 @@ export default function ComposeModal({
         sendEmail({ ...payload, idempotencyKey }).then(() => undefined),
       onUndo: () => {
         finishSend(context, idempotencyKey, "undone");
-        onReopen(snapshot);
+        onReopen(snapshot, draftKey);
       },
       onSent: () => {
         finishSend(context, idempotencyKey, "sent");
@@ -326,10 +326,10 @@ export default function ComposeModal({
         // The message comes back with the same key, so sending it again
         // cannot send it twice.
         finishSend(context, idempotencyKey, "failed");
-        onReopen({
-          ...snapshot,
-          error: sendKeyProblem(sendError, context) ?? failure,
-        });
+        onReopen(
+          { ...snapshot, error: sendKeyProblem(sendError, context) ?? failure },
+          draftKey,
+        );
       },
     });
   }
