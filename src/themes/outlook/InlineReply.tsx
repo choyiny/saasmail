@@ -177,6 +177,7 @@ export default function InlineReply({
       fromAddress,
       ...(cc.length ? { cc } : {}),
       ...(files.length ? { files: files.map((file) => ({ file })) } : {}),
+      recipient: "sender" as const,
     };
     // Close at once; the draft is kept (saved on close) until it really goes.
     onClose();

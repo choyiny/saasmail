@@ -60,6 +60,10 @@ every address that will get a copy, and offer **Reply to the sender instead**,
 which ignores the header altogether. The mail view's reading pane shows the
 `Reply-To:` line on such a message. An address is never both in To and in Cc.
 
+Replies from the [Gmail and Outlook layouts](appearance.md) go to the sender
+they show, whatever the header says; to answer the Reply-To address, reply from
+the default layout.
+
 Two guards apply:
 
 - A Reply-To address that is one of this instance's own inboxes is ignored, so a

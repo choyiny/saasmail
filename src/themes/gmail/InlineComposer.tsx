@@ -208,6 +208,7 @@ export function InlineComposer({
             ...text,
             fromAddress,
             ...(payloadCc ? { cc: payloadCc } : {}),
+            recipient: "sender",
           });
         }
       },
