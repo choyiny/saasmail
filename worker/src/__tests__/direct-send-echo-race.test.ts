@@ -114,39 +114,31 @@ describe("insertSentRowReplacingEcho, with a mirror written mid-write", () => {
     {
       name: "Gmail: no echo at the select, the mirror lands before the insert",
       provider: "gmail" as const,
-      method: "insert" as const,
       before: [] as Partial<SentRow>[],
       during: { id: "mirror-late", gmailMessageId: "g-1" },
       sendRow: { id: "send-1", gmailMessageId: "g-1", gmailThreadId: "t-1" },
-      // The unique index allows one row for (Gmail id, inbox) either way.
-      rowsForMessage: 1,
-      survives: null as string | null,
     },
     {
       name: "Outlook: no echo at the select, the mirror lands before the insert",
       provider: "outlook" as const,
-      method: "insert" as const,
       before: [],
       during: { id: "mirror-late", outlookMessageId: "ol-1" },
       sendRow: { id: "send-1" },
-      rowsForMessage: 2,
-      survives: "mirror-late",
     },
     {
       name: "Outlook: one echo cleared, a second mirror lands before the batch",
       provider: "outlook" as const,
-      method: "batch" as const,
       before: [{ id: "mirror-early", outlookMessageId: "ol-1" }],
       during: { id: "mirror-late", outlookMessageId: "ol-2" },
       sendRow: { id: "send-1" },
-      rowsForMessage: 2,
-      survives: "mirror-late",
     },
   ])("$name", async (c) => {
     const db = getDb();
     for (const early of c.before) await mirror(db, early);
     const sender = { provider: c.provider } as unknown as EmailSender;
-    const racing = interleave(db, c.method, () => mirror(db, c.during));
+    // The replacement and the insert are one batch: the only window left is
+    // between the attachment read and that batch.
+    const racing = interleave(db, "batch", () => mirror(db, c.during));
 
     await expect(
       insertSentRowReplacingEcho(
@@ -161,15 +153,12 @@ describe("insertSentRowReplacingEcho, with a mirror written mid-write", () => {
       .select({ id: sentEmails.id })
       .from(sentEmails)
       .where(sql`${sentEmails.messageId} = ${MESSAGE_ID}`);
-    expect(rows).toHaveLength(c.rowsForMessage);
+    // As upstream: the send's row replaces every mirror of the message,
+    // whenever it landed, and the mirrors' state goes with them.
+    expect(rows.map((r) => r.id)).toEqual([c.sendRow.id]);
     expect(await orphanedState(db)).toBe(0);
-    if (c.survives) {
-      expect(rows.map((r) => r.id)).toContain(c.survives);
-      expect(await stateOf(db, c.survives)).toBe(1);
-    }
-    // An echo seen at the select is replaced, its state gone with it.
-    for (const early of c.before) {
-      expect(rows.map((r) => r.id)).not.toContain(early.id);
+    for (const m of [...c.before, c.during]) {
+      expect(await stateOf(db, m.id!)).toBe(0);
     }
   });
 });

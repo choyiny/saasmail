@@ -1,10 +1,9 @@
 import { and, eq, isNotNull, sql, type SQL } from "drizzle-orm";
+import { attachments } from "../db/attachments.schema";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { sentEmails } from "../db/sent-emails.schema";
 import type { EmailSender, SendEmailResult } from "./email-sender/types";
-import { jsonList } from "./inbox-permissions";
-import { deleteMessageState } from "./messages/state";
-import { discardSentAttachments } from "./sent-attachments";
+import { deleteSentMessageStateStatements } from "./messages/state";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -122,47 +121,12 @@ export function sentEchoWhere(
 }
 
 /**
- * Before the send's row replaces a mirrored echo: the echo's message state
- * goes first (every hard delete does), and its ids are returned so that its
- * attachment files can go once the batch has removed it.
- */
-export async function clearEchoState(
-  db: Db,
-  where: SQL | null,
-): Promise<string[]> {
-  if (!where) return [];
-  const echoes = await db
-    .select({ id: sentEmails.id })
-    .from(sentEmails)
-    .where(where);
-  const ids = echoes.map((row: { id: string }) => row.id);
-  if (ids.length > 0) {
-    await deleteMessageState(
-      db,
-      ids.map((id: string) => ({ kind: "sent" as const, id })),
-    );
-  }
-  return ids;
-}
-
-/** The echoes' attachment rows and files, after the batch deleted the rows. */
-export async function discardEchoFiles(
-  db: Db,
-  env: CloudflareBindings,
-  ids: string[],
-): Promise<void> {
-  for (const id of ids) {
-    try {
-      await discardSentAttachments(db, env, id);
-    } catch (error) {
-      console.warn(`[send] files of the replaced Sent copy ${id} kept:`, error);
-    }
-  }
-}
-
-/**
- * Writes the send's `sent_emails` row, replacing a mirrored echo in the same
- * batch as the insert.
+ * Writes the send's `sent_emails` row, replacing any mirrored echo of the same
+ * provider message in one batch: the echo's message state (every hard delete
+ * clears it first), its attachment rows, the echo, then the insert. The deletes
+ * match the echo when the batch runs, so a sync that mirrors the copy while the
+ * send is writing is replaced with its state, and the insert never meets the
+ * unique `(gmail_message_id, from_address)` index.
  */
 export async function insertSentRowReplacingEcho(
   db: Db,
@@ -179,18 +143,32 @@ export async function insertSentRowReplacingEcho(
     await db.insert(sentEmails).values(row);
     return;
   }
-  const echoIds = await clearEchoState(db, where);
-  if (echoIds.length === 0) {
-    await db.insert(sentEmails).values(row);
-    return;
-  }
-  // Only the echoes whose state was just cleared are deleted: one mirrored
-  // after the select is kept rather than deleted with its state left behind.
+  const echoIds = sql`(SELECT ${sentEmails.id} FROM ${sentEmails} WHERE ${where})`;
+  const echoAttachments = and(
+    eq(attachments.kind, "sent"),
+    sql`${attachments.emailId} IN ${echoIds}`,
+  );
+  // Read before the batch: an echo mirrored after this read loses its
+  // attachment rows in the batch but leaves its R2 objects behind.
+  const files = await db
+    .select({ r2Key: attachments.r2Key })
+    .from(attachments)
+    .where(echoAttachments);
+  const [userState, mailboxState, membership] =
+    deleteSentMessageStateStatements(db, echoIds);
   await db.batch([
-    db
-      .delete(sentEmails)
-      .where(and(where, sql`${sentEmails.id} IN ${jsonList(echoIds)}`)),
+    userState,
+    mailboxState,
+    membership,
+    db.delete(attachments).where(echoAttachments),
+    db.delete(sentEmails).where(where),
     db.insert(sentEmails).values(row),
   ]);
-  await discardEchoFiles(db, env, echoIds);
+  for (const { r2Key } of files) {
+    try {
+      await env.R2.delete(r2Key);
+    } catch (error) {
+      console.warn(`[send] file ${r2Key} of a replaced Sent copy kept:`, error);
+    }
+  }
 }
