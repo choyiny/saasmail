@@ -22,6 +22,12 @@ import { dispatchEmailSent } from "@/lib/email-events";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { sendWithUndo } from "@/lib/undo-send";
+import {
+  beginSend,
+  finishSend,
+  forgetSendKey,
+  sendKeyProblem,
+} from "@/lib/send-key";
 import { cn } from "@/lib/utils";
 import { Avatar } from "./ui";
 
@@ -34,6 +40,10 @@ interface Identity {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// A forward goes to each recipient with its own key derived from the
+// message's; a retry skips the recipients its earlier attempts reached.
+const forwarded = new Map<string, Set<string>>();
 
 /**
  * Gmail's inline reply / forward box at the bottom of a conversation. It
@@ -151,6 +161,8 @@ export function InlineComposer({
   }, [identities, fromAddress]);
 
   const contextKey = isForward ? `forward:${target.id}` : `reply:${target.id}`;
+  const sendContext = `send:${contextKey}`;
+  useEffect(() => () => forgetSendKey(sendContext), [sendContext]);
 
   // Send closes the box at once and hands off to sendWithUndo, so there's
   // no in-flight state to guard here.
@@ -186,14 +198,19 @@ export function InlineComposer({
     }).catch(() => null);
     const payloadCc = cc.length ? cc : undefined;
     const text = bodyText.trim() ? { bodyText } : {};
+    const idempotencyKey = beginSend(sendContext);
     onClose();
     sendWithUndo({
       seconds: undoSeconds,
       label: isForward ? "Forwarding…" : "Sending…",
       send: async () => {
         if (isForward) {
+          const reached = forwarded.get(idempotencyKey) ?? new Set<string>();
+          forwarded.set(idempotencyKey, reached);
           for (const r of recipients) {
+            if (reached.has(r)) continue;
             await sendEmail({
+              idempotencyKey: `${idempotencyKey}:${encodeURIComponent(r)}`,
               to: r,
               fromAddress,
               cc: payloadCc,
@@ -201,6 +218,7 @@ export function InlineComposer({
               bodyHtml: finalBody,
               ...text,
             });
+            reached.add(r);
           }
         } else {
           await replyToEmail(target.id, {
@@ -209,13 +227,18 @@ export function InlineComposer({
             fromAddress,
             ...(payloadCc ? { cc: payloadCc } : {}),
             recipient: "sender",
+            idempotencyKey,
           });
         }
       },
       onUndo: () => {
+        finishSend(sendContext, idempotencyKey, "undone");
+        forwarded.delete(idempotencyKey);
         void kept.then(() => onReopen());
       },
       onSent: () => {
+        finishSend(sendContext, idempotencyKey, "sent");
+        forwarded.delete(idempotencyKey);
         void kept.then(() => deleteDraft(contextKey).catch(() => {}));
         dispatchEmailSent({
           fromAddress,
@@ -224,7 +247,9 @@ export function InlineComposer({
         });
         onSent();
       },
-      onError: () => {
+      onError: (e) => {
+        finishSend(sendContext, idempotencyKey, "failed");
+        sendKeyProblem(e, sendContext);
         void kept.then(() => onReopen());
       },
     });

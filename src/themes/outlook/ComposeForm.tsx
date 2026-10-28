@@ -6,6 +6,12 @@ import AttachmentPicker from "@/components/AttachmentPicker";
 import AttachmentChips from "@/components/AttachmentChips";
 import { deleteDraft, sendEmail, type CcEntry } from "@/lib/api";
 import { sendWithUndo } from "@/lib/undo-send";
+import {
+  beginSend,
+  finishSend,
+  forgetSendKey,
+  sendKeyProblem,
+} from "@/lib/send-key";
 import { useUndoSendSetting } from "./sendUndo";
 import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { dispatchEmailSent } from "@/lib/email-events";
@@ -106,6 +112,7 @@ export default function ComposeForm({
   });
 
   const total = files.reduce((s, f) => s + f.size, 0);
+  useEffect(() => () => forgetSendKey("send:compose"), []);
   const canSend =
     !sending && !!to.trim() && !bodyIsEmpty && total <= ATTACHMENT_CAP_BYTES;
 
@@ -136,27 +143,36 @@ export default function ComposeForm({
       ...(bodyText.trim() ? { bodyText } : {}),
       ...(held.length ? { files: held.map((file) => ({ file })) } : {}),
     };
+    const idempotencyKey = beginSend("send:compose");
     // Close at once; the draft is kept (saved on close) until it really goes.
     onClose();
     sendWithUndo({
       seconds: undoSettings.undoSendSeconds,
       send: async () => {
-        await sendEmail(payload);
+        await sendEmail({ ...payload, idempotencyKey });
         dispatchEmailSent({ fromAddress, to: payload.to, origin: "compose" });
       },
-      onUndo: () => onReopen(snapshot, { files: held }),
+      onUndo: () => {
+        finishSend("send:compose", idempotencyKey, "undone");
+        onReopen(snapshot, { files: held });
+      },
       onSent: () => {
+        finishSend("send:compose", idempotencyKey, "sent");
         // Let the close-flush save land first, then drop the draft.
         window.setTimeout(
           () => void deleteDraft("compose").catch(() => {}),
           1500,
         );
       },
-      onError: (e) =>
+      onError: (e) => {
+        finishSend("send:compose", idempotencyKey, "failed");
         onReopen(snapshot, {
           files: held,
-          error: e instanceof Error ? e.message : "Message not sent",
-        }),
+          error:
+            sendKeyProblem(e, "send:compose") ??
+            (e instanceof Error ? e.message : "Message not sent"),
+        });
+      },
     });
   }
 

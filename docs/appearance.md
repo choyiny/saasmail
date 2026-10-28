@@ -121,6 +121,12 @@ layout's quick settings, or in the Outlook layout's settings: Off, 5, 10, 20 or 
 seconds (5 by default). The message waits in your browser, so keep the tab open
 until it has gone; closing the tab during the delay asks first.
 
+Sending again after a failed send never sends a second copy: in every layout a
+message keeps one [idempotency key](users-and-api-keys.md#retrying-a-send-safely)
+across its attempts, and a Gmail-layout forward one per recipient, so its retry
+skips the recipients it already reached. Gmail and Outlook layout replies go to
+the sender they show ([Replying](inboxes.md#replying)).
+
 ## Settings follow your account
 
 Your layout settings are saved to your account, not to one browser, so they are

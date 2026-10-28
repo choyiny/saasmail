@@ -6,6 +6,12 @@ import AttachmentPicker from "@/components/AttachmentPicker";
 import AttachmentChips from "@/components/AttachmentChips";
 import { deleteDraft, replyToEmail, type CcEntry, type Email } from "@/lib/api";
 import { sendWithUndo } from "@/lib/undo-send";
+import {
+  beginSend,
+  finishSend,
+  forgetSendKey,
+  sendKeyProblem,
+} from "@/lib/send-key";
 import { useUndoSendSetting } from "./sendUndo";
 import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { dispatchEmailSent } from "@/lib/email-events";
@@ -152,6 +158,8 @@ export default function InlineReply({
   });
 
   const total = files.reduce((s, f) => s + f.size, 0);
+  const sendContext = `send:reply:${email.id}`;
+  useEffect(() => () => forgetSendKey(sendContext), [sendContext]);
 
   function send() {
     if (bodyIsEmpty) {
@@ -178,7 +186,9 @@ export default function InlineReply({
       ...(cc.length ? { cc } : {}),
       ...(files.length ? { files: files.map((file) => ({ file })) } : {}),
       recipient: "sender" as const,
+      idempotencyKey: beginSend(sendContext),
     };
+    const context = sendContext;
     // Close at once; the draft is kept (saved on close) until it really goes.
     onClose();
     sendWithUndo({
@@ -188,23 +198,31 @@ export default function InlineReply({
         await replyToEmail(emailId, payload);
         dispatchEmailSent({ fromAddress, to: counterpart, origin: "reply" });
       },
-      onUndo: () => reopenReply(itemKey, { email, mode, initial: snapshot }),
+      onUndo: () => {
+        finishSend(context, payload.idempotencyKey, "undone");
+        reopenReply(itemKey, { email, mode, initial: snapshot });
+      },
       onSent: () => {
+        finishSend(context, payload.idempotencyKey, "sent");
         onSent();
         window.setTimeout(
           () => void deleteDraft(`reply:${emailId}`).catch(() => {}),
           1500,
         );
       },
-      onError: (e) =>
+      onError: (e) => {
+        finishSend(context, payload.idempotencyKey, "failed");
         reopenReply(itemKey, {
           email,
           mode,
           initial: {
             ...snapshot,
-            error: e instanceof Error ? e.message : "Reply not sent",
+            error:
+              sendKeyProblem(e, context) ??
+              (e instanceof Error ? e.message : "Reply not sent"),
           },
-        }),
+        });
+      },
     });
   }
 
