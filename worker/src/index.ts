@@ -476,8 +476,8 @@ export default {
     env: CloudflareBindings,
     ctx: ExecutionContext,
   ) {
-    ctx.waitUntil(runWithAudit(systemActor("cron"), () => scheduledChain(env)));
-    // Isolated from sequence dispatch / outbox processing above: a Gmail
+    // The mailbox sync runs after the fork's chain, never beside it, and is
+    // isolated from sequence dispatch / outbox processing: a Gmail
     // sync failure must not be able to break either. `syncAllGmailAccounts`
     // already isolates per-account failures internally (see its own
     // Promise.allSettled) and no-ops when the integration isn't configured,
@@ -494,6 +494,7 @@ export default {
     // -account failures never reach it, by design.
     ctx.waitUntil(
       runWithAudit(systemActor("cron"), async () => {
+        await scheduledChain(env);
         const db = drizzle(env.DB, { schema });
         // Each provider isolated from the other: a hard Gmail failure must
         // not stop Outlook mailboxes syncing, or the reverse.
