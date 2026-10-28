@@ -304,9 +304,7 @@ export async function parseRawEmail(
   //   don't fork conversation_id buckets,
   // - cap the array so a single inbound message can't slam storage
   //   with thousands of header-entries.
-  const cc = cleanAddresses(
-    (parsed.cc as Array<{ address?: string; name?: string }> | undefined) ?? [],
-  );
+  const cc = cleanAddresses(flattened(parsed.cc));
   const toList = cleanAddresses(flattened(parsed.to));
   const bcc = cleanAddresses(flattened(parsed.bcc));
 
