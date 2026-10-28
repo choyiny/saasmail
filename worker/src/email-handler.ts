@@ -1,10 +1,13 @@
 import { and, eq } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { createDb } from "./db/client";
+import type { schema } from "./db/schema";
 import { emails } from "./db/emails.schema";
 import { inboxPermissions } from "./db/inbox-permissions.schema";
 import { senderIdentities } from "./db/sender-identities.schema";
 import { users } from "./db/auth.schema";
 import { parseEmail } from "./lib/email-parser";
+import type { ParsedEmail } from "./lib/email-parser";
 import {
   MAX_ATTACHMENTS,
   domainsOf,
@@ -58,13 +61,49 @@ export function shouldEnqueueSuggestedReply(options: {
   );
 }
 
+/** What `ingestParsedEmail` did with a message. */
+export type IngestOutcome =
+  /** Refused: the live handler bounces it with `reason`. Nothing stored. */
+  | { status: "rejected"; reason: string }
+  /** From a blocked sender or domain: dropped silently, nothing stored. */
+  | { status: "blocked" }
+  /** Already in this inbox (same Message-ID): nothing stored. */
+  | { status: "duplicate"; emailId: string }
+  /** Stored, and every step after storage has run. */
+  | { status: "stored"; emailId: string };
+
+/** Cloudflare Email Worker entry point. */
 export async function handleEmail(
   message: ForwardableEmailMessage,
   env: CloudflareBindings,
   ctx: ExecutionContext,
 ): Promise<void> {
   const db = createDb(env);
+  // The SMTP envelope recipient picks the inbox, not the MIME To (a Bcc
+  // delivery names another address there).
   const parsed = await parseEmail(message);
+  const outcome = await ingestParsedEmail(db, parsed, env, ctx);
+  if (outcome.status === "rejected") message.setReject(outcome.reason);
+}
+
+/**
+ * Stores an already-parsed inbound message in the inbox `parsed.to` names and
+ * runs every step that follows: unknown-recipient and rule rejection,
+ * blocklist, per-inbox dedupe, spam scoring, rules, suggested replies,
+ * conversation wake, notifications, webhook, forwarding and sequence
+ * cancellation.
+ *
+ * Source-agnostic: the Email Worker reaches it through `handleEmail`; a
+ * mailbox sync calls it directly with a `ParsedEmail` built from the raw
+ * message, setting `parsed.to` to the inbox it belongs in. A rejection is
+ * returned, not sent: the caller decides how to refuse.
+ */
+export async function ingestParsedEmail(
+  db: DrizzleD1Database<typeof schema>,
+  parsed: ParsedEmail,
+  env: CloudflareBindings,
+  ctx: ExecutionContext,
+): Promise<IngestOutcome> {
   const now = Math.floor(Date.now() / 1000);
 
   // Canonicalize inbox addresses to lowercase before storage so casing
@@ -101,24 +140,28 @@ export async function handleEmail(
     (await rejectsUnknownRecipients(db)) &&
     !(await hasInboxMembers(db, recipientCanonical))
   ) {
-    message.setReject(UNKNOWN_RECIPIENT_REASON);
-    await recordInboundRejection(db, {
-      from: fromAddressCanonical,
-      recipient: recipientCanonical,
-      subject: parsed.subject,
-      messageId: parsed.messageId,
-      reason: "unknown_recipient",
-    });
+    // Recording the refusal is best effort: it must never stop the refusal.
+    try {
+      await recordInboundRejection(db, {
+        from: fromAddressCanonical,
+        recipient: recipientCanonical,
+        subject: parsed.subject,
+        messageId: parsed.messageId,
+        reason: "unknown_recipient",
+      });
+    } catch (error) {
+      console.warn("Failed to record an inbound rejection:", error);
+    }
     console.log(
       `Rejected email from ${fromAddressCanonical} to ${recipientCanonical}: not an inbox`,
     );
-    return;
+    return { status: "rejected", reason: UNKNOWN_RECIPIENT_REASON };
   }
 
   // Drop mail from blocked senders/domains before any storage or side effects.
   if (await isBlocked(db, fromAddressCanonical)) {
     console.log(`Dropped blocked email from ${fromAddressCanonical}`);
-    return;
+    return { status: "blocked" };
   }
 
   // Deduplicate by Message-ID within this inbox: a redelivery is dropped, but a
@@ -136,7 +179,7 @@ export async function handleEmail(
       .limit(1);
     if (existing.length > 0) {
       console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);
-      return;
+      return { status: "duplicate", emailId: existing[0].id };
     }
   }
 
@@ -179,23 +222,27 @@ export async function handleEmail(
   }
   const rejection = rejectionOf(matchedRules);
   if (rejection) {
-    message.setReject(rejection.reason);
-    await recordRuleMatch(db, rejection.rule.id, now);
-    await runWithAudit(ruleActor(rejection.rule), () =>
-      recordInboundRejection(db, {
-        from: fromAddressCanonical,
-        recipient: recipientCanonical,
-        subject: parsed.subject,
-        messageId: parsed.messageId,
-        reason: rejection.reason,
-        ruleId: rejection.rule.id,
-        ruleName: rejection.rule.name,
-      }),
-    );
+    // Recording the refusal is best effort: it must never stop the refusal.
+    try {
+      await recordRuleMatch(db, rejection.rule.id, now);
+      await runWithAudit(ruleActor(rejection.rule), () =>
+        recordInboundRejection(db, {
+          from: fromAddressCanonical,
+          recipient: recipientCanonical,
+          subject: parsed.subject,
+          messageId: parsed.messageId,
+          reason: rejection.reason,
+          ruleId: rejection.rule.id,
+          ruleName: rejection.rule.name,
+        }),
+      );
+    } catch (error) {
+      console.warn("Failed to record an inbound rejection:", error);
+    }
     console.log(
       `Rejected email from ${fromAddressCanonical} to ${recipientCanonical} by rule ${rejection.rule.id}`,
     );
-    return;
+    return { status: "rejected", reason: rejection.reason };
   }
 
   // Stored exactly as the importer stores history, but as live mail: unread,
@@ -412,4 +459,5 @@ export async function handleEmail(
   console.log(
     `Processed email from ${fromAddressCanonical} to ${recipientCanonical} (${parsed.attachments.length} attachments)`,
   );
+  return { status: "stored", emailId };
 }

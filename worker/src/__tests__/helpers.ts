@@ -222,6 +222,7 @@ export async function applyMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS campaign_events_click_unique ON campaign_events(campaign_id, contact_id, campaign_link_id) WHERE event_type = 'click'`,
     `CREATE TABLE IF NOT EXISTS campaign_unsubscribe_attributions (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, list_member_id TEXT NOT NULL, occurred_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS campaign_unsub_attr_campaign_member_unique ON campaign_unsubscribe_attributions(campaign_id, list_member_id)`,
+    `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
   ];
 
   for (const sql of statements) {
@@ -525,6 +526,7 @@ export async function cleanDb() {
     DELETE FROM async_jobs;
     DELETE FROM agent_sessions;
     DELETE FROM suggested_replies;
+    DELETE FROM gmail_accounts;
     DELETE FROM drafts;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;

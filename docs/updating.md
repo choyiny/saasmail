@@ -16,6 +16,33 @@ git rebase upstream/main -X ours
 
 The `-X ours` flag tells rebase to prefer upstream for conflicting hunks (during a rebase, "ours" is the branch being rebased onto). Your local commits are still replayed on top.
 
+## Upstream migrations
+
+This fork numbers its D1 migrations on its own, so upstream's
+`migrations/*.sql` files reuse numbers the fork already has under other names.
+Git adds them without a conflict, and wrangler would run any that survive at
+the next `yarn db:migrate:prod`, because it applies every file whose name is
+not yet in `d1_migrations`.
+
+When you merge upstream:
+
+1. Delete every upstream `migrations/*.sql` the merge adds, and keep the
+   fork's side of `migrations/meta/_journal.json` and of every
+   `migrations/meta/*_snapshot.json` exactly.
+2. Re-express the schema change with `yarn db:generate --name=<slug>` under
+   the fork's next number, check that the new file holds only upstream's
+   statements, and update `applyMigrations()` in
+   `worker/src/__tests__/helpers.ts` in the same commit.
+3. Add a row to the table below.
+
+| Upstream file                     | Fork file                          | Note            |
+| --------------------------------- | ---------------------------------- | --------------- |
+| `0035_overjoyed_rocket_racer.sql` | `0085_upstream_gmail_accounts.sql` | same statements |
+
+`yarn typecheck` runs `scripts/check-migrations.mjs`, which fails while two
+migration files share a number, so an upstream file that survives a merge
+fails CI.
+
 ## Temporary AI SDK approval-continuation patch
 
 This release carries `scripts/patch-ai-resume.mjs`, run by `postinstall`. AI SDK

@@ -30,7 +30,7 @@
     "test:e2e": "node e2e/scripts/wipe-db.mjs && playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:debug": "PWDEBUG=1 playwright test",
-    "typecheck": "tsc -p tsconfig.app.json --noEmit && node scripts/check-worker-types.mjs",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && node scripts/check-worker-types.mjs && node scripts/check-migrations.mjs",
     "typecheck:update-baseline": "node scripts/check-worker-types.mjs --update",
     "postinstall": "node scripts/patch-ai-resume.mjs"
   },
@@ -83,7 +83,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "codemirror": "^6.0.2",
-    "dompurify": "^3.4.13",
+    "dompurify": "^3.4.16",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.7",
     "hono-rate-limiter": "^0.5.3",

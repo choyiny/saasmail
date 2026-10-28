@@ -30,6 +30,7 @@ import { adminRouter } from "./routers/admin-router";
 import { adminInboxesRouter } from "./routers/admin-inboxes-router";
 import { adminRulesRouter } from "./routers/admin-rules-router";
 import { adminAuditRouter } from "./routers/admin-audit-router";
+import { adminGmailRouter } from "./routers/admin-gmail-router";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
@@ -337,6 +338,7 @@ app.route("/api/admin/rules", adminRulesRouter);
 app.route("/api/admin/audit", adminAuditRouter);
 app.route("/api/admin/imports", importsRouter);
 app.route("/api/admin/backups", backupsRouter);
+app.route("/api/admin/gmail", adminGmailRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a

@@ -46,6 +46,7 @@ import { sendCounters } from "./send-counters.schema";
 import { authRateLimits } from "./auth-rate-limits.schema";
 import { spamModels, spamTokens, spamTraining } from "./spam-filter.schema";
 import { backupRuns } from "./backup-runs.schema";
+import { gmailAccounts } from "./gmail-accounts.schema";
 
 export const schema = {
   ...authSchema,
@@ -99,4 +100,5 @@ export const schema = {
   spamTokens,
   spamTraining,
   backupRuns,
+  gmailAccounts,
 } as const;

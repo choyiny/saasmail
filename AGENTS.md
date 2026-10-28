@@ -122,3 +122,8 @@ dedicated PR, regenerate `yarn.lock`, and rerun the full worker/web/e2e suite.
 ## WebMCP tools
 
 WebMCP tools live in `src/webmcp/` (runtime + hook + `tools/`), registered in `DashboardLayout` via `WebMcpTools`. Read tools call `src/lib/api.ts`; action tools drive the UI through the bridge (`src/webmcp/bridge.tsx`). Add a tool by extending `createReadTools`/`createActionTools` in `src/webmcp/tools/`.
+
+## Patterns we do not use
+
+- A second mailbox-state table (upstream's `mail_item_states`): write row actions through `worker/src/lib/messages/state.ts`, so `/mail`, JMAP and the grouped inbox agree.
+- Holding Gmail/Outlook sends in the outbox: refuse them instead, because outbox rows store no transport and a later drain could send through another provider.

@@ -308,3 +308,6 @@ export async function parseRawEmail(
     spamScore: parseSpamScore(headers),
   };
 }
+
+/** Upstream's name for `parseRawEmail`; mailbox syncs import it. */
+export const parseRaw = parseRawEmail;
