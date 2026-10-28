@@ -285,6 +285,53 @@ describe("ComposeModal: Undo Send and the send key", () => {
     expect(keyOf(mSend.mock.calls[1])).toBe(keyOf(mSend.mock.calls[0]));
     expect(keyOf(mSend.mock.calls[0])).toBeTruthy();
   });
+
+  it("a message from a named draft slot fails after the undo window and its retry reuses that slot's key", async () => {
+    // The dashboard resets the window to the "compose" slot when it closes
+    // (Send closes it at once), and reopens it on the slot it was sent from.
+    settings.seconds = 0.05;
+    mSend.mockRejectedValueOnce(new Error("network down"));
+    function DashboardHost() {
+      const [state, setState] = useState<{
+        open: boolean;
+        prefill: ComposePrefill | null;
+        contextKey: string;
+      }>({ open: true, prefill: PREFILL, contextKey: "draft:x1" });
+      return (
+        <ComposeModal
+          open={state.open}
+          prefill={state.prefill}
+          contextKey={state.contextKey}
+          onClose={() =>
+            setState({ open: false, prefill: null, contextKey: "compose" })
+          }
+          onReopen={(prefill, contextKey = "compose") =>
+            setState({ open: true, prefill, contextKey })
+          }
+        />
+      );
+    }
+    render(<DashboardHost />);
+    const SLOT_KEY = "saasmail:send-key:send:draft:x1";
+
+    await pressComposeSend();
+    const key = sessionStorage.getItem(SLOT_KEY);
+    expect(key).toBeTruthy();
+    await afterWindow();
+    expect(mSend).toHaveBeenCalledTimes(1);
+    // Back on its own slot, still owning its key.
+    expect(sessionStorage.getItem(SLOT_KEY)).toBe(key);
+    expect(sessionStorage.getItem(COMPOSE_KEY)).toBeNull();
+
+    await pressComposeSend();
+    await afterWindow();
+    expect(mSend).toHaveBeenCalledTimes(2);
+    expect(keyOf(mSend.mock.calls[0])).toBe(key);
+    expect(keyOf(mSend.mock.calls[1])).toBe(key);
+    expect(sessionStorage.getItem(SLOT_KEY)).toBeNull();
+    // The sent message's own draft slot is the one removed.
+    expect(vi.mocked(deleteDraft)).toHaveBeenCalledWith("draft:x1");
+  });
 });
 
 // ── ChatQuickReply ──────────────────────────────────────────────────────
@@ -349,5 +396,40 @@ describe("ChatQuickReply: Undo Send and the send key", () => {
     await waitFor(() => expect(mReply).toHaveBeenCalledTimes(2));
     expect(keyOf(mReply.mock.calls[1])).toBe(keyOf(mReply.mock.calls[0]));
     expect(keyOf(mReply.mock.calls[0])).toBeTruthy();
+  });
+
+  it("a second message sent during the first's undo window gets its own key; the first fails and its retry keeps the first key", async () => {
+    settings.seconds = 0.05;
+    mReply.mockRejectedValueOnce(new Error("network down"));
+    renderQuick();
+    const box = await sendQuick("first");
+    const first = sessionStorage.getItem(REPLY_KEY);
+    await sendQuick("second");
+    const second = sessionStorage.getItem(REPLY_KEY);
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+
+    await afterWindow();
+    // Each went out once, with its own key: the first failed, the second
+    // was sent.
+    expect(mReply).toHaveBeenCalledTimes(2);
+    const byText = new Map(
+      mReply.mock.calls.map((c) => [
+        (c[1] as { bodyText?: string }).bodyText,
+        keyOf(c),
+      ]),
+    );
+    expect(byText.get("first")).toBe(first);
+    expect(byText.get("second")).toBe(second);
+    // The failed message is back in the box and still owns its key.
+    await waitFor(() => expect(box.value).toBe("first"));
+    expect(sessionStorage.getItem(REPLY_KEY)).toBe(first);
+
+    await sendQuick("");
+    await afterWindow();
+    expect(mReply).toHaveBeenCalledTimes(3);
+    expect(keyOf(mReply.mock.calls[2])).toBe(first);
+    expect(sessionStorage.getItem(REPLY_KEY)).toBeNull();
   });
 });
