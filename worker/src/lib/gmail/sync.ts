@@ -1308,7 +1308,7 @@ export async function syncAllGmailAccounts(
       // And on the row, or the failure exists only in cron output. `lastError`
       // is the one field the admin UI reads for trouble, and nothing there has
       // a staleness threshold — so without this a mailbox that has failed
-      // every 15 minutes for a week renders as "Synced 7 days ago" with no
+      // every hour for a week renders as "Synced 7 days ago" with no
       // Reconnect offered, and the only symptom is mail not arriving.
       await recordSyncFailure(
         db,

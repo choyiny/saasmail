@@ -31,7 +31,7 @@ import {
 } from "@worker/lib/gmail/error-codes";
 
 /** How often the backend cron sweeps every connected mailbox. */
-const SYNC_INTERVAL_LABEL = "every 15 minutes";
+const SYNC_INTERVAL_LABEL = "every hour";
 
 type Provider = "google" | "microsoft";
 
@@ -84,7 +84,7 @@ const NON_AUTH_ERRORS = new Set<string>([
 /**
  * The `sync_failed:` codes a fresh grant CAN fix: Gmail refusing the
  * credential itself. A 5xx, a rate limit or an unclassified throw are the
- * server's problem or ours, and the next run in 15 minutes is the answer —
+ * server's problem or ours, and the next hourly run is the answer —
  * reconnecting only re-seeds the cursor and loses mail.
  */
 const RECONNECTABLE_SYNC_FAILURES = new Set<string>([
@@ -468,8 +468,8 @@ export default function ConnectedMailboxes({
           <CheckCircle2 size={14} className="mt-px shrink-0" />
           <span>
             <span className="font-medium">Mailbox connected.</span> It is in the
-            list below. The first sync runs within 15 minutes, and only mail
-            that arrives from now on is pulled in.
+            list below. The first sync runs within the hour, and only mail that
+            arrives from now on is pulled in.
           </span>
         </div>
       )}
@@ -534,7 +534,7 @@ export default function ConnectedMailboxes({
                         className="mt-0.5 text-xs font-light text-text-tertiary"
                       >
                         {account.lastSyncedAt === null
-                          ? "Not synced yet — the first sync runs within 15 minutes."
+                          ? "Not synced yet — the first sync runs within the hour."
                           : `Synced ${relativeTime(account.lastSyncedAt)}`}
                       </div>
                       <div

@@ -778,7 +778,7 @@ describe("send router — Gmail reply routing", () => {
     // On this install the configured provider IS reachable (RESEND_API_KEY
     // is set in the test env), so the old code sent a Workspace address's
     // reply through Resend — DKIM-signed by the wrong service, absent from
-    // the user's own Gmail Sent folder, and retried on a 15-minute loop.
+    // the user's own Gmail Sent folder, and retried on an hourly loop.
     // On a Gmail-only install the same fallback is NoopSender, and the user
     // got a 201 and a cleared draft for a reply that was never sent.
     await seedGmailAccount({ accessToken: null, expiresAt: null });

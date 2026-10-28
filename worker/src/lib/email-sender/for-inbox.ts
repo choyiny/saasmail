@@ -67,7 +67,7 @@ export class GmailSenderUnavailableError extends Error {
  * closed — nothing sent and the user told it was. On an install that does
  * have Resend or Postmark it is worse: the reply goes out from a Workspace
  * address through a provider that domain's SPF/DKIM does not authorise,
- * failing DMARC, and the outbox retries it every 15 minutes. That is exactly
+ * failing DMARC, and the outbox retries it every hour. That is exactly
  * what `send-email.ts` forbids in the comment above its Gmail branch, and the
  * guard there could not see it because the substitution happened up here.
  *

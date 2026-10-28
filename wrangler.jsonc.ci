@@ -45,7 +45,7 @@
     ]
   },
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": ["0 * * * *"]
   },
   // The one-off mailbox import, for Gmail and Outlook alike
   // (worker/src/lib/gmail/backfill-job.ts). Created on deploy; nothing to

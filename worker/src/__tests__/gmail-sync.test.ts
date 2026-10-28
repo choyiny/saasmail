@@ -1267,7 +1267,7 @@ describe("syncAllGmailAccounts", () => {
 
     // Not merely "no mail ingested" but "never reached the network": an
     // instance that never configured Gmail must not talk to Google, nor log
-    // an error, on every 15-minute cron tick.
+    // an error, on every hourly cron tick.
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await getDb().select().from(emails)).toHaveLength(0);
   });
@@ -1457,7 +1457,7 @@ describe("syncAllGmailAccounts", () => {
   /**
    * A rejecting sync used to be logged and nothing else: `lastError` stayed
    * null and `lastSyncedAt` kept its old value, so a mailbox failing every
-   * 15 minutes for a week rendered in the admin UI as "Synced 7 days ago"
+   * hour for a week rendered in the admin UI as "Synced 7 days ago"
    * with no Reconnect offered. `lastError` is the only field that page reads
    * for trouble, so it is the only place this can be said.
    */

@@ -153,7 +153,7 @@ top of the same page. Pointing an inbox at a Google mailbox makes saasmail read
 that mailbox over the Gmail API instead, and send its replies through it.
 
 Everything about that path — connecting a mailbox, what the mapping is checked
-against before it saves, the 15-minute poll, and why it never backfills — is in
+against before it saves, the hourly poll, and why it never backfills — is in
 [Gmail integration](gmail.md). Setting it up on a local instance is
 [Gmail on a local instance](gmail-local-setup.md).
 

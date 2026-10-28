@@ -38,7 +38,7 @@ Since Cloudflare Email Routing can't deliver to `wrangler dev`, the seed script 
 
 ## Firing the cron by hand
 
-The worker's `scheduled` handler runs every 15 minutes in production. It dispatches due sequence emails, processes the retry outbox, and syncs every connected Gmail mailbox — and it is the only caller of the Gmail sync, so there is no route, button or script that syncs one mailbox on demand.
+The worker's `scheduled` handler runs every hour in production. It dispatches due sequence emails, processes the retry outbox, and syncs every connected Gmail mailbox — and it is the only caller of the Gmail sync, so there is no route, button or script that syncs one mailbox on demand.
 
 The Vite dev server forwards Miniflare's trigger endpoint, so this runs the whole handler immediately against a running `yarn dev`:
 

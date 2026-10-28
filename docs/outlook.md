@@ -60,7 +60,7 @@ maps. Several inboxes can share one mailbox, routed by `To:`/`Cc:` exactly as
 
 ## What syncs
 
-- **Live mail** is read on the same 15-minute cron as Gmail, 50 messages per
+- **Live mail** is read on the same hourly cron as Gmail, 50 messages per
   mailbox per tick, from two folders: **Inbox** (onto timelines) and **Sent
   Items** (mirrored as sent mail, so replies typed in Outlook appear too).
   Each folder has its own Graph delta cursor, saved after every page and

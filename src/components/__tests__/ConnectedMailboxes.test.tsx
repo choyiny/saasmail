@@ -117,13 +117,13 @@ describe("ConnectedMailboxes", () => {
     expect(synced.textContent).not.toContain("Not synced yet");
   });
 
-  it("shows Not synced yet, and says sync runs every 15 minutes", async () => {
+  it("shows Not synced yet, and says sync runs every hour", async () => {
     mFetch.mockResolvedValue([account({ lastSyncedAt: null })]);
     renderAt();
 
     const row = await screen.findByTestId("gmail-account-acct_1");
     expect(row.textContent).toContain("Not synced yet");
-    expect(screen.getByText(/every 15 minutes/i)).toBeTruthy();
+    expect(screen.getByText(/every hour/i)).toBeTruthy();
   });
 
   it("offers Reconnect and shows the message when lastError is set", async () => {
@@ -570,11 +570,7 @@ describe("ConnectedMailboxes — starting the consent flow", () => {
     ["no_personal_inbox", /map one below/i, /no inbox is mapped/i],
     ["history_gap", /re-seeded from the present/i, /next successful sync/i],
     ["message_failed:18c2f0a1b2c3", /the next run retries it/i, /cursor/i],
-    [
-      "sync_failed:http_500",
-      /retries every 15 minutes/i,
-      /last sync could not run/i,
-    ],
+    ["sync_failed:http_500", /retries every hour/i, /last sync could not run/i],
   ])(
     "tells the operator what to do instead for %s",
     async (lastError, action, cause) => {

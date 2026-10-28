@@ -28,13 +28,12 @@ import { completeEnrollmentIfDone } from "./enrollment-completion";
  * immediately, so it is retried once per tick and this constant divided by the
  * cron frequency is the real retry window.
  *
- * The cron in `wrangler.jsonc` runs every 15 minutes, so 96 ticks is ~24h —
- * enough to ride out Cloudflare's daily send-quota reset. **Changing the cron
- * schedule changes this budget.** It was 24 while the cron was hourly; if the
- * schedule moves again, recompute this or quota-blocked mail starts failing
- * permanently before the quota resets.
+ * The cron in `wrangler.jsonc` runs hourly, so 24 ticks is ~24h — enough to
+ * ride out Cloudflare's daily send-quota reset. **Changing the cron schedule
+ * changes this budget.** If the schedule moves, recompute this or
+ * quota-blocked mail starts failing permanently before the quota resets.
  */
-export const MAX_OUTBOX_ATTEMPTS = 96;
+export const MAX_OUTBOX_ATTEMPTS = 24;
 
 /** Caps one cron tick's work; anything beyond drains on subsequent ticks. */
 const OUTBOX_BATCH_LIMIT = 200;
@@ -323,7 +322,7 @@ export async function sendViaOutbox(
 
 /**
  * Cron entry point: re-attempt every due pending outbox row. Called from the
- * `scheduled()` handler after sequence dispatch, once every 15 minutes.
+ * `scheduled()` handler after sequence dispatch, once an hour.
  */
 export async function processOutbox(env: CloudflareBindings): Promise<void> {
   if (isDemoMode(env)) return;

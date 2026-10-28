@@ -101,7 +101,7 @@
     }
   ],
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": ["0 * * * *"]
   },
   // Outbound email provider selection (runtime, no explicit toggle):
   //   - Set BOTH BAVIMAIL_API_KEY and BAVIMAIL_ALIAS_ID (via `wrangler secret put`)
