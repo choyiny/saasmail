@@ -6,7 +6,8 @@
 // or folders while those wait for a later release (docs/mailbox-state.md),
 // without touching the state the /mail page keeps.
 //
-// Seed gives us Alice (p_alice) and Bob (p_bob) in support@ and marketing@.
+// Seed gives us Alice (p_alice) and Bob (p_bob) in support@ and marketing@,
+// and Mailbox Fixture (p_mailbox) in support@.
 import type { Page, Request } from "@playwright/test";
 import { test, expect } from "../fixtures/test";
 import { truncateAndReseed } from "../support/reset-db";
@@ -97,7 +98,12 @@ function personView(page: Page, name: string, email: string) {
 
 type ListedMessage = {
   ref: string;
-  state?: { starredAt: number | null; archivedAt: number | null };
+  state?: {
+    starredAt: number | null;
+    archivedAt: number | null;
+    trashedAt: number | null;
+    snoozedUntil: number | null;
+  };
 };
 
 test.describe.serial("shell navigation", () => {
@@ -191,31 +197,46 @@ test.describe.serial("shell navigation", () => {
         page,
         api,
       }) => {
-        // State the /mail page set, through its own API.
-        const list = await api.get(
-          "/api/messages?inbox=support%40e2e.test&limit=100",
-        );
-        expect(list.ok()).toBe(true);
-        const before = ((await list.json()) as { messages: ListedMessage[] })
-          .messages;
-        const ref = before[0]!.ref;
+        // State the /mail page sets, through its own API: archive one
+        // message, star one, snooze one conversation, trash one.
+        const archived = "received:e_s_a1";
+        const starred = "received:e_s_a2";
+        const snoozed = "received:e_s_b1";
+        const trashed = "received:e_mailbox_1";
+        const until = Math.floor(Date.now() / 1000) + 3600;
+        expect(
+          (
+            await api.post("/api/messages/mailbox-state", {
+              data: { refs: [archived], archived: true },
+            })
+          ).ok(),
+        ).toBe(true);
         expect(
           (
             await api.post("/api/messages/user-state", {
-              data: { refs: [ref], starred: true },
+              data: { refs: [starred], starred: true },
+            })
+          ).ok(),
+        ).toBe(true);
+        expect(
+          (
+            await api.post("/api/messages/snooze", {
+              data: { refs: [snoozed], until },
             })
           ).ok(),
         ).toBe(true);
         expect(
           (
             await api.post("/api/messages/mailbox-state", {
-              data: { refs: [ref], archived: true },
+              data: { refs: [trashed], trashed: true },
             })
           ).ok(),
         ).toBe(true);
-        const set = await stateOf(api, ref);
-        expect(set?.starredAt).not.toBeNull();
-        expect(set?.archivedAt).not.toBeNull();
+        const set = await statesOf(api);
+        expect(set.get(archived)?.archivedAt).not.toBeNull();
+        expect(set.get(starred)?.starredAt).not.toBeNull();
+        expect(set.get(snoozed)?.snoozedUntil).toBe(until);
+        expect(set.get(trashed)?.trashedAt).not.toBeNull();
 
         const watch = watchRequests(page);
         await openLayout(page, layout);
@@ -240,20 +261,34 @@ test.describe.serial("shell navigation", () => {
           await expect(page.getByText("Alice Anderson").first()).toBeVisible();
         }
 
-        // Open a conversation: its header has none either.
-        await page.goto("/inbox/support%40e2e.test/p_alice");
-        await expect(
-          personView(page, "Alice Anderson", "alice@customers.test"),
-        ).toBeVisible();
-        await expect(
-          page.getByRole("button", { name: STATE_CONTROL }),
-        ).toHaveCount(0);
+        // Open each of those people: their headers have none either.
+        for (const person of [
+          {
+            id: "p_alice",
+            name: "Alice Anderson",
+            email: "alice@customers.test",
+          },
+          { id: "p_bob", name: "Bob Brown", email: "bob@customers.test" },
+          {
+            id: "p_mailbox",
+            name: "Mailbox Fixture",
+            email: "mailbox@customers.test",
+          },
+        ]) {
+          await page.goto(`/inbox/support%40e2e.test/${person.id}`);
+          await expect(
+            personView(page, person.name, person.email),
+          ).toBeVisible();
+          await expect(
+            page.getByRole("button", { name: STATE_CONTROL }),
+          ).toHaveCount(0);
+        }
         expect(watch.check()).toBeGreaterThan(0);
 
-        // The state /mail keeps is untouched by browsing the grouped inbox.
-        const after = await stateOf(api, ref);
-        expect(after?.starredAt).toBe(set?.starredAt);
-        expect(after?.archivedAt).toBe(set?.archivedAt);
+        // The state /mail keeps is untouched by browsing the grouped inbox
+        // (opening a conversation reads it, so "seen" may change).
+        const after = await statesOf(api);
+        expect(withoutSeen(after)).toEqual(withoutSeen(set));
 
         // /mail keeps its own folders and controls.
         await page.goto("/mail/support%40e2e.test/inbox");
@@ -261,32 +296,45 @@ test.describe.serial("shell navigation", () => {
         await expect(page.getByTestId("mail-folder-archive")).toBeVisible();
         await expect(page.getByTestId("mail-folder-trash")).toBeVisible();
 
-        // Leave the message as the seed had it for the next layout.
-        await api.post("/api/messages/user-state", {
-          data: { refs: [ref], starred: false },
-        });
-        await api.post("/api/messages/mailbox-state", {
-          data: { refs: [ref], archived: false },
-        });
+        // Leave the messages as the seed had them for the next layout.
+        for (const [path, data] of [
+          ["mailbox-state", { refs: [archived], archived: false }],
+          ["user-state", { refs: [starred], starred: false }],
+          ["snooze", { refs: [snoozed], until: null }],
+          ["mailbox-state", { refs: [trashed], trashed: false }],
+        ] as const) {
+          expect((await api.post(`/api/messages/${path}`, { data })).ok()).toBe(
+            true,
+          );
+        }
       });
     });
   }
 });
 
-async function stateOf(
+function withoutSeen(states: Map<string, ListedMessage["state"]>) {
+  return Object.fromEntries(
+    [...states].map(([ref, state]) => {
+      const { seen: _seen, ...rest } = (state ?? {}) as Record<string, unknown>;
+      return [ref, rest];
+    }),
+  );
+}
+
+/** Every support message's state, from each folder it can sit in. */
+async function statesOf(
   api: import("@playwright/test").APIRequestContext,
-  ref: string,
-): Promise<ListedMessage["state"] | undefined> {
-  // Archived messages leave the inbox folder; ask for the archive too.
-  for (const folder of ["inbox", "archive"]) {
+): Promise<Map<string, ListedMessage["state"]>> {
+  const states = new Map<string, ListedMessage["state"]>();
+  for (const folder of ["inbox", "sent", "archive", "trash", "snoozed"]) {
     const res = await api.get(
       `/api/messages?inbox=support%40e2e.test&folder=${folder}&limit=100`,
     );
     expect(res.ok()).toBe(true);
-    const found = (
-      (await res.json()) as { messages: ListedMessage[] }
-    ).messages.find((m) => m.ref === ref);
-    if (found) return found.state;
+    for (const m of ((await res.json()) as { messages: ListedMessage[] })
+      .messages) {
+      if (!states.has(m.ref)) states.set(m.ref, m.state);
+    }
   }
-  return undefined;
+  return states;
 }
