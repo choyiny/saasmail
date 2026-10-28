@@ -9,13 +9,17 @@
  * With Undo Send the request can go out after the composer has closed. A
  * send in progress (held for Undo or in flight) owns its key: `beginSend`
  * claims it, `finishSend` releases it, and closing the composer meanwhile
- * does not forget it.
+ * does not forget it. When two overlapping sends from one window both fail
+ * and are put back together, no one key covers the merged message: the key
+ * is dropped and the user is told to check Sent first.
  */
 const PREFIX = "saasmail:send-key:";
 // When sessionStorage is unavailable (private mode, blocked storage).
 const memory = new Map<string, string>();
 // Keys owned by a send that has not finished yet.
 const held = new Set<string>();
+// Contexts where a second failed send met another failed message's key.
+const merged = new Set<string>();
 
 function storedKey(context: string): string | null {
   try {
@@ -87,8 +91,17 @@ export function finishSend(
   outcome: "sent" | "undone" | "failed",
 ): void {
   held.delete(key);
-  if (outcome === "failed") storeKey(context, key);
-  else if (storedKey(context) === key) dropKey(context);
+  if (outcome === "failed") {
+    const other = storedKey(context);
+    if (other && other !== key && !held.has(other)) {
+      // Another message from this window failed too, and the two go back
+      // together: neither key covers that, so sendKeyProblem warns instead.
+      merged.add(context);
+      dropKey(context);
+      return;
+    }
+    storeKey(context, key);
+  } else if (storedKey(context) === key) dropKey(context);
 }
 
 /**
@@ -102,6 +115,9 @@ export function finishSend(
 export function sendKeyProblem(error: unknown, context: string): string | null {
   // An ApiError carries the server's code; read it by shape, so this works
   // wherever the API module is replaced (tests).
+  if (merged.delete(context)) {
+    return "Two messages from this window failed and were put back together; one of them may already have gone out. Check Sent before sending again.";
+  }
   const code = (error as { code?: unknown } | null)?.code;
   if (code === "IDEMPOTENCY_KEY_REUSED") {
     forgetSendKey(context);

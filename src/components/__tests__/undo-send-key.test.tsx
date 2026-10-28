@@ -468,4 +468,34 @@ describe("ChatQuickReply: Undo Send and the send key", () => {
     expect(keyOf(mReply.mock.calls[2])).toBe(first);
     expect(sessionStorage.getItem(REPLY_KEY)).toBeNull();
   });
+
+  it("two overlapping sends that both fail come back together with a warning to check Sent, and their retry gets a new key", async () => {
+    settings.seconds = 0.05;
+    mReply
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockRejectedValueOnce(new Error("network down"));
+    renderQuick();
+    const box = await sendQuick("first");
+    await sendQuick("second");
+
+    await afterWindow();
+    expect(mReply).toHaveBeenCalledTimes(2);
+    const [first, second] = mReply.mock.calls.map((c) => keyOf(c));
+    expect(first).toBeTruthy();
+    expect(second).toBeTruthy();
+    expect(first).not.toBe(second);
+    // Both are back in the box; no one key covers the two of them.
+    await waitFor(() => expect(box.value).toContain("first"));
+    expect(box.value).toContain("second");
+    expect(sessionStorage.getItem(REPLY_KEY)).toBeNull();
+    expect(await screen.findByText(/Check Sent/)).toBeTruthy();
+
+    await sendQuick("");
+    await afterWindow();
+    expect(mReply).toHaveBeenCalledTimes(3);
+    const retry = keyOf(mReply.mock.calls[2]);
+    expect(retry).toBeTruthy();
+    expect(retry).not.toBe(first);
+    expect(retry).not.toBe(second);
+  });
 });
