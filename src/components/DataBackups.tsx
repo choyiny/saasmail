@@ -187,7 +187,7 @@ export default function DataBackups() {
           type="button"
           onClick={onToggle}
           disabled={!overview || busy !== null}
-          className="shrink-0 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="shrink-0 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-background hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {busy === "toggle"
             ? "Saving…"

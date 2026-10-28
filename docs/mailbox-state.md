@@ -165,6 +165,13 @@ WebMCP exposes the same tool names for the signed-in browser session. Its
 The web app exposes a conventional three-pane mailbox at `/mail` alongside the
 customer-centric inbox at `/`. The mailbox UI reads the same unified message
 rows and state described above; it does not maintain a second copy of mail.
+Every layout links it as **Mail** ([Appearance](appearance.md)).
+
+The grouped inbox at `/` does not offer star, pin, archive, snooze or Trash
+yet, in any layout: `MAIL_STATE_ACTIONS_ENABLED` in
+`src/lib/mail-state-actions.ts` is `false`, which hides those controls and
+folders, and `GET /api/people/grouped` takes only `folder=all`, `inbox` or
+`sent`. They arrive in a later release. The state on this page is unaffected.
 
 Routes are URL-addressable:
 

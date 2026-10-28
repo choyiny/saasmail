@@ -13,7 +13,7 @@ auto-replying in a loop, an agent with a bad prompt, a leaked API key.
 
 ## Pause outbound sending
 
-**Settings → Sending → Pause sending** (admins). While sending is paused:
+**Settings → Sending controls → Pause sending** (admins). While sending is paused:
 
 - Every send is still accepted and recorded. The composer, the API, MCP, JMAP,
   rules, sequences, campaigns and list subscription confirmations go on as
@@ -66,7 +66,7 @@ tools are unaffected. Unset (or any other value), sending is on.
 
 ## Daily send limits
 
-**Settings → Sending → Daily send limits** (admins), or
+**Settings → Sending controls → Daily send limits** (admins), or
 `PATCH /api/admin/settings` with `dailySendLimits`. A limit is the number of
 messages one person may send in a UTC day through one channel:
 
@@ -100,7 +100,7 @@ cannot both get under it. Over the limit:
 counts start again. The first refusal of a day records `send.limit_reached` in
 the audit log, once per person and channel.
 
-**Settings → Sending** lists today's counts, busiest first
+**Settings → Sending controls** lists today's counts, busiest first
 (`GET /api/admin/send-usage?day=YYYY-MM-DD`). Counts are kept for a week.
 
 ## API

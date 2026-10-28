@@ -11,8 +11,9 @@ authenticated side panel is the UI on top of that runtime.
 
 ## In-app panel
 
-The **Agent** button in the top navigation opens a side panel from any
-authenticated page. The keyboard shortcut is **⌘J** on macOS and **Ctrl+J** on
+The agent button (a robot icon) in the header of every layout (default,
+Gmail-style and Outlook-style, see [Appearance](appearance.md)) opens a side
+panel from any authenticated page. The keyboard shortcut is **⌘J** on macOS and **Ctrl+J** on
 other platforms; pressing it again closes the panel. The open/closed preference
 is stored locally in the browser.
 

@@ -229,7 +229,7 @@ export default function TiptapEditor({
             active={editor.isActive("code")}
             title="Inline code"
           >
-            <span className="font-mono text-[10px]">&lt;/&gt;</span>
+            <span className="font-code text-[10px]">&lt;/&gt;</span>
           </ToolbarButton>
 
           <Separator />
@@ -343,7 +343,7 @@ export default function TiptapEditor({
             active={editor.isActive("codeBlock")}
             title="Code block"
           >
-            <span className="font-mono text-[10px]">{"{ }"}</span>
+            <span className="font-code text-[10px]">{"{ }"}</span>
           </ToolbarButton>
           <ToolbarButton
             onClick={() => editor.chain().focus().setHorizontalRule().run()}
@@ -400,7 +400,7 @@ export default function TiptapEditor({
       {imageError && (
         <div
           role="alert"
-          className="mt-2 rounded-[6px] border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
+          className="mt-2 rounded-lg border border-destructive/25 bg-destructive-subtle px-3 py-1.5 text-xs text-destructive"
         >
           {imageError}
           <button
@@ -439,10 +439,11 @@ function ToolbarButton({
     <button
       type="button"
       title={title}
-      className={`flex items-center justify-center rounded px-2 py-1.5 text-[11px] font-medium transition-colors ${
+      aria-pressed={active}
+      className={`flex h-7 min-w-7 items-center justify-center rounded-md px-1.5 text-xs font-medium transition-colors ${
         active
-          ? "bg-accent/15 text-accent"
-          : "text-text-tertiary hover:bg-bg-muted hover:text-text-secondary"
+          ? "bg-accent-subtle text-accent-subtle-fg"
+          : "text-text-secondary hover:bg-bg-muted hover:text-text-primary"
       }`}
       onClick={onClick}
     >

@@ -17,6 +17,8 @@ import {
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 import { SectionHeader } from "@/components/PageForm";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 function formatDate(ts: number): string {
   return new Date(ts * 1000).toLocaleDateString();
@@ -36,18 +38,10 @@ function relativeTime(ts: number): string {
 
 const REASON_META: Record<
   Suppression["reason"],
-  { label: string; chipClass: string; color: string }
+  { label: string; chip: string }
 > = {
-  unsubscribe: {
-    label: "Unsubscribed",
-    chipClass: "bg-violet/10 ring-violet/20",
-    color: "#7c5cfc",
-  },
-  manual: {
-    label: "Manual",
-    chipClass: "bg-bg-muted ring-border",
-    color: "#6b7280",
-  },
+  unsubscribe: { label: "Unsubscribed", chip: "accent" },
+  manual: { label: "Manual", chip: "" },
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -168,21 +162,20 @@ export default function SuppressionsPage() {
         title="Suppressions"
         subtitle="Email addresses that won't receive marketing or sequence sends."
         action={
-          <button
+          <Button
             onClick={() => {
               resetAddDialog();
               setAddOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
           >
-            <Plus size={14} />
+            <Plus />
             Add suppression
-          </button>
+          </Button>
         }
       />
 
       <div className="max-w-4xl space-y-6">
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <section className="overflow-hidden rounded-2xl bg-card border border-border shadow-card">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
               icon={Ban}
@@ -194,82 +187,92 @@ export default function SuppressionsPage() {
           </div>
 
           {error && (
-            <div className="border-b border-border bg-rose-50/60 px-5 py-2 text-xs font-medium text-rose-700">
+            <div className="border-b border-border bg-destructive-subtle px-5 py-2 text-xs font-medium text-destructive">
               {error}
             </div>
           )}
 
           {loading ? (
-            <p className="px-5 py-6 text-xs font-light text-text-tertiary">
-              Loading…
-            </p>
+            <div className="space-y-3 px-5 py-5" aria-busy="true">
+              {[0, 1, 2, 3].map((i) => (
+                <span key={i} className="pt-skel block h-4 w-full" />
+              ))}
+            </div>
           ) : items.length === 0 ? (
             <EmptyState
               icon={Ban}
               title="No suppressions yet"
-              hint="Recipients who unsubscribe land here automatically. You can also add one manually above."
+              hint="Recipients who unsubscribe land here automatically."
             />
           ) : (
             <>
-              <ul className="divide-y divide-border/60">
-                {items.map((item) => {
-                  const meta = REASON_META[item.reason];
-                  return (
-                    <li
-                      key={item.id}
-                      className="flex items-center gap-3 px-5 py-3"
-                    >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-muted">
-                        <Ban size={14} className="text-text-tertiary" />
-                      </span>
-
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="truncate text-sm font-medium text-text-primary">
+              <div className="overflow-x-auto">
+                <table className="pt-table">
+                  <thead>
+                    <tr>
+                      <th>Address</th>
+                      <th>Reason</th>
+                      <th className="hidden md:table-cell">Source</th>
+                      <th>Added</th>
+                      <th className="w-0">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => {
+                      const meta = REASON_META[item.reason];
+                      return (
+                        <tr key={item.id}>
+                          <td className="max-w-[260px] truncate font-medium">
                             {item.email}
-                          </p>
-                          <span
-                            className={cn(
-                              "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1",
-                              meta.chipClass,
-                            )}
-                            style={{ color: meta.color }}
+                          </td>
+                          <td>
+                            <span className={cn("pt-chip", meta.chip)}>
+                              {meta.label}
+                            </span>
+                          </td>
+                          <td className="muted hidden md:table-cell">
+                            {item.source ?? "—"}
+                          </td>
+                          <td
+                            className="muted whitespace-nowrap"
+                            title={formatDate(item.createdAt)}
                           >
-                            {meta.label}
-                          </span>
-                        </div>
-                        <p className="truncate text-xs font-light text-text-tertiary">
-                          {item.source ?? "—"} · added{" "}
-                          {relativeTime(item.createdAt)} (
-                          {formatDate(item.createdAt)})
-                        </p>
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          setDeleteError(null);
-                          setConfirmDelete(item);
-                        }}
-                        aria-label={`Remove suppression for ${item.email}`}
-                        className="inline-flex h-8 shrink-0 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-rose-50 hover:text-rose-600"
-                      >
-                        <Trash2 size={12} />
-                        Remove
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+                            {relativeTime(item.createdAt)}
+                          </td>
+                          <td className="!py-1.5 text-right">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setDeleteError(null);
+                                setConfirmDelete(item);
+                              }}
+                              aria-label={`Remove suppression for ${item.email}`}
+                              className="hover:bg-destructive-subtle hover:text-destructive"
+                            >
+                              <Trash2 />
+                              Remove
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
               {nextCursor && (
                 <div className="border-t border-border px-5 py-3">
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={loadMore}
                     disabled={loadingMore}
-                    className="w-full rounded-[6px] border border-border bg-card py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
+                    className="w-full"
                   >
                     {loadingMore ? "Loading…" : "Load more"}
-                  </button>
+                  </Button>
                 </div>
               )}
             </>
@@ -285,17 +288,15 @@ export default function SuppressionsPage() {
           if (!open) resetAddDialog();
         }}
       >
-        <DialogContent className="border-border bg-card text-text-primary ring-1 ring-border">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-text-primary">
-              Add suppression
-            </DialogTitle>
+            <DialogTitle>Add suppression</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAdd} className="space-y-4">
             <div className="space-y-1.5">
               <label
                 htmlFor="suppression-email"
-                className="block text-[11px] font-medium uppercase tracking-wider text-text-tertiary"
+                className="block text-[13px] font-medium text-text-primary"
               >
                 Email
               </label>
@@ -307,30 +308,30 @@ export default function SuppressionsPage() {
                 value={addEmail}
                 onChange={(e) => setAddEmail(e.target.value)}
                 placeholder="user@example.com"
-                className="h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/20"
+                className="h-9 w-full rounded-lg border border-border-strong bg-card px-3 text-sm text-text-primary shadow-card transition-[border-color,box-shadow] placeholder:text-text-tertiary hover:border-text-tertiary/60 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15"
               />
-              <p className="text-[11px] font-light text-text-tertiary">
+              <p className="text-xs text-text-tertiary">
                 Future marketing and sequence sends to this address will be
                 skipped.
               </p>
             </div>
 
             {addError && (
-              <p className="text-xs font-medium text-rose-600">{addError}</p>
+              <p className="text-xs font-medium text-destructive">{addError}</p>
             )}
 
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setAddOpen(false)}
-                className="rounded-[8px] border border-border bg-card px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-card font-medium text-text-primary transition-colors hover:bg-bg-subtle hover:text-text-primary h-9 px-3.5 text-[13.5px] shadow-card"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={addSubmitting}
-                className="rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-medium text-accent-foreground transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60 h-9 px-3.5 text-[13.5px]"
               >
                 {addSubmitting ? "Adding…" : "Add suppression"}
               </button>
@@ -349,13 +350,11 @@ export default function SuppressionsPage() {
           }
         }}
       >
-        <DialogContent className="border-border bg-card text-text-primary ring-1 ring-border">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-text-primary">
-              Remove suppression?
-            </DialogTitle>
+            <DialogTitle>Remove suppression?</DialogTitle>
           </DialogHeader>
-          <p className="text-sm font-light text-text-secondary">
+          <p className="text-sm text-text-secondary">
             <span className="font-medium text-text-primary">
               {confirmDelete?.email}
             </span>{" "}
@@ -364,14 +363,16 @@ export default function SuppressionsPage() {
           </p>
 
           {deleteError && (
-            <p className="text-xs font-medium text-rose-600">{deleteError}</p>
+            <p className="text-xs font-medium text-destructive">
+              {deleteError}
+            </p>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={() => setConfirmDelete(null)}
-              className="rounded-[8px] border border-border bg-card px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-card font-medium text-text-primary transition-colors hover:bg-bg-subtle hover:text-text-primary h-9 px-3.5 text-[13.5px] shadow-card"
             >
               Cancel
             </button>
@@ -379,7 +380,7 @@ export default function SuppressionsPage() {
               type="button"
               onClick={handleConfirmDelete}
               disabled={deleteSubmitting}
-              className="rounded-[8px] bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-destructive font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-60 h-9 px-3.5 text-[13.5px]"
             >
               {deleteSubmitting ? "Removing…" : "Remove"}
             </button>
@@ -402,12 +403,12 @@ function EmptyState({
   hint: string;
 }) {
   return (
-    <div className="px-5 py-10 text-center">
-      <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-violet/10">
-        <Icon size={16} style={{ color: "#7c5cfc" }} />
+    <div className="pt-empty">
+      <span className="ic">
+        <Icon size={18} />
       </span>
-      <p className="text-sm font-medium text-text-primary">{title}</p>
-      <p className="mt-1 text-xs font-light text-text-tertiary">{hint}</p>
+      <p className="font-medium text-text-primary">{title}</p>
+      <p className="-mt-2 text-[13px]">{hint}</p>
     </div>
   );
 }

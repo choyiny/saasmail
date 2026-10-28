@@ -91,7 +91,7 @@ export default function ListsPage() {
         action={
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
-              <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90">
+              <button className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-background shadow-sm transition-colors hover:bg-text-primary/90">
                 <Plus size={14} />
                 New list
               </button>
@@ -163,7 +163,7 @@ export default function ListsPage() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="w-full rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  className="w-full rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
                 >
                   {saving ? "Creating…" : "Create list"}
                 </button>

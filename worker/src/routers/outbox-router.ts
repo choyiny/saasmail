@@ -303,14 +303,20 @@ const listRoute = createRoute({
   path: "/",
   tags: ["Outbox"],
   description:
-    "List outbox rows (sends awaiting retry or terminally failed), newest first. Cursor is the createdAt of the last item.",
+    "List outbox rows (sends awaiting retry or terminally failed), newest first. Cursor is the nextCursor of the previous page (`<createdAt>_<id>`).",
   request: {
     query: z.object({
       cursor: z.string().optional(),
       limit: z.string().optional(),
     }),
   },
-  responses: { ...json200Response(ListResponseSchema, "Outbox rows") },
+  responses: {
+    ...json200Response(ListResponseSchema, "Outbox rows"),
+    400: {
+      description: "Malformed cursor",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+  },
 });
 
 outboxRouter.openapi(listRoute, async (c) => {
@@ -331,25 +337,22 @@ outboxRouter.openapi(listRoute, async (c) => {
   const scope = inboxFilter(allowed, outboxEmails.fromAddress);
   if (scope) clauses.push(scope);
   if (cursor) {
-    const sep = cursor.indexOf("_");
-    if (sep === -1) {
-      // Backward compat: bare createdAt cursor (old format).
-      clauses.push(lt(outboxEmails.createdAt, Number.parseInt(cursor, 10)));
-    } else {
-      const c_createdAt = Number.parseInt(cursor.slice(0, sep), 10);
-      const cid = cursor.slice(sep + 1);
-      // Compound keyset: rows with a smaller createdAt, OR rows with the same
-      // createdAt but a smaller id (nanoid lexicographic descending).
-      clauses.push(
-        or(
-          lt(outboxEmails.createdAt, c_createdAt),
-          and(
-            eq(outboxEmails.createdAt, c_createdAt),
-            lt(outboxEmails.id, cid),
-          ),
+    // `${createdAt}_${id}`; the id may itself contain "_".
+    const m = /^(\d+)_(.+)$/.exec(cursor);
+    if (!m) return c.json({ error: "Invalid cursor" }, 400);
+    const cursorCreatedAt = Number.parseInt(m[1], 10);
+    const cursorId = m[2];
+    // Compound keyset: rows with a smaller createdAt, OR rows with the same
+    // createdAt but a smaller id (nanoid lexicographic descending).
+    clauses.push(
+      or(
+        lt(outboxEmails.createdAt, cursorCreatedAt),
+        and(
+          eq(outboxEmails.createdAt, cursorCreatedAt),
+          lt(outboxEmails.id, cursorId),
         ),
-      );
-    }
+      ),
+    );
   }
 
   const rows = await db

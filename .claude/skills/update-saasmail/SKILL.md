@@ -1,21 +1,20 @@
 ---
 name: update-saasmail
-description: Update a deployed saasmail instance to the latest release (npx saasmail@latest upgrade), or sync a fork or local clone with https://github.com/choyiny/saasmail. Use this skill whenever the user wants to update saasmail, upgrade it, get the latest saasmail, pull upstream changes, sync or rebase on upstream, adopt an existing install into the npm package, or says "/update-saasmail". For a fork it adds the upstream remote if missing, rebases local commits on upstream/main, auto-stashes uncommitted work, and prefers upstream on conflicts.
+description: Update a deployed saasmail instance to the latest release (npx saasmail@latest upgrade), or sync a fork or local clone with https://github.com/choyiny/saasmail. Use this skill whenever the user wants to update saasmail, upgrade it, get the latest saasmail, pull upstream changes, sync or rebase on upstream, or says "/update-saasmail". For a fork it adds the upstream remote if missing, rebases local commits on upstream/main, auto-stashes uncommitted work, and prefers upstream on conflicts.
 ---
 
 # Update saasmail
 
-Three paths. Pick by how the instance was installed:
+Two paths. Pick by how the instance was installed:
 
 - **Installed with `npx saasmail install`** (state in `~/.saasmail/<slug>/`, or `SAASMAIL_HOME`): follow **Upgrade from npm**.
-- **Installed from a clone** (`yarn saasmail install`, state in the checkout's `.saasmail/`) that the user wants to hand to the package, or a worker made by the old onboarding skill: **Adopt first**, then upgrade.
-- **A fork or modified code the user keeps running from a clone**: follow **Sync a fork from upstream** (the original flow, below).
+- **Installed from a clone** (`yarn saasmail install`, state in the checkout's `.saasmail/`), or a fork or modified code the user keeps running from a clone: follow **Sync a fork from upstream** (below).
 
 Ask if unsure. Never deploy from a clone with `yarn deploy` for an install the package owns.
 
 ## Upgrade from npm
 
-`upgrade` and `adopt` are npm-only; run them from any directory. Same rule as onboarding: you run the read-only plan, **the user runs the apply in their own terminal, not with `!`**, because the apply prints the setup code and credential prompts must stay out of this conversation.
+`upgrade` is npm-only; run it from any directory. Same rule as onboarding: you run the read-only plan, **the user runs the apply in their own terminal, not with `!`**, because the apply prints the setup code and credential prompts must stay out of this conversation.
 
 1. `npx saasmail status [--name <name>]` shows the recorded install, the running version and **Latest** on npm.
 2. Plan (read-only, safe from your shell):
@@ -32,13 +31,6 @@ Ask if unsure. Never deploy from a clone with `yarn deploy` for an install the p
 4. Ask for an explicit yes, then give the user the apply command the plan printed (it ends with `--expect-plan <digest> --yes`) to run in their own terminal.
 5. If it fails, the message prints the command to continue. Ask for the error lines (never a `Setup code:` line), help fix the cause, and have them run `npx saasmail@latest upgrade --resume [--name <name>]` in their terminal. `--resume` continues even if the site is down. "The plan changed since it was reviewed" means something moved: plan again.
 6. Run `npx saasmail status [--name <name>]` yourself and confirm the running version matches Latest.
-
-## Adopt first (once)
-
-- A clone install: `npx saasmail adopt --from <checkout> [--name <name>]` copies its state and `wrangler.jsonc` to `~/.saasmail/<slug>/`. Nothing on Cloudflare changes; the clone then refuses to install or resume it. Confirm with the user before running it.
-- An install with no CLI state (old onboarding skill): `npx saasmail adopt --worker <name> [--account <id|name>] [--inbound-domain <domain>] [--send-domain <domain>] --plan`, review it with the user, then they run the printed apply in their terminal. It reads the worker's bindings and deploys nothing; without the domain flags it records the zones whose catch-all goes to the worker (Email Routing on) and, with Email Sending, the enabled sending subdomains in them. If the running version is unknown, the first upgrade needs `--replace-custom-code`. Zone routes other than custom domains are not supported. It stops, writing nothing, on worker vars the first upgrade would drop or change (a var saasmail's config does not set, one it sets to another value such as a hand-edited `TRUSTED_ORIGINS`, or a plain var named like a generated secret such as `TOKEN_ENCRYPTION_KEY`); it lists each with its current and new value. Retired vars (`APP_NAME`, `APP_LOGO_LETTER`) and a `TRUSTED_ORIGINS` trimmed only of localhost origins don't stop it; the plan lists them as dropped. The user changes or removes the others on the worker (dashboard → Settings → Variables), then runs adopt again. A secret-named var keeps its value as a Secret (dashboard: change its type to Secret), so the data it protects stays readable.
-
-Then continue with **Upgrade from npm**.
 
 ## Sync a fork from upstream
 

@@ -48,7 +48,7 @@ function parseDrafts(drafts: LimitDrafts): DailySendLimits | string {
   return limits;
 }
 
-/** Settings → Sending (admins): the outbound pause and the daily limits. */
+/** Settings → Sending controls (admins): the outbound pause and the daily limits. */
 export default function SendingSettings() {
   const { outboundPaused, refresh: refreshBranding } = useBranding();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -144,7 +144,9 @@ export default function SendingSettings() {
 
   return (
     <section className="space-y-3" data-testid="sending-settings">
-      <h2 className="text-base font-semibold text-text-primary">Sending</h2>
+      <h2 className="text-base font-semibold text-text-primary">
+        Sending controls
+      </h2>
 
       <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -171,7 +173,7 @@ export default function SendingSettings() {
             type="button"
             onClick={togglePause}
             disabled={!settings || busy !== null}
-            className="shrink-0 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="shrink-0 rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-background hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy === "pause"
               ? "Saving…"
@@ -231,7 +233,7 @@ export default function SendingSettings() {
             type="button"
             onClick={saveLimits}
             disabled={!drafts || busy !== null}
-            className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-background hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {busy === "limits" ? "Saving…" : "Save limits"}
           </button>

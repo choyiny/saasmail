@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { Outlet, useNavigate } from "react-router-dom";
-import TopNav from "@/components/TopNav";
-import Breadcrumbs from "@/components/Breadcrumbs";
+import PortalShell from "@/components/shell/PortalShell";
 import SendingPausedBanner from "@/components/SendingPausedBanner";
-import Footer from "@/components/Footer";
 import ComposeFab from "@/components/ComposeFab";
 import ComposeModal, { type ComposePrefill } from "@/pages/ComposeModal";
 import Toaster from "@/components/Toaster";
-import { useReducedAnimations } from "@/hooks/useReducedAnimations";
 import { useBranding } from "@/lib/branding";
 import { WebMcpBridgeProvider } from "@/webmcp/bridge";
 import { WebMcpTools } from "@/webmcp/registerTools";
 import AgentPanel from "@/components/AgentPanel";
 import { AgentContextProvider } from "@/agent/AgentContext";
+import { AgentPanelContext } from "@/agent/AgentPanelToggle";
+import { useUiTheme } from "@/lib/preferences";
 
 const AGENT_PANEL_STORAGE_KEY = "saasmail.agentPanelOpen";
 
@@ -23,6 +29,9 @@ function initialAgentPanelOpen(): boolean {
     return false;
   }
 }
+
+const GmailShell = lazy(() => import("@/themes/gmail/GmailShell"));
+const OutlookShell = lazy(() => import("@/themes/outlook/OutlookShell"));
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
@@ -35,7 +44,7 @@ export default function DashboardLayout() {
   const [composePrefill, setComposePrefill] = useState<ComposePrefill | null>(
     null,
   );
-  const reduced = useReducedAnimations();
+  const ui = useUiTheme();
 
   const openCompose = useCallback(
     (prefill?: ComposePrefill, contextKey = "compose") => {
@@ -68,6 +77,12 @@ export default function DashboardLayout() {
     return () => window.removeEventListener("keydown", handleAgentShortcut);
   }, []);
 
+  const toggleAgent = useCallback(() => setAgentOpen((open) => !open), []);
+  const agentToggle = useMemo(
+    () => ({ open: agentOpen, toggle: toggleAgent }),
+    [agentOpen, toggleAgent],
+  );
+
   const closeCompose = useCallback(() => {
     setComposeOpen(false);
     setComposePrefill(null);
@@ -77,54 +92,51 @@ export default function DashboardLayout() {
   return (
     <WebMcpBridgeProvider navigate={navigate} openCompose={openCompose}>
       <AgentContextProvider>
-        {webmcpEnabled && <WebMcpTools />}
-        <div className="relative flex min-h-screen flex-col bg-background pt-16">
-          {/* Faded gradient backdrop. Animates by default; falls back to a
-            static version on low-spec devices or when the user prefers
-            reduced motion. */}
-          <div
-            className={
-              reduced
-                ? "dashboard-backdrop dashboard-backdrop-static"
-                : "dashboard-backdrop"
-            }
-            aria-hidden
-          />
-          <div className="dashboard-backdrop-mask" aria-hidden />
-
-          <TopNav
-            agentOpen={agentOpen}
-            onAgentToggle={() => setAgentOpen((open) => !open)}
-          />
-
-          <div className="relative z-10 flex min-h-0 flex-1">
-            <div className="flex min-w-0 flex-1 flex-col">
-              <SendingPausedBanner />
-              <Breadcrumbs />
-              <main className="flex min-h-0 flex-1 flex-col">
-                <Outlet context={{ onCompose: openCompose }} />
-              </main>
-              <Footer />
+        <AgentPanelContext.Provider value={agentToggle}>
+          {webmcpEnabled && <WebMcpTools />}
+          {/* The agent panel and the sending-paused banner sit outside the
+            layout switch, so every layout keeps them. */}
+          <div className="flex h-dvh flex-col overflow-hidden">
+            <SendingPausedBanner />
+            <div className="flex min-h-0 flex-1">
+              <div className="dash-shell min-w-0 flex-1">
+                {ui === "default" ? (
+                  <PortalShell onCompose={() => openCompose()}>
+                    <Outlet context={{ onCompose: openCompose }} />
+                  </PortalShell>
+                ) : (
+                  <Suspense fallback={null}>
+                    {(() => {
+                      const Shell = ui === "gmail" ? GmailShell : OutlookShell;
+                      return (
+                        <Shell onCompose={openCompose}>
+                          <Outlet context={{ onCompose: openCompose }} />
+                        </Shell>
+                      );
+                    })()}
+                  </Suspense>
+                )}
+              </div>
+              {agentOpen && (
+                <AgentPanel
+                  onClose={() => setAgentOpen(false)}
+                  onOpenCompose={openCompose}
+                />
+              )}
             </div>
-            {agentOpen && (
-              <AgentPanel
-                onClose={() => setAgentOpen(false)}
-                onOpenCompose={openCompose}
-              />
-            )}
           </div>
 
-          <ComposeFab onClick={() => openCompose()} />
+          {ui === "default" && <ComposeFab onClick={() => openCompose()} />}
 
           <ComposeModal
             open={composeOpen}
             onClose={closeCompose}
             prefill={composePrefill}
             contextKey={composeContextKey}
+            onReopen={openCompose}
           />
-
           <Toaster />
-        </div>
+        </AgentPanelContext.Provider>
       </AgentContextProvider>
     </WebMcpBridgeProvider>
   );

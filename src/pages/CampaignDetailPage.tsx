@@ -260,7 +260,7 @@ export default function CampaignDetailPage() {
                 void act(() => sendCampaign(id), "Could not start the send.");
               }}
               disabled={busy}
-              className="rounded-[6px] bg-text-primary px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+              className="rounded-[6px] bg-text-primary px-3 py-2 text-xs font-medium text-background disabled:opacity-50"
             >
               Send now
             </button>
@@ -271,7 +271,7 @@ export default function CampaignDetailPage() {
                 act(() => retryCampaign(id), "Could not retry the campaign.")
               }
               disabled={busy}
-              className="rounded-[6px] bg-text-primary px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+              className="rounded-[6px] bg-text-primary px-3 py-2 text-xs font-medium text-background disabled:opacity-50"
             >
               Retry failures
             </button>
@@ -371,7 +371,7 @@ export default function CampaignDetailPage() {
                 type="button"
                 onClick={() => void saveBody()}
                 disabled={savingBody}
-                className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-background disabled:opacity-60"
               >
                 {savingBody ? "Saving…" : "Save"}
               </button>
@@ -416,7 +416,7 @@ export default function CampaignDetailPage() {
                 <button
                   type="button"
                   onClick={() => void useBlocks()}
-                  className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white"
+                  className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-background"
                 >
                   Use blocks
                 </button>

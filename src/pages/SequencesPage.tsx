@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Plus, ListOrdered, Pencil, Trash2, Clock } from "lucide-react";
 import { fetchSequences, deleteSequence, type Sequence } from "@/lib/api";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
 
 /** Round delay-hours into a friendlier string for the row chip. */
 function formatTotalDelay(hours: number): string {
@@ -41,37 +42,60 @@ export default function SequencesPage() {
     <PageContainer>
       <PageHeader
         title="Sequences"
-        subtitle="Multi-step drip campaigns. Enroll a contact and saasmail sends templated emails on a schedule."
+        subtitle="Multi-step drip campaigns. Enroll a contact and templated emails go out on a schedule."
         action={
-          <button
-            onClick={() => navigate("/sequences/new")}
-            className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
-          >
-            <Plus size={14} />
+          <Button onClick={() => navigate("/sequences/new")}>
+            <Plus />
             New sequence
-          </button>
+          </Button>
         }
       />
 
-      <div className="max-w-4xl">
+      <div>
         {loading ? (
-          <p className="text-sm font-light text-text-tertiary">Loading…</p>
+          <div
+            className="pt-card divide-y divide-border-subtle"
+            aria-busy="true"
+          >
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-4">
+                <span className="pt-skel h-9 w-9 rounded-lg" />
+                <span className="flex flex-1 flex-col gap-2">
+                  <span className="pt-skel h-3 w-1/3" />
+                  <span className="pt-skel h-2.5 w-1/4" />
+                </span>
+              </div>
+            ))}
+          </div>
         ) : sequences.length === 0 ? (
-          <div className="rounded-[8px] bg-card p-10 text-center ring-1 ring-border">
-            <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet/10">
-              <ListOrdered size={20} style={{ color: "#7c5cfc" }} />
+          <div className="pt-card pt-empty">
+            <span className="ic">
+              <ListOrdered size={18} />
             </span>
-            <p className="mb-1 text-sm font-medium text-text-primary">
-              No sequences yet
-            </p>
-            <p className="mb-4 text-xs font-light text-text-tertiary">
-              Build your first multi-step campaign to nurture contacts
+            <p>
+              No sequences yet. Build one to follow up with contacts
               automatically.
             </p>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/sequences/new")}
+            >
+              <Plus />
+              Create a sequence
+            </Button>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
-            <ul className="divide-y divide-border/60">
+          <div className="pt-card overflow-hidden">
+            <div className="hidden h-9 items-center gap-4 border-b border-border bg-bg-subtle px-5 sm:flex">
+              <span className="font-label flex-1 text-text-secondary">
+                Sequence
+              </span>
+              <span className="font-label w-24 text-right text-text-secondary">
+                Steps
+              </span>
+              <span className="w-[104px]" />
+            </div>
+            <ul className="divide-y divide-border-subtle">
               {sequences.map((seq) => {
                 const total = totalDurationHours(seq);
                 return (
@@ -79,50 +103,55 @@ export default function SequencesPage() {
                     key={seq.id}
                     data-testid="sequence-row"
                     data-sequence-id={seq.id}
-                    className="group flex items-center justify-between gap-4 px-5 py-3.5 transition-colors hover:bg-text-primary/[0.02]"
+                    className="group flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-bg-subtle sm:gap-4 sm:px-5"
                   >
                     <Link
                       to={`/sequences/${seq.id}`}
                       className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[6px] bg-bg-muted">
-                        <ListOrdered size={14} className="text-text-tertiary" />
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-subtle">
+                        <ListOrdered
+                          size={15}
+                          className="text-text-secondary"
+                        />
                       </span>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-medium text-text-primary">
-                            {seq.name}
-                          </p>
-                          <span
-                            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-violet/10 px-2 py-0.5 text-[10px] font-medium tabular-nums"
-                            style={{ color: "#7c5cfc" }}
-                            title={`${seq.steps.length} step${seq.steps.length === 1 ? "" : "s"}`}
-                          >
-                            {seq.steps.length} step
-                            {seq.steps.length === 1 ? "" : "s"}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 inline-flex items-center gap-1 text-xs font-light text-text-tertiary">
-                          <Clock size={10} />
-                          spans {formatTotalDelay(total)}
+                        <p className="truncate text-[14px] font-medium text-text-primary">
+                          {seq.name}
+                        </p>
+                        <p className="mt-0.5 inline-flex items-center gap-1 text-[13px] text-text-secondary">
+                          <Clock size={12} className="text-text-tertiary" />
+                          Spans {formatTotalDelay(total)}
                         </p>
                       </div>
                     </Link>
-                    <div className="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
-                      <button
-                        onClick={() => navigate(`/sequences/${seq.id}/edit`)}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                    <span className="hidden w-24 justify-end sm:flex">
+                      <span
+                        className="pt-chip tabular"
+                        title={`${seq.steps.length} step${seq.steps.length === 1 ? "" : "s"}`}
                       >
-                        <Pencil size={12} />
-                        Edit
-                      </button>
-                      <button
+                        {seq.steps.length} step
+                        {seq.steps.length === 1 ? "" : "s"}
+                      </span>
+                    </span>
+                    <div className="flex shrink-0 items-center justify-end sm:w-[104px] gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate(`/sequences/${seq.id}/edit`)}
+                      >
+                        <Pencil />
+                        <span className="max-sm:sr-only">Edit</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => handleDelete(seq.id)}
                         aria-label="Delete"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+                        className="h-8 w-8 hover:bg-destructive-subtle hover:text-destructive"
                       >
-                        <Trash2 size={12} />
-                      </button>
+                        <Trash2 />
+                      </Button>
                     </div>
                   </li>
                 );

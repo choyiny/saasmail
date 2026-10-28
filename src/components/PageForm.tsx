@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
  */
 
 export const FORM_INPUT_CLASS =
-  "h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/20 disabled:cursor-not-allowed";
+  "h-9 w-full rounded-lg border border-border-strong bg-card px-3 text-sm text-text-primary shadow-card transition-[border-color,box-shadow] placeholder:text-text-tertiary hover:border-text-tertiary/60 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15 disabled:cursor-not-allowed disabled:opacity-60";
 
 interface SectionHeaderProps {
   icon?: React.ElementType;
@@ -30,14 +30,14 @@ export function SectionHeader({
     <div className="flex items-start justify-between gap-3">
       <div className="flex min-w-0 items-start gap-2">
         {Icon && (
-          <Icon size={14} className="mt-0.5 shrink-0 text-text-tertiary" />
+          <Icon size={16} className="mt-0.5 shrink-0 text-text-secondary" />
         )}
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-text-primary">{title}</h2>
+          <h2 className="text-[15px] font-semibold leading-snug tracking-[-0.01em] text-text-primary">
+            {title}
+          </h2>
           {subtitle && (
-            <p className="mt-0.5 text-xs font-light text-text-secondary">
-              {subtitle}
-            </p>
+            <p className="mt-0.5 text-[13px] text-text-secondary">{subtitle}</p>
           )}
         </div>
       </div>
@@ -56,14 +56,12 @@ interface FieldProps {
 export function Field({ label, hint, children, className }: FieldProps) {
   return (
     <label className={cn("block", className)}>
-      <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+      <span className="mb-1.5 block text-[13px] font-medium text-text-primary">
         {label}
       </span>
       {children}
       {hint && (
-        <span className="mt-1.5 block text-[11px] font-light text-text-tertiary">
-          {hint}
-        </span>
+        <span className="mt-1.5 block text-xs text-text-tertiary">{hint}</span>
       )}
     </label>
   );
@@ -72,8 +70,8 @@ export function Field({ label, hint, children, className }: FieldProps) {
 /** Pill-style label used at the top of code/preview panes. */
 export function PaneLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="shrink-0 border-b border-border bg-bg-subtle/40 px-3 py-1.5">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
+    <div className="shrink-0 border-b border-border bg-bg-subtle px-3 py-2">
+      <span className="font-label text-[10.5px] text-text-tertiary">
         {children}
       </span>
     </div>
@@ -102,19 +100,19 @@ export function CodeBlock({
     <div className="relative">
       <pre
         className={cn(
-          "overflow-x-auto rounded-[6px] border border-border bg-bg-subtle/60 p-3 text-[11px] leading-relaxed text-text-secondary",
+          "overflow-x-auto rounded-lg border border-border bg-bg-subtle p-3 pr-20 text-xs leading-relaxed text-text-primary",
           oneLine ? "whitespace-nowrap" : "whitespace-pre",
         )}
       >
-        <code className="font-mono">{value}</code>
+        <code className="font-code">{value}</code>
       </pre>
       <button
         type="button"
         onClick={copy}
         aria-label="Copy"
-        className="absolute right-2 top-2 inline-flex h-6 items-center gap-1 rounded-[4px] border border-border bg-card px-1.5 text-[10px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+        className="absolute right-2 top-2 inline-flex h-7 items-center gap-1 rounded-md border border-border-strong bg-card px-2 text-xs font-medium text-text-secondary shadow-card transition-colors hover:bg-bg-subtle hover:text-text-primary"
       >
-        {copied ? <Check size={10} /> : <Copy size={10} />}
+        {copied ? <Check size={12} /> : <Copy size={12} />}
         {copied ? "Copied" : "Copy"}
       </button>
     </div>

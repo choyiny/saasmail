@@ -51,20 +51,22 @@ export default function SequenceStatus({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-green-800/50 bg-green-900/20 px-3 py-2 text-sm">
-      <div className="flex-1">
-        <p className="font-medium text-green-400">
-          Sequence: {info.sequenceName}
-        </p>
-        <p className="text-xs text-text-secondary">
-          {sent}/{total} sent
+    <div className="inline-flex h-8 min-w-0 items-center gap-2 rounded-lg border border-info/25 bg-info-subtle pl-2.5 pr-1 text-[13px]">
+      <span className="pt-sdot info" aria-hidden />
+      <span className="min-w-0 truncate">
+        <span className="font-medium text-text-primary">
+          {info.sequenceName}
+        </span>
+        <span className="tabular text-text-secondary">
+          {" "}
+          · {sent}/{total} sent
           {nextPending &&
-            ` · Next: ${new Date(nextPending.scheduledAt * 1000).toLocaleString()}`}
-        </p>
-      </div>
+            ` · next ${new Date(nextPending.scheduledAt * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`}
+        </span>
+      </span>
       <button
         onClick={handleCancel}
-        className="text-xs text-red-400 hover:text-red-300"
+        className="shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium text-text-secondary transition-colors hover:bg-destructive-subtle hover:text-destructive"
       >
         Cancel
       </button>

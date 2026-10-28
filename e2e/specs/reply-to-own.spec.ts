@@ -24,7 +24,7 @@ test.describe.serial("reply to own sent message", () => {
     await page.getByText("Alice Anderson").click();
 
     // ── Step 1: send an initial email via the Compose modal ───────────────
-    await page.getByRole("button", { name: "Compose" }).click();
+    await page.getByRole("button", { name: "Compose", exact: true }).click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();

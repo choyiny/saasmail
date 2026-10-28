@@ -20,29 +20,7 @@ It moves the installation to the package's version: applies new migrations, adds
 
 `/update-saasmail` in Claude Code runs the plan and walks you through it; you run the apply in your own terminal because it prints the setup code.
 
-## Adopt an existing install
-
-Installs made another way move under the package once, then upgrade as above.
-
-From a clone that ran `yarn saasmail install`:
-
-```bash
-npx saasmail adopt --from <checkout>
-```
-
-This copies the install's state and `wrangler.jsonc` to `~/.saasmail/<slug>/`; nothing on Cloudflare changes. The clone keeps a marker and refuses to install or resume it afterwards.
-
-From a worker deployed by hand or by the old onboarding skill:
-
-```bash
-npx saasmail adopt --worker <name> [--account <id|name>] [--inbound-domain <domain>] [--send-domain <domain>] --plan
-```
-
-It reads the worker's bindings from Cloudflare and deploys nothing. Without `--inbound-domain`, it records the zones whose Email Routing catch-all sends mail to the worker (with Email Routing on); without `--send-domain` (Email Sending), the enabled Email Sending subdomains in those zones. Pass the flags to choose others. If the running version is unknown, the first upgrade needs `--replace-custom-code`. Zone routes other than custom domains are not supported.
-
-The first upgrade deploys saasmail's generated config, which replaces the worker's vars. So adopt stops, writing nothing, when a var would be lost or changed: a var the generated config does not set, one it sets to a different value (for example a `TRUSTED_ORIGINS` list edited by hand; it becomes the site URL), or a plain var named like a secret saasmail generates (`BETTER_AUTH_SECRET`, `UNSUBSCRIBE_SECRET`, `TOKEN_ENCRYPTION_KEY`, `VAPID_PRIVATE_KEY`, `SETUP_CODE_HASH`). It lists each var with its current and new value (a secret-named var's value is not shown). Change or remove them on the worker, then run adopt again. For a secret-named var, keep its value: change its type to Secret in the dashboard (Worker → Settings → Variables and Secrets), so data it protects stays readable. `SAASMAIL_VERSION` is expected to change and does not stop it. Neither do vars the worker no longer reads (`APP_NAME`, `APP_LOGO_LETTER`) or a `TRUSTED_ORIGINS` the upgrade only trims of local development origins (`localhost`, `127.0.0.1`, `[::1]`): the plan lists them under "The first upgrade drops these vars".
-
-### A database without d1_migrations
+## A database without d1_migrations
 
 `upgrade` reads the `d1_migrations` table to know which migrations already ran. A database set up some other way (for example SQL files run with `wrangler d1 execute`) has saasmail's tables but no such table, so the plan stops with `D1 <name> has tables but no d1_migrations table` and changes nothing. Running every migration again would fail on the existing tables.
 
@@ -87,21 +65,24 @@ When you merge upstream:
    `worker/src/__tests__/helpers.ts` in the same commit.
 3. Add a row to the table below.
 
-| Upstream file                      | Fork file                          | Note                                              |
-| ---------------------------------- | ---------------------------------- | ------------------------------------------------- |
-| `0035_overjoyed_rocket_racer.sql`  | `0085_upstream_gmail_accounts.sql` | same statements                                   |
-| `0036_futuristic_gunslinger.sql`   | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0037_careful_gwen_stacy.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0038_thick_blonde_phantom.sql`    | `0086_upstream_gmail_outlook.sql`  | dropped: index already in fork 0067               |
-| `0039_amazing_moondragon.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0040_needy_nocturne.sql`          | `0086_upstream_gmail_outlook.sql`  | dropped: index replaced by 0041                   |
-| `0041_old_nighthawk.sql`           | `0086_upstream_gmail_outlook.sql`  | unique index only                                 |
-| `0042_gmail_backfill.sql`          | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0043_gmail_backfill_one_year.sql` | `0086_upstream_gmail_outlook.sql`  | column only; dropped: data step on an empty table |
-| `0044_gmail_backfill_job.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0045_gmail_backfill_progress.sql` | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0046_careless_silhouette.sql`     | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0047_outlook_mailboxes.sql`       | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| Upstream file                              | Fork file                            | Note                                                                                        |
+| ------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `0035_overjoyed_rocket_racer.sql`          | `0085_upstream_gmail_accounts.sql`   | same statements                                                                             |
+| `0036_futuristic_gunslinger.sql`           | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0037_careful_gwen_stacy.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0038_thick_blonde_phantom.sql`            | `0086_upstream_gmail_outlook.sql`    | dropped: index already in fork 0067                                                         |
+| `0039_amazing_moondragon.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0040_needy_nocturne.sql`                  | `0086_upstream_gmail_outlook.sql`    | dropped: index replaced by 0041                                                             |
+| `0041_old_nighthawk.sql`                   | `0086_upstream_gmail_outlook.sql`    | unique index only                                                                           |
+| `0042_gmail_backfill.sql`                  | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0043_gmail_backfill_one_year.sql`         | `0086_upstream_gmail_outlook.sql`    | column only; dropped: data step on an empty table                                           |
+| `0044_gmail_backfill_job.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0045_gmail_backfill_progress.sql`         | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0046_careless_silhouette.sql`             | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0047_outlook_mailboxes.sql`               | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0048_user_prefs_mail_states.sql`          | `0087_upstream_user_preferences.sql` | `user_preferences` only; dropped: `mail_item_states` (the fork keeps its own state model)   |
+| `0049_user_prefs_palette.sql`              | `0087_upstream_user_preferences.sql` | column in the `CREATE TABLE`                                                                |
+| `0050_trash_overrides_layout_settings.sql` | `0087_upstream_user_preferences.sql` | `category_overrides`, columns in the `CREATE TABLE`; dropped: `mail_item_states.trashed_at` |
 
 Keep the fork's hourly cron (`0 * * * *` in `wrangler.jsonc.example` and
 `wrangler.jsonc.ci`) and `MAX_OUTBOX_ATTEMPTS` (24) when upstream changes

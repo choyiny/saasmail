@@ -25,8 +25,7 @@ export function npmManifest({ version, commit, wranglerVersion }) {
   return {
     name: "saasmail",
     version,
-    description:
-      "Install, upgrade and adopt a saasmail deployment on Cloudflare.",
+    description: "Install and upgrade a saasmail deployment on Cloudflare.",
     license: "Apache-2.0",
     type: "module",
     bin: { saasmail: "bin/saasmail.js" },

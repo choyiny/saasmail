@@ -6,8 +6,40 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#0a0a0a" />
-    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#16203a" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- Apply the saved mail theme / colour mode before first paint so the
+         page never flashes in the wrong theme. Mirrors
+         applyPreferencesToDocument in src/lib/preferences.tsx. -->
+    <script>
+      (function () {
+        var p = {};
+        try {
+          p = JSON.parse(localStorage.getItem("saasmail.preferences") || "{}");
+        } catch (e) {}
+        var ui =
+          ["gmail", "outlook"].indexOf(p.uiTheme) >= 0 ? p.uiTheme : "default";
+        var mode =
+          p.colorMode === "light" || p.colorMode === "dark"
+            ? p.colorMode
+            : window.matchMedia &&
+                window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+        var r = document.documentElement;
+        r.setAttribute("data-ui", ui);
+        r.setAttribute("data-mode", mode);
+        r.setAttribute(
+          "data-density",
+          p.density === "compact" ? "compact" : "comfortable",
+        );
+        var palettes = ["ink", "slate", "indigo", "forest", "claret", "paper"];
+        r.setAttribute(
+          "data-palette",
+          palettes.indexOf(p.palette) >= 0 ? p.palette : "navy",
+        );
+      })();
+    </script>
 
     <!-- Primary SEO -->
     <title>saasmail · The centralized inbox for SaaS teams</title>
@@ -107,7 +139,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Caveat:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Inter+Tight:wght@800;900&family=IBM+Plex+Mono:wght@400;500;600&family=Roboto:wght@400;500;700&family=Caveat:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
   </head>

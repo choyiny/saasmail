@@ -9,6 +9,14 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/api", () => api);
+// Undo Send off: these tests are about the payload and its key, so the send
+// runs at once (the undo window is covered in undo-send-key.test).
+vi.mock("@/lib/default-layout-settings", () => ({
+  useCommonSettings: () => [
+    { undoSendSeconds: 0, hideSignatures: false },
+    () => {},
+  ],
+}));
 
 import ChatQuickReply from "@/components/ChatQuickReply";
 

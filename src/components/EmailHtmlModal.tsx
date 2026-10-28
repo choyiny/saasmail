@@ -34,6 +34,7 @@ import {
 } from "@/lib/api";
 import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { avatarColor } from "@/lib/avatar";
 
 interface EmailHtmlModalProps {
   email: Email | null;
@@ -52,19 +53,6 @@ function formatBytes(bytes: number): string {
 function avatarInitial(addr: string | null): string {
   if (!addr) return "?";
   return addr[0]?.toUpperCase() ?? "?";
-}
-
-function avatarColor(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  const palette = [
-    { bg: "rgba(124, 92, 252, 0.14)", fg: "#5b3ce6" },
-    { bg: "rgba(34, 197, 94, 0.14)", fg: "#15803d" },
-    { bg: "rgba(244, 114, 182, 0.16)", fg: "#be185d" },
-    { bg: "rgba(56, 189, 248, 0.16)", fg: "#0369a1" },
-    { bg: "rgba(168, 85, 247, 0.14)", fg: "#7e22ce" },
-  ];
-  return palette[h % palette.length];
 }
 
 export default function EmailHtmlModal({
@@ -282,10 +270,10 @@ export default function EmailHtmlModal({
           className={trayContentClass({ fullscreen, width: "viewer" })}
         >
           {/* Slim header — avatar + subject inline. */}
-          <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-border bg-card pl-3 pr-3">
+          <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border bg-card pl-3.5 pr-2.5">
             <div className="flex min-w-0 items-center gap-2">
               <span
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
                 style={{ backgroundColor: color.bg, color: color.fg }}
               >
                 {avatarInitial(senderForAvatar)}
@@ -295,12 +283,11 @@ export default function EmailHtmlModal({
               </DialogPrimitive.Title>
               <span
                 className={cn(
-                  "hidden shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider sm:inline-flex",
-                  isSent ? "bg-bg-muted text-text-secondary" : "bg-violet/10",
+                  "pt-chip hidden shrink-0 sm:inline-flex",
+                  !isSent && "accent",
                 )}
-                style={!isSent ? { color: "#7c5cfc" } : undefined}
               >
-                {isSent ? <Send size={9} /> : <InboxIcon size={9} />}
+                {isSent ? <Send size={11} /> : <InboxIcon size={11} />}
                 {isSent ? "Sent" : "Received"}
               </span>
             </div>
@@ -310,7 +297,7 @@ export default function EmailHtmlModal({
                 onToggle={() => setFullscreen((v) => !v)}
               />
               <DialogPrimitive.Close
-                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
                 aria-label="Close"
               >
                 <X size={14} />
@@ -319,13 +306,13 @@ export default function EmailHtmlModal({
           </div>
 
           {/* Compact metadata. */}
-          <div className="shrink-0 divide-y divide-border/60 border-b border-border bg-bg-subtle/30">
+          <div className="shrink-0 divide-y divide-border-subtle border-b border-border bg-card">
             <TrayMetaRow label="From">
               {editing && canEdit ? (
                 <select
                   value={fromVal}
                   onChange={(e) => setFromVal(e.target.value)}
-                  className="my-1 w-full rounded-md border border-border bg-white px-2 py-1 text-sm text-text-primary ring-1 ring-gray-200"
+                  className="my-1 h-8 w-full rounded-lg border border-border-strong bg-card px-2 text-sm text-text-primary shadow-card outline-none focus:border-accent focus:ring-3 focus:ring-accent/15"
                 >
                   {fromOptions.map((o) => (
                     <option key={o} value={o}>
@@ -335,7 +322,7 @@ export default function EmailHtmlModal({
                 </select>
               ) : (
                 <div className="flex items-center justify-between gap-2 pr-3">
-                  <span className="block truncate py-2 text-sm text-text-primary">
+                  <span className="block truncate py-2.5 text-sm text-text-primary">
                     {fromAddr || (isSent ? "you" : "—")}
                   </span>
                   {canEdit && (
@@ -344,7 +331,7 @@ export default function EmailHtmlModal({
                       onClick={startEdit}
                       data-testid="view-edit-recipient"
                       title="Change From / To"
-                      className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
                     >
                       <UserPen size={13} />
                     </button>
@@ -362,10 +349,10 @@ export default function EmailHtmlModal({
                     if (e.key === "Enter") void saveEdit();
                   }}
                   placeholder="recipient@example.com"
-                  className="my-1 w-full rounded-md border border-border bg-white px-2 py-1 text-sm text-text-primary ring-1 ring-gray-200"
+                  className="my-1 h-8 w-full rounded-lg border border-border-strong bg-card px-2 text-sm text-text-primary shadow-card outline-none focus:border-accent focus:ring-3 focus:ring-accent/15"
                 />
               ) : (
-                <span className="block truncate py-2 pr-3 text-sm text-text-primary">
+                <span className="block truncate py-2.5 pr-3 text-sm text-text-primary">
                   {toAddr || "—"}
                 </span>
               )}
@@ -373,14 +360,14 @@ export default function EmailHtmlModal({
             {editing && canEdit && (
               <div className="flex items-center justify-end gap-2 px-3 py-2">
                 {editErr && (
-                  <span className="mr-auto text-xs text-red-400">
+                  <span className="mr-auto text-xs text-destructive">
                     {editErr}
                   </span>
                 )}
                 <button
                   type="button"
                   onClick={() => setEditing(false)}
-                  className="rounded-md border border-border px-2.5 py-1 text-xs text-text-secondary hover:bg-bg-muted"
+                  className="inline-flex h-8 items-center rounded-lg px-3 text-[13px] font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary"
                 >
                   Cancel
                 </button>
@@ -388,7 +375,7 @@ export default function EmailHtmlModal({
                   type="button"
                   onClick={saveEdit}
                   disabled={saving}
-                  className="inline-flex items-center gap-1 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white hover:bg-accent/90 disabled:opacity-50"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-[13px] font-medium text-accent-foreground shadow-card hover:bg-accent-hover disabled:opacity-50"
                 >
                   <Check size={12} />
                   {saving ? "Saving…" : "Save"}
@@ -396,12 +383,12 @@ export default function EmailHtmlModal({
               </div>
             )}
             <TrayMetaRow label="Time">
-              <span className="block truncate py-2 pr-3 text-sm text-text-primary">
+              <span className="block truncate py-2.5 pr-3 text-sm text-text-primary">
                 {fullDate} · {fullTime}
               </span>
             </TrayMetaRow>
             <TrayMetaRow label="ID">
-              <span className="block truncate py-2 pr-3 font-mono text-xs text-text-tertiary">
+              <span className="font-code block truncate py-2.5 pr-3 text-xs text-text-tertiary">
                 {email.id}
               </span>
             </TrayMetaRow>
@@ -410,7 +397,7 @@ export default function EmailHtmlModal({
           {/* Attachments */}
           {attachmentCount > 0 && (
             <div className="shrink-0 border-b border-border bg-card px-4 py-2.5 sm:px-5">
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
+              <p className="font-label mb-2 text-text-tertiary">
                 {attachmentCount} attachment
                 {attachmentCount !== 1 ? "s" : ""}
               </p>
@@ -423,7 +410,7 @@ export default function EmailHtmlModal({
                   <li key={att.id}>
                     <a
                       href={`/api/attachments/${att.id}`}
-                      className="flex items-center justify-between gap-3 rounded-[8px] border border-border bg-card px-3 py-2 text-xs transition-colors hover:bg-bg-muted"
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 text-[13px] shadow-card transition-colors hover:bg-bg-subtle"
                     >
                       <div className="flex min-w-0 items-center gap-2">
                         <Paperclip
@@ -435,7 +422,9 @@ export default function EmailHtmlModal({
                         </span>
                       </div>
                       <div className="flex shrink-0 items-center gap-2 text-text-tertiary">
-                        <span>{formatBytes(att.size)}</span>
+                        <span className="tabular text-xs">
+                          {formatBytes(att.size)}
+                        </span>
                         <Download size={12} />
                       </div>
                     </a>
@@ -448,29 +437,21 @@ export default function EmailHtmlModal({
           {/* Body view toggle + actions */}
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2 sm:px-5">
             <div className="flex items-center gap-2">
-              <div className="inline-flex rounded-[8px] bg-bg-muted/70 p-0.5 ring-1 ring-border">
+              <div className="pt-seg">
                 <button
                   onClick={() => setView("rendered")}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-[6px] px-3 py-1 text-xs font-medium transition-all",
-                    view === "rendered"
-                      ? "bg-card text-text-primary shadow-sm"
-                      : "text-text-secondary hover:text-text-primary",
-                  )}
+                  aria-pressed={view === "rendered"}
+                  className={cn(view === "rendered" && "on")}
                 >
-                  <FileText size={12} />
+                  <FileText size={13} />
                   Rendered
                 </button>
                 <button
                   onClick={() => setView("plain")}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-[6px] px-3 py-1 text-xs font-medium transition-all",
-                    view === "plain"
-                      ? "bg-card text-text-primary shadow-sm"
-                      : "text-text-secondary hover:text-text-primary",
-                  )}
+                  aria-pressed={view === "plain"}
+                  className={cn(view === "plain" && "on")}
                 >
-                  <Code size={12} />
+                  <Code size={13} />
                   Plain text
                 </button>
               </div>
@@ -482,7 +463,7 @@ export default function EmailHtmlModal({
                   type="button"
                   onClick={() => setThreadExpanded((v) => !v)}
                   aria-expanded={threadExpanded}
-                  className="inline-flex items-center gap-1.5 rounded-[6px] border border-border bg-card px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border-strong bg-card px-2.5 text-[13px] font-medium text-text-secondary shadow-card transition-colors hover:text-text-primary"
                 >
                   <MessageSquare size={12} />
                   {threadExpanded ? "Hide" : "Show"} {priorEmails.length}{" "}
@@ -495,7 +476,7 @@ export default function EmailHtmlModal({
                 </button>
               )}
               {!hasThreadContext && threadLoading && (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-light text-text-tertiary">
+                <span className="inline-flex items-center gap-1.5 text-xs text-text-tertiary">
                   <MessageSquare size={11} />
                   Loading thread…
                 </span>
@@ -503,7 +484,7 @@ export default function EmailHtmlModal({
             </div>
             <button
               onClick={handleCopy}
-              className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
             >
               {copied ? (
                 <>
@@ -524,22 +505,22 @@ export default function EmailHtmlModal({
               current rendering. */}
           <div className="smooth-scroll min-h-0 flex-1 overflow-y-auto bg-card">
             {threadExpanded && hasThreadContext && (
-              <div className="border-b border-border bg-bg-subtle/30">
+              <div className="border-b border-border bg-bg-subtle">
                 <div className="flex items-center gap-2 px-4 py-2 sm:px-5">
-                  <MessageSquare size={11} className="text-text-tertiary" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                  <MessageSquare size={13} className="text-text-secondary" />
+                  <span className="font-label text-[10.5px] text-text-tertiary">
                     {priorEmails.length} earlier message
                     {priorEmails.length === 1 ? "" : "s"} in this thread
                   </span>
                 </div>
-                <div className="divide-y divide-border/60">
+                <div className="divide-y divide-border-subtle">
                   {priorEmails.map((e) => (
                     <ThreadMessage key={e.id} email={e} muted />
                   ))}
                 </div>
                 <div className="flex items-center gap-2 border-t border-border bg-card px-4 py-2 sm:px-5">
-                  <ChevronDown size={11} className="text-text-tertiary" />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
+                  <ChevronDown size={13} className="text-text-secondary" />
+                  <span className="font-label text-[10.5px] text-text-tertiary">
                     This message
                   </span>
                 </div>
@@ -547,8 +528,7 @@ export default function EmailHtmlModal({
             )}
             {view === "rendered" && email.bodyHtml ? (
               <div
-                className="prose prose-sm max-w-none px-5 py-4 text-text-primary [&_a]:text-violet [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-text-secondary [&_p]:my-2 sm:px-7 sm:py-5"
-                style={{ "--tw-prose-links": "#7c5cfc" } as React.CSSProperties}
+                className="email-surface m-3 max-w-none overflow-x-auto rounded-lg px-5 py-4 sm:m-4 text-sm leading-relaxed [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--sm-email-line)] [&_blockquote]:pl-3 [&_img]:max-w-full [&_p]:my-2 sm:px-7 sm:py-5"
                 dangerouslySetInnerHTML={{
                   __html: sanitizeEmailHtml(email.bodyHtml),
                 }}
@@ -561,10 +541,10 @@ export default function EmailHtmlModal({
           </div>
 
           {/* Slim footer — single-line Esc hint. */}
-          <div className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-card px-4 py-2 sm:px-5">
-            <p className="text-[11px] font-light text-text-tertiary">
+          <div className="hidden shrink-0 items-center justify-between gap-2 border-t border-border bg-card px-4 py-2 sm:flex sm:px-5">
+            <p className="text-xs text-text-tertiary">
               Press{" "}
-              <kbd className="rounded border border-border bg-bg-muted px-1 font-mono text-[10px]">
+              <kbd className="rounded border border-border bg-bg-subtle px-1 font-sans text-[11px]">
                 Esc
               </kbd>{" "}
               to close

@@ -135,6 +135,7 @@ export default function MailPage() {
           totalEmails: 0,
           unreadCount: 0,
           recipients: [],
+          inboxUnread: {},
           senderIdentities: [],
         }),
       );

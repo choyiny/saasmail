@@ -83,23 +83,22 @@ export function describeState(
 
 /**
  * The command that moves this install to `latest`: always npx at that version (this package's own
- * version would redeploy the same release). An install still in a checkout is adopted first, since
- * upgrade runs only on installs under ~/.saasmail (ruling P2).
+ * version would redeploy the same release). upgrade runs only on installs under ~/.saasmail
+ * (ruling P2), so an install still in a checkout is pointed at the fork update path instead.
  */
 export function upgradeHint(
   s: InstallState,
   latest: string | null,
   where: { slug?: string; checkout?: string },
 ): string {
+  if (where.checkout !== undefined && s.movedTo === undefined)
+    return "update this checkout with git: see docs/updating.md#forks-and-modified-code";
   const npx = `npx saasmail@${latest ?? "latest"}`;
-  const slug = where.slug ?? s.inputs.name;
-  const upgrade = `${npx} upgrade --name ${slug}`;
-  if (where.checkout === undefined || s.movedTo !== undefined) return upgrade;
-  return `${npx} adopt --from ${where.checkout} --name ${s.inputs.name}, then ${upgrade}`;
+  return `${npx} upgrade --name ${where.slug ?? s.inputs.name}`;
 }
 
 export async function status(
-  opts: { name?: string; slug?: string; checkout?: string },
+  opts: { name?: string; slug?: string },
   deps: StatusDeps,
 ): Promise<number> {
   const { io } = deps;
@@ -125,8 +124,7 @@ export async function status(
       upgrade: upgradeHint(s, latest, {
         slug: opts.slug,
         checkout:
-          opts.checkout ??
-          (deps.source.kind === "checkout" ? deps.source.root : undefined),
+          deps.source.kind === "checkout" ? deps.source.root : undefined,
       }),
     }),
   );

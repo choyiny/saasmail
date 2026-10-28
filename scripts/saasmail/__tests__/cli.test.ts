@@ -1401,7 +1401,7 @@ describe("upgrade", () => {
     const h = harness();
     expect(await main(["upgrade", "--yes"], h.deps)).toBe(2);
     expect(h.text()).toContain(
-      `Upgrades run from npm: npx saasmail adopt --from ${cwd}, then npx saasmail upgrade.`,
+      "upgrade runs from npm on installs made with npx saasmail install.",
     );
     expect(h.tokenCalls()).toBe(0);
   });
@@ -1497,7 +1497,7 @@ describe("status", () => {
     expect(h.text()).not.toContain(`saasmail@${VERSION}`);
   });
 
-  it("in a checkout, the hint adopts from it with npx, then upgrades (never yarn saasmail upgrade)", async () => {
+  it("in a checkout, the hint points at the fork update path (never an upgrade command)", async () => {
     const h = harness({
       latest: "9.9.9",
       wellKnown: () => Response.json({ installationId: ID, version: "1.0.0" }),
@@ -1505,26 +1505,9 @@ describe("status", () => {
     writeState(dir, { ...installedState(), deployedVersion: "1.0.0" });
     expect(await main(["status"], h.deps)).toBe(0);
     expect(h.text()).toContain(
-      `(npx saasmail@9.9.9 adopt --from ${cwd} --name acme, then npx saasmail@9.9.9 upgrade --name acme)`,
+      "(update this checkout with git: see docs/updating.md#forks-and-modified-code)",
     );
-    expect(h.text()).not.toContain("yarn saasmail upgrade");
-  });
-
-  it("status --from a checkout hints adopt from that checkout, then upgrade", async () => {
-    const checkout = join(root, "checkout");
-    writeState(join(checkout, ".saasmail"), {
-      ...installedState(),
-      deployedVersion: "1.0.0",
-    });
-    const h = harness({
-      home: join(root, "home"),
-      latest: "9.9.9",
-      wellKnown: () => Response.json({ installationId: ID, version: "1.0.0" }),
-    });
-    expect(await main(["status", "--from", checkout], h.deps)).toBe(0);
-    expect(h.text()).toContain(
-      `(npx saasmail@9.9.9 adopt --from ${checkout} --name acme, then npx saasmail@9.9.9 upgrade --name acme)`,
-    );
+    expect(h.text()).not.toContain("upgrade --name");
   });
 
   it("running at the latest prints no upgrade hint", async () => {
@@ -1540,34 +1523,6 @@ describe("status", () => {
     writeState(dir, installedState());
     expect(await main(["status"], h.deps)).toBe(0);
     expect(h.text()).toMatch(/Latest\s+unknown/);
-  });
-
-  it("--from reads a checkout in package mode, read-only", async () => {
-    const checkout = join(root, "checkout");
-    const cdir = join(checkout, ".saasmail");
-    const s = installedState();
-    writeState(cdir, s);
-    const other = installedState();
-    writeState(cdir, {
-      ...other,
-      installationId: "beta-000000000000",
-      inputs: { ...other.inputs, name: "beta" },
-    });
-    const h = harness({ home: join(root, "home") });
-    expect(await main(["status", "--from", checkout], h.deps)).toBe(2);
-    expect(h.text()).toContain("Pass --name");
-    const h2 = harness({ home: join(root, "home") });
-    expect(
-      await main(["status", "--from", checkout, "--name", "acme"], h2.deps),
-    ).toBe(0);
-    expect(h2.text()).toContain("acme-db");
-    expect(listStates(cdir)).toHaveLength(2);
-    expect(existsSync(join(root, "home"))).toBe(false);
-  });
-
-  it("--from in a checkout is a usage error", async () => {
-    const h = harness();
-    expect(await main(["status", "--from", "/x"], h.deps)).toBe(2);
   });
 
   it("a moved install shows where", async () => {
@@ -1721,228 +1676,25 @@ describe("isEntry", () => {
   });
 });
 
-describe("adopt", () => {
-  const home = () => join(root, "home");
-  const MOVED = () => join(home(), resourceNames("acme").worker);
-  const seedCheckout = (over: Partial<InstallState> = {}) => {
-    const s = { ...installedState(), ...over };
-    writeState(dir, s);
-    writeFileSync(join(cwd, "wrangler.jsonc"), "// generated\n{}\n");
-    return s;
-  };
-  const MOVED_LINE = () =>
-    `This install moved to ${MOVED()}. Run npx saasmail upgrade --name ${resourceNames("acme").worker}.`;
+describe("a checkout install moved to the package", () => {
+  const MOVED = "/home/me/.saasmail/acme";
+  const MOVED_LINE = `This install moved to ${MOVED}. Run npx saasmail upgrade --name acme.`;
 
-  it("moves the install and the checkout then refuses install and --resume", async () => {
-    seedCheckout();
-    const h = harness({ home: home() });
-    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(0);
-    expect(h.text()).toContain(`Moved acme to ${MOVED()}`);
-    expect(readState(MOVED(), ID)!.adoptedAt).toBe("2026-10-17T00:00:00.000Z");
-    expect(readState(dir, ID)!.movedTo).toBe(MOVED());
-    expect(h.tokenCalls()).toBe(0);
-
-    const checkoutHarness = () => harness({});
-    const fresh = checkoutHarness();
+  it("the checkout refuses install and --resume", async () => {
+    writeState(dir, { ...installedState(), movedTo: MOVED });
+    const fresh = harness({});
     expect(await main(["install", ...FLAGS, "--yes"], fresh.deps)).toBe(1);
-    expect(fresh.text()).toContain(MOVED_LINE());
+    expect(fresh.text()).toContain(MOVED_LINE);
     expect(fresh.deploys).toHaveLength(0);
 
-    const resume = checkoutHarness();
+    const resume = harness({});
     expect(
       await main(
         ["install", "--resume", "--name", "acme", "--yes"],
         resume.deps,
       ),
     ).toBe(1);
-    expect(resume.text()).toContain(MOVED_LINE());
+    expect(resume.text()).toContain(MOVED_LINE);
     expect(resume.deploys).toHaveLength(0);
-  });
-
-  it("status on a moved checkout state shows where it went", async () => {
-    seedCheckout({ movedTo: "/somewhere/acme" });
-    const h = harness({});
-    expect(await main(["status"], h.deps)).toBe(0);
-    expect(h.text()).toContain("Moved         /somewhere/acme");
-  });
-
-  it("asks before moving, and a no changes nothing", async () => {
-    seedCheckout();
-    const h = harness({ home: home(), tty: true, confirm: false });
-    expect(await main(["adopt", "--from", cwd], h.deps)).toBe(1);
-    expect(h.confirms).toEqual(["Move this install?"]);
-    expect(h.text()).toContain("Nothing was changed.");
-    expect(existsSync(MOVED())).toBe(false);
-    expect(readState(dir, ID)!.movedTo).toBeUndefined();
-  });
-
-  it("without a terminal and --yes exits 2", async () => {
-    seedCheckout();
-    const h = harness({ home: home() });
-    expect(await main(["adopt", "--from", cwd], h.deps)).toBe(2);
-    expect(h.text()).toContain("Not running in a terminal");
-    expect(existsSync(MOVED())).toBe(false);
-  });
-
-  it("needs --from", async () => {
-    const h = harness({ home: home() });
-    expect(await main(["adopt", "--yes"], h.deps)).toBe(2);
-    expect(h.text()).toContain("adopt needs --from");
-  });
-
-  it("checkout mode points at npx", async () => {
-    seedCheckout();
-    const h = harness({});
-    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(2);
-    expect(h.text()).toContain(`npx saasmail adopt --from ${cwd}`);
-    expect(readState(dir, ID)!.movedTo).toBeUndefined();
-  });
-
-  it("a corrupt checkout state exits 1 with its message", async () => {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, `${ID}.json`), "{ not json");
-    const h = harness({ home: home() });
-    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(1);
-    expect(h.text()).toContain(`${ID}.json`);
-    expect(existsSync(home())).toBe(false);
-    const st = harness({ home: home() });
-    expect(await main(["status", "--from", cwd], st.deps)).toBe(1);
-    expect(st.text()).toContain(`${ID}.json`);
-  });
-
-  it("a taken destination exits 1 and leaves the checkout alone", async () => {
-    const s = seedCheckout();
-    writeState(MOVED(), s);
-    const h = harness({ home: home() });
-    expect(await main(["adopt", "--from", cwd, "--yes"], h.deps)).toBe(1);
-    expect(h.text()).toContain(`${MOVED()} already has an install`);
-    expect(readState(dir, ID)!.movedTo).toBeUndefined();
-  });
-});
-
-describe("adopt --worker", () => {
-  const home = () => join(root, "home");
-  const seed: FakeCloudflareSeed = {
-    workers: {
-      acme: [
-        { type: "d1", name: "DB", id: "d1-acme" },
-        { type: "plain_text", name: "COOKIE_PREFIX", text: "acme" },
-        { type: "secret_text", name: "BETTER_AUTH_SECRET" },
-      ],
-    },
-    d1: [{ uuid: "d1-acme", name: "acme-db" }],
-  };
-
-  it("--from and --worker together exit 2", async () => {
-    const h = harness({ home: home() });
-    expect(
-      await main(["adopt", "--from", cwd, "--worker", "acme", "--yes"], h.deps),
-    ).toBe(2);
-    expect(h.text()).toContain("Pass either --from or --worker, not both.");
-  });
-
-  it("--plan prints the report and the apply command and writes nothing", async () => {
-    const h = harness({ home: home(), seed });
-    expect(
-      await main(
-        [
-          "adopt",
-          "--worker",
-          "acme",
-          "--inbound-domain",
-          "example.com",
-          "--plan",
-        ],
-        h.deps,
-      ),
-    ).toBe(0);
-    const text = h.text();
-    expect(text).toContain("Adopt worker acme");
-    const digest = /Plan ([0-9a-f]{12})/.exec(text)![1]!;
-    expect(text).toContain(
-      `npx saasmail@${VERSION} adopt --worker acme --account ${ACCOUNT} --inbound-domain example.com --provider none --cookie-prefix acme --expect-plan ${digest} --yes`,
-    );
-    expect(existsSync(home())).toBe(false);
-
-    const apply = harness({ home: home(), seed });
-    expect(
-      await main(
-        [
-          "adopt",
-          "--worker",
-          "acme",
-          "--account",
-          ACCOUNT,
-          "--inbound-domain",
-          "example.com",
-          "--provider",
-          "none",
-          "--cookie-prefix",
-          "acme",
-          "--expect-plan",
-          digest,
-          "--yes",
-        ],
-        apply.deps,
-      ),
-    ).toBe(0);
-    const s = listStates(join(home(), "acme"))[0]!;
-    expect(s.resources.every((r) => r.ownership === "adopted")).toBe(true);
-    expect(s.inputs.inboundDomains).toEqual(["example.com"]);
-    expect(apply.runner.calls).toHaveLength(0);
-    expect(apply.deploys).toHaveLength(0);
-  });
-
-  it("--plan without domain flags uses the ones found on Cloudflare, and its command applies", async () => {
-    const mailSeed: FakeCloudflareSeed = {
-      ...seed,
-      workers: {
-        acme: [...seed.workers!.acme!, { type: "send_email", name: "EMAIL" }],
-      },
-      zones: [{ id: "z1", name: "acme.dev", status: "active" }],
-      routing: { z1: { enabled: true, status: "ready" } },
-      catchAll: {
-        z1: { enabled: true, actions: [{ type: "worker", value: ["acme"] }] },
-      },
-      sending: { z1: [{ id: "s1", name: "acme.dev", enabled: true }] },
-    };
-    const h = harness({ home: home(), seed: mailSeed, tty: false });
-    expect(await main(["adopt", "--worker", "acme", "--plan"], h.deps)).toBe(0);
-    const text = h.text();
-    const digest = /Plan ([0-9a-f]{12})/.exec(text)![1]!;
-    const command = `npx saasmail@${VERSION} adopt --worker acme --account ${ACCOUNT} --inbound-domain acme.dev --provider cloudflare --send-domain acme.dev --cookie-prefix acme --expect-plan ${digest} --yes`;
-    expect(text).toContain(command);
-
-    const apply = harness({ home: home(), seed: mailSeed, tty: false });
-    const argv = command.split(" ").slice(2);
-    expect(await main(argv, apply.deps)).toBe(0);
-    const s = listStates(join(home(), "acme"))[0]!;
-    expect(s.inputs.inboundDomains).toEqual(["acme.dev"]);
-    expect(s.inputs.sendDomains).toEqual(["acme.dev"]);
-  });
-
-  it("without a terminal and --yes exits 2; checkout mode points at npx", async () => {
-    const h = harness({ home: home(), seed });
-    expect(await main(["adopt", "--worker", "acme"], h.deps)).toBe(2);
-    expect(h.text()).toContain("Not running in a terminal");
-    const c = harness({ seed });
-    expect(await main(["adopt", "--worker", "acme", "--yes"], c.deps)).toBe(2);
-    expect(c.text()).toContain("npx saasmail adopt --worker acme");
-  });
-
-  it("a wrong worker name stops before any mail prompt", async () => {
-    const h = harness({ home: home(), seed, tty: true });
-    expect(await main(["adopt", "--worker", "nope"], h.deps)).toBe(1);
-    expect(h.text()).toContain(`No worker named nope on account ${ACCOUNT}`);
-    expect(h.asked).toEqual([]);
-    expect(existsSync(home())).toBe(false);
-  });
-
-  it("worker-only flags with --from are usage errors", async () => {
-    const h = harness({ home: home() });
-    expect(
-      await main(["adopt", "--from", cwd, "--plan", "--yes"], h.deps),
-    ).toBe(2);
-    expect(h.text()).toContain("--plan is only for adopt --worker.");
   });
 });

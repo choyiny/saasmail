@@ -9,6 +9,14 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/api", () => api);
+// Undo Send off: these tests are about the payload and its key, so the send
+// runs at once (the undo window is covered in undo-send-key.test).
+vi.mock("@/lib/default-layout-settings", () => ({
+  useCommonSettings: () => [
+    { undoSendSeconds: 0, hideSignatures: false },
+    () => {},
+  ],
+}));
 vi.mock("@/lib/use-draft-autosave", () => ({
   useDraftAutosave: () => ({ clear: () => {} }),
 }));
@@ -110,6 +118,9 @@ describe("ReplyComposer and Reply-To", () => {
       replyRecipients: [{ email: "help@acme.com", name: null }],
     });
     renderComposer();
+    // Each send fails, so the composer stays on screen for the next one (a
+    // reply that goes out hides it while it waits out Undo Send).
+    api.replyToEmail.mockRejectedValue(new Error("not sent"));
 
     const hint = await screen.findByTestId("reply-to-hint");
     expect(hint.textContent).toContain(
@@ -139,6 +150,9 @@ describe("ReplyComposer and Reply-To", () => {
       ],
     });
     renderComposer();
+    // Each send fails, so the composer stays on screen for the next one (a
+    // reply that goes out hides it while it waits out Undo Send).
+    api.replyToEmail.mockRejectedValue(new Error("not sent"));
 
     const hint = await screen.findByTestId("reply-to-hint");
     expect(hint.textContent).toContain(

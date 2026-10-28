@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -12,13 +11,28 @@ import {
   ArrowUpDown,
   RefreshCw,
   Bot,
+  Check,
+  CheckCheck,
+  Layers,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 import {
   defaultDirectionFor,
   type InboxSort,
   type InboxSortSpec,
+  type MailCategory,
 } from "@/lib/api";
+import { CATEGORY_LABELS } from "@/components/MailActions";
 
 export interface InboxFilters {
   recipient?: string;
@@ -27,6 +41,8 @@ export interface InboxFilters {
   drafts?: boolean;
   /** Only contacts currently enrolled in a sequence. */
   sequenced?: boolean;
+  /** Only one inbox tab (Primary, Promotions, Social, Updates). */
+  category?: MailCategory;
 }
 
 export type InboxView = "list" | "table";
@@ -59,6 +75,18 @@ interface InboxToolbarProps {
   /** "Agent Plan" tab — a WebMCP agent's live plan, beside the filters. */
   agentPlanActive: boolean;
   onAgentPlanToggle: () => void;
+  /** Heading shown at the start of the header row (e.g. "Inbox"). */
+  title?: string;
+  /** Optional count shown after the title. */
+  count?: number;
+  /**
+   * "Mark all as read": every unread conversation in the current folder
+   * and filters, on the server (not just the loaded page).
+   */
+  onMarkAllRead?: () => void;
+  /** Unread conversations in the current folder + filters. */
+  unreadCount?: number;
+  markAllReadBusy?: boolean;
 }
 
 const SORT_OPTIONS: Array<{ value: InboxSort; label: string }> = [
@@ -91,30 +119,12 @@ export default function InboxToolbar({
   onCompose,
   agentPlanActive,
   onAgentPlanToggle,
+  title,
+  count,
+  onMarkAllRead,
+  unreadCount = 0,
+  markAllReadBusy,
 }: InboxToolbarProps) {
-  const [inboxOpen, setInboxOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const sortWrapRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!inboxOpen) return;
-    function close(e: MouseEvent) {
-      if (!wrapRef.current?.contains(e.target as Node)) setInboxOpen(false);
-    }
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [inboxOpen]);
-
-  useEffect(() => {
-    if (!sortOpen) return;
-    function close(e: MouseEvent) {
-      if (!sortWrapRef.current?.contains(e.target as Node)) setSortOpen(false);
-    }
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [sortOpen]);
-
   const activeInbox = inboxes.find((i) => i.email === filters.recipient);
   const activeLabel = activeInbox
     ? inboxOptionLabel(activeInbox)
@@ -123,108 +133,297 @@ export default function InboxToolbar({
     !!filters.recipient ||
     !!filters.unread ||
     !!filters.drafts ||
-    !!filters.sequenced;
+    !!filters.sequenced ||
+    !!filters.category;
+  const markAll = onMarkAllRead ? (
+    <MarkAllReadChip
+      onClick={onMarkAllRead}
+      busy={!!markAllReadBusy}
+      unread={unreadCount}
+    />
+  ) : null;
 
   return (
-    <div className="flex flex-wrap items-center gap-1 rounded-[8px] bg-card p-1 ring-1 ring-border">
-      {/* Search — borderless inside the unified bar. On mobile takes full
-          width, on desktop sits inline with filters. */}
-      <div className="relative w-full min-w-[160px] flex-1 sm:w-auto sm:max-w-[220px]">
-        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-tertiary" />
-        <input
-          data-testid="person-search-input"
-          type="text"
-          placeholder="Search..."
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          className="h-9 w-full rounded-[6px] border-0 bg-transparent pl-7 pr-7 text-base text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/15 sm:h-7 sm:text-sm"
-        />
-        {search && (
-          <button
-            data-testid="person-search-clear"
-            onClick={() => onSearchChange("")}
-            className="absolute right-1 top-1/2 -translate-y-1/2 rounded-full p-1 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
-            aria-label="Clear search"
-          >
-            <X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-          </button>
-        )}
-      </div>
-
-      {/* Vertical divider — desktop only */}
-      <span className="mx-0.5 hidden h-5 w-px bg-border sm:block" aria-hidden />
-
-      {/* Inbox dropdown — ghost button inside bar */}
-      <div ref={wrapRef} className="relative">
-        <ToolbarButton
-          active={!!filters.recipient}
-          onClick={() => setInboxOpen((v) => !v)}
-        >
-          <Inbox size={12} />
-          {activeLabel}
-          <ChevronDown size={12} className="opacity-60" />
-        </ToolbarButton>
-        {inboxOpen && (
-          <div className="absolute left-0 top-full z-30 mt-1.5 w-56 overflow-hidden rounded-[8px] border border-border bg-card py-1 shadow-lg">
-            <button
-              type="button"
-              onClick={() => {
-                onFiltersChange({ ...filters, recipient: undefined });
-                setInboxOpen(false);
-              }}
-              className={cn(
-                "flex w-full items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-bg-muted",
-                !filters.recipient && "bg-bg-subtle font-medium",
-              )}
-            >
-              <span>All inboxes</span>
-              {!filters.recipient && (
-                <span className="text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
-                  active
-                </span>
-              )}
-            </button>
-            <div className="my-1 h-px bg-border" />
-            {inboxes.length === 0 ? (
-              <p className="px-3 py-2 text-xs font-light text-text-tertiary">
-                No inboxes available
-              </p>
-            ) : (
-              inboxes.map((inbox) => {
-                const active = filters.recipient === inbox.email;
-                return (
-                  <button
-                    key={inbox.email}
-                    type="button"
-                    onClick={() => {
-                      onFiltersChange({ ...filters, recipient: inbox.email });
-                      setInboxOpen(false);
-                    }}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-2 px-3 py-2 text-xs transition-colors hover:bg-bg-muted",
-                      active && "bg-bg-subtle font-medium",
-                    )}
-                  >
-                    <div className="flex min-w-0 flex-col items-start">
-                      <span className="truncate text-text-primary">
-                        {inboxOptionLabel(inbox)}
-                      </span>
-                      <span className="truncate text-[10px] font-light text-text-tertiary">
-                        {inbox.email}
-                      </span>
-                    </div>
-                    {active && (
-                      <span className="shrink-0 text-[10px] font-bold uppercase tracking-wider text-text-tertiary">
-                        active
-                      </span>
-                    )}
-                  </button>
-                );
-              })
+    <div className="flex flex-col gap-3">
+      {/* Row 1 — module header: title, view switch, actions. */}
+      {title && (
+        <div className="flex min-h-9 items-center gap-3">
+          <h1 className="truncate text-[20px] font-semibold tracking-[-0.02em] text-text-primary sm:text-[22px]">
+            {title}
+          </h1>
+          {count != null && count > 0 && (
+            <span className="tabular hidden text-[13px] text-text-tertiary sm:inline">
+              {count.toLocaleString()}
+            </span>
+          )}
+          <div className="pt-seg ml-2 hidden sm:inline-flex" role="group">
+            <ViewToggleButton
+              icon={LayoutList}
+              label="List"
+              active={!agentPlanActive && view === "list"}
+              onClick={() => onViewChange("list")}
+            />
+            <ViewToggleButton
+              icon={LayoutGrid}
+              label="Table"
+              active={!agentPlanActive && view === "table"}
+              onClick={() => onViewChange("table")}
+            />
+            <ViewToggleButton
+              icon={Bot}
+              label="Agent"
+              active={agentPlanActive}
+              onClick={onAgentPlanToggle}
+            />
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            {onRefresh && (
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onRefresh}
+                disabled={refreshing}
+                aria-label="Refresh"
+                title="Refresh"
+                className="hidden sm:inline-flex"
+              >
+                <RefreshCw className={cn(refreshing && "animate-spin")} />
+              </Button>
+            )}
+            {onCompose && (
+              <Button
+                onClick={onCompose}
+                className="hidden sm:inline-flex"
+                title="New message (C)"
+                aria-keyshortcuts="c"
+              >
+                <PenSquare />
+                Compose
+              </Button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Row 2 — search and filters. Scrolls sideways on phones. */}
+      <div className="flex items-center gap-2">
+        <div className="relative w-full min-w-0 flex-1 sm:max-w-[300px]">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary" />
+          <input
+            data-testid="person-search-input"
+            type="text"
+            placeholder="Search people and mail"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            aria-keyshortcuts="/"
+            onKeyDown={(e) => {
+              // Esc leaves the field so j/k work again; Enter or ↓ jumps
+              // to the first result.
+              if (e.key === "Escape") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              } else if (e.key === "Enter" || e.key === "ArrowDown") {
+                const first = document.querySelector<HTMLElement>(
+                  '[data-testid="person-row"],[data-testid="group-row"]',
+                );
+                if (first) {
+                  e.preventDefault();
+                  first.focus();
+                }
+              }
+            }}
+            className="peer h-9 w-full rounded-lg border border-border-strong bg-card pl-8 pr-8 text-sm text-text-primary shadow-card transition-[border-color,box-shadow] placeholder:text-text-tertiary hover:border-text-tertiary/60 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15"
+          />
+          {!search && (
+            <kbd
+              aria-hidden
+              className="pointer-events-none absolute right-2 top-1/2 hidden h-5 min-w-5 -translate-y-1/2 place-items-center rounded border border-border bg-bg-subtle px-1 font-sans text-[11px] text-text-tertiary peer-focus:hidden sm:grid"
+            >
+              /
+            </kbd>
+          )}
+          {search && (
+            <button
+              data-testid="person-search-clear"
+              onClick={() => onSearchChange("")}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              aria-label="Clear search"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        {!title && onCompose && (
+          <Button onClick={onCompose} className="hidden sm:inline-flex">
+            <PenSquare />
+            Compose
+          </Button>
         )}
+        <div className="-mr-2 hidden min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pr-2 [scrollbar-width:none] sm:flex">
+          <FilterRow
+            filters={filters}
+            onFiltersChange={onFiltersChange}
+            inboxes={inboxes}
+            activeLabel={activeLabel}
+            hasActiveFilters={hasActiveFilters}
+          />
+          <span className="ml-auto" />
+          {markAll}
+          <SortControl sortSpec={sortSpec} onSortChange={onSortChange} />
+        </div>
       </div>
+      <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 [scrollbar-width:none] sm:hidden">
+        <FilterRow
+          filters={filters}
+          onFiltersChange={onFiltersChange}
+          inboxes={inboxes}
+          activeLabel={activeLabel}
+          hasActiveFilters={hasActiveFilters}
+        />
+        {markAll}
+      </div>
+    </div>
+  );
+}
+
+function MarkAllReadChip({
+  onClick,
+  busy,
+  unread,
+}: {
+  onClick: () => void;
+  busy: boolean;
+  unread: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy || unread === 0}
+      data-testid="folder-mark-all-read"
+      title={
+        unread === 0
+          ? "Nothing unread here"
+          : `Mark all ${unread.toLocaleString()} unread conversations here as read`
+      }
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+    >
+      {busy ? (
+        <Loader2 size={13} className="animate-spin" />
+      ) : (
+        <CheckCheck size={13} />
+      )}
+      <span className="whitespace-nowrap">Mark all as read</span>
+    </button>
+  );
+}
+
+function FilterRow({
+  filters,
+  onFiltersChange,
+  inboxes,
+  activeLabel,
+  hasActiveFilters,
+}: {
+  filters: InboxFilters;
+  onFiltersChange: (next: InboxFilters) => void;
+  inboxes: InboxOption[];
+  activeLabel: string;
+  hasActiveFilters: boolean;
+}) {
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className={cn(chipClass(!!filters.recipient), "pr-2")}
+          >
+            <Inbox size={13} />
+            <span className="max-w-[160px] truncate">{activeLabel}</span>
+            <ChevronDown size={13} className="opacity-60" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-60">
+          <DropdownMenuItem
+            onSelect={() =>
+              onFiltersChange({ ...filters, recipient: undefined })
+            }
+          >
+            <span className="flex-1">All inboxes</span>
+            {!filters.recipient && <Check className="text-accent" />}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>Inboxes</DropdownMenuLabel>
+          {inboxes.length === 0 ? (
+            <p className="px-2 py-1.5 text-[13px] text-text-tertiary">
+              No inboxes available
+            </p>
+          ) : (
+            inboxes.map((inbox) => {
+              const active = filters.recipient === inbox.email;
+              return (
+                <DropdownMenuItem
+                  key={inbox.email}
+                  onSelect={() =>
+                    onFiltersChange({ ...filters, recipient: inbox.email })
+                  }
+                >
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">{inboxOptionLabel(inbox)}</span>
+                    <span className="truncate text-xs text-text-tertiary">
+                      {inbox.email}
+                    </span>
+                  </span>
+                  {active && <Check className="text-accent" />}
+                </DropdownMenuItem>
+              );
+            })
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            data-testid="filter-category"
+            className={cn(chipClass(!!filters.category), "pr-2")}
+          >
+            <Layers size={13} />
+            <span>
+              {filters.category
+                ? CATEGORY_LABELS[filters.category]
+                : "All tabs"}
+            </span>
+            <ChevronDown size={13} className="opacity-60" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuItem
+            onSelect={() =>
+              onFiltersChange({ ...filters, category: undefined })
+            }
+          >
+            <span className="flex-1">All tabs</span>
+            {!filters.category && <Check className="text-accent" />}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {(Object.keys(CATEGORY_LABELS) as MailCategory[]).map((c) => (
+            <DropdownMenuItem
+              key={c}
+              onSelect={() => onFiltersChange({ ...filters, category: c })}
+            >
+              <span className="flex-1">{CATEGORY_LABELS[c]}</span>
+              {filters.category === c && <Check className="text-accent" />}
+            </DropdownMenuItem>
+          ))}
+          <DropdownMenuSeparator />
+          <p className="px-2 py-1.5 text-xs leading-snug text-text-tertiary">
+            Sorted by sender. Fix a sender with Move to tab in its menu.
+          </p>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <ToolbarToggle
         label="Unread"
@@ -256,188 +455,100 @@ export default function InboxToolbar({
               unread: false,
               drafts: false,
               sequenced: false,
+              category: undefined,
             })
           }
-          className="inline-flex h-7 items-center gap-1 rounded-[5px] px-1.5 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
         >
-          <X size={11} />
+          <X size={13} />
           Clear
         </button>
       )}
+    </>
+  );
+}
 
-      <span className="ml-auto" />
-
-      {/* Sort dropdown — applies to both list + table views. The
-          dropdown picks the *key*; the icon button next to it flips
-          the direction. Clicking the active key in the dropdown also
-          flips direction so users have two paths. */}
-      <div
-        ref={sortWrapRef}
-        className="relative hidden sm:flex sm:items-center sm:gap-0.5"
-      >
-        <button
-          type="button"
-          onClick={() => setSortOpen((v) => !v)}
-          className="inline-flex h-7 items-center gap-1 rounded-[5px] px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-          aria-label="Sort"
-        >
-          <ArrowUpDown size={11} />
-          <span className="hidden md:inline">{sortLabel(sortSpec.key)}</span>
-          <ChevronDown size={11} className="opacity-60" />
-        </button>
-        {/* Explicit direction toggle — visible always so the current
-            direction is obvious without opening the dropdown. */}
-        <button
-          type="button"
-          onClick={() =>
-            onSortChange({
-              key: sortSpec.key,
-              direction: sortSpec.direction === "asc" ? "desc" : "asc",
-            })
-          }
-          aria-label={
-            sortSpec.direction === "asc" ? "Sort descending" : "Sort ascending"
-          }
-          title={`Currently ${sortSpec.direction === "asc" ? "ascending" : "descending"}. Click to flip.`}
-          className="inline-flex h-7 w-7 items-center justify-center rounded-[5px] text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-        >
-          {sortSpec.direction === "asc" ? (
-            <ArrowUp size={11} />
-          ) : (
-            <ArrowDown size={11} />
-          )}
-        </button>
-        {sortOpen && (
-          <div className="absolute right-0 top-full z-30 mt-1.5 w-48 overflow-hidden rounded-[8px] border border-border bg-card py-1 shadow-lg">
-            {SORT_OPTIONS.map((opt) => {
-              const isActive = sortSpec.key === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => {
-                    if (isActive) {
-                      onSortChange({
-                        key: opt.value,
-                        direction:
-                          sortSpec.direction === "asc" ? "desc" : "asc",
-                      });
-                    } else {
-                      onSortChange({
-                        key: opt.value,
-                        direction: defaultDirectionFor(opt.value),
-                      });
-                    }
-                    setSortOpen(false);
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 px-3 py-2 text-xs transition-colors hover:bg-bg-muted",
-                    isActive && "bg-bg-subtle font-medium",
-                  )}
-                >
-                  <span>{opt.label}</span>
-                  {isActive && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
-                      {sortSpec.direction === "asc" ? (
-                        <ArrowUp size={10} />
-                      ) : (
-                        <ArrowDown size={10} />
-                      )}
-                      {sortSpec.direction === "asc" ? "asc" : "desc"}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Refresh — desktop only. Mobile refreshes via pull-to-refresh on the
-          list itself, so the button would be redundant there. */}
-      {onRefresh && (
-        <>
-          <span
-            className="mx-0.5 hidden h-4 w-px bg-border sm:block"
-            aria-hidden
-          />
+function SortControl({
+  sortSpec,
+  onSortChange,
+}: {
+  sortSpec: InboxSortSpec;
+  onSortChange: (spec: InboxSortSpec) => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-0.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <button
             type="button"
-            onClick={onRefresh}
-            disabled={refreshing}
-            aria-label="Refresh"
-            title="Refresh"
-            className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-[5px] text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-60 sm:inline-flex"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[13px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary data-[state=open]:bg-bg-muted"
+            aria-label="Sort"
           >
-            <RefreshCw size={13} className={cn(refreshing && "animate-spin")} />
+            <ArrowUpDown size={13} />
+            <span className="hidden md:inline">{sortLabel(sortSpec.key)}</span>
+            <ChevronDown size={13} className="opacity-60" />
           </button>
-        </>
-      )}
-
-      {/* View toggle — pinned to the right edge. Hidden on mobile (the
-          table view is unusable at narrow widths). */}
-      <span className="mx-0.5 hidden h-4 w-px bg-border sm:block" aria-hidden />
-      <div className="hidden h-7 rounded-[5px] bg-bg-muted/70 p-0.5 sm:inline-flex">
-        <ViewToggleButton
-          icon={LayoutList}
-          label="List"
-          active={!agentPlanActive && view === "list"}
-          onClick={() => onViewChange("list")}
-        />
-        <ViewToggleButton
-          icon={LayoutGrid}
-          label="Table"
-          active={!agentPlanActive && view === "table"}
-          onClick={() => onViewChange("table")}
-        />
-        <ViewToggleButton
-          icon={Bot}
-          label="Agent"
-          active={agentPlanActive}
-          onClick={onAgentPlanToggle}
-        />
-      </div>
-
-      {/* Compose — anchored at the far right of the unified bar. Hidden on
-          mobile (the floating FAB takes over there). */}
-      {onCompose && (
-        <>
-          <span
-            className="mx-0.5 hidden h-4 w-px bg-border sm:block"
-            aria-hidden
-          />
-          <button
-            onClick={onCompose}
-            className="hidden h-7 shrink-0 items-center gap-1.5 rounded-[5px] bg-text-primary px-2.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90 sm:inline-flex"
-          >
-            <PenSquare className="h-3.5 w-3.5" />
-            Compose
-          </button>
-        </>
-      )}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+          {SORT_OPTIONS.map((opt) => {
+            const isActive = sortSpec.key === opt.value;
+            return (
+              <DropdownMenuItem
+                key={opt.value}
+                onSelect={() =>
+                  onSortChange(
+                    isActive
+                      ? {
+                          key: opt.value,
+                          direction:
+                            sortSpec.direction === "asc" ? "desc" : "asc",
+                        }
+                      : {
+                          key: opt.value,
+                          direction: defaultDirectionFor(opt.value),
+                        },
+                  )
+                }
+              >
+                <span className="flex-1">{opt.label}</span>
+                {isActive &&
+                  (sortSpec.direction === "asc" ? <ArrowUp /> : <ArrowDown />)}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <button
+        type="button"
+        onClick={() =>
+          onSortChange({
+            key: sortSpec.key,
+            direction: sortSpec.direction === "asc" ? "desc" : "asc",
+          })
+        }
+        aria-label={
+          sortSpec.direction === "asc" ? "Sort descending" : "Sort ascending"
+        }
+        title={`Currently ${sortSpec.direction === "asc" ? "ascending" : "descending"}. Click to flip.`}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+      >
+        {sortSpec.direction === "asc" ? (
+          <ArrowUp size={13} />
+        ) : (
+          <ArrowDown size={13} />
+        )}
+      </button>
     </div>
   );
 }
 
-interface ToolbarButtonProps {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}
-function ToolbarButton({ active, onClick, children }: ToolbarButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-[5px] px-2 text-xs font-medium transition-colors",
-        active
-          ? "bg-text-primary/[0.06] text-text-primary"
-          : "text-text-secondary hover:bg-bg-muted hover:text-text-primary",
-      )}
-    >
-      {children}
-    </button>
+function chipClass(active: boolean) {
+  return cn(
+    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[13px] font-medium transition-colors",
+    active
+      ? "border-accent-subtle bg-accent-subtle text-accent-subtle-fg"
+      : "border-border bg-card text-text-secondary hover:border-border-strong hover:text-text-primary",
   );
 }
 
@@ -451,16 +562,14 @@ function ToolbarToggle({ label, active, onClick }: ToolbarToggleProps) {
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-[5px] px-2 text-xs font-medium transition-colors",
-        active
-          ? "bg-text-primary/[0.06] text-text-primary"
-          : "text-text-secondary hover:bg-bg-muted hover:text-text-primary",
-      )}
+      aria-pressed={active}
+      className={chipClass(active)}
     >
       <span
-        className="h-1.5 w-1.5 rounded-full transition-colors"
-        style={{ backgroundColor: active ? "#7c5cfc" : "rgba(0,0,0,0.18)" }}
+        className={cn(
+          "h-1.5 w-1.5 rounded-full transition-colors",
+          active ? "bg-accent" : "bg-border-strong",
+        )}
         aria-hidden
       />
       {label}
@@ -485,15 +594,11 @@ function ViewToggleButton({
       type="button"
       onClick={onClick}
       title={`${label} view`}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-[5px] px-2.5 text-xs font-medium transition-all",
-        active
-          ? "bg-card text-text-primary shadow-sm ring-1 ring-border/60"
-          : "text-text-secondary hover:text-text-primary",
-      )}
+      aria-pressed={active}
+      className={cn(active && "on")}
     >
-      <Icon size={13} />
-      <span className="hidden sm:inline">{label}</span>
+      <Icon size={14} />
+      <span>{label}</span>
     </button>
   );
 }

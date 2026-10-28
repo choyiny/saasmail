@@ -51,7 +51,7 @@ export default function MessageLinkPage() {
   if (error) {
     return (
       <div className="flex h-full flex-1 items-center justify-center px-6 py-16">
-        <div className="max-w-sm rounded-2xl bg-card p-8 text-center ring-1 ring-border">
+        <div className="max-w-sm rounded-2xl border border-border bg-card p-8 text-center shadow-card">
           <h2 className="text-base font-semibold text-text-primary">
             Can't open this message
           </h2>
@@ -67,9 +67,5 @@ export default function MessageLinkPage() {
     );
   }
 
-  return (
-    <div className="flex h-full flex-1 items-center justify-center text-sm text-text-tertiary">
-      Opening message…
-    </div>
-  );
+  return <div className="pt-empty h-full flex-1">Opening message…</div>;
 }

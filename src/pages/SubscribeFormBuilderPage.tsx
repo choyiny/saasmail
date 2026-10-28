@@ -171,7 +171,7 @@ export default function SubscribeFormBuilderPage() {
           <button
             onClick={save}
             disabled={saving}
-            className="rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
           >
             {saving ? "Saving…" : saved ? "Saved" : "Save"}
           </button>

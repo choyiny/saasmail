@@ -78,7 +78,12 @@ describe("stats router", () => {
       const data = await res.json();
       expect(data.totalPeople).toBe(2);
       expect(data.totalEmails).toBe(3);
-      expect(data.unreadCount).toBe(2);
+      // One unread row (s1), even with unread mail at two inboxes.
+      expect(data.unreadCount).toBe(1);
+      expect(data.inboxUnread).toEqual({
+        "inbox@saasmail.test": 1,
+        "other@saasmail.test": 1,
+      });
       expect(data.recipients).toContain("inbox@saasmail.test");
       expect(data.recipients).toContain("other@saasmail.test");
     });
@@ -132,6 +137,69 @@ describe("stats router", () => {
       const data = await res.json();
       expect(data.totalEmails).toBe(1);
       expect(data.unreadCount).toBe(1);
+    });
+  });
+
+  describe("GET /api/stats — unread counts follow the Inbox folder", () => {
+    beforeEach(async () => {
+      // p-a: two unread messages (one row); p-b, p-c, p-d: one unread each;
+      // p-read: read; conv1: a group thread with one unread message.
+      for (const id of ["p-a", "p-b", "p-c", "p-d", "p-read"]) {
+        await createTestPerson({ id, email: `${id}@test.com` });
+      }
+      await createTestEmail({ id: "a1", personId: "p-a", messageId: "a1@x" });
+      await createTestEmail({ id: "a2", personId: "p-a", messageId: "a2@x" });
+      await createTestEmail({ id: "b1", personId: "p-b", messageId: "b1@x" });
+      await createTestEmail({ id: "c1", personId: "p-c", messageId: "c1@x" });
+      await createTestEmail({ id: "d1", personId: "p-d", messageId: "d1@x" });
+      await createTestEmail({
+        id: "r1",
+        personId: "p-read",
+        messageId: "r1@x",
+        isRead: 1,
+      });
+      await createTestEmail({
+        id: "g1",
+        personId: "p-read",
+        messageId: "g1@x",
+        conversationId: "conv1",
+        recipient: "team@saasmail.test",
+      });
+    });
+
+    async function stats() {
+      const res = await authFetch("/api/stats", { apiKey });
+      expect(res.status).toBe(200);
+      return (await res.json()) as {
+        unreadCount: number;
+        inboxUnread: Record<string, number>;
+      };
+    }
+
+    async function inboxUnreadIds() {
+      const res = await authFetch("/api/people/grouped?folder=inbox&unread=1", {
+        apiKey,
+      });
+      return ((await res.json()).data as Array<{ id: string }>).map(
+        (r) => r.id,
+      );
+    }
+
+    it("counts unread rows, not unread messages", async () => {
+      const data = await stats();
+      expect(data.unreadCount).toBe(5);
+      expect(data.inboxUnread).toEqual({
+        "inbox@saasmail.test": 4,
+        "team@saasmail.test": 1,
+      });
+      expect(data.unreadCount).toBe((await inboxUnreadIds()).length);
+    });
+
+    it("narrows unreadCount to ?recipient=", async () => {
+      const res = await authFetch("/api/stats?recipient=team%40saasmail.test", {
+        apiKey,
+      });
+      expect((await res.json()).unreadCount).toBe(1);
     });
   });
 });

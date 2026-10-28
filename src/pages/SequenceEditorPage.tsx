@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useUnsavedGuard } from "@/hooks/useUnsavedGuard";
 import { useNavigate, useParams, Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -11,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
 import {
   CodeBlock,
   Field,
@@ -64,6 +66,14 @@ export default function SequenceEditorPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(() =>
+    JSON.stringify({
+      name: "",
+      steps: [{ order: 1, templateSlug: "", delayHours: 0 }],
+    }),
+  );
+  const dirty = !loading && JSON.stringify({ name, steps }) !== saved;
+  const { confirmLeave, release } = useUnsavedGuard(dirty);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,6 +87,7 @@ export default function SequenceEditorPage() {
           if (cancelled) return;
           setName(seq.name);
           setSteps(seq.steps);
+          setSaved(JSON.stringify({ name: seq.name, steps: seq.steps }));
         }
       } catch {
         if (!cancelled) setError("Failed to load sequence.");
@@ -124,6 +135,7 @@ export default function SequenceEditorPage() {
       } else {
         await createSequence({ name, steps });
       }
+      release();
       navigate("/sequences");
     } catch {
       setError("Failed to save sequence.");
@@ -141,7 +153,11 @@ export default function SequenceEditorPage() {
   if (loading) {
     return (
       <PageContainer>
-        <p className="pt-10 text-sm text-text-tertiary">Loading…</p>
+        <div className="flex flex-col gap-4" aria-busy="true">
+          <span className="pt-skel h-6 w-48" />
+          <span className="pt-skel h-32 w-full rounded-2xl" />
+          <span className="pt-skel h-56 w-full rounded-2xl" />
+        </div>
       </PageContainer>
     );
   }
@@ -150,9 +166,9 @@ export default function SequenceEditorPage() {
     <PageContainer>
       <Link
         to="/sequences"
-        className="-mt-1 mb-1 inline-flex items-center gap-1 text-xs font-medium text-text-tertiary transition-colors hover:text-text-primary"
+        className="-mt-1 mb-2 inline-flex items-center gap-1 text-[13px] font-medium text-text-secondary transition-colors hover:text-text-primary"
       >
-        <ArrowLeft size={12} />
+        <ArrowLeft size={14} />
         Sequences
       </Link>
 
@@ -165,27 +181,26 @@ export default function SequenceEditorPage() {
         }
         action={
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
-              onClick={() => navigate("/sequences")}
-              className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              variant="outline"
+              onClick={() => confirmLeave() && navigate("/sequences")}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => handleSubmit()}
               disabled={
                 saving || !name.trim() || steps.some((s) => !s.templateSlug)
               }
-              className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving
                 ? "Saving…"
                 : isEditing
                   ? "Save changes"
                   : "Create sequence"}
-            </button>
+            </Button>
           </div>
         }
       />
@@ -193,7 +208,7 @@ export default function SequenceEditorPage() {
       {error && (
         <div
           role="alert"
-          className="mb-4 rounded-[8px] border border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+          className="mb-4 rounded-xl border border-destructive/25 bg-destructive-subtle px-4 py-2.5 text-[13px] text-destructive"
         >
           {error}
         </div>
@@ -201,7 +216,7 @@ export default function SequenceEditorPage() {
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* --- Details card --- */}
-        <section className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+        <section className="pt-card p-5">
           <SectionHeader
             icon={Sparkles}
             title="Details"
@@ -222,7 +237,7 @@ export default function SequenceEditorPage() {
         </section>
 
         {/* --- Steps card --- */}
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <section className="pt-card overflow-hidden">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
             <SectionHeader
               icon={ListOrdered}
@@ -241,7 +256,7 @@ export default function SequenceEditorPage() {
 
           <ul
             data-testid="sequence-steps"
-            className="divide-y divide-border/60"
+            className="divide-y divide-border-subtle"
           >
             {steps.map((step, idx) => (
               <li
@@ -253,11 +268,11 @@ export default function SequenceEditorPage() {
                 <div className="flex shrink-0 items-center gap-2">
                   <GripVertical
                     size={14}
-                    className="text-text-tertiary/60"
+                    className="text-text-tertiary"
                     aria-hidden
                   />
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet/10 text-[11px] font-semibold tabular-nums">
-                    <span style={{ color: "#7c5cfc" }}>{idx + 1}</span>
+                  <span className="tabular flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-accent-subtle bg-accent-subtle text-xs font-semibold text-accent-subtle-fg">
+                    {idx + 1}
                   </span>
                 </div>
 
@@ -265,7 +280,7 @@ export default function SequenceEditorPage() {
                   <Field
                     label="Template"
                     hint={
-                      <span className="text-text-tertiary/80">
+                      <span className="text-text-tertiary">
                         {formatCumulative(steps, idx)}
                       </span>
                     }
@@ -313,7 +328,7 @@ export default function SequenceEditorPage() {
                         }
                         className={cn(FORM_INPUT_CLASS, "pr-12 tabular-nums")}
                       />
-                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
+                      <span className="font-label pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary">
                         hrs
                       </span>
                     </div>
@@ -325,22 +340,22 @@ export default function SequenceEditorPage() {
                   onClick={() => removeStep(step.order)}
                   disabled={steps.length <= 1}
                   aria-label="Remove step"
-                  className="inline-flex h-8 shrink-0 items-center gap-1.5 self-end rounded-[6px] px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 self-end rounded-lg px-2.5 text-[13px] font-medium text-text-secondary transition-colors hover:bg-destructive-subtle hover:text-destructive disabled:cursor-not-allowed disabled:opacity-40 sm:self-auto"
                 >
-                  <Trash2 size={12} />
+                  <Trash2 size={14} />
                   Remove
                 </button>
               </li>
             ))}
           </ul>
 
-          <div className="border-t border-border bg-bg-subtle/40 px-5 py-3">
+          <div className="border-t border-border bg-bg-subtle px-5 py-3">
             <button
               type="button"
               onClick={addStep}
-              className="inline-flex items-center gap-1.5 rounded-[6px] border border-dashed border-border bg-card px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-text-primary/30 hover:bg-bg-muted hover:text-text-primary"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-dashed border-border-strong bg-card px-3 text-[13px] font-medium text-text-secondary transition-colors hover:border-text-tertiary hover:text-text-primary"
             >
-              <Plus size={12} />
+              <Plus size={14} />
               Add step
             </button>
           </div>
@@ -455,25 +470,25 @@ function ApiReferenceCard({
   -d '${body}'`;
 
   return (
-    <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+    <section className="pt-card overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-bg-muted/30"
+        className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-bg-subtle"
       >
         <div className="min-w-0">
-          <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-text-primary">
-            <Code2 size={13} className="text-text-tertiary" />
+          <h2 className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em] text-text-primary">
+            <Code2 size={15} className="text-text-secondary" />
             Enroll via API
           </h2>
-          <p className="mt-0.5 text-xs font-light text-text-secondary">
+          <p className="mt-0.5 text-[13px] text-text-secondary">
             Programmatically enroll a contact — pass{" "}
-            <code className="rounded bg-bg-muted px-1 py-0.5 font-mono text-[10px]">
+            <code className="font-code rounded bg-bg-muted px-1 py-0.5 text-[11px]">
               personEmail
             </code>{" "}
             (looked up or created) or{" "}
-            <code className="rounded bg-bg-muted px-1 py-0.5 font-mono text-[10px]">
+            <code className="font-code rounded bg-bg-muted px-1 py-0.5 text-[11px]">
               personId
             </code>{" "}
             (existing).
@@ -499,7 +514,7 @@ function ApiReferenceCard({
               label="Template variables"
               hint="All variables must be supplied in `variables` or the API returns 400."
             >
-              <ul className="space-y-1.5 text-xs">
+              <ul className="space-y-1.5 text-[13px]">
                 {perTemplate.map((tv) => (
                   <li
                     key={tv.slug}
@@ -512,8 +527,7 @@ function ApiReferenceCard({
                     {tv.vars.map((v) => (
                       <code
                         key={v}
-                        className="rounded-full bg-violet/10 px-2 py-0.5 text-[11px] font-mono"
-                        style={{ color: "#7c5cfc" }}
+                        className="pt-chip accent font-code !font-medium"
                       >
                         {`{{${v}}}`}
                       </code>

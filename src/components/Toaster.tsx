@@ -8,31 +8,13 @@ interface ToastItem extends ToastInit {
   id: string;
 }
 
-const KIND_META: Record<
-  ToastKind,
-  { Icon: React.ElementType; ringClass: string; iconColor: string }
-> = {
-  info: {
-    Icon: Info,
-    ringClass: "ring-violet/30",
-    iconColor: "#7c5cfc",
-  },
-  success: {
-    Icon: CheckCircle2,
-    ringClass: "ring-emerald-300/40",
-    iconColor: "#047857",
-  },
-  warning: {
-    Icon: AlertTriangle,
-    ringClass: "ring-amber-300/50",
-    iconColor: "#b45309",
-  },
-  error: {
-    Icon: XCircle,
-    ringClass: "ring-red-300/50",
-    iconColor: "#b91c1c",
-  },
-};
+const KIND_META: Record<ToastKind, { Icon: React.ElementType; tone: string }> =
+  {
+    info: { Icon: Info, tone: "text-text-secondary" },
+    success: { Icon: CheckCircle2, tone: "text-success" },
+    warning: { Icon: AlertTriangle, tone: "text-warning" },
+    error: { Icon: XCircle, tone: "text-destructive" },
+  };
 
 /**
  * Mount once near the root (DashboardLayout). Listens for
@@ -85,7 +67,10 @@ export default function Toaster() {
   return createPortal(
     <div
       aria-live="polite"
-      className="pointer-events-none fixed bottom-4 left-4 z-[60] flex w-full max-w-[360px] flex-col gap-2 sm:bottom-6 sm:left-6"
+      className="sm-toaster pointer-events-none fixed bottom-4 left-3 right-3 z-[60] flex max-w-[380px] flex-col gap-2 sm:bottom-6 sm:left-6 sm:right-auto sm:w-full"
+      style={{
+        bottom: "max(1rem, calc(env(safe-area-inset-bottom) + 0.5rem))",
+      }}
     >
       {items.map((it) => {
         const meta = KIND_META[it.kind ?? "info"];
@@ -93,43 +78,39 @@ export default function Toaster() {
           <div
             key={it.id}
             role="status"
-            className={cn(
-              "pointer-events-auto flex items-start gap-3 rounded-[10px] border border-border bg-card px-3.5 py-3 shadow-lg ring-1",
-              meta.ringClass,
-            )}
+            className="pointer-events-auto flex items-center gap-3 rounded-xl border border-border-strong bg-popover py-2.5 pl-3.5 pr-2 text-text-primary shadow-overlay"
           >
             <meta.Icon
               size={16}
-              className="mt-0.5 shrink-0"
-              style={{ color: meta.iconColor }}
+              className={cn("shrink-0 self-start mt-0.5", meta.tone)}
               aria-hidden
             />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-text-primary">
+              <p className="text-[13.5px] font-medium leading-snug text-text-primary">
                 {it.message}
               </p>
               {it.description && (
-                <p className="mt-0.5 text-xs font-light text-text-secondary">
+                <p className="mt-0.5 text-[12.5px] text-text-secondary">
                   {it.description}
                 </p>
               )}
-              {it.action && (
-                <button
-                  type="button"
-                  onClick={() => it.action?.onClick(() => dismiss(it.id))}
-                  className="mt-1.5 inline-flex items-center text-xs font-medium text-text-primary underline-offset-2 hover:underline"
-                >
-                  {it.action.label}
-                </button>
-              )}
             </div>
+            {it.action && (
+              <button
+                type="button"
+                onClick={() => it.action?.onClick(() => dismiss(it.id))}
+                className="shrink-0 rounded-md px-2 py-1 text-[13px] font-semibold text-accent-subtle-fg transition-colors hover:bg-accent-subtle"
+              >
+                {it.action.label}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => dismiss(it.id)}
               aria-label="Dismiss"
-              className="shrink-0 rounded-[6px] p-1 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              className="shrink-0 rounded-md p-1.5 text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
             >
-              <X size={12} />
+              <X size={13} />
             </button>
           </div>
         );

@@ -16,6 +16,8 @@ import {
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 import { SectionHeader } from "@/components/PageForm";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 function relativeTime(ts: number): string {
   const diff = ts - Date.now() / 1000;
@@ -146,41 +148,42 @@ export default function BlocklistPage() {
         title="Blocklist"
         subtitle="Blocked addresses and domains are hidden from the inbox, and future mail from them is dropped."
         action={
-          <button
+          <Button
             onClick={() => {
               resetAdd();
               setAddOpen(true);
             }}
-            className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
           >
-            <Plus size={14} />
+            <Plus />
             Add block
-          </button>
+          </Button>
         }
       />
 
       <div className="max-w-4xl space-y-6">
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
-          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <section className="overflow-hidden rounded-2xl bg-card border border-border shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
             <SectionHeader
               icon={ShieldBan}
               title={`Blocked (${items.length}${nextCursor ? "+" : ""})`}
               subtitle="Inbound mail from these senders is dropped."
             />
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setPurgeResult(null);
                 setPurgeOpen(true);
               }}
-              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-rose-50 hover:text-rose-600"
+              className="shrink-0 hover:bg-destructive-subtle hover:text-destructive"
             >
-              <Trash2 size={12} />
+              <Trash2 />
               Delete blocked mail
-            </button>
+            </Button>
           </div>
 
           {error && (
-            <div className="border-b border-border bg-rose-50/60 px-5 py-2 text-xs font-medium text-rose-700">
+            <div className="border-b border-border bg-destructive-subtle px-5 py-2 text-xs font-medium text-destructive">
               {error}
             </div>
           )}
@@ -191,63 +194,79 @@ export default function BlocklistPage() {
           )}
 
           {loading ? (
-            <p className="px-5 py-6 text-xs font-light text-text-tertiary">
-              Loading…
-            </p>
+            <div className="space-y-3 px-5 py-5" aria-busy="true">
+              {[0, 1, 2].map((i) => (
+                <span key={i} className="pt-skel block h-4 w-full" />
+              ))}
+            </div>
           ) : items.length === 0 ? (
-            <p className="px-5 py-10 text-center text-sm text-text-tertiary">
-              Nothing blocked yet.
-            </p>
+            <div className="pt-empty">
+              <span className="ic">
+                <ShieldBan size={18} />
+              </span>
+              <p>Nothing is blocked. Block a sender from any conversation.</p>
+            </div>
           ) : (
             <>
-              <ul className="divide-y divide-border/60">
-                {items.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center gap-3 px-5 py-3"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-muted">
-                      <ShieldBan size={14} className="text-text-tertiary" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate text-sm font-medium text-text-primary">
+              <div className="overflow-x-auto">
+                <table className="pt-table">
+                  <thead>
+                    <tr>
+                      <th>Sender</th>
+                      <th>Type</th>
+                      <th className="hidden md:table-cell">Added by</th>
+                      <th>Added</th>
+                      <th className="w-0">
+                        <span className="sr-only">Actions</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((item) => (
+                      <tr key={item.id}>
+                        <td className="max-w-[260px] truncate font-medium">
                           {item.value}
-                        </p>
-                        <span
-                          className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1",
-                            item.type === "domain"
-                              ? "bg-amber-50 text-amber-700 ring-amber-200"
-                              : "bg-bg-muted text-text-secondary ring-border",
-                          )}
-                        >
-                          {item.type === "domain" ? "Domain" : "Email"}
-                        </span>
-                      </div>
-                      <p className="truncate text-xs font-light text-text-tertiary">
-                        {item.createdBy ?? "—"} · added{" "}
-                        {relativeTime(item.createdAt)}
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setConfirmDelete(item)}
-                      aria-label={`Unblock ${item.value}`}
-                      className="inline-flex h-8 shrink-0 items-center gap-1 rounded-[6px] px-2 text-xs font-medium text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
-                    >
-                      Unblock
-                    </button>
-                  </li>
-                ))}
-              </ul>
+                        </td>
+                        <td>
+                          <span
+                            className={cn(
+                              "pt-chip",
+                              item.type === "domain" && "warn",
+                            )}
+                          >
+                            {item.type === "domain" ? "Domain" : "Email"}
+                          </span>
+                        </td>
+                        <td className="muted hidden max-w-[200px] truncate md:table-cell">
+                          {item.createdBy ?? "—"}
+                        </td>
+                        <td className="muted whitespace-nowrap">
+                          {relativeTime(item.createdAt)}
+                        </td>
+                        <td className="!py-1.5 text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmDelete(item)}
+                            aria-label={`Unblock ${item.value}`}
+                          >
+                            Unblock
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {nextCursor && (
                 <div className="border-t border-border px-5 py-3">
-                  <button
+                  <Button
+                    variant="outline"
                     onClick={loadMore}
-                    className="w-full rounded-[6px] border border-border bg-card py-2 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+                    className="w-full"
                   >
                     Load more
-                  </button>
+                  </Button>
                 </div>
               )}
             </>
@@ -263,52 +282,48 @@ export default function BlocklistPage() {
           if (!o) resetAdd();
         }}
       >
-        <DialogContent className="border-border bg-card text-text-primary ring-1 ring-border">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-text-primary">Add block</DialogTitle>
+            <DialogTitle>Add block</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAdd} className="space-y-4">
-            <div className="flex gap-2">
+            <div className="pt-seg flex w-full" role="radiogroup">
               {(["email", "domain"] as BlockRuleType[]).map((t) => (
                 <button
                   key={t}
                   type="button"
+                  role="radio"
+                  aria-checked={addType === t}
                   onClick={() => setAddType(t)}
-                  className={cn(
-                    "flex-1 rounded-[6px] border px-3 py-2 text-sm font-medium transition-colors",
-                    addType === t
-                      ? "border-text-primary bg-text-primary/5 text-text-primary"
-                      : "border-border text-text-secondary hover:bg-bg-muted",
-                  )}
+                  className="flex-1"
                 >
                   {t === "email" ? "Email address" : "Domain"}
                 </button>
               ))}
             </div>
-            <input
+            <Input
               autoFocus
               value={addValue}
               onChange={(e) => setAddValue(e.target.value)}
               placeholder={
                 addType === "email" ? "user@example.com" : "example.com"
               }
-              className="h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-text-primary/20"
             />
             {addError && (
-              <p className="text-xs font-medium text-rose-600">{addError}</p>
+              <p className="text-xs font-medium text-destructive">{addError}</p>
             )}
             <div className="flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => setAddOpen(false)}
-                className="rounded-[8px] border border-border bg-card px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-muted"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-card font-medium text-text-primary transition-colors hover:bg-bg-subtle h-9 px-3.5 text-[13.5px] shadow-card"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={addSubmitting}
-                className="rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-text-primary/90 disabled:opacity-60"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-medium text-accent-foreground transition-colors hover:bg-accent-hover disabled:opacity-60 h-9 px-3.5 text-[13.5px]"
               >
                 {addSubmitting ? "Adding…" : "Block"}
               </button>
@@ -324,11 +339,11 @@ export default function BlocklistPage() {
           if (!o) setConfirmDelete(null);
         }}
       >
-        <DialogContent className="border-border bg-card text-text-primary ring-1 ring-border">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-text-primary">Unblock?</DialogTitle>
+            <DialogTitle>Unblock?</DialogTitle>
           </DialogHeader>
-          <p className="text-sm font-light text-text-secondary">
+          <p className="text-sm text-text-secondary">
             <span className="font-medium text-text-primary">
               {confirmDelete?.value}
             </span>{" "}
@@ -339,14 +354,14 @@ export default function BlocklistPage() {
             <button
               type="button"
               onClick={() => setConfirmDelete(null)}
-              className="rounded-[8px] border border-border bg-card px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-muted"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-card font-medium text-text-primary transition-colors hover:bg-bg-subtle h-9 px-3.5 text-[13.5px] shadow-card"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleConfirmDelete}
-              className="rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-text-primary/90"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-accent font-medium text-accent-foreground transition-colors hover:bg-accent-hover h-9 px-3.5 text-[13.5px]"
             >
               Unblock
             </button>
@@ -356,13 +371,11 @@ export default function BlocklistPage() {
 
       {/* Purge confirm */}
       <Dialog open={purgeOpen} onOpenChange={setPurgeOpen}>
-        <DialogContent className="border-border bg-card text-text-primary ring-1 ring-border">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-text-primary">
-              Delete all blocked mail?
-            </DialogTitle>
+            <DialogTitle>Delete all blocked mail?</DialogTitle>
           </DialogHeader>
-          <p className="text-sm font-light text-text-secondary">
+          <p className="text-sm text-text-secondary">
             This permanently deletes every hidden email from blocked senders.
             This cannot be undone.
           </p>
@@ -370,7 +383,7 @@ export default function BlocklistPage() {
             <button
               type="button"
               onClick={() => setPurgeOpen(false)}
-              className="rounded-[8px] border border-border bg-card px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-muted"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-card font-medium text-text-primary transition-colors hover:bg-bg-subtle h-9 px-3.5 text-[13.5px] shadow-card"
             >
               Cancel
             </button>
@@ -378,7 +391,7 @@ export default function BlocklistPage() {
               type="button"
               onClick={handlePurge}
               disabled={purgeSubmitting}
-              className="rounded-[8px] bg-rose-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-700 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-destructive font-medium text-destructive-foreground transition-colors hover:bg-destructive/90 disabled:opacity-60 h-9 px-3.5 text-[13.5px]"
             >
               {purgeSubmitting ? "Deleting…" : "Delete"}
             </button>
