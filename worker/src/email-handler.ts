@@ -140,13 +140,18 @@ export async function ingestParsedEmail(
     (await rejectsUnknownRecipients(db)) &&
     !(await hasInboxMembers(db, recipientCanonical))
   ) {
-    await recordInboundRejection(db, {
-      from: fromAddressCanonical,
-      recipient: recipientCanonical,
-      subject: parsed.subject,
-      messageId: parsed.messageId,
-      reason: "unknown_recipient",
-    });
+    // Recording the refusal is best effort: it must never stop the refusal.
+    try {
+      await recordInboundRejection(db, {
+        from: fromAddressCanonical,
+        recipient: recipientCanonical,
+        subject: parsed.subject,
+        messageId: parsed.messageId,
+        reason: "unknown_recipient",
+      });
+    } catch (error) {
+      console.warn("Failed to record an inbound rejection:", error);
+    }
     console.log(
       `Rejected email from ${fromAddressCanonical} to ${recipientCanonical}: not an inbox`,
     );
@@ -217,18 +222,23 @@ export async function ingestParsedEmail(
   }
   const rejection = rejectionOf(matchedRules);
   if (rejection) {
-    await recordRuleMatch(db, rejection.rule.id, now);
-    await runWithAudit(ruleActor(rejection.rule), () =>
-      recordInboundRejection(db, {
-        from: fromAddressCanonical,
-        recipient: recipientCanonical,
-        subject: parsed.subject,
-        messageId: parsed.messageId,
-        reason: rejection.reason,
-        ruleId: rejection.rule.id,
-        ruleName: rejection.rule.name,
-      }),
-    );
+    // Recording the refusal is best effort: it must never stop the refusal.
+    try {
+      await recordRuleMatch(db, rejection.rule.id, now);
+      await runWithAudit(ruleActor(rejection.rule), () =>
+        recordInboundRejection(db, {
+          from: fromAddressCanonical,
+          recipient: recipientCanonical,
+          subject: parsed.subject,
+          messageId: parsed.messageId,
+          reason: rejection.reason,
+          ruleId: rejection.rule.id,
+          ruleName: rejection.rule.name,
+        }),
+      );
+    } catch (error) {
+      console.warn("Failed to record an inbound rejection:", error);
+    }
     console.log(
       `Rejected email from ${fromAddressCanonical} to ${recipientCanonical} by rule ${rejection.rule.id}`,
     );
