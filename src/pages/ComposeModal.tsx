@@ -90,6 +90,8 @@ export default function ComposeModal({
   const [{ undoSendSeconds }] = useCommonSettings();
   const openRef = useRef(open);
   openRef.current = open;
+  const contextKeyRef = useRef(contextKey);
+  contextKeyRef.current = contextKey;
   const [to, setTo] = useState("");
   const [fromAddress, setFromAddress] = useState("");
   const [cc, setCc] = useState<CcEntry[]>([]);
@@ -318,9 +320,10 @@ export default function ComposeModal({
       onSent: () => {
         finishSend(context, idempotencyKey, "sent");
         dispatchEmailSent({ fromAddress, to, origin: "compose" });
-        // The message went out: drop its draft, unless a new message is
-        // being written right now (that one owns the draft slot).
-        if (!openRef.current) deleteDraft(draftKey).catch(() => {});
+        // The message went out: drop its draft, unless the composer open
+        // right now is writing on that same slot (it owns the draft now).
+        if (!(openRef.current && contextKeyRef.current === draftKey))
+          deleteDraft(draftKey).catch(() => {});
       },
       onError: (sendError) => {
         // The message comes back with the same key, so sending it again

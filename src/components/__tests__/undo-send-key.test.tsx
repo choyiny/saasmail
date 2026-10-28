@@ -334,6 +334,42 @@ describe("ComposeModal: Undo Send and the send key", () => {
   });
 });
 
+describe("a /mail draft sent while a new message is open", () => {
+  it("still deletes the sent message's own draft slot", async () => {
+    settings.seconds = 0.05;
+    let api: { open: (k: string) => void } | null = null;
+    function Host() {
+      const [state, setState] = useState<{
+        open: boolean;
+        prefill: ComposePrefill | null;
+        contextKey: string;
+      }>({ open: true, prefill: PREFILL, contextKey: "draft:A" });
+      api = {
+        open: (k) => setState({ open: true, prefill: null, contextKey: k }),
+      };
+      return (
+        <ComposeModal
+          open={state.open}
+          prefill={state.prefill}
+          contextKey={state.contextKey}
+          onClose={() =>
+            setState({ open: false, prefill: null, contextKey: "compose" })
+          }
+          onReopen={(prefill, contextKey = "compose") =>
+            setState({ open: true, prefill, contextKey })
+          }
+        />
+      );
+    }
+    render(<Host />);
+    await pressComposeSend();
+    act(() => api!.open("draft:B"));
+    await afterWindow();
+    expect(mSend).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(deleteDraft)).toHaveBeenCalledWith("draft:A");
+  });
+});
+
 // ── ChatQuickReply ──────────────────────────────────────────────────────
 
 function renderQuick() {
