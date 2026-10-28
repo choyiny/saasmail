@@ -204,59 +204,36 @@ export async function storeReceivedMessage(
     parsed.auth.dmarc === "pass";
   const name = parsed.from.name || null;
 
-  if (imported) {
-    // The person without counting yet: the count goes up with the message
-    // row, in one batch, so a retried import never counts a message twice.
-    // An import only fills a missing name: an old message must not rename
-    // them.
-    await db
-      .insert(people)
-      .values({
-        id: nanoid(),
-        email: fromAddress,
-        name,
-        lastEmailAt: receivedAt,
-        unreadCount: 0,
-        totalCount: 0,
-        createdAt: now,
+  // The person without counting yet: the counts go up with the message row,
+  // in one batch, so a message that fails to store (and is then retried, by
+  // a mailbox sync or an import) is never counted twice. Only an
+  // authenticated sender updates the name; an import only fills a missing
+  // one, since an old message must not rename them.
+  await db
+    .insert(people)
+    .values({
+      id: nanoid(),
+      email: fromAddress,
+      name,
+      lastEmailAt: receivedAt,
+      unreadCount: 0,
+      totalCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: people.email,
+      set: {
+        ...(senderAuthenticated
+          ? {
+              name: imported
+                ? sql`COALESCE(${people.name}, ${name})`
+                : sql`COALESCE(${name}, ${people.name})`,
+            }
+          : {}),
         updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: people.email,
-        set: {
-          ...(senderAuthenticated
-            ? { name: sql`COALESCE(${people.name}, ${name})` }
-            : {}),
-          updatedAt: now,
-        },
-      });
-  } else {
-    // Upsert person — only update name if sender passes authentication
-    await db
-      .insert(people)
-      .values({
-        id: nanoid(),
-        email: fromAddress,
-        name,
-        lastEmailAt: receivedAt,
-        unreadCount: 1,
-        totalCount: 1,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: people.email,
-        set: {
-          ...(senderAuthenticated
-            ? { name: sql`COALESCE(${name}, ${people.name})` }
-            : {}),
-          lastEmailAt: receivedAt,
-          unreadCount: sql`${people.unreadCount} + 1`,
-          totalCount: sql`${people.totalCount} + 1`,
-          updatedAt: now,
-        },
-      });
-  }
+      },
+    });
 
   // Get the actual person ID (could be existing). Lookup by the
   // canonical (lowercased) email so legacy mixed-case rows still
@@ -276,98 +253,107 @@ export async function storeReceivedMessage(
       `Attachment limits exceeded for email from ${parsed.from.address}, skipping ${dropped}`,
     );
   }
-  const bodyHtml = await storeAttachments(db, env, {
-    emailId,
-    kind: "inbound",
-    attachments: kept,
-    bodyHtml: parsed.bodyHtml,
-    now,
-  });
-
-  // Compute the conversation_id, if this is a multi-participant thread.
-  // External participants = the sender + everyone on the Cc line, minus
-  // any addresses that match one of our sender_identities (those are
-  // "internal" team members and don't change the group identity).
-  const externals = externalsOnly(
-    [fromAddress, ...parsed.cc.map((c) => c.email)],
-    input.ourDomains,
-  );
-  const conversationId = await computeConversationId(inbox, externals);
-  // In a headers-mode inbox, the thread of the first message it cites.
-  const inReplyTo = parsed.headers["in-reply-to"]?.trim() || null;
-  const referencesHeader = parsed.headers["references"]?.trim() || null;
-  const threadKey = await threadKeyForNewMessage(db, {
-    inbox,
-    messageId: parsed.messageId,
-    citedIds: citedIdsOf(inReplyTo, referencesHeader),
-    mode: input.threadingMode,
-  });
-
-  // The message exactly as received, for JMAP's blobId. Written before the row
-  // so a new Email never gains a blobId after a client has seen it; a failed
-  // write stores the mail without one rather than losing it.
+  // Every file written from here on is removed again when the row is not.
   let rawR2Key: string | null = `inbound-raw/${emailId}.eml`;
+  let bodyHtml: string | null;
+  let conversationId: string | null;
+  let threadKey: string | null;
   try {
-    await env.R2.put(rawR2Key, parsed.raw, {
-      httpMetadata: { contentType: "message/rfc822" },
+    bodyHtml = await storeAttachments(db, env, {
+      emailId,
+      kind: "inbound",
+      attachments: kept,
+      bodyHtml: parsed.bodyHtml,
+      now,
     });
-  } catch (err) {
-    console.error(`[inbound] raw message not stored for ${emailId}:`, err);
-    rawR2Key = null;
-  }
 
-  // Insert email (with rewritten HTML and auth results). Store the
-  // canonical (lowercased) recipient so it matches the conversation
-  // group key.
-  const row = {
-    id: emailId,
-    personId,
-    recipient: inbox,
-    subject: parsed.subject,
-    bodyHtml: imported ? storedBody(bodyHtml) : bodyHtml,
-    bodyText: imported ? storedBody(parsed.bodyText) : parsed.bodyText,
-    rawHeaders: JSON.stringify(parsed.headers),
-    messageId: parsed.messageId,
-    // postal-mime keys headers in lowercase; JMAP exposes these as
-    // inReplyTo/references.
-    inReplyTo,
-    referencesHeader,
-    rawR2Key,
-    rawSize: rawR2Key ? parsed.raw.byteLength : null,
-    spf: parsed.auth.spf,
-    dkim: parsed.auth.dkim,
-    dmarc: parsed.auth.dmarc,
-    spamScore: parsed.spamScore,
-    spamProbability: imported ? null : (input.spamProbability ?? null),
-    isRead: imported ? 1 : 0,
-    cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
-    replyTo: parsed.replyTo.length ? JSON.stringify(parsed.replyTo) : null,
-    conversationId,
-    threadKey,
-    importJobId: imported ? (input.importJobId ?? null) : null,
-    receivedAt,
-    createdAt: now,
-  };
-  if (imported) {
+    // Compute the conversation_id, if this is a multi-participant thread.
+    // External participants = the sender + everyone on the Cc line, minus
+    // any addresses that match one of our sender_identities (those are
+    // "internal" team members and don't change the group identity).
+    const externals = externalsOnly(
+      [fromAddress, ...parsed.cc.map((c) => c.email)],
+      input.ourDomains,
+    );
+    conversationId = await computeConversationId(inbox, externals);
+    // In a headers-mode inbox, the thread of the first message it cites.
+    const inReplyTo = parsed.headers["in-reply-to"]?.trim() || null;
+    const referencesHeader = parsed.headers["references"]?.trim() || null;
+    threadKey = await threadKeyForNewMessage(db, {
+      inbox,
+      messageId: parsed.messageId,
+      citedIds: citedIdsOf(inReplyTo, referencesHeader),
+      mode: input.threadingMode,
+    });
+
+    // The message exactly as received, for JMAP's blobId. Written before the row
+    // so a new Email never gains a blobId after a client has seen it; a failed
+    // write stores the mail without one rather than losing it.
     try {
-      await db.batch([
-        db.insert(emails).values(row),
-        db
-          .update(people)
-          .set({
-            totalCount: sql`${people.totalCount} + 1`,
-            lastEmailAt: sql`MAX(${people.lastEmailAt}, ${receivedAt})`,
-            updatedAt: now,
-          })
-          .where(eq(people.id, personId)),
-      ]);
-    } catch (error) {
-      // Nothing of a message that was not stored stays behind.
-      await discardStoredFiles(db, env, emailId, rawR2Key);
-      throw error;
+      await env.R2.put(rawR2Key, parsed.raw, {
+        httpMetadata: { contentType: "message/rfc822" },
+      });
+    } catch (err) {
+      console.error(`[inbound] raw message not stored for ${emailId}:`, err);
+      rawR2Key = null;
     }
-  } else {
-    await db.insert(emails).values(row);
+
+    // Insert email (with rewritten HTML and auth results). Store the
+    // canonical (lowercased) recipient so it matches the conversation
+    // group key.
+    const row = {
+      id: emailId,
+      personId,
+      recipient: inbox,
+      subject: parsed.subject,
+      bodyHtml: imported ? storedBody(bodyHtml) : bodyHtml,
+      bodyText: imported ? storedBody(parsed.bodyText) : parsed.bodyText,
+      rawHeaders: JSON.stringify(parsed.headers),
+      messageId: parsed.messageId,
+      // postal-mime keys headers in lowercase; JMAP exposes these as
+      // inReplyTo/references.
+      inReplyTo,
+      referencesHeader,
+      rawR2Key,
+      rawSize: rawR2Key ? parsed.raw.byteLength : null,
+      spf: parsed.auth.spf,
+      dkim: parsed.auth.dkim,
+      dmarc: parsed.auth.dmarc,
+      spamScore: parsed.spamScore,
+      spamProbability: imported ? null : (input.spamProbability ?? null),
+      isRead: imported ? 1 : 0,
+      cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
+      replyTo: parsed.replyTo.length ? JSON.stringify(parsed.replyTo) : null,
+      conversationId,
+      threadKey,
+      importJobId: imported ? (input.importJobId ?? null) : null,
+      receivedAt,
+      createdAt: now,
+    };
+    await db.batch([
+      db.insert(emails).values(row),
+      db
+        .update(people)
+        .set(
+          imported
+            ? {
+                totalCount: sql`${people.totalCount} + 1`,
+                lastEmailAt: sql`MAX(${people.lastEmailAt}, ${receivedAt})`,
+                updatedAt: now,
+              }
+            : {
+                lastEmailAt: receivedAt,
+                unreadCount: sql`${people.unreadCount} + 1`,
+                totalCount: sql`${people.totalCount} + 1`,
+                updatedAt: now,
+              },
+        )
+        .where(eq(people.id, personId)),
+    ]);
+  } catch (error) {
+    // Nothing of a message that was not stored stays behind.
+    await discardStoredFiles(db, env, emailId, rawR2Key);
+    throw error;
   }
 
   return {

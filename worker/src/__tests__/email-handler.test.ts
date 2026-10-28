@@ -1055,10 +1055,11 @@ describe("ingestParsedEmail — a failure part-way through", () => {
       put.mockRestore();
     }
 
-    // The message itself is on the timeline...
+    // This fork writes the files before the row (so a JMAP Email never gains
+    // a blobId after a client has seen it): the message is not stored, the
+    // sender's retry delivers it, and nothing dangles.
     const emailRows = await getDb().select().from(emails);
-    expect(emailRows).toHaveLength(1);
-    // ...and nothing dangles.
+    expect(emailRows).toHaveLength(0);
     expect(await getDb().select().from(attachments)).toHaveLength(0);
   });
 
@@ -1104,21 +1105,22 @@ describe("ingestParsedEmail — a failure part-way through", () => {
       put.mockRestore();
     }
 
+    // Nothing was stored, so nothing was counted.
     const first = await getDb().select().from(people);
-    expect(first[0].totalCount).toBe(1);
-    expect(first[0].unreadCount).toBe(1);
+    expect(first[0].totalCount).toBe(0);
+    expect(first[0].unreadCount).toBe(0);
 
-    // The retry now finds the row this inbox already holds.
+    // The retry stores it, and counts it once.
     const outcome = await ingest({
       ...withAttachment,
       messageId: "<retry@example.com>",
     });
-    expect(outcome.status).toBe("duplicate");
+    expect(outcome.status).toBe("stored");
 
     const after = await getDb().select().from(people);
     expect(after[0].totalCount).toBe(1);
     expect(after[0].unreadCount).toBe(1);
     expect(await getDb().select().from(emails)).toHaveLength(1);
-    expect(await getDb().select().from(attachments)).toHaveLength(0);
+    expect(await getDb().select().from(attachments)).toHaveLength(1);
   });
 });
