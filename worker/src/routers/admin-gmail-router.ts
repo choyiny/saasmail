@@ -4,7 +4,12 @@ import { nanoid } from "nanoid";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
 import { users } from "../db/auth.schema";
 import { encryptSecret } from "../lib/crypto";
-import { buildAuthUrl, exchangeCode, getProfile } from "../lib/gmail/oauth";
+import {
+  GoogleAuthError,
+  buildAuthUrl,
+  exchangeCode,
+  getProfile,
+} from "../lib/gmail/oauth";
 import { signState, verifyState } from "../lib/gmail/state";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
@@ -170,10 +175,17 @@ adminGmailRouter.openapi(callbackRoute, async (c) => {
 
     return c.redirect(`${INBOXES_PATH}?gmail=connected`, 302);
   } catch (err) {
-    // Log only the message, never the error object: a D1 error carries its
-    // bound query parameters, which on this path include the access token.
-    const reason = err instanceof Error ? err.message : "unknown error";
-    console.error(`[gmail] OAuth callback failed: ${reason}`);
+    // Never log the error's message or the error itself: a failed Drizzle/D1
+    // query puts its bound parameters (the access token and the sealed
+    // refresh token on this path) in the message. Log a fixed text with the
+    // error's kind only: Google's error code, or the error class name.
+    const kind =
+      err instanceof GoogleAuthError && /^[a-z_]{1,64}$/.test(err.code)
+        ? err.code
+        : err instanceof Error
+          ? err.name
+          : "unknown";
+    console.error(`[gmail] OAuth callback failed (${kind})`);
     return c.redirect(`${INBOXES_PATH}?gmail=error`, 302);
   }
 });
