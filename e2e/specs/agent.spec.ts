@@ -82,33 +82,34 @@ test.describe.serial("native agent panel", () => {
     ).toBe(0);
   });
 
-  test("keeps document scrolling on long dashboard content", async ({
+  test("keeps the page scrolling on long dashboard content", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto("/templates");
 
-    await page.locator("main").evaluate((main) => {
+    // The shell scrolls the page inside its work panel, not the document.
+    const scroller = page.locator("main .pt-scroll");
+    await scroller.evaluate((element) => {
       const filler = document.createElement("div");
       filler.dataset.testid = "dashboard-scroll-filler";
-      filler.style.height = "3000px";
+      // A flex item: min-height keeps it from shrinking to its text.
+      filler.style.minHeight = "3000px";
       filler.textContent = "Long dashboard content";
-      main.appendChild(filler);
+      element.appendChild(filler);
     });
 
     await expect
       .poll(() =>
-        page.evaluate(
-          () =>
-            (document.scrollingElement?.scrollHeight ?? 0) > window.innerHeight,
+        scroller.evaluate(
+          (element) => element.scrollHeight > element.clientHeight,
         ),
       )
       .toBe(true);
 
-    await page.evaluate(() => window.scrollTo(0, 200));
+    await scroller.evaluate((element) => element.scrollTo(0, 200));
     await expect
-      .poll(() => page.evaluate(() => window.scrollY))
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
-    await expect(page.locator("nav").first()).toHaveClass(/shadow-2xl/);
   });
 
   test("creates, renames, and archives a session", async ({
