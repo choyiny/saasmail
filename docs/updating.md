@@ -87,9 +87,21 @@ When you merge upstream:
    `worker/src/__tests__/helpers.ts` in the same commit.
 3. Add a row to the table below.
 
-| Upstream file                     | Fork file                          | Note            |
-| --------------------------------- | ---------------------------------- | --------------- |
-| `0035_overjoyed_rocket_racer.sql` | `0085_upstream_gmail_accounts.sql` | same statements |
+| Upstream file                      | Fork file                          | Note                                              |
+| ---------------------------------- | ---------------------------------- | ------------------------------------------------- |
+| `0035_overjoyed_rocket_racer.sql`  | `0085_upstream_gmail_accounts.sql` | same statements                                   |
+| `0036_futuristic_gunslinger.sql`   | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| `0037_careful_gwen_stacy.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| `0038_thick_blonde_phantom.sql`    | `0086_upstream_gmail_outlook.sql`  | dropped: index already in fork 0067               |
+| `0039_amazing_moondragon.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| `0040_needy_nocturne.sql`          | `0086_upstream_gmail_outlook.sql`  | dropped: index replaced by 0041                   |
+| `0041_old_nighthawk.sql`           | `0086_upstream_gmail_outlook.sql`  | unique index only                                 |
+| `0042_gmail_backfill.sql`          | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| `0043_gmail_backfill_one_year.sql` | `0086_upstream_gmail_outlook.sql`  | column only; dropped: data step on an empty table |
+| `0044_gmail_backfill_job.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| `0045_gmail_backfill_progress.sql` | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| `0046_careless_silhouette.sql`     | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| `0047_outlook_mailboxes.sql`       | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
 
 `yarn typecheck` runs `scripts/check-migrations.mjs`, which fails while two
 migration files share a number, so an upstream file that survives a merge
