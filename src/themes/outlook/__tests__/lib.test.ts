@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// These cover the star, archive, snooze and trash views too (see docs/mailbox-state.md).
+vi.mock("@/lib/mail-state-actions", () => ({
+  MAIL_STATE_ACTIONS_ENABLED: true,
+}));
 import type { GroupedItem } from "@/lib/api";
 import {
   filterQuery,

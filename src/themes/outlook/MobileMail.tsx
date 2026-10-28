@@ -28,6 +28,8 @@ import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 import { fetchGroupedPeople, type Email, type GroupedItem } from "@/lib/api";
 import { itemKey, itemTitle } from "@/hooks/useMailList";
 import { usePreferences } from "@/lib/preferences";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
+import { gateSwipe } from "@/lib/mail-state-gates";
 import { showToast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
@@ -56,6 +58,7 @@ import {
   FILTER_LABELS,
   SWIPE_LABELS,
   formatMobileTime,
+  stateActionAvailable,
   swipeOutcome,
   type ListFilter,
   type SwipeAction,
@@ -122,7 +125,7 @@ function MobileRow({
   const o = useOutlook();
   const ui = useMailUi();
   const side = dx > 0 ? "right" : "left";
-  const action: SwipeAction = dx > 0 ? o.swipeRight : o.swipeLeft;
+  const action: SwipeAction = gateSwipe(dx > 0 ? o.swipeRight : o.swipeLeft);
   const swipeLabel = (act: SwipeAction) =>
     act === "flag"
       ? item.starred
@@ -188,8 +191,9 @@ function MobileRow({
   function finishSwipe(finalDx: number) {
     const out = swipeOutcome(finalDx, width);
     setAnimating(true);
-    const act =
-      out === "right" ? o.swipeRight : out === "left" ? o.swipeLeft : "none";
+    const act = gateSwipe(
+      out === "right" ? o.swipeRight : out === "left" ? o.swipeLeft : "none",
+    );
     if (act === "none") {
       setDx(0);
       setTimeout(() => setAnimating(false), 200);
@@ -496,18 +500,20 @@ function MobileSearch({ mail }: { mail: OutlookMail }) {
             ["flagged", "Flagged", <FlagGlyph key="f" size={14} />],
             ["files", "Attachments", <Paperclip key="a" size={14} />],
           ] as const
-        ).map(([k, label, icon]) => (
-          <button
-            key={k}
-            type="button"
-            aria-pressed={chips[k]}
-            className={cn("ol-m-chip", chips[k] && "ol-m-chip-on")}
-            onClick={() => setChips((c) => ({ ...c, [k]: !c[k] }))}
-          >
-            {icon}
-            {label}
-          </button>
-        ))}
+        )
+          .filter(([k]) => MAIL_STATE_ACTIONS_ENABLED || k !== "flagged")
+          .map(([k, label, icon]) => (
+            <button
+              key={k}
+              type="button"
+              aria-pressed={chips[k]}
+              className={cn("ol-m-chip", chips[k] && "ol-m-chip-on")}
+              onClick={() => setChips((c) => ({ ...c, [k]: !c[k] }))}
+            >
+              {icon}
+              {label}
+            </button>
+          ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {searching && people.length > 0 && (
@@ -632,6 +638,7 @@ function MobileConversation({
         <IconButton
           label="Archive"
           size="lg"
+          stateAction
           onClick={() => mail.ops.archive([item])}
         >
           <Archive size={21} />
@@ -639,6 +646,7 @@ function MobileConversation({
         <IconButton
           label="Delete"
           size="lg"
+          stateAction
           onClick={() => void mail.ops.delete([item])}
         >
           <Trash2 size={21} />
@@ -783,7 +791,7 @@ function MobileConversation({
               (!mail.canDeleteForever || item.type !== "person"),
             onSelect: () => void mail.ops.delete([item]),
           },
-        ]}
+        ].filter(stateActionAvailable)}
       />
       <ActionSheet
         open={sheet === "snooze"}
@@ -1016,7 +1024,9 @@ export default function MobileMail({ mail }: { mail: OutlookMail }) {
             >
               <MenuRadioItem value="all">All</MenuRadioItem>
               <MenuRadioItem value="unread">Unread</MenuRadioItem>
-              <MenuRadioItem value="flagged">Flagged</MenuRadioItem>
+              {MAIL_STATE_ACTIONS_ENABLED && (
+                <MenuRadioItem value="flagged">Flagged</MenuRadioItem>
+              )}
               <MenuRadioItem value="files">Attachments</MenuRadioItem>
             </MenuRadioGroup>
           </MenuContent>
@@ -1107,26 +1117,30 @@ export default function MobileMail({ mail }: { mail: OutlookMail }) {
 
       {selecting && (
         <nav className="ol-m-actionbar" aria-label="Selection actions">
-          <button
-            type="button"
-            disabled={!selectedItems.length}
-            onClick={() => act(() => mail.ops.archive(selectedItems))}
-          >
-            <Archive size={22} aria-hidden />
-            Archive
-          </button>
-          <button
-            type="button"
-            disabled={
-              !selectedItems.length ||
-              // In Deleted Items, Delete is permanent: admins only.
-              (mail.folder === "deleted" && !mail.canDeleteForever)
-            }
-            onClick={() => act(() => void mail.ops.delete(selectedItems))}
-          >
-            <Trash2 size={22} aria-hidden />
-            Delete
-          </button>
+          {MAIL_STATE_ACTIONS_ENABLED && (
+            <>
+              <button
+                type="button"
+                disabled={!selectedItems.length}
+                onClick={() => act(() => mail.ops.archive(selectedItems))}
+              >
+                <Archive size={22} aria-hidden />
+                Archive
+              </button>
+              <button
+                type="button"
+                disabled={
+                  !selectedItems.length ||
+                  // In Deleted Items, Delete is permanent: admins only.
+                  (mail.folder === "deleted" && !mail.canDeleteForever)
+                }
+                onClick={() => act(() => void mail.ops.delete(selectedItems))}
+              >
+                <Trash2 size={22} aria-hidden />
+                Delete
+              </button>
+            </>
+          )}
           <button
             type="button"
             disabled={!selectedItems.length}
@@ -1139,22 +1153,26 @@ export default function MobileMail({ mail }: { mail: OutlookMail }) {
             )}
             {anyUnread ? "Read" : "Unread"}
           </button>
-          <button
-            type="button"
-            disabled={!selectedItems.length}
-            onClick={() => act(() => mail.ops.flag(selectedItems))}
-          >
-            <FlagGlyph size={22} />
-            Flag
-          </button>
-          <button
-            type="button"
-            disabled={!selectedItems.length}
-            onClick={() => setMoreOpen(true)}
-          >
-            <MoreHorizontal size={22} aria-hidden />
-            More
-          </button>
+          {MAIL_STATE_ACTIONS_ENABLED && (
+            <>
+              <button
+                type="button"
+                disabled={!selectedItems.length}
+                onClick={() => act(() => mail.ops.flag(selectedItems))}
+              >
+                <FlagGlyph size={22} />
+                Flag
+              </button>
+              <button
+                type="button"
+                disabled={!selectedItems.length}
+                onClick={() => setMoreOpen(true)}
+              >
+                <MoreHorizontal size={22} aria-hidden />
+                More
+              </button>
+            </>
+          )}
         </nav>
       )}
 
@@ -1220,7 +1238,7 @@ export default function MobileMail({ mail }: { mail: OutlookMail }) {
             icon: <InboxIcon size={20} />,
             onSelect: () => act(() => mail.ops.moveToInbox(selectedItems)),
           },
-        ]}
+        ].filter(stateActionAvailable)}
       />
     </div>
   );

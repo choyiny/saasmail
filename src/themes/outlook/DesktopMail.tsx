@@ -4,6 +4,7 @@ import type { GroupedItem } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 import { usePreferences } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
+import { ifMailState } from "@/lib/mail-state-gates";
 import { useMedia, useOutlook } from "./context";
 import FolderList, { type DropTarget } from "./FolderList";
 import MessageList from "./MessageList";
@@ -310,7 +311,7 @@ export default function DesktopMail({ mail }: { mail: OutlookMail }) {
                     ? () => void mail.ops.emptyTrash()
                     : undefined
                 }
-                onDropRows={onDropRows}
+                onDropRows={ifMailState(onDropRows)}
               />
             </aside>
           </>

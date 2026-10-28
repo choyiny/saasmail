@@ -12,6 +12,7 @@ import {
 import type { Email } from "@/lib/api";
 import { itemTitle } from "@/hooks/useMailList";
 import { cn } from "@/lib/utils";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 import type { ComposePrefill } from "@/pages/ComposeModal";
 import { useOutlook } from "./context";
 import Conversation from "./Conversation";
@@ -64,22 +65,26 @@ function MultiSelected({ mail }: { mail: OutlookMail }) {
         {items.length} items selected
       </p>
       <div className="flex flex-wrap justify-center gap-2">
-        <button
-          type="button"
-          className="ol-btn-outline"
-          onClick={() => mail.ops.archive(items)}
-        >
-          <Archive size={16} aria-hidden /> Archive
-        </button>
-        <button
-          type="button"
-          className="ol-btn-outline"
-          // In Deleted Items, Delete is permanent: admins only.
-          disabled={mail.folder === "deleted" && !mail.canDeleteForever}
-          onClick={() => void mail.ops.delete(items)}
-        >
-          <Trash2 size={16} aria-hidden /> Delete
-        </button>
+        {MAIL_STATE_ACTIONS_ENABLED && (
+          <>
+            <button
+              type="button"
+              className="ol-btn-outline"
+              onClick={() => mail.ops.archive(items)}
+            >
+              <Archive size={16} aria-hidden /> Archive
+            </button>
+            <button
+              type="button"
+              className="ol-btn-outline"
+              // In Deleted Items, Delete is permanent: admins only.
+              disabled={mail.folder === "deleted" && !mail.canDeleteForever}
+              onClick={() => void mail.ops.delete(items)}
+            >
+              <Trash2 size={16} aria-hidden /> Delete
+            </button>
+          </>
+        )}
         <button
           type="button"
           className="ol-btn-outline"
@@ -92,33 +97,37 @@ function MultiSelected({ mail }: { mail: OutlookMail }) {
           )}
           {anyUnread ? "Mark as read" : "Mark as unread"}
         </button>
-        <button
-          type="button"
-          className="ol-btn-outline"
-          onClick={() => mail.ops.flag(items)}
-        >
-          <FlagGlyph size={16} /> Flag
-        </button>
-        <button
-          type="button"
-          className="ol-btn-outline"
-          onClick={() => mail.ops.pin(items)}
-        >
-          <Pin size={16} aria-hidden /> Pin
-        </button>
-        <Menu>
-          <MenuTrigger asChild>
-            <button type="button" className="ol-btn-outline">
-              <Clock size={16} aria-hidden /> Snooze
+        {MAIL_STATE_ACTIONS_ENABLED && (
+          <>
+            <button
+              type="button"
+              className="ol-btn-outline"
+              onClick={() => mail.ops.flag(items)}
+            >
+              <FlagGlyph size={16} /> Flag
             </button>
-          </MenuTrigger>
-          <MenuContent>
-            <SnoozeMenuItems
-              onPick={(u) => mail.ops.snooze(items, u)}
-              onCustom={onSnoozeCustom}
-            />
-          </MenuContent>
-        </Menu>
+            <button
+              type="button"
+              className="ol-btn-outline"
+              onClick={() => mail.ops.pin(items)}
+            >
+              <Pin size={16} aria-hidden /> Pin
+            </button>
+            <Menu>
+              <MenuTrigger asChild>
+                <button type="button" className="ol-btn-outline">
+                  <Clock size={16} aria-hidden /> Snooze
+                </button>
+              </MenuTrigger>
+              <MenuContent>
+                <SnoozeMenuItems
+                  onPick={(u) => mail.ops.snooze(items, u)}
+                  onCustom={onSnoozeCustom}
+                />
+              </MenuContent>
+            </Menu>
+          </>
+        )}
       </div>
       <button
         type="button"
@@ -237,27 +246,31 @@ export default function ReadingPane({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            className={cn("ol-icon-btn", item.starred && "text-star")}
-            aria-label={item.starred ? "Unflag" : "Flag"}
-            title={item.starred ? "Unflag" : "Flag"}
-            onClick={() => mail.ops.flag([item])}
-          >
-            <FlagGlyph size={18} filled={item.starred} />
-          </button>
-          <button
-            type="button"
-            className={cn("ol-icon-btn", item.pinned && "text-accent")}
-            aria-label={item.pinned ? "Unpin" : "Pin"}
-            title={item.pinned ? "Unpin" : "Pin"}
-            onClick={() => mail.ops.pin([item])}
-          >
-            <Pin
-              size={18}
-              className={item.pinned ? "fill-current" : undefined}
-            />
-          </button>
+          {MAIL_STATE_ACTIONS_ENABLED && (
+            <>
+              <button
+                type="button"
+                className={cn("ol-icon-btn", item.starred && "text-star")}
+                aria-label={item.starred ? "Unflag" : "Flag"}
+                title={item.starred ? "Unflag" : "Flag"}
+                onClick={() => mail.ops.flag([item])}
+              >
+                <FlagGlyph size={18} filled={item.starred} />
+              </button>
+              <button
+                type="button"
+                className={cn("ol-icon-btn", item.pinned && "text-accent")}
+                aria-label={item.pinned ? "Unpin" : "Pin"}
+                title={item.pinned ? "Unpin" : "Pin"}
+                onClick={() => mail.ops.pin([item])}
+              >
+                <Pin
+                  size={18}
+                  className={item.pinned ? "fill-current" : undefined}
+                />
+              </button>
+            </>
+          )}
           <Menu>
             <MenuTrigger asChild>
               <button
