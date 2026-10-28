@@ -185,7 +185,8 @@ export type ReplyEmailResult = ReplyEmailSuccess | ReplyEmailFailure;
 /**
  * The sender for mail from `fromAddress`: its Gmail or Outlook mailbox when
  * the inbox is connected to one, else the configured provider. A connected
- * inbox whose mailbox cannot be used fails closed, with the message to show.
+ * inbox whose mailbox cannot produce a token fails closed, with the message to
+ * show.
  */
 async function senderForInbox(
   db: Db,
