@@ -160,6 +160,11 @@ the preview.
 The state lives in two tables, `user_preferences` and `mail_item_states`
 (migration `0048`).
 
+> **Not in this release** either: `PATCH /api/mail-state` does not exist yet,
+> `GET /api/people/grouped` takes `folder=all`, `inbox` or `sent` only, and
+> migration `0087` creates `user_preferences` and `category_overrides`, not
+> `mail_item_states` (see [Updating](updating.md#upstream-migrations)).
+
 ## For contributors
 
 Colours, fonts, radii and shadows are CSS variables in `src/index.css`, keyed off
