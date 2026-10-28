@@ -17,7 +17,7 @@ Every interaction with a customer matters, and context compounds. saasmail pulls
 
 Self-hosted on Cloudflare Workers. Receive with **Cloudflare Email Workers**. Send with **Cloudflare Email Sending**, **Resend**, **Bavimail**, or **Postmark**.
 
-<img width="3200" height="1954" alt="The saasmail customer timeline: a people list on the left and one customer's mail across four inboxes on the right" src="docs/screenshots/hero.jpg" />
+![saasmail: one customer's mail across four inboxes in a single timeline](docs/screenshots/inbox-timeline.jpg)
 
 ## Who this is for
 
@@ -81,10 +81,6 @@ One person's mail across four inboxes in a single timeline, the table overview, 
 https://github.com/user-attachments/assets/937d45e9-744e-461f-83fd-71e90a4c38b0
 
 ## Screenshots
-
-**One timeline per customer** — every inbox a person has emailed collapses into a single conversation, with per-inbox tabs and a chat-style composer.
-
-![Unified customer timeline](docs/screenshots/inbox-timeline.jpg)
 
 **Table overview** — stat tiles plus a sortable people table spanning every inbox, with unread and attachment indicators.
 

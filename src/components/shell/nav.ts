@@ -36,7 +36,7 @@ export interface MailView {
   params: Record<string, string>;
 }
 
-export const MAIL_VIEWS: MailView[] = [
+const ALL_MAIL_VIEWS: MailView[] = [
   { id: "inbox", label: "Inbox", icon: Inbox, params: {} },
   {
     id: "starred",
@@ -70,7 +70,11 @@ export const MAIL_VIEWS: MailView[] = [
     icon: Trash2,
     params: { folder: "trash" },
   },
-].filter((v) => mailStateFolderAvailable(v.id));
+];
+
+export const MAIL_VIEWS: MailView[] = ALL_MAIL_VIEWS.filter((v) =>
+  mailStateFolderAvailable(v.id),
+);
 
 export const FOLDERS: MailFolder[] = [
   "inbox",

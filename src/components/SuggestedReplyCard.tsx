@@ -64,6 +64,8 @@ export default function SuggestedReplyCard({
   );
 
   if (!suggestion) return null;
+  // The handlers below are closures: narrowing does not reach into them.
+  const current = suggestion;
 
   async function handleUse() {
     setBusy(true);
@@ -85,11 +87,11 @@ export default function SuggestedReplyCard({
         ...(existing?.toAddress ? { to: existing.toAddress } : {}),
         ...(existing?.cc ? { cc: existing.cc } : {}),
         ...(existing?.subject ? { subject: existing.subject } : {}),
-        bodyHtml: plainTextToHtml(suggestion.bodyText),
-        bodyText: suggestion.bodyText,
+        bodyHtml: plainTextToHtml(current.bodyText),
+        bodyText: current.bodyText,
         replyToEmailId: emailId,
       });
-      await useSuggestedReply(suggestion.id);
+      await useSuggestedReply(current.id);
       setSuggestion(null);
       onUse();
     } catch (error) {
@@ -106,7 +108,7 @@ export default function SuggestedReplyCard({
   async function handleDismiss() {
     setBusy(true);
     try {
-      await dismissSuggestedReply(suggestion.id);
+      await dismissSuggestedReply(current.id);
       setSuggestion(null);
     } catch (error) {
       showToast({

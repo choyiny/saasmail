@@ -2,8 +2,9 @@
 // suite leaves open: what a real disconnect does to the loop, the D1 query
 // count in the worst case (a change on every tick) for each kind of caller,
 // a change racing the initial event, and how pings and keepalives interleave.
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { makeSignature } from "better-auth/crypto";
+import { sql } from "drizzle-orm";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { passkeys, sessions } from "../db/auth.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
@@ -32,6 +33,8 @@ import {
   getDb,
 } from "./helpers";
 import { acct } from "./jmap-ids";
+import { mcpAudience, oauthIssuer } from "../mcp/resource";
+import worker from "../index";
 
 const MINE = "mine@saasmail.test";
 
@@ -257,29 +260,33 @@ describe("EventSource push: disconnects, races and the query budget", () => {
   it("over the real route, a disconnect stops the per-tick seq queries", async () => {
     const { apiKey } = await createTestUser({ id: "edge-route-cancel" });
     await addIdentity(MINE);
-    const realDb = env.DB;
     const counted = instrumentedD1();
-    (env as any).DB = counted.db;
-    try {
-      const response = await exports.default.fetch(
+    // Its own env object: the auth instance is cached per env.
+    const countedEnv = {
+      ...env,
+      DB: counted.db,
+    } as unknown as CloudflareBindings;
+    const response = await worker.fetch(
+      new Request(
         "http://localhost/jmap/eventsource/?types=Email&closeafter=no&ping=0",
         { headers: { Authorization: `Bearer ${apiKey}` } },
-      );
-      expect(response.status).toBe(200);
-      const reader = response.body!.getReader();
-      await readUntil(reader, "event: state");
-      await reader.cancel();
-      const afterCancel = counted.count();
-      // Past the first 10 s tick: a loop that missed the disconnect would
-      // have queried jmap_changes by now.
-      await delay(10_800);
-      const later = counted.queries.slice(afterCancel);
-      expect(later.filter((query) => query.includes("jmap_changes"))).toEqual(
-        [],
-      );
-    } finally {
-      (env as any).DB = realDb;
-    }
+      ),
+      countedEnv,
+      {
+        waitUntil: () => {},
+        passThroughOnException: () => {},
+      } as unknown as ExecutionContext,
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    await readUntil(reader, "event: state");
+    await reader.cancel();
+    const afterCancel = counted.count();
+    // Past the first 10 s tick: a loop that missed the disconnect would
+    // have queried jmap_changes by now.
+    await delay(10_800);
+    const later = counted.queries.slice(afterCancel);
+    expect(later.filter((query) => query.includes("jmap_changes"))).toEqual([]);
   }, 20_000);
 
   it("a change landing between connect and the initial event is reported on the next tick", async () => {
@@ -733,5 +740,167 @@ describe("EventSource push: the budget counts from the first statement of the re
       run.events.filter((e) => e.event === "state").length,
     ).toBeGreaterThan(1);
     expect(run.counted.count()).toBeLessThanOrEqual(PUSH_QUERY_BUDGET);
+  });
+});
+
+describe("EventSource push: the auth instance each connect builds", () => {
+  // docs/jmap.md: the auth library's setup reads of oauth_resources count
+  // against the stream's budget once per connect; a re-check costs the
+  // authentication and the fingerprint, nothing more.
+  beforeAll(async () => {
+    await applyMigrations();
+  });
+
+  beforeEach(async () => {
+    await cleanDb();
+    await createTestPerson({ id: "edge-person", email: "edge@example.com" });
+  });
+
+  const INBOXES = Array.from(
+    { length: 45 },
+    (_, index) => `cbox${String(index).padStart(2, "0")}@saasmail.test`,
+  );
+
+  /** A member of 45 inboxes signed in with a session cookie (and a passkey). */
+  async function cookieMember(id: string): Promise<string> {
+    const { userId } = await createTestUser({
+      id,
+      role: "member",
+      email: `${id}@example.com`,
+    });
+    await grant(userId, INBOXES);
+    const now = new Date();
+    const token = `${id}-session-token`;
+    await getDb()
+      .insert(sessions)
+      .values({
+        id: `${id}-session`,
+        token,
+        userId,
+        expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
+        createdAt: now,
+        updatedAt: now,
+      });
+    await getDb()
+      .insert(passkeys)
+      .values({
+        id: `${id}-passkey`,
+        publicKey: "pk",
+        userId,
+        credentialID: `${id}-cred`,
+        counter: 0,
+        deviceType: "singleDevice",
+        backedUp: false,
+      });
+    const signature = await makeSignature(
+      token,
+      (env as any).BETTER_AUTH_SECRET as string,
+    );
+    return `saasmail.session_token=${token}.${signature}`;
+  }
+
+  /**
+   * One stream with a change before every tick and the passkey gate on.
+   * Returns the state events, every statement that reached D1, and how many
+   * had run when the stream first slept (what connecting cost).
+   */
+  async function stream(headers: HeadersInit, queryBudget?: number) {
+    const counted = instrumentedD1();
+    let nowMs = START_MS;
+    let atFirstSleep = -1;
+    let done: Promise<unknown> | null = null;
+    const response = await openEventSource(
+      new Request("http://localhost/jmap/eventsource/?types=*&ping=0", {
+        headers,
+      }),
+      {
+        ...env,
+        DB: counted.db,
+        DISABLE_PASSKEY_GATE: "false",
+      } as unknown as CloudflareBindings,
+      {
+        queryBudget,
+        now: () => nowMs,
+        sleep: async (ms) => {
+          if (atFirstSleep === -1) atFirstSleep = counted.count();
+          nowMs += ms;
+          await newEmail(INBOXES[0]);
+        },
+        waitUntil: (promise) => {
+          done = promise;
+        },
+      },
+    );
+    expect(response.status).toBe(200);
+    const text = await readAll(response);
+    await done;
+    return {
+      states: parseEvents(text).filter((e) => e.event === "state").length,
+      queries: counted.queries,
+      atFirstSleep,
+    };
+  }
+
+  it("the first connect after a deploy seeds oauth_resources within the budget, and no re-check reads it again", async () => {
+    const cookie = await cookieMember("edge-seed");
+    // A fresh deploy: migration 0088 ran, no OAuth request has seeded it yet.
+    await getDb().run(sql`DELETE FROM oauth_resources`);
+
+    const first = await stream({ Cookie: cookie });
+    expect(first.states).toBeGreaterThan(1);
+    expect(first.queries.length).toBeLessThanOrEqual(PUSH_QUERY_BUDGET);
+    const touching = (queries: string[]) =>
+      queries.filter((query) => query.includes("oauth_resources"));
+    expect(touching(first.queries).length).toBeGreaterThan(0);
+    expect(touching(first.queries.slice(first.atFirstSleep))).toEqual([]);
+    const seeded = await getDb().all<{ identifier: string }>(
+      sql`SELECT identifier FROM oauth_resources ORDER BY identifier`,
+    );
+    const baseURL = (env as any).BASE_URL as string;
+    expect(seeded.map((row) => row.identifier)).toEqual(
+      [oauthIssuer(baseURL), mcpAudience(baseURL)].sort(),
+    );
+
+    // Seeded: each connect reads it twice and writes nothing; ticks never.
+    const next = await stream({ Cookie: cookie });
+    const reads = touching(next.queries);
+    expect(reads).toHaveLength(2);
+    expect(reads.every((query) => /^\s*select/i.test(query))).toBe(true);
+    expect(touching(next.queries.slice(next.atFirstSleep))).toEqual([]);
+  });
+
+  it("counts a re-check exactly: every tick that starts sends its event, and the stream stops only when the next tick cannot fit", async () => {
+    const cookie = await cookieMember("edge-exact");
+    // The first stream also pays one-off writes (the oauth_resources seed,
+    // the session's extension, the signing key): measure a later one.
+    await stream({ Cookie: cookie }, 10_000);
+    // Unbounded by the budget: the 5-minute lifetime ends it.
+    const free = await stream({ Cookie: cookie }, 10_000);
+    const connect = free.atFirstSleep;
+    const ticks = free.states - 1;
+    expect(ticks).toBeGreaterThan(5);
+    const perTick = (free.queries.length - connect) / ticks;
+    expect(Number.isInteger(perTick), `per tick ${perTick}`).toBe(true);
+    expect(connect + 2 * perTick).toBeLessThan(PUSH_QUERY_BUDGET);
+
+    for (
+      let budget = connect - 1;
+      budget <= connect + 2 * perTick + 1;
+      budget++
+    ) {
+      const run = await stream({ Cookie: cookie }, budget);
+      if (budget < connect) {
+        expect(run.states, `budget ${budget}`).toBe(0);
+        // It never starts a re-check it cannot finish.
+        expect(run.queries.length, `budget ${budget}`).toBeLessThan(budget);
+        continue;
+      }
+      const fits = Math.floor((budget - connect) / perTick);
+      expect(run.states, `budget ${budget}`).toBe(1 + fits);
+      // No tick was cut short by a refused statement.
+      expect(run.queries.length, `budget ${budget}`).toBe(
+        connect + fits * perTick,
+      );
+    }
   });
 });

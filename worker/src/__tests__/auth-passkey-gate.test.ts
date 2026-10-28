@@ -1,17 +1,17 @@
 // docs/users-and-api-keys.md: what a password session can
 // do before its account has a passkey, and what is left of it afterwards.
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { env, exports } from "cloudflare:workers";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { env } from "cloudflare:workers";
 import { eq, sql } from "drizzle-orm";
 import { oauthConsents, passkeys, sessions, users } from "../db/auth.schema";
 import { revokeOnFirstPasskey } from "../auth/first-passkey";
+import worker from "../index";
 import { applyMigrations, cleanDb, getDb } from "./helpers";
 import {
   type Credentials,
   Jar,
   createUserWithPassword,
   getAccessToken,
-  mcpRpc,
   signIn,
 } from "./mcp-helpers";
 
@@ -45,8 +45,31 @@ async function addPasskey(forUser: string, createdAt = new Date()) {
     });
 }
 
+// Production rules: the gate and the limiter are on. Their own env object:
+// the auth instance is cached per env and reads the flag once.
+const gatedEnv = {
+  ...env,
+  DISABLE_PASSKEY_GATE: "false",
+} as unknown as CloudflareBindings;
+const gatedFetch = (path: string, init?: RequestInit) =>
+  worker.fetch(new Request(`http://localhost${path}`, init), gatedEnv, {
+    waitUntil: () => {},
+    passThroughOnException: () => {},
+  } as unknown as ExecutionContext);
+
+const gatedRpc = (accessToken: string, method: string) =>
+  gatedFetch("/mcp", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: {} }),
+  });
+
 const authCall = (path: string, cookie: string, body?: unknown) =>
-  exports.default.fetch(`http://localhost/api/auth${path}`, {
+  gatedFetch(`/api/auth${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       Cookie: cookie,
@@ -69,12 +92,6 @@ describe("a session whose account has no passkey yet", () => {
     const jar = new Jar();
     await signIn(jar, ADMIN);
     cookie = jar.header;
-    // Production rules: the gate and the limiter are on.
-    (env as any).DISABLE_PASSKEY_GATE = "false";
-  });
-
-  afterEach(() => {
-    (env as any).DISABLE_PASSKEY_GATE = "true";
   });
 
   it("cannot use better-auth's admin or account endpoints", async () => {
@@ -190,17 +207,12 @@ describe("an MCP token minted before the account's first passkey", () => {
     await createUserWithPassword(ADMIN, "admin");
   });
 
-  afterEach(() => {
-    (env as any).DISABLE_PASSKEY_GATE = "true";
-  });
-
   it("is refused; one minted after it works", async () => {
     const token = await getAccessToken(ADMIN, "openid email:read");
     const id = await userId(ADMIN.email);
     await addPasskey(id, new Date(Date.now() + 60_000));
-    (env as any).DISABLE_PASSKEY_GATE = "false";
 
-    const refused = await mcpRpc(token, "tools/list");
+    const refused = await gatedRpc(token, "tools/list");
     expect(refused.status).toBe(401);
     expect(await refused.json()).toEqual({
       error: "token predates passkey registration",
@@ -210,7 +222,7 @@ describe("an MCP token minted before the account's first passkey", () => {
       .update(passkeys)
       .set({ createdAt: new Date(Date.now() - 60 * 60_000) })
       .where(eq(passkeys.userId, id));
-    expect((await mcpRpc(token, "tools/list")).status).toBe(200);
+    expect((await gatedRpc(token, "tools/list")).status).toBe(200);
   });
 });
 
@@ -219,16 +231,11 @@ describe("refusing a password for an account with a passkey", () => {
     await cleanDb();
     await createUserWithPassword(ADMIN, "admin");
     await addPasskey(await userId(ADMIN.email));
-    (env as any).DISABLE_PASSKEY_GATE = "false";
-  });
-
-  afterEach(() => {
-    (env as any).DISABLE_PASSKEY_GATE = "true";
   });
 
   it("is counted, so it cannot be used to probe for accounts without limit", async () => {
     const attempt = () =>
-      exports.default.fetch("http://localhost/api/auth/sign-in/email", {
+      gatedFetch("/api/auth/sign-in/email", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

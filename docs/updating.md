@@ -83,6 +83,7 @@ When you merge upstream:
 | `0048_user_prefs_mail_states.sql`          | `0087_upstream_user_preferences.sql` | `user_preferences` only; dropped: `mail_item_states` (the fork keeps its own state model)   |
 | `0049_user_prefs_palette.sql`              | `0087_upstream_user_preferences.sql` | column in the `CREATE TABLE`                                                                |
 | `0050_trash_overrides_layout_settings.sql` | `0087_upstream_user_preferences.sql` | `category_overrides`, columns in the `CREATE TABLE`; dropped: `mail_item_states.trashed_at` |
+| `0051_better_auth_1_7.sql`                 | `0088_upstream_better_auth_1_7.sql`  | same statements                                                                             |
 
 Keep the fork's hourly cron (`0 * * * *` in `wrangler.jsonc.example` and
 `wrangler.jsonc.ci`) and `MAX_OUTBOX_ATTEMPTS` (24) when upstream changes

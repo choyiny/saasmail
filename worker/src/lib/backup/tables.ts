@@ -14,6 +14,8 @@ export const EXCLUDED_TABLES: ReadonlySet<string> = new Set([
   "oauth_access_tokens",
   "oauth_refresh_tokens",
   "jwkss",
+  // Used client-assertion ids, kept only until the assertion expires.
+  "oauth_client_assertions",
   "auth_rate_limits",
   "jmap_changes",
   "send_idempotency",
