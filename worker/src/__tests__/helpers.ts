@@ -43,11 +43,20 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS passkeys (id TEXT PRIMARY KEY, name TEXT, public_key TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, credential_id TEXT NOT NULL, counter INTEGER NOT NULL, device_type TEXT NOT NULL, backed_up INTEGER NOT NULL, transports TEXT, created_at INTEGER, aaguid TEXT)`,
     `CREATE INDEX IF NOT EXISTS passkeys_userId_idx ON passkeys(user_id)`,
     `CREATE INDEX IF NOT EXISTS passkeys_credentialID_idx ON passkeys(credential_id)`,
-    `CREATE TABLE IF NOT EXISTS jwkss (id TEXT PRIMARY KEY, public_key TEXT NOT NULL, private_key TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER)`,
-    `CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, client_id TEXT NOT NULL UNIQUE, client_secret TEXT, disabled INTEGER DEFAULT 0, skip_consent INTEGER, enable_end_session INTEGER, subject_type TEXT, scopes TEXT, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER, updated_at INTEGER, name TEXT, uri TEXT, icon TEXT, contacts TEXT, tos TEXT, policy TEXT, software_id TEXT, software_version TEXT, software_statement TEXT, redirect_uris TEXT NOT NULL, post_logout_redirect_uris TEXT, token_endpoint_auth_method TEXT, grant_types TEXT, response_types TEXT, public INTEGER, type TEXT, require_pkce INTEGER, reference_id TEXT, metadata TEXT)`,
-    `CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (id TEXT PRIMARY KEY, token TEXT NOT NULL, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, expires_at INTEGER, created_at INTEGER, revoked INTEGER, auth_time INTEGER, scopes TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS oauth_access_tokens (id TEXT PRIMARY KEY, token TEXT UNIQUE, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, refresh_id TEXT REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE, expires_at INTEGER, created_at INTEGER, scopes TEXT NOT NULL)`,
-    `CREATE TABLE IF NOT EXISTS oauth_consents (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, scopes TEXT NOT NULL, created_at INTEGER, updated_at INTEGER)`,
+    // Not cleared between tests: the MCP verifier caches the JWKS per isolate,
+    // and better-auth refetches it for an unknown key at most every 30s, so a
+    // fresh signing key per test would fail verification.
+    `CREATE TABLE IF NOT EXISTS jwkss (id TEXT PRIMARY KEY, public_key TEXT NOT NULL, private_key TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER, alg TEXT, crv TEXT)`,
+    `CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, client_id TEXT NOT NULL UNIQUE, client_secret TEXT, disabled INTEGER DEFAULT 0, skip_consent INTEGER, enable_end_session INTEGER, subject_type TEXT, scopes TEXT, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, created_at INTEGER, updated_at INTEGER, name TEXT, uri TEXT, icon TEXT, contacts TEXT, tos TEXT, policy TEXT, software_id TEXT, software_version TEXT, software_statement TEXT, redirect_uris TEXT NOT NULL, post_logout_redirect_uris TEXT, token_endpoint_auth_method TEXT, grant_types TEXT, response_types TEXT, public INTEGER, type TEXT, require_pkce INTEGER, reference_id TEXT, metadata TEXT, client_discovery_id TEXT, client_credentials_scopes TEXT DEFAULT '[]', backchannel_logout_uri TEXT, backchannel_logout_session_required INTEGER, application_type TEXT, jwks TEXT, jwks_uri TEXT, dpop_bound_access_tokens INTEGER DEFAULT false)`,
+    `CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (id TEXT PRIMARY KEY, token TEXT NOT NULL, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, expires_at INTEGER, created_at INTEGER, revoked INTEGER, auth_time INTEGER, scopes TEXT NOT NULL, authorization_code_id TEXT, resources TEXT, requested_user_info_claims TEXT, rotated_at INTEGER, rotation_replay_response TEXT, rotation_replay_expires_at INTEGER, confirmation TEXT)`,
+    `CREATE TABLE IF NOT EXISTS oauth_access_tokens (id TEXT PRIMARY KEY, token TEXT UNIQUE, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, refresh_id TEXT REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE, expires_at INTEGER, created_at INTEGER, scopes TEXT NOT NULL, authorization_code_id TEXT, resources TEXT, requested_user_info_claims TEXT, revoked INTEGER, confirmation TEXT)`,
+    `CREATE TABLE IF NOT EXISTS oauth_consents (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id) ON DELETE CASCADE, reference_id TEXT, scopes TEXT NOT NULL, created_at INTEGER, updated_at INTEGER, resources TEXT, requested_user_info_claims TEXT)`,
+    // Not cleared between tests either: the auth instance is cached per
+    // isolate and seeds these rows once, as it does in production.
+    `CREATE TABLE IF NOT EXISTS oauth_resources (id TEXT PRIMARY KEY, identifier TEXT NOT NULL UNIQUE, name TEXT NOT NULL, access_token_ttl INTEGER, refresh_token_ttl INTEGER, signing_algorithm TEXT, signing_key_id TEXT, allowed_scopes TEXT, custom_claims TEXT, dpop_bound_access_tokens_required INTEGER DEFAULT false, disabled INTEGER DEFAULT false, created_at INTEGER, updated_at INTEGER, policy_version INTEGER DEFAULT 1, metadata TEXT)`,
+    `CREATE TABLE IF NOT EXISTS oauth_client_resources (id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(client_id) ON DELETE CASCADE, resource_id TEXT NOT NULL REFERENCES oauth_resources(identifier) ON DELETE CASCADE, metadata TEXT, created_at INTEGER)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS oauthClientResources_clientId_resourceId_uidx ON oauth_client_resources(client_id, resource_id)`,
+    `CREATE TABLE IF NOT EXISTS oauth_client_assertions (id TEXT PRIMARY KEY, expires_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS people (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT, last_email_at INTEGER NOT NULL, unread_count INTEGER NOT NULL DEFAULT 0, total_count INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS people_last_email_at_idx ON people(last_email_at)`,
     `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, display_name TEXT, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -558,12 +567,13 @@ export async function cleanDb() {
     DELETE FROM oauth_consents;
     DELETE FROM oauth_access_tokens;
     DELETE FROM oauth_refresh_tokens;
+    DELETE FROM oauth_client_resources;
+    DELETE FROM oauth_client_assertions;
     DELETE FROM oauth_clients;
     DELETE FROM passkeys;
     DELETE FROM sessions;
     DELETE FROM accounts;
     DELETE FROM verifications;
-    DELETE FROM jwkss;
     DELETE FROM jmap_blobs;
     DELETE FROM users;
     DELETE FROM jmap_changes;

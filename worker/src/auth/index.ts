@@ -22,7 +22,29 @@ export const OAUTH_SCOPES = [
   ...MCP_SCOPES,
 ];
 
+/**
+ * One instance per isolate. `env` is the same object for every request an
+ * isolate serves, and building a betterAuth instance is not free: plugin init
+ * runs per instance, and the oauth-provider plugin's init reads
+ * `oauth_resources` to seed it. The session middleware calls this on every
+ * /api request.
+ */
+const instances = new WeakMap<
+  CloudflareBindings,
+  ReturnType<typeof buildAuth>
+>();
+
 export function createAuth(env?: CloudflareBindings) {
+  if (!env) return buildAuth();
+  let instance = instances.get(env);
+  if (!instance) {
+    instance = buildAuth(env);
+    instances.set(env, instance);
+  }
+  return instance;
+}
+
+function buildAuth(env?: CloudflareBindings) {
   const db = env ? createDb(env) : ({} as any);
   const baseURL = env?.BASE_URL || "http://localhost:8080";
 
@@ -94,12 +116,25 @@ export function createAuth(env?: CloudflareBindings) {
         // user completes the login + consent flow.
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
+        // Desktop and CLI MCP clients (Claude Code, Cursor) register an
+        // `http://localhost:<port>` callback. better-auth defaults a dynamic
+        // registration to a "web" client, which must use https; "infer" makes
+        // a loopback or custom-scheme registration a "native" client instead.
+        clientRegistrationDefaultApplicationType: "infer",
         scopes: OAUTH_SCOPES,
-        // A `resource` outside this list is rejected as invalid_request, and
+        // A `resource` outside this list is rejected as invalid_target, and
         // an access token is only issued as a *JWT* when a resource was
         // requested — an opaque token can't be verified locally against JWKS.
-        // The MCP audience therefore has to be declared here.
-        validAudiences: [oauthIssuer(baseURL), mcpAudience(baseURL)],
+        // The MCP audience therefore has to be declared here. (Seeded into
+        // `oauth_resources` on first use; existing rows are left alone.)
+        // Omitted for the schema CLI (no `env`, no database), whose seed
+        // attempt would only log an error.
+        resources: env ? [oauthIssuer(baseURL), mcpAudience(baseURL)] : [],
+        // By default better-auth only lets a client request a resource it has
+        // been linked to. Clients registered before the upgrade have no links,
+        // so every connected MCP client would fail at its next token refresh.
+        // Any client may request any resource above, as before.
+        enforcePerClientResources: false,
       }),
     ],
     advanced: {
