@@ -55,7 +55,25 @@ their headers and inbox and can't be corrected.
 All three show the same mail and the same pages (templates, sequences, settings,
 admin); only the layout and look change. Every layout has a light and a dark mode.
 
+Each layout links the same pages: **Mail** (the [mailbox](mailbox-state.md#conventional-mailbox-ui)
+at `/mail`), **Lists**, **Campaigns** and **Subscribe forms**
+([Newsletters](newsletters.md)), and for admins **Automations**
+([Automations](automations.md)), **Audit log** ([Audit log](audit-log.md)) and
+**Contact data** (subject-access requests and erasure, see
+[Privacy and retention](newsletters.md#privacy-and-retention)). The default layout lists them in the navigation rail, the
+Gmail layout in its apps grid, the Outlook layout in its app launcher. The
+robot button in each layout's header opens the [mail agent](agent.md#in-app-panel)
+(⌘J / Ctrl+J), and admins see the sending-paused banner above every layout.
+
 ## Star, pin, archive and snooze
+
+> **Not in this release.** Star, pin, archive, snooze and Trash in these
+> layouts arrive in a later release. Until then their buttons, menu entries,
+> swipes, shortcuts and folders (Starred, Snoozed, Archive, Trash / Flagged,
+> Deleted Items) are hidden in all three layouts, which show Inbox, Sent,
+> Drafts and Sequenced. The [mailbox at `/mail`](mailbox-state.md#conventional-mailbox-ui)
+> keeps its own star, archive, snooze and Trash. The rest of this section and
+> [Trash](#trash) describe the layouts once that release lands.
 
 These work in every layout and are **per user**: archiving a conversation hides it
 from your inbox, not your teammates'.

@@ -65,21 +65,24 @@ When you merge upstream:
    `worker/src/__tests__/helpers.ts` in the same commit.
 3. Add a row to the table below.
 
-| Upstream file                      | Fork file                          | Note                                              |
-| ---------------------------------- | ---------------------------------- | ------------------------------------------------- |
-| `0035_overjoyed_rocket_racer.sql`  | `0085_upstream_gmail_accounts.sql` | same statements                                   |
-| `0036_futuristic_gunslinger.sql`   | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0037_careful_gwen_stacy.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0038_thick_blonde_phantom.sql`    | `0086_upstream_gmail_outlook.sql`  | dropped: index already in fork 0067               |
-| `0039_amazing_moondragon.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0040_needy_nocturne.sql`          | `0086_upstream_gmail_outlook.sql`  | dropped: index replaced by 0041                   |
-| `0041_old_nighthawk.sql`           | `0086_upstream_gmail_outlook.sql`  | unique index only                                 |
-| `0042_gmail_backfill.sql`          | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0043_gmail_backfill_one_year.sql` | `0086_upstream_gmail_outlook.sql`  | column only; dropped: data step on an empty table |
-| `0044_gmail_backfill_job.sql`      | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0045_gmail_backfill_progress.sql` | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0046_careless_silhouette.sql`     | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
-| `0047_outlook_mailboxes.sql`       | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
+| Upstream file                              | Fork file                            | Note                                                                                        |
+| ------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `0035_overjoyed_rocket_racer.sql`          | `0085_upstream_gmail_accounts.sql`   | same statements                                                                             |
+| `0036_futuristic_gunslinger.sql`           | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0037_careful_gwen_stacy.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0038_thick_blonde_phantom.sql`            | `0086_upstream_gmail_outlook.sql`    | dropped: index already in fork 0067                                                         |
+| `0039_amazing_moondragon.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0040_needy_nocturne.sql`                  | `0086_upstream_gmail_outlook.sql`    | dropped: index replaced by 0041                                                             |
+| `0041_old_nighthawk.sql`                   | `0086_upstream_gmail_outlook.sql`    | unique index only                                                                           |
+| `0042_gmail_backfill.sql`                  | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0043_gmail_backfill_one_year.sql`         | `0086_upstream_gmail_outlook.sql`    | column only; dropped: data step on an empty table                                           |
+| `0044_gmail_backfill_job.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0045_gmail_backfill_progress.sql`         | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0046_careless_silhouette.sql`             | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0047_outlook_mailboxes.sql`               | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0048_user_prefs_mail_states.sql`          | `0087_upstream_user_preferences.sql` | `user_preferences` only; dropped: `mail_item_states` (the fork keeps its own state model)   |
+| `0049_user_prefs_palette.sql`              | `0087_upstream_user_preferences.sql` | column in the `CREATE TABLE`                                                                |
+| `0050_trash_overrides_layout_settings.sql` | `0087_upstream_user_preferences.sql` | `category_overrides`, columns in the `CREATE TABLE`; dropped: `mail_item_states.trashed_at` |
 
 Keep the fork's hourly cron (`0 * * * *` in `wrangler.jsonc.example` and
 `wrangler.jsonc.ci`) and `MAX_OUTBOX_ATTEMPTS` (24) when upstream changes
