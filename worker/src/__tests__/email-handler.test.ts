@@ -18,6 +18,9 @@ import { blocklist } from "../db/blocklist.schema";
 import { setWebhookConfig } from "../lib/webhook-config";
 import { eq } from "drizzle-orm";
 import { rules } from "../db/rules.schema";
+import { sequences } from "../db/sequences.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
+import { sequenceEmails } from "../db/sequence-emails.schema";
 import {
   UNKNOWN_RECIPIENT_REASON,
   setRejectUnknownRecipients,
@@ -27,6 +30,8 @@ import {
   applyMigrations,
   cleanDb,
   createTestUser,
+  createTestPerson,
+  createTestTemplate,
   authFetch,
 } from "./helpers";
 
@@ -811,5 +816,191 @@ describe("handleEmail — on top of ingestParsedEmail", () => {
     const rows = await getDb().select().from(emails);
     expect(rows).toHaveLength(1);
     expect(rows[0].recipient).toBe(INBOX);
+  });
+});
+
+/**
+ * The steps after storage run on a stored message only, and before
+ * `ingestParsedEmail` resolves: an enrolled sender's sequence is cancelled,
+ * a suggested reply is queued for an autodraft inbox, and the inbox's users
+ * get a real-time push. A rejected, blocked or duplicate message gets none of
+ * them (the early returns the live handler always had).
+ */
+describe("ingestParsedEmail — steps after storage", () => {
+  const INBOX = "agent@acme.dev";
+  const SENDER = "jane@example.com";
+
+  it("runs them before `stored` resolves, and never for a message it does not store", async () => {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(senderIdentities).values({
+      email: INBOX,
+      displayName: "Agent",
+      agentAutodraft: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { userId: adminId } = await createTestUser({ role: "admin" });
+    await createTestPerson({ id: "p-jane", email: SENDER });
+    await createTestTemplate({ slug: "welcome" });
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Onboarding",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 24 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    async function enroll(id: string) {
+      await db.insert(sequenceEnrollments).values({
+        id,
+        sequenceId: "seq-1",
+        personId: "p-jane",
+        status: "active",
+        variables: "{}",
+        fromAddress: INBOX,
+        enrolledAt: now,
+      });
+      await db.insert(sequenceEmails).values({
+        id: `${id}-step-1`,
+        enrollmentId: id,
+        stepOrder: 1,
+        templateSlug: "welcome",
+        scheduledAt: now + 86_400,
+        status: "pending",
+      });
+    }
+    async function statusOf(id: string) {
+      const [enrollment] = await db
+        .select({ status: sequenceEnrollments.status })
+        .from(sequenceEnrollments)
+        .where(eq(sequenceEnrollments.id, id));
+      const [step] = await db
+        .select({ status: sequenceEmails.status })
+        .from(sequenceEmails)
+        .where(eq(sequenceEmails.enrollmentId, id));
+      return [enrollment.status, step.status];
+    }
+    await enroll("enr-1");
+    await db.insert(rules).values({
+      id: "refuse",
+      name: "Refuse",
+      inbox: INBOX,
+      trigger: "message.received",
+      conditions: [{ field: "subject", operator: "contains", value: "refuse" }],
+      actions: [{ type: "reject", reason: "Refused here" }],
+      position: 0,
+      stopProcessing: 0,
+      enabled: 1,
+      matchCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const mutableEnv = env as unknown as Record<string, unknown>;
+    const saved = {
+      queue: mutableEnv.EMAIL_QUEUE,
+      hub: mutableEnv.NOTIFICATIONS_HUB,
+      anthropic: mutableEnv.ANTHROPIC_API_KEY,
+    };
+    const queued: unknown[] = [];
+    const pushedTo: string[] = [];
+    mutableEnv.EMAIL_QUEUE = {
+      send: async (message: unknown) => void queued.push(message),
+    };
+    mutableEnv.NOTIFICATIONS_HUB = {
+      idFromName: (name: string) => name,
+      get: (id: string) => ({
+        fetch: async () => {
+          pushedTo.push(id);
+          return new Response("ok");
+        },
+      }),
+    };
+    // A configured model, so an autodraft inbox queues a suggested reply.
+    mutableEnv.ANTHROPIC_API_KEY = "sk-ant-test";
+
+    async function ingest(subject: string, messageId: string, to = INBOX) {
+      const bytes = await new Response(
+        buildRawEmail({ from: SENDER, to, subject, messageId }),
+      ).arrayBuffer();
+      const calls: Promise<unknown>[] = [];
+      const outcome = await ingestParsedEmail(
+        db,
+        await parseRaw(bytes, { from: SENDER, to }),
+        env as unknown as CloudflareBindings,
+        fakeCtx(calls),
+      );
+      // Read before any background work settles: what `stored` promises.
+      const atResolve = {
+        registered: calls.length,
+        enr1: await statusOf("enr-1"),
+      };
+      await Promise.allSettled(calls);
+      return { outcome, ...atResolve };
+    }
+
+    try {
+      // Refused by a rule, by the unknown-recipient setting, and blocked.
+      const refused = await ingest("please refuse", "<refused@example.com>");
+      expect(refused.outcome).toEqual({
+        status: "rejected",
+        reason: "Refused here",
+      });
+
+      await setRejectUnknownRecipients(db, true);
+      const unknown = await ingest(
+        "hello",
+        "<unknown@example.com>",
+        "nobody@acme.dev",
+      );
+      expect(unknown.outcome).toEqual({
+        status: "rejected",
+        reason: UNKNOWN_RECIPIENT_REASON,
+      });
+
+      await db.insert(blocklist).values({
+        id: "b-jane",
+        type: "email",
+        value: SENDER,
+        createdAt: now,
+      });
+      const blocked = await ingest("hello", "<blocked@example.com>");
+      expect(blocked.outcome).toEqual({ status: "blocked" });
+      await db.delete(blocklist).where(eq(blocklist.id, "b-jane"));
+
+      for (const notStored of [refused, unknown, blocked]) {
+        expect(notStored.registered).toBe(0);
+        expect(notStored.enr1).toEqual(["active", "pending"]);
+      }
+      expect(queued).toEqual([]);
+      expect(pushedTo).toEqual([]);
+      expect(await db.select().from(emails)).toHaveLength(0);
+
+      // Stored: the sequence is already cancelled when the outcome arrives.
+      const stored = await ingest("hello", "<stored@example.com>");
+      expect(stored.outcome.status).toBe("stored");
+      const emailId = (stored.outcome as { emailId: string }).emailId;
+      expect(stored.enr1).toEqual(["cancelled", "cancelled"]);
+      expect(stored.registered).toBeGreaterThan(0);
+      expect(queued).toEqual([{ type: "suggest_reply", emailId }]);
+      expect(pushedTo).toEqual([adminId]);
+
+      // A redelivery is a duplicate: a sequence enrolled since stays active,
+      // nothing is queued or pushed.
+      await enroll("enr-2");
+      const duplicate = await ingest("hello", "<stored@example.com>");
+      expect(duplicate.outcome).toEqual({ status: "duplicate", emailId });
+      expect(duplicate.registered).toBe(0);
+      expect(await statusOf("enr-2")).toEqual(["active", "pending"]);
+      expect(queued).toHaveLength(1);
+      expect(pushedTo).toHaveLength(1);
+      expect(await db.select().from(emails)).toHaveLength(1);
+    } finally {
+      mutableEnv.EMAIL_QUEUE = saved.queue;
+      mutableEnv.NOTIFICATIONS_HUB = saved.hub;
+      mutableEnv.ANTHROPIC_API_KEY = saved.anthropic;
+    }
   });
 });
