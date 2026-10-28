@@ -1,3 +1,4 @@
+import { createAuth } from "../auth";
 import { createDb } from "../db/client";
 import type { AllowedInboxes } from "../lib/inbox-permissions";
 import { authenticateJmap, problem } from "./auth";
@@ -313,7 +314,14 @@ export async function openEventSource(
   const db = createDb(countedEnv);
 
   let auth: Awaited<ReturnType<typeof authenticateJmap>>;
+  let beforeAuth: number;
   try {
+    // The auth instance is built for this connect (its env is countedEnv) and
+    // its plugin init reads oauth_resources: counted against the budget, but
+    // once, since the re-checks reuse the instance. Built first so the
+    // re-check estimate below holds the authentication alone.
+    await createAuth(countedEnv).$context;
+    beforeAuth = queries;
     auth = await authenticateJmap(request, countedEnv, db);
   } catch (error) {
     if (refused) return closedEventStream();
@@ -321,7 +329,7 @@ export async function openEventSource(
   }
   if (refused) return closedEventStream();
   if (auth instanceof Response) return auth;
-  const authQueries = queries;
+  const authQueries = queries - beforeAuth;
 
   const parsed = parseEventSourceParams(new URL(request.url));
   if (parsed.error !== null) {
