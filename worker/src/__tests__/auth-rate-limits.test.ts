@@ -1,12 +1,13 @@
 // docs/users-and-api-keys.md: sign-in rate limits that hold across
 // Worker isolates.
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { env, exports } from "cloudflare:workers";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { env } from "cloudflare:workers";
 import { sql } from "drizzle-orm";
 import {
   d1RateLimitStorage,
   pruneAuthRateLimits,
 } from "../auth/rate-limit-storage";
+import worker from "../index";
 import { applyMigrations, cleanDb, getDb } from "./helpers";
 import { createUserWithPassword } from "./mcp-helpers";
 
@@ -116,8 +117,19 @@ describe("the D1 rate-limit storage", () => {
 });
 
 describe("rate-limited sign-in", () => {
+  // The limiter is off in local development and tests; on here. Its own env
+  // object: the auth instance is cached per env and reads the flag once.
+  const limitedEnv = {
+    ...env,
+    DISABLE_PASSKEY_GATE: "false",
+  } as unknown as CloudflareBindings;
+  const fetchLimited = (url: string, init?: RequestInit) =>
+    worker.fetch(new Request(url, init), limitedEnv, {
+      waitUntil: () => {},
+      passThroughOnException: () => {},
+    } as unknown as ExecutionContext);
   const signIn = (ip: string, password = "wrong-password") =>
-    exports.default.fetch("http://localhost/api/auth/sign-in/email", {
+    fetchLimited("http://localhost/api/auth/sign-in/email", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -136,12 +148,6 @@ describe("rate-limited sign-in", () => {
       { name: "Jane", email: "jane@acme.com", password: "right-password-1" },
       "member",
     );
-    // The limiter is off in local development and tests; on here.
-    (env as any).DISABLE_PASSKEY_GATE = "false";
-  });
-
-  afterEach(() => {
-    (env as any).DISABLE_PASSKEY_GATE = "true";
   });
 
   it("refuses the fourth attempt from one address within 10 seconds, even with the right password", async () => {
@@ -163,10 +169,10 @@ describe("rate-limited sign-in", () => {
 
   it("keeps requests to paths better-auth does not serve in one row", async () => {
     for (let i = 0; i < 5; i++) {
-      await exports.default.fetch(
-        `http://localhost/api/auth/no-such-endpoint-${i}`,
-        { method: "POST", headers: { "cf-connecting-ip": "203.0.113.9" } },
-      );
+      await fetchLimited(`http://localhost/api/auth/no-such-endpoint-${i}`, {
+        method: "POST",
+        headers: { "cf-connecting-ip": "203.0.113.9" },
+      });
     }
     const rows = await getDb().all<{ key: string; count: number }>(
       sql`SELECT key, count FROM auth_rate_limits WHERE key LIKE '203.0.113.9%'`,
@@ -178,7 +184,7 @@ describe("rate-limited sign-in", () => {
 
   it("does not count reading the session", async () => {
     for (let i = 0; i < 5; i++) {
-      await exports.default.fetch("http://localhost/api/auth/get-session", {
+      await fetchLimited("http://localhost/api/auth/get-session", {
         headers: { "cf-connecting-ip": "203.0.113.7" },
       });
     }

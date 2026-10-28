@@ -9,6 +9,7 @@ import {
   reconcileMessages,
   toolApprovalUpdate,
 } from "agents/chat";
+import worker from "../index";
 import { sessions } from "../db/auth.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
@@ -950,27 +951,32 @@ describe("agent session runtime", () => {
 
     const secret = (env as any).BETTER_AUTH_SECRET as string;
     const signature = await makeSignature(token, secret);
-    const previousGate = (env as any).DISABLE_PASSKEY_GATE;
-
-    try {
-      (env as any).DISABLE_PASSKEY_GATE = "false";
-      const response = await exports.default.fetch(
+    // Its own env object: the auth instance is cached per env.
+    const gatedEnv = {
+      ...env,
+      DISABLE_PASSKEY_GATE: "false",
+    } as unknown as CloudflareBindings;
+    const response = await worker.fetch(
+      new Request(
         `http://localhost/agents/mail-agent/${agentSession.instanceName}`,
         {
           headers: {
             Cookie: `saasmail.session_token=${token}.${signature}`,
           },
         },
-      );
+      ),
+      gatedEnv,
+      {
+        waitUntil: () => {},
+        passThroughOnException: () => {},
+      } as unknown as ExecutionContext,
+    );
 
-      expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: "Passkey registration required",
-        code: "PASSKEY_REQUIRED",
-      });
-    } finally {
-      (env as any).DISABLE_PASSKEY_GATE = previousGate;
-    }
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({
+      error: "Passkey registration required",
+      code: "PASSKEY_REQUIRED",
+    });
   });
 
   it("returns agent status to an authenticated member without exposing credentials", async () => {
