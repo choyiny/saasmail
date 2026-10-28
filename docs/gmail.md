@@ -2,6 +2,8 @@
 
 # Gmail integration
 
+> **Not usable yet.** This release has the credential layer only (connect, list and disconnect a mailbox); nothing reads mail from Gmail until the sync arrives in a later release. Leave the Gmail variables unset.
+
 ## Why this exists
 
 A domain has exactly one set of MX records. If a root domain like `example.com`
