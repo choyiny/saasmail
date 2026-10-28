@@ -103,6 +103,11 @@ When you merge upstream:
 | `0046_careless_silhouette.sql`     | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
 | `0047_outlook_mailboxes.sql`       | `0086_upstream_gmail_outlook.sql`  | same statements                                   |
 
+Keep the fork's hourly cron (`0 * * * *` in `wrangler.jsonc.example` and
+`wrangler.jsonc.ci`) and `MAX_OUTBOX_ATTEMPTS` (24) when upstream changes
+them: upstream polls every 15 minutes. Gmail and Outlook mail therefore syncs
+hourly here ([Configuration](configuration.md)).
+
 `yarn typecheck` runs `scripts/check-migrations.mjs`, which fails while two
 migration files share a number, so an upstream file that survives a merge
 fails CI.

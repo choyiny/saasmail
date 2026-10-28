@@ -2,8 +2,6 @@
 
 # Gmail integration
 
-> **Not usable yet.** This release has the credential layer only (connect, list and disconnect a mailbox); nothing reads mail from Gmail until the sync arrives in a later release. Leave the Gmail variables unset.
-
 ## Why this exists
 
 A domain has exactly one set of MX records. If a root domain like `example.com`
@@ -550,6 +548,27 @@ behind someone's back is worse than asking them to press send again. If you
 see this error, the reply was not sent and is not in flight: send it again —
 unless the error asks you to reconnect the mailbox, which means the Google
 grant is dead and resending cannot work until you do (see below).
+
+### Send controls and idempotency
+
+A Gmail reply goes through the same [send controls](sending.md) as any other
+reply: the daily cap for its channel (a `429` once it is reached) and the
+`Idempotency-Key` header. Two rules follow from the reply never being queued:
+
+- **While sending is paused, the reply is refused** with `409` and code
+  `MAILBOX_SEND_NOT_HELD`. Other mail is held in the outbox while paused, but
+  a held Gmail reply would later leave through the configured provider, so
+  nothing is sent, stored or queued. Send it again once sending resumes.
+- **When the outcome is unknown, a retry does not send it again.** If Gmail
+  answers with a `5xx`, or the connection drops after the request went out,
+  the reply may have been sent. saasmail answers `502` with `SEND_FAILED` and
+  a message to check the mailbox's Sent folder, and keeps that answer for the
+  request's `Idempotency-Key`: a retry with the same key gets the same `502`
+  and sends nothing, and the attempt still counts towards the daily cap. If
+  the Sent folder does not have it, send it again from a new draft (a new
+  key). A `4xx` from Gmail, or a refusal before the request (such as a
+  message over Gmail's size limit), means nothing was sent: the key is
+  released and a retry with it sends.
 
 ### A broken grant refuses the reply; it does not reroute it
 
