@@ -167,7 +167,8 @@ describe("ReplyComposer and Reply-To", () => {
     await screen.findByText("Replying to");
 
     fireEvent.click(screen.getByTestId("reply-send-button"));
-    await screen.findByText("Failed to send reply");
+    // The server's own words, as upstream shows them.
+    await screen.findByText("network timeout");
     fireEvent.click(screen.getByTestId("reply-send-button"));
     await waitFor(() => expect(api.replyToEmail).toHaveBeenCalledTimes(2));
     const [attempt, retry] = api.replyToEmail.mock.calls.map(
@@ -195,7 +196,8 @@ describe("ReplyComposer and Reply-To", () => {
     const view = renderComposer();
     await screen.findByText("Replying to");
     fireEvent.click(screen.getByTestId("reply-send-button"));
-    await screen.findByText("Failed to send reply");
+    // The server's own words, as upstream shows them.
+    await screen.findByText("network timeout");
     const abandoned = api.replyToEmail.mock.calls[0][1].idempotencyKey;
     expect(sessionStorage.getItem("saasmail:send-key:send:reply:email-1")).toBe(
       abandoned,

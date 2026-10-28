@@ -111,7 +111,8 @@ describe("ChatQuickReply and Reply-To", () => {
       target: { value: "hello" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await screen.findByText("Failed to send message");
+    // The server's own words, as upstream shows them.
+    await screen.findByText("network timeout");
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(api.replyToEmail).toHaveBeenCalledTimes(2));
     const [attempt, retry] = api.replyToEmail.mock.calls.map(
