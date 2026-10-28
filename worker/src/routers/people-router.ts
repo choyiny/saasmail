@@ -237,14 +237,10 @@ export const GroupedQuerySchema = z.object({
     description:
       "Also return per-category unread and new-since-last-viewed counts for the inbox",
   }),
-  folder: z
-    .enum(["all", "inbox", "starred", "snoozed", "archive", "sent", "trash"])
-    .optional()
-    .default("all")
-    .openapi({
-      description:
-        "Mail folder, from the signed-in user's star/archive/snooze/trash state. `all` (default) ignores that state; `inbox` hides archived, snoozed and trashed rows and puts pinned rows first; `sent` keeps rows we have written to; every folder except `trash` (including `all`) hides the caller's trashed rows.",
-    }),
+  folder: z.enum(["all", "inbox", "sent"]).optional().default("all").openapi({
+    description:
+      "Mail folder. `all` (default) and `inbox` list the same rows; `sent` keeps rows we have written to. The starred, snoozed, archive and trash folders arrive with per-user mail state in a later release.",
+  }),
   sort: z
     .enum(["recency", "unread", "inbox", "attachments"])
     .optional()
@@ -793,29 +789,8 @@ export async function computeGroupedRows(
       r.type === "person" ? personHits.has(r.id) : convHits.has(r.id),
     );
   }
-  // Trash hides a row everywhere except the Trash folder.
-  if (folder !== "trash") merged = merged.filter((r) => !r.trashedAt);
-
-  switch (folder) {
-    case "inbox":
-      merged = merged.filter((r) => !r.archivedAt && !r.snoozedUntil);
-      break;
-    case "starred":
-      merged = merged.filter((r) => r.starred);
-      break;
-    case "snoozed":
-      merged = merged.filter((r) => r.snoozedUntil);
-      break;
-    case "archive":
-      merged = merged.filter((r) => r.archivedAt);
-      break;
-    case "sent":
-      merged = merged.filter((r) => r.hasSent);
-      break;
-    case "trash":
-      merged = merged.filter((r) => r.trashedAt);
-      break;
-  }
+  // `inbox` lists the same rows as `all` until rows carry mail state.
+  if (folder === "sent") merged = merged.filter((r) => r.hasSent);
 
   const sign = effectiveDirection === "asc" ? -1 : 1;
   switch (sort) {
@@ -845,12 +820,6 @@ export async function computeGroupedRows(
     default:
       merged.sort((a, b) => sign * (b.lastEmailAt - a.lastEmailAt));
       break;
-  }
-  if (folder === "inbox") {
-    // Stable sort keeps the chosen order within the pinned and unpinned sets.
-    merged.sort((a, b) => Number(b.pinned) - Number(a.pinned));
-  } else if (folder === "snoozed") {
-    merged.sort((a, b) => (a.snoozedUntil ?? 0) - (b.snoozedUntil ?? 0));
   }
   return { merged, tabCounts };
 }
