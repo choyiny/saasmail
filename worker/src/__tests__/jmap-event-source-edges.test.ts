@@ -2,7 +2,7 @@
 // suite leaves open: what a real disconnect does to the loop, the D1 query
 // count in the worst case (a change on every tick) for each kind of caller,
 // a change racing the initial event, and how pings and keepalives interleave.
-import { env, exports } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { makeSignature } from "better-auth/crypto";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { passkeys, sessions } from "../db/auth.schema";
@@ -32,6 +32,7 @@ import {
   getDb,
 } from "./helpers";
 import { acct } from "./jmap-ids";
+import worker from "../index";
 
 const MINE = "mine@saasmail.test";
 
@@ -257,29 +258,33 @@ describe("EventSource push: disconnects, races and the query budget", () => {
   it("over the real route, a disconnect stops the per-tick seq queries", async () => {
     const { apiKey } = await createTestUser({ id: "edge-route-cancel" });
     await addIdentity(MINE);
-    const realDb = env.DB;
     const counted = instrumentedD1();
-    (env as any).DB = counted.db;
-    try {
-      const response = await exports.default.fetch(
+    // Its own env object: the auth instance is cached per env.
+    const countedEnv = {
+      ...env,
+      DB: counted.db,
+    } as unknown as CloudflareBindings;
+    const response = await worker.fetch(
+      new Request(
         "http://localhost/jmap/eventsource/?types=Email&closeafter=no&ping=0",
         { headers: { Authorization: `Bearer ${apiKey}` } },
-      );
-      expect(response.status).toBe(200);
-      const reader = response.body!.getReader();
-      await readUntil(reader, "event: state");
-      await reader.cancel();
-      const afterCancel = counted.count();
-      // Past the first 10 s tick: a loop that missed the disconnect would
-      // have queried jmap_changes by now.
-      await delay(10_800);
-      const later = counted.queries.slice(afterCancel);
-      expect(later.filter((query) => query.includes("jmap_changes"))).toEqual(
-        [],
-      );
-    } finally {
-      (env as any).DB = realDb;
-    }
+      ),
+      countedEnv,
+      {
+        waitUntil: () => {},
+        passThroughOnException: () => {},
+      } as unknown as ExecutionContext,
+    );
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    await readUntil(reader, "event: state");
+    await reader.cancel();
+    const afterCancel = counted.count();
+    // Past the first 10 s tick: a loop that missed the disconnect would
+    // have queried jmap_changes by now.
+    await delay(10_800);
+    const later = counted.queries.slice(afterCancel);
+    expect(later.filter((query) => query.includes("jmap_changes"))).toEqual([]);
   }, 20_000);
 
   it("a change landing between connect and the initial event is reported on the next tick", async () => {
