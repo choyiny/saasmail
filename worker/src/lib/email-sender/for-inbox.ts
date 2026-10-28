@@ -54,13 +54,12 @@ export class GmailSenderUnavailableError extends Error {
  * address is a Gmail-mapped inbox with usable credentials, otherwise the
  * provider `createEmailSender` would already pick.
  *
- * Two outcomes that used to be one. "This inbox is not mapped" — no
- * identity row, or `source: "cloudflare"` — uses the configured provider,
- * because that IS the right transport for it.
+ * Two outcomes that used to be one. "This inbox is not Gmail-mapped" — no
+ * OAuth secrets, no identity row, `source: "cloudflare"`, or a null
+ * `gmail_account_id` — still falls back quietly, because the configured
+ * provider IS the right transport for it.
  *
- * "This inbox IS mapped and we could not get a token" throws, and so does a
- * mapped inbox whose OAuth configuration is missing or cannot be decrypted:
- * the mapping is read before the credentials. Catching
+ * "This inbox IS Gmail-mapped and we could not get a token" throws. Catching
  * it and falling back meant one failed HTTPS request to Google silently
  * rerouted a reply: on a Gmail-only install `createEmailSender` is
  * `NoopSender`, so the outbox marked the row "failed" while `replyToEmail`
@@ -80,79 +79,78 @@ export async function createSenderForInbox(
   env: ForInboxEnv,
   fromAddress: string,
 ): Promise<EmailSender> {
-  // The mapping first, the credentials second: an inbox mapped to a mailbox
-  // goes out through that mailbox or not at all, whatever is missing.
-  const mapping = await inboxMappingOf(db, fromAddress);
-  if (!mapping) return createEmailSender(env);
-  const { provider } = mapping;
   try {
-    const sender =
-      provider === "gmail"
-        ? await tryGmailSender(db, env, mapping.accountId)
-        : await tryOutlookSender(db, env, mapping.accountId);
-    if (sender) return sender;
+    const gmailSender = await tryGmailSender(db, env, fromAddress);
+    if (gmailSender) return gmailSender;
   } catch (e) {
-    if (e instanceof GmailSenderUnavailableError) throw e;
     // A code, not the message: `getAccessToken`'s last statement binds the
     // access token and the sealed refresh token, and a D1 error carries its
     // bound parameters.
     const code =
-      e instanceof GoogleAuthError ||
-      e instanceof GmailApiError ||
-      e instanceof MicrosoftAuthError ||
-      e instanceof GraphApiError
+      e instanceof GoogleAuthError || e instanceof GmailApiError
         ? e.code
         : "token_unavailable";
     console.error(
-      `[createSenderForInbox] ${fromAddress} is ${provider}-mapped but no token could be resolved: ${code}. Refusing to send it through another transport.`,
+      `[createSenderForInbox] ${fromAddress} is Gmail-mapped but no token could be resolved: ${code}. Refusing to send it through another transport.`,
     );
-    throw new GmailSenderUnavailableError(code, fromAddress, provider);
+    throw new GmailSenderUnavailableError(code, fromAddress);
   }
-  // Mapped, but the OAuth client is not set up, or its secret or
-  // TOKEN_ENCRYPTION_KEY is missing or cannot decrypt it.
-  console.error(
-    `[createSenderForInbox] ${fromAddress} is ${provider}-mapped but the ${provider === "gmail" ? "Google" : "Microsoft"} OAuth configuration is unusable. Refusing to send it through another transport.`,
-  );
-  throw new GmailSenderUnavailableError(
-    "not_configured",
-    fromAddress,
-    provider,
-  );
+  // The same rule for an Outlook-mapped inbox: send through the mailbox, or
+  // refuse — never reroute it through another provider.
+  try {
+    const outlookSender = await tryOutlookSender(db, env, fromAddress);
+    if (outlookSender) return outlookSender;
+  } catch (e) {
+    const code =
+      e instanceof MicrosoftAuthError || e instanceof GraphApiError
+        ? e.code
+        : "token_unavailable";
+    console.error(
+      `[createSenderForInbox] ${fromAddress} is Outlook-mapped but no token could be resolved: ${code}. Refusing to send it through another transport.`,
+    );
+    throw new GmailSenderUnavailableError(code, fromAddress, "outlook");
+  }
+  return createEmailSender(env);
 }
 
 /**
- * The mailbox `fromAddress` is mapped to, from its `sender_identities` row
- * alone (no credentials read), or null for an inbox the configured provider
- * sends. A mapping whose account id is missing still counts: such an inbox
- * must not leave through another transport either.
+ * The Gmail account id `fromAddress` sends through, or null when this reply
+ * will not go out through Gmail at all — no OAuth secrets, not a Gmail-mapped
+ * identity, or no account behind the mapping.
+ *
+ * Shared by the sender and the attachment-budget lookup so the two can never
+ * disagree about which transport a reply is headed for.
  */
-export async function inboxMappingOf(
+async function resolveGmailAccountId(
   db: DrizzleD1Database<typeof schema>,
+  env: ForInboxEnv,
   fromAddress: string,
-): Promise<{ provider: "gmail" | "outlook"; accountId: string | null } | null> {
+): Promise<string | null> {
+  if (!(await gmailAuthConfig(db, env))) {
+    console.error(
+      "[createSenderForInbox] Gmail integration is not configured (missing OAuth secrets); falling back to the configured provider",
+    );
+    return null;
+  }
+
   // sender_identities.email is stored lowercased; every other lookup site
-  // normalises before querying, and this must too, or a from-address that
-  // merely differs in case/whitespace silently misses its mapping.
+  // normalises before querying (see admin-inboxes-router.ts, email-handler.ts,
+  // send-email.ts, send-template.ts, route-inbox.ts) and this must too, or a
+  // from-address that merely differs in case/whitespace silently misses its
+  // Gmail mapping and falls back with no error anywhere.
   const normalizedFrom = fromAddress.trim().toLowerCase();
+
   const [identity] = await db
-    .select({
-      source: senderIdentities.source,
-      gmailAccountId: senderIdentities.gmailAccountId,
-      outlookAccountId: senderIdentities.outlookAccountId,
-    })
+    .select()
     .from(senderIdentities)
-    .where(eq(senderIdentities.email, normalizedFrom))
-    .limit(1);
-  if (identity?.source === "gmail") {
-    return { provider: "gmail", accountId: identity.gmailAccountId ?? null };
+    .where(eq(senderIdentities.email, normalizedFrom));
+  if (!identity || identity.source !== "gmail" || !identity.gmailAccountId) {
+    console.error(
+      `[createSenderForInbox] ${normalizedFrom} is not a Gmail-mapped inbox; falling back to the configured provider`,
+    );
+    return null;
   }
-  if (identity?.source === "outlook") {
-    return {
-      provider: "outlook",
-      accountId: identity.outlookAccountId ?? null,
-    };
-  }
-  return null;
+  return identity.gmailAccountId;
 }
 
 /**
@@ -174,9 +172,12 @@ export async function maxAttachmentBytesForInbox(
   fromAddress: string,
 ): Promise<number> {
   try {
-    const mapping = await inboxMappingOf(db, fromAddress);
-    if (mapping?.provider === "gmail") return GMAIL_MAX_ATTACHMENT_BYTES;
-    if (mapping?.provider === "outlook") return OUTLOOK_MAX_ATTACHMENT_BYTES;
+    if (await resolveGmailAccountId(db, env, fromAddress)) {
+      return GMAIL_MAX_ATTACHMENT_BYTES;
+    }
+    if (await resolveOutlookAccountId(db, env, fromAddress)) {
+      return OUTLOOK_MAX_ATTACHMENT_BYTES;
+    }
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     console.error(
@@ -195,12 +196,13 @@ export async function maxAttachmentBytesForInbox(
 async function tryGmailSender(
   db: DrizzleD1Database<typeof schema>,
   env: ForInboxEnv,
-  accountId: string | null,
+  fromAddress: string,
 ): Promise<GmailSender | null> {
-  // Null: Google is not set up, or its secret cannot be decrypted.
-  const cfg = await gmailAuthConfig(db, env);
-  if (!cfg) return null;
-  if (!accountId) throw new Error("unknown gmail account");
+  const accountId = await resolveGmailAccountId(db, env, fromAddress);
+  if (!accountId) return null;
+
+  // Non-null: resolveGmailAccountId only returns an id when it is configured.
+  const cfg = (await gmailAuthConfig(db, env))!;
 
   // Resolve a token now — this is what surfaces a dangling gmailAccountId
   // (getAccessToken throws "unknown gmail account") or a grant revoked
@@ -225,14 +227,39 @@ async function tryGmailSender(
   });
 }
 
+/**
+ * The Outlook account `fromAddress` sends through, or null when it is not an
+ * Outlook-mapped inbox (or Microsoft is not set up). Quiet: unlike Gmail's,
+ * there is nothing to log for the common case of a non-Outlook inbox.
+ */
+async function resolveOutlookAccountId(
+  db: DrizzleD1Database<typeof schema>,
+  env: ForInboxEnv,
+  fromAddress: string,
+): Promise<string | null> {
+  const normalizedFrom = fromAddress.trim().toLowerCase();
+  const [identity] = await db
+    .select({
+      source: senderIdentities.source,
+      outlookAccountId: senderIdentities.outlookAccountId,
+    })
+    .from(senderIdentities)
+    .where(eq(senderIdentities.email, normalizedFrom));
+  if (identity?.source !== "outlook" || !identity.outlookAccountId) {
+    return null;
+  }
+  if (!(await outlookAuthConfig(db, env))) return null;
+  return identity.outlookAccountId;
+}
+
 async function tryOutlookSender(
   db: DrizzleD1Database<typeof schema>,
   env: ForInboxEnv,
-  accountId: string | null,
+  fromAddress: string,
 ): Promise<OutlookSender | null> {
-  const cfg = await outlookAuthConfig(db, env);
-  if (!cfg) return null;
-  if (!accountId) throw new Error("unknown outlook account");
+  const accountId = await resolveOutlookAccountId(db, env, fromAddress);
+  if (!accountId) return null;
+  const cfg = (await outlookAuthConfig(db, env))!;
   // Resolving the token now is what surfaces a revoked grant here, where the
   // caller refuses the send, instead of mid-request.
   const accessToken = await getOutlookAccessToken(db, accountId, cfg);
