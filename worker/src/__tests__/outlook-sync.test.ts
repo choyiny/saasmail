@@ -24,6 +24,7 @@ import { ensureBackfillJobs } from "../lib/gmail/backfill-job";
 import { saveProviderConfig } from "../lib/oauth-providers";
 import { MAX_MESSAGES_PER_RUN } from "../lib/gmail/sync";
 import { getDb, applyMigrations, cleanDb } from "./helpers";
+import { armLiveSteps } from "./mailbox-ingest-fixture";
 
 const KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 const CFG = {
@@ -599,5 +600,92 @@ describe("one import at a time, across Gmail and Outlook", () => {
 
     expect(created).toHaveLength(0);
     expect((await account()).backfillJobId).toBeNull();
+  });
+});
+
+describe("Outlook sync and the fork's ingestion steps", () => {
+  const SENDER = "customer@example.com";
+  const JOB = "outlook-backfill-ol-1-1";
+
+  beforeEach(async () => {
+    await seedAccount({ backfillJobId: JOB });
+    await seedInbox();
+  });
+
+  it("a live message is stored once, with its Outlook id, and runs the live steps", async () => {
+    stubGraph({
+      inbox: [[{ id: "live1" }]],
+      mimes: { live1: inbound("live1") },
+    });
+    const armed = await armLiveSteps({ inbox: MAILBOX, sender: SENDER });
+    try {
+      await syncOutlookAccount(
+        getDb(),
+        await account(),
+        env as unknown as CloudflareBindings,
+        armed.ctx,
+        CFG,
+      );
+      const seen = await armed.observe();
+
+      expect(seen.stored).toHaveLength(1);
+      expect(seen.stored[0].rawR2Key).toBeTruthy();
+      expect(seen.stored[0].outlookMessageId).toBe("live1");
+      // The Outlook id is in the insert: its creation and the rule's archive,
+      // no follow-up update of the row.
+      expect(seen.emailChanges).toEqual([
+        { object_id: `received:${seen.stored[0].id}`, op: "c" },
+        { object_id: `received:${seen.stored[0].id}`, op: "u" },
+      ]);
+      expect(seen.webhookCalls).toBe(1);
+      expect(seen.ruleMatches).toBe(1);
+      expect(seen.suggestedReplies).toBe(1);
+      expect(seen.pushes).toBeGreaterThan(0);
+      expect(seen.snoozed).toBe(false);
+      expect(seen.sequenceStatus).toBe("cancelled");
+    } finally {
+      armed.restore();
+    }
+  });
+
+  it("a historical message is stored read, at its own time, and runs none of them", async () => {
+    stubGraph({
+      list: [[{ id: "old1", receivedDateTime: "2025-09-01T00:00:00Z" }]],
+      mimes: { old1: inbound("old1") },
+    });
+    const armed = await armLiveSteps({ inbox: MAILBOX, sender: SENDER });
+    try {
+      await runOutlookBackfillChunk(
+        getDb(),
+        env as unknown as CloudflareBindings,
+        armed.ctx,
+        CFG,
+        "ol-1",
+        JOB,
+        50,
+      );
+      const seen = await armed.observe();
+
+      expect(seen.stored).toHaveLength(1);
+      expect(seen.stored[0]).toMatchObject({
+        outlookMessageId: "old1",
+        isRead: 1,
+        spamProbability: null,
+      });
+      // Its own time (Graph's receivedDateTime), not the import's.
+      expect(seen.stored[0].receivedAt).toBe(Date.UTC(2025, 8, 1) / 1000);
+      expect(seen.spamTraining).toBe(0);
+      expect(seen.ruleMatches).toBe(0);
+      expect(seen.suggestedReplies).toBe(0);
+      expect(seen.snoozed).toBe(true);
+      expect(seen.audit).toEqual([]);
+      expect(seen.pushes).toBe(0);
+      expect(seen.webhookCalls).toBe(0);
+      // Push, webhook and forward all start in the background: none did.
+      expect(seen.backgroundTasks).toBe(0);
+      expect(seen.sequenceStatus).toBe("active");
+    } finally {
+      armed.restore();
+    }
   });
 });

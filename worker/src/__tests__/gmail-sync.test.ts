@@ -24,6 +24,7 @@ import {
 import { ensureBackfillJobs, runBackfillJob } from "../lib/gmail/backfill-job";
 import { BACKFILL_WINDOW_SECONDS } from "../lib/gmail/backfill";
 import { getDb, applyMigrations, cleanDb } from "./helpers";
+import { armLiveSteps } from "./mailbox-ingest-fixture";
 
 const KEY = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
 const CFG = { clientId: "cid", clientSecret: "csec", encryptionKey: KEY };
@@ -2329,5 +2330,112 @@ describe("the one-year import job", () => {
       expect(listQueries).toHaveLength(0);
       expect(created).toHaveLength(0);
     });
+  });
+});
+
+describe("Gmail sync and the fork's ingestion steps", () => {
+  const INBOX = "choyin@acme.dev";
+  const SENDER = "jane@example.com";
+
+  beforeEach(async () => {
+    await seedAccount("9000", { emailAddress: INBOX });
+    await seedInbox(INBOX, null);
+  });
+
+  it("a live message is stored once, with its Gmail id, and runs the live steps", async () => {
+    stubGmail({
+      historyIds: ["live1"],
+      messages: {
+        live1: {
+          raw: addressed({
+            from: SENDER,
+            to: INBOX,
+            messageId: "<live1@example.com>",
+          }),
+        },
+      },
+    });
+    const armed = await armLiveSteps({ inbox: INBOX, sender: SENDER });
+    try {
+      await syncAccount(
+        getDb(),
+        await account(),
+        env as unknown as CloudflareBindings,
+        armed.ctx,
+        CFG,
+      );
+      const seen = await armed.observe();
+
+      expect(seen.stored).toHaveLength(1);
+      expect(seen.stored[0].rawR2Key).toBeTruthy();
+      expect(seen.stored[0].gmailMessageId).toBe("live1");
+      // The Gmail ids are in the insert: its creation and the rule's archive,
+      // no follow-up update of the row.
+      expect(seen.emailChanges).toEqual([
+        { object_id: `received:${seen.stored[0].id}`, op: "c" },
+        { object_id: `received:${seen.stored[0].id}`, op: "u" },
+      ]);
+      expect(seen.webhookCalls).toBe(1);
+      expect(seen.ruleMatches).toBe(1);
+      expect(seen.suggestedReplies).toBe(1);
+      expect(seen.pushes).toBeGreaterThan(0);
+      expect(seen.snoozed).toBe(false);
+      expect(seen.sequenceStatus).toBe("cancelled");
+    } finally {
+      armed.restore();
+    }
+  });
+
+  it("a historical message is stored read, at its own time, and runs none of them", async () => {
+    await getDb()
+      .update(gmailAccounts)
+      .set({ backfillJobId: "job-1" })
+      .where(eq(gmailAccounts.id, "acct-1"));
+    stubGmail({
+      listIds: ["old1"],
+      messages: {
+        old1: {
+          internalDate: "1700000000000",
+          raw: addressed({
+            from: SENDER,
+            to: INBOX,
+            messageId: "<old1@example.com>",
+          }),
+        },
+      },
+    });
+    const armed = await armLiveSteps({ inbox: INBOX, sender: SENDER });
+    try {
+      await runBackfillChunk(
+        getDb(),
+        env as unknown as CloudflareBindings,
+        armed.ctx,
+        CFG,
+        "acct-1",
+        "job-1",
+        MAX_MESSAGES_PER_RUN,
+      );
+      const seen = await armed.observe();
+
+      expect(seen.stored).toHaveLength(1);
+      expect(seen.stored[0]).toMatchObject({
+        gmailMessageId: "old1",
+        isRead: 1,
+        receivedAt: 1_700_000_000,
+        spamProbability: null,
+      });
+      expect(seen.spamTraining).toBe(0);
+      expect(seen.ruleMatches).toBe(0);
+      expect(seen.suggestedReplies).toBe(0);
+      expect(seen.snoozed).toBe(true);
+      expect(seen.audit).toEqual([]);
+      expect(seen.pushes).toBe(0);
+      expect(seen.webhookCalls).toBe(0);
+      // Push, webhook and forward all start in the background: none did.
+      expect(seen.backgroundTasks).toBe(0);
+      expect(seen.sequenceStatus).toBe("active");
+    } finally {
+      armed.restore();
+    }
   });
 });
