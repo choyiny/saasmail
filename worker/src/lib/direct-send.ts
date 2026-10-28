@@ -1,7 +1,8 @@
-import { and, eq, isNotNull, type SQL } from "drizzle-orm";
+import { and, eq, isNotNull, sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { sentEmails } from "../db/sent-emails.schema";
 import type { EmailSender, SendEmailResult } from "./email-sender/types";
+import { jsonList } from "./inbox-permissions";
 import { deleteMessageState } from "./messages/state";
 import { discardSentAttachments } from "./sent-attachments";
 
@@ -161,7 +162,7 @@ export async function discardEchoFiles(
 
 /**
  * Writes the send's `sent_emails` row, replacing a mirrored echo in the same
- * batch so the sync cannot slip a second copy between the two statements.
+ * batch as the insert.
  */
 export async function insertSentRowReplacingEcho(
   db: Db,
@@ -179,8 +180,16 @@ export async function insertSentRowReplacingEcho(
     return;
   }
   const echoIds = await clearEchoState(db, where);
+  if (echoIds.length === 0) {
+    await db.insert(sentEmails).values(row);
+    return;
+  }
+  // Only the echoes whose state was just cleared are deleted: one mirrored
+  // after the select is kept rather than deleted with its state left behind.
   await db.batch([
-    db.delete(sentEmails).where(where),
+    db
+      .delete(sentEmails)
+      .where(and(where, sql`${sentEmails.id} IN ${jsonList(echoIds)}`)),
     db.insert(sentEmails).values(row),
   ]);
   await discardEchoFiles(db, env, echoIds);
