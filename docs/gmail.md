@@ -569,6 +569,11 @@ reply: the daily cap for its channel (a `429` once it is reached) and the
   key). A `4xx` from Gmail, or a refusal before the request (such as a
   message over Gmail's size limit), means nothing was sent: the key is
   released and a retry with it sends.
+- **When Gmail accepted the reply but saasmail could not finish recording
+  it**, the answer is also a kept `502` `SEND_FAILED`, with a message that
+  the reply was sent and must not be sent again (and, when the Sent row could
+  not be written, that it is missing from Sent). The key and the daily-cap
+  slot are kept, as above.
 
 ### A broken grant refuses the reply; it does not reroute it
 
