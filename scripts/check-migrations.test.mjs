@@ -167,6 +167,15 @@ describe("check-migrations", () => {
       "0027: 2 files",
     ],
     [
+      "another 0027 file in place of the named one (the exception is one file name)",
+      ({ migrations }) =>
+        renameSync(
+          join(migrations, "0027_strong_thena.sql"),
+          join(migrations, "0027_upstream_rename.sql"),
+        ),
+      "0027_upstream_rename.sql: no _journal.json entry",
+    ],
+    [
       "a renamed file at another number (the exception is 0027's only)",
       ({ migrations }) =>
         renameSync(
