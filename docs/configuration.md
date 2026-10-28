@@ -82,6 +82,8 @@ Local development secrets. Created from `.dev.vars.example`. This file is gitign
 - `DEMO_MODE` — Local-only: set to `"1"` to skip real sending (a send returns a
   synthetic `demo_…` id) and the queue; it also turns off the passkey gate.
   Required by `yarn test:e2e`. **Never set this in production.**
+- `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` — Optional; unused while the Gmail integration is off (leave them unset). OAuth client credentials for the [Gmail integration](gmail.md), from an **Internal** consent screen. Set in prod via `wrangler secret put`.
+- `TOKEN_ENCRYPTION_KEY` — Optional; unused while the Gmail integration is off (leave it unset). Does two jobs for the [Gmail integration](gmail.md): it encrypts stored Gmail refresh tokens, and it is the HMAC secret that signs the OAuth `state` parameter carried through Google's consent screen. 32 random bytes, base64-encoded (`openssl rand -base64 32`). Set in prod via `wrangler secret put`. Never rotate this without reconnecting every mailbox.
 
 In production these are Cloudflare secrets (`wrangler secret put …`), not
 entries in this file. The local-only keys are never set in production.
