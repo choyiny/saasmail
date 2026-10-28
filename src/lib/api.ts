@@ -1,4 +1,5 @@
 import type { BlockDocument } from "@worker/lib/blocks/schema";
+import { statusFallbackMessage } from "@/lib/error-message";
 
 export interface Person {
   id: string;
@@ -140,13 +141,20 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Throws the server's own `{ error }` message whenever it sends one, and the
+ * bare status code only when it doesn't. The body is the actionable part —
+ * a 400 naming the address that can't be sent from, a 502 saying a Gmail
+ * reply was rejected *and not queued for retry* — and a UI handed only
+ * "API error: 502" has nothing left to tell the user to do.
+ */
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     credentials: "include",
     ...options,
   });
   if (!res.ok) {
-    let message = `API error: ${res.status}`;
+    let message = statusFallbackMessage(res.status);
     let code: string | null = null;
     try {
       const body = (await res.json()) as { error?: unknown; code?: unknown };
@@ -1422,6 +1430,12 @@ export interface AdminInbox {
   /** Whether eligible inbound messages get AI-generated suggested replies. */
   agentAutodraft: boolean;
   assignedUserIds: string[];
+  /** Where this inbox's mail comes from. */
+  source: "cloudflare" | "gmail" | "outlook";
+  /** Connected mailbox id when source is "gmail"; null otherwise. */
+  gmailAccountId: string | null;
+  /** Connected mailbox id when source is "outlook"; null otherwise. */
+  outlookAccountId: string | null;
   /** The inbox's learning spam filter. */
   spamFilter: SpamFilterStatus;
 }
@@ -1461,11 +1475,18 @@ export async function fetchAdminInboxes(): Promise<AdminInbox[]> {
   return apiFetch("/api/admin/inboxes");
 }
 
+/**
+ * POST /inboxes answers without `source`/`gmailAccountId` — a freshly created
+ * inbox is always a Cloudflare one. The caller fills the defaults in rather
+ * than pretending the server sent them.
+ */
 export async function createInbox(data: {
   email: string;
   displayName?: string | null;
   displayMode?: InboxDisplayMode;
-}): Promise<AdminInbox> {
+}): Promise<
+  Omit<AdminInbox, "source" | "gmailAccountId" | "outlookAccountId">
+> {
   return apiFetch("/api/admin/inboxes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1484,6 +1505,11 @@ export async function updateInboxSettings(
     agentInstructions?: string;
     agentAutodraft?: boolean;
     threadingMode?: ThreadingMode;
+    source?: "cloudflare" | "gmail" | "outlook";
+    /** Pass null to clear the mapping; omit to leave it unchanged. */
+    gmailAccountId?: string | null;
+    /** Same, for an Outlook mailbox. */
+    outlookAccountId?: string | null;
   },
 ): Promise<{
   email: string;
@@ -1496,7 +1522,13 @@ export async function updateInboxSettings(
   spamThreshold: number | null;
   agentInstructions: string | null;
   agentAutodraft: boolean;
+  source: "cloudflare" | "gmail" | "outlook";
+  gmailAccountId: string | null;
+  outlookAccountId: string | null;
 }> {
+  // The failure body is the whole point here: a rejected Gmail mapping answers
+  // with the one sentence that tells the operator how to fix it ("add it under
+  // Gmail's Send mail as…"). `apiFetch` throws it verbatim.
   return apiFetch(`/api/admin/inboxes/${encodeURIComponent(email)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
@@ -1729,6 +1761,130 @@ export async function testRule(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rule: { conditions, actions }, emailId }),
   });
+}
+
+// --- Admin Gmail ---
+
+/** A Google mailbox connected via OAuth, as the admin API reports it. */
+export interface GmailAccount {
+  id: string;
+  emailAddress: string;
+  /** Unix **seconds** of the last successful sync; null = never synced yet. */
+  lastSyncedAt: number | null;
+  /** Last sync failure. Non-null means this mailbox has stopped syncing. */
+  lastError: string | null;
+  /**
+   * Unix **seconds** of the last sync-cursor re-seed — an expired history
+   * cursor, or a reconnect. Mail that arrived during that window was never
+   * synced and cannot be recovered. The worker stores and returns these
+   * columns in seconds, not milliseconds; render them accordingly.
+   */
+  lastGapAt: number | null;
+  /**
+   * The one-off import of the last year: "pending" until it starts,
+   * "running" while it pages through, "done" at the end. `count` is messages
+   * handled so far; `completedAt` is unix **seconds**. Imports run one
+   * mailbox at a time, so a "pending" one may be waiting for another.
+   */
+  backfill: {
+    status: "pending" | "running" | "done";
+    count: number;
+    completedAt: number | null;
+    /**
+     * 0 to 1: how far back through its window the import has walked, by date
+     * (it goes newest first; Gmail gives no reliable total). 1 when done.
+     */
+    progress: number;
+    /** Unix **seconds**: Gmail date of the oldest message reached so far. */
+    reachedAt: number | null;
+  };
+  /** Unix **seconds** of the connection, like the two fields above. */
+  createdAt: number;
+  /**
+   * The admin who last connected or reconnected this mailbox. Null on a row
+   * connected before the server recorded it; `name` and `email` are null when
+   * that user has since been deleted — the id is kept either way, because it
+   * is what the row actually stores.
+   */
+  connectedBy: {
+    id: string;
+    name: string | null;
+    email: string | null;
+  } | null;
+}
+
+export async function fetchGmailAccounts(): Promise<GmailAccount[]> {
+  // The endpoint wraps the list: { accounts: [...] }.
+  //
+  // No trailing slash. Hono matches paths exactly and does no trailing-slash
+  // normalisation, so `/api/admin/gmail/` matches nothing and falls through
+  // to the SPA catch-all — which in production answers `index.html` with a
+  // 200, so `res.json()` throws a parse error rather than a clean 404. The
+  // shipped contract test sends this literal string through the real worker.
+  const res = await apiFetch<{ accounts: GmailAccount[] }>("/api/admin/gmail");
+  return res.accounts;
+}
+
+export async function disconnectGmailAccount(
+  id: string,
+): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(
+    `/api/admin/gmail/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+
+/**
+ * Ask the worker for the Google consent URL to send the operator to.
+ *
+ * This endpoint answers `{ authUrl }` with a 200; it does **not** redirect.
+ * Linking an anchor straight at it lands the operator on a page of raw JSON,
+ * so the caller must fetch the URL and navigate to `authUrl` itself.
+ *
+ * `email` names the mailbox being *re*connected. It becomes Google's
+ * `login_hint` and is sealed into the OAuth state, so the callback refuses a
+ * grant for any other mailbox rather than re-seeding that one's sync cursor.
+ * Omit it for a first connection, where any account is a valid answer.
+ *
+ * On an instance with no OAuth secrets it answers 503 with
+ * `{ error: "Gmail integration is not configured" }`, which `apiFetch`
+ * rethrows verbatim — show it rather than navigating.
+ */
+export async function startGmailConnect(
+  email?: string,
+): Promise<{ authUrl: string }> {
+  const qs = email ? `?email=${encodeURIComponent(email)}` : "";
+  return apiFetch<{ authUrl: string }>(`/api/admin/gmail/connect${qs}`);
+}
+
+// --- Outlook (Microsoft Graph) ---
+
+/** A connected Outlook mailbox. The same shape as `GmailAccount`. */
+export type OutlookAccount = GmailAccount;
+
+export async function fetchOutlookAccounts(): Promise<OutlookAccount[]> {
+  // No trailing slash, for the reason given on `fetchGmailAccounts`.
+  const res = await apiFetch<{ accounts: OutlookAccount[] }>(
+    "/api/admin/outlook",
+  );
+  return res.accounts;
+}
+
+export async function disconnectOutlookAccount(
+  id: string,
+): Promise<{ success: boolean }> {
+  return apiFetch<{ success: boolean }>(
+    `/api/admin/outlook/${encodeURIComponent(id)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** The Microsoft sign-in URL to send the admin to; see `startGmailConnect`. */
+export async function startOutlookConnect(
+  email?: string,
+): Promise<{ authUrl: string }> {
+  const qs = email ? `?email=${encodeURIComponent(email)}` : "";
+  return apiFetch<{ authUrl: string }>(`/api/admin/outlook/connect${qs}`);
 }
 
 // --- Suppressions ---
@@ -2615,4 +2771,43 @@ export async function startBackupNow(): Promise<BackupRun> {
 
 export async function fetchBackupManifest(id: string): Promise<BackupManifest> {
   return apiFetch(`/api/admin/backups/${encodeURIComponent(id)}/manifest`);
+}
+
+/** A mailbox provider's OAuth app settings, as the admin UI sees them. */
+export interface ProviderSettings {
+  provider: "google" | "microsoft";
+  /** Usable now: settings present and TOKEN_ENCRYPTION_KEY set. */
+  configured: boolean;
+  /** "env" while Google's settings still come from wrangler vars. */
+  source: "database" | "env" | null;
+  clientId: string | null;
+  /** The secret itself is never sent back — only whether one is stored. */
+  hasClientSecret: boolean;
+  /** Microsoft only; null means any work, school or personal account. */
+  tenant: string | null;
+  /** The exact redirect URI to register with the provider. */
+  redirectUri: string;
+  /** Mailboxes whose grants belong to the current OAuth app. */
+  connectedMailboxes: number;
+  /** Unix **seconds**. */
+  updatedAt: number | null;
+}
+
+export async function fetchIntegrations(): Promise<{
+  encryptionKeyConfigured: boolean;
+  providers: ProviderSettings[];
+}> {
+  return apiFetch("/api/admin/integrations");
+}
+
+/** Omit `clientSecret` to keep the stored one. */
+export async function saveIntegration(
+  provider: ProviderSettings["provider"],
+  body: { clientId: string; clientSecret?: string; tenant?: string | null },
+): Promise<ProviderSettings> {
+  return apiFetch(`/api/admin/integrations/${provider}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }

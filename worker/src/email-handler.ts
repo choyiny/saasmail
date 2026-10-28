@@ -43,6 +43,7 @@ import {
   recordInboundRejection,
   rejectsUnknownRecipients,
 } from "./lib/inbound-rejection";
+import { messagePreview } from "./lib/push-preview";
 
 export { isAutomatedInbound } from "./lib/automated-inbound";
 
@@ -71,6 +72,26 @@ export type IngestOutcome =
   | { status: "duplicate"; emailId: string }
   /** Stored, and every step after storage has run. */
   | { status: "stored"; emailId: string };
+
+export type IngestOptions = {
+  /**
+   * Set when importing old mail (the Gmail backfill). The message is stored
+   * already read, at its own `receivedAt`, and NONE of the live side effects
+   * run: no push notification, no webhook, no forward, no sequence
+   * cancellation. Replaying a year of those would page the team for
+   * mail they have already handled, re-forward it all, and stop sequences
+   * because of a reply someone sent weeks before they were enrolled.
+   *
+   * Stored the way the mail importer stores history (`source: "import"`):
+   * no spam scoring, rules, suggested reply, conversation wake, audit,
+   * realtime, push, webhook, forward or sequence cancellation.
+   */
+  historical?: { receivedAt: number };
+  /** The synced mailbox's ids for the message, written with the row. */
+  gmailMessageId?: string | null;
+  gmailThreadId?: string | null;
+  outlookMessageId?: string | null;
+};
 
 /** Cloudflare Email Worker entry point. */
 export async function handleEmail(
@@ -103,8 +124,12 @@ export async function ingestParsedEmail(
   parsed: ParsedEmail,
   env: CloudflareBindings,
   ctx: ExecutionContext,
+  opts: IngestOptions = {},
 ): Promise<IngestOutcome> {
   const now = Math.floor(Date.now() / 1000);
+  const historical = opts.historical ?? null;
+  /** When the message arrived: now for live mail, its own time for imports. */
+  const receivedAt = historical?.receivedAt ?? now;
 
   // Canonicalize inbox addresses to lowercase before storage so casing
   // variants of the same recipient don't fork into separate group-row
@@ -181,6 +206,29 @@ export async function ingestParsedEmail(
       console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);
       return { status: "duplicate", emailId: existing[0].id };
     }
+  }
+
+  const providerIds = {
+    gmailMessageId: opts.gmailMessageId ?? null,
+    gmailThreadId: opts.gmailThreadId ?? null,
+    outlookMessageId: opts.outlookMessageId ?? null,
+  };
+
+  if (historical) {
+    // History, stored as the mail importer stores it: read, at its own time,
+    // and none of the live steps below.
+    const { emailId } = await storeReceivedMessage(db, env, {
+      parsed,
+      inbox: recipientCanonical,
+      fromAddress: fromAddressCanonical,
+      receivedAt,
+      now,
+      source: "import",
+      ourDomains: domainsOf(identityRows.map((r) => r.email)),
+      threadingMode: inboxIdentity?.threadingMode ?? "relationship",
+      ...providerIds,
+    });
+    return { status: "stored", emailId };
   }
 
   // The inbox's learning filter scores the message, when it is on and
@@ -263,6 +311,7 @@ export async function ingestParsedEmail(
     ourDomains: domainsOf(identityRows.map((r) => r.email)),
     spamProbability,
     threadingMode: inboxIdentity?.threadingMode ?? "relationship",
+    ...providerIds,
   });
   // The webhook and the forward describe the first 50 attachments, as they
   // always have.
@@ -371,7 +420,7 @@ export async function ingestParsedEmail(
             personId: actualPersonId,
             senderName: parsed.from.name || fromAddressCanonical,
             subject: parsed.subject ?? "",
-            bodyPreview: (parsed.bodyText ?? "").slice(0, 140),
+            bodyPreview: messagePreview(parsed.bodyText, parsed.bodyHtml),
           });
           const results = await Promise.allSettled(
             userIds.map((userId) => {
@@ -453,8 +502,24 @@ export async function ingestParsedEmail(
     knownInboxes: identityRows.map((r) => r.email),
   });
 
-  // Cancel any active sequences for this person
-  await cancelSequencesForPerson(db, actualPersonId);
+  // Cancel any active sequences for this person.
+  //
+  // Guarded, like the identical call in `mirrorSentMessage`, and for the same
+  // reason: the `emails` row above is already committed, so a throw here
+  // would stop the Gmail sync's run AND leave the retry hitting the per-inbox
+  // dedupe — the message would be skipped forever and the cancellation lost
+  // permanently, so the customer who just wrote in keeps getting automated
+  // follow-ups. A sequence that keeps running is worth an operator's
+  // attention; it is not worth discarding mail that is already on the
+  // timeline.
+  try {
+    await cancelSequencesForPerson(db, actualPersonId);
+  } catch (err) {
+    console.error(
+      `Stored the message from ${fromAddressCanonical} to ${recipientCanonical}, but cancelling their sequences failed; they may keep receiving automated follow-ups:`,
+      err instanceof Error ? err.message : "unknown error",
+    );
+  }
 
   console.log(
     `Processed email from ${fromAddressCanonical} to ${recipientCanonical} (${parsed.attachments.length} attachments)`,

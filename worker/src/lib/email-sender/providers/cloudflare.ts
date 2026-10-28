@@ -6,6 +6,7 @@ import type {
 } from "../types";
 import { parseFrom } from "../shared";
 import { classifyErrorMessage } from "../classify";
+import { inlineDataImages } from "../inline-images";
 
 /**
  * Headers Cloudflare generates itself; sending one fails the whole message with
@@ -64,7 +65,9 @@ export class CloudflareSender implements EmailSender {
   readonly provider = "cloudflare" as const;
   constructor(private binding: SendEmail) {}
 
-  async send(params: SendEmailParams): Promise<SendEmailResult> {
+  async send(input: SendEmailParams): Promise<SendEmailResult> {
+    // Pasted images as inline cid: parts, which every client shows.
+    const params = inlineDataImages(input);
     let replyTo: Address | undefined;
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(params.headers ?? {})) {

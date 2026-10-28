@@ -33,6 +33,13 @@ export function buildAuthUrl(opts: {
   clientId: string;
   redirectUri: string;
   state: string;
+  /**
+   * The mailbox this flow is meant for, when reconnecting a known one. Google
+   * pre-selects it instead of silently granting whichever account happens to
+   * be signed in. It is only a hint — the operator can still choose another
+   * account — so the callback checks the returned profile as well.
+   */
+  loginHint?: string;
 }): string {
   const url = new URL(AUTH_ENDPOINT);
   url.searchParams.set("client_id", opts.clientId);
@@ -45,6 +52,7 @@ export function buildAuthUrl(opts: {
   url.searchParams.set("prompt", "consent");
   url.searchParams.set("include_granted_scopes", "true");
   url.searchParams.set("state", opts.state);
+  if (opts.loginHint) url.searchParams.set("login_hint", opts.loginHint);
   return url.toString();
 }
 

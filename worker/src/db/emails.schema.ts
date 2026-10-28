@@ -67,6 +67,12 @@ export const emails = sqliteTable(
      * headers; NULL otherwise. Comes first in the conversation key.
      */
     threadKey: text("thread_key"),
+    /** Gmail's own message id. Null for Cloudflare-routed mail. */
+    gmailMessageId: text("gmail_message_id"),
+    /** Gmail's thread id, kept for reply threading in a later slice. */
+    gmailThreadId: text("gmail_thread_id"),
+    /** Graph's immutable message id, for mail synced from Outlook. */
+    outlookMessageId: text("outlook_message_id"),
     receivedAt: integer("received_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },

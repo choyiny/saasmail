@@ -579,7 +579,12 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       "A UUID you generate per intended send and reuse if you retry. A retry with the same key returns the first result (with replayed: true) instead of sending again; the same key with a different message is refused. Kept 24 hours.",
     );
 
-  type SendAttempt = { result?: unknown; error?: string };
+  /**
+   * `remember`: a Gmail or Outlook send whose outcome is unknown. Its key
+   * keeps the failure and its slot stays counted, so a retry never sends it
+   * twice.
+   */
+  type SendAttempt = { result?: unknown; error?: string; remember?: boolean };
 
   /**
    * Runs one send against the user's daily MCP limit: refused over the
@@ -597,7 +602,9 @@ export function buildMcpServer(ctx: McpContext): McpServer {
     }
     try {
       const attempt = await run();
-      if (attempt.error !== undefined) await reservation.release();
+      if (attempt.error !== undefined && !attempt.remember) {
+        await reservation.release();
+      }
       return attempt;
     } catch (error) {
       await reservation.release();
@@ -639,7 +646,9 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         async () => {
           const attempt = await run();
           if (attempt.error !== undefined) {
-            return { status: 400, body: { error: attempt.error } };
+            return attempt.remember
+              ? { status: 502, body: { error: attempt.error }, remember: true }
+              : { status: 400, body: { error: attempt.error } };
           }
           const result = attempt.result as { id?: string | null };
           return { status: 200, body: attempt.result, sentEmailId: result?.id };
@@ -872,6 +881,9 @@ export function buildMcpServer(ctx: McpContext): McpServer {
               return { error: NOT_FOUND };
             }
             return {
+              ...("keepIdempotencyKey" in result && result.keepIdempotencyKey
+                ? { remember: true }
+                : {}),
               error:
                 result.code === "MISSING_VARIABLES" &&
                 "missingVariables" in result

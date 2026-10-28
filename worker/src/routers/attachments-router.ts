@@ -5,6 +5,7 @@ import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { isInboxAllowed } from "../lib/inbox-permissions";
 import { sanitizeFilename } from "../lib/sanitize-filename";
+import { isInlineImageType } from "../lib/inline-image-types";
 import type { Variables } from "../variables";
 
 export const attachmentsRouter = new OpenAPIHono<{
@@ -50,6 +51,28 @@ export async function findReadableAttachment(
   return attachment;
 }
 
+/**
+ * Headers on every attachment response, whichever route serves it.
+ *
+ * The bytes and their Content-Type come from a stranger. `nosniff` stops a
+ * browser second-guessing the declared type into something executable, and
+ * the sandbox CSP means that even a document opened straight from this origin
+ * — an HTML or SVG attachment in its own tab — runs no script and reaches
+ * nothing. Neither affects an `<img>` loading a raster image.
+ */
+const UNTRUSTED_CONTENT_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Content-Security-Policy": "default-src 'none'; img-src 'self'; sandbox",
+};
+
+function attachmentDisposition(filename: string): string {
+  // Sanitize before interpolating into the header: a raw filename can carry
+  // quotes or CR/LF and split the response. `filename*` (RFC 5987) carries the
+  // full value for clients that honour it.
+  const safeFilename = sanitizeFilename(filename).replaceAll('"', "_");
+  return `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`;
+}
+
 const downloadRoute = createRoute({
   method: "get",
   path: "/{id}",
@@ -80,17 +103,13 @@ attachmentsRouter.openapi(downloadRoute, async (c) => {
     return c.json({ error: "File not found in storage" }, 404);
   }
 
-  // Sanitize before interpolating into the header: a raw filename can carry
-  // quotes or CR/LF and split the response. `filename*` (RFC 5987) carries the
-  // full value for clients that honour it.
-  const safeFilename = sanitizeFilename(att.filename).replaceAll('"', "_");
-
   return new Response(object.body, {
     headers: {
       "Content-Type": att.contentType,
-      "Content-Disposition": `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`,
+      "Content-Disposition": attachmentDisposition(att.filename),
       "Content-Length": att.size.toString(),
       "Cache-Control": "private, max-age=31536000, immutable",
+      ...UNTRUSTED_CONTENT_HEADERS,
     },
   });
 });
@@ -101,7 +120,7 @@ const inlineRoute = createRoute({
   path: "/{id}/inline",
   tags: ["Attachments"],
   description:
-    "Serve an attachment inline (for embedded images). Scoped to the caller's allowed inboxes.",
+    "Serve an image attachment inline — embedded CID images and the image viewer. Only raster image types (PNG, JPEG, GIF, WebP, AVIF, BMP) are served with `Content-Disposition: inline`; anything else, SVG included, is served as a download. Scoped to the caller's allowed inboxes.",
   request: {
     params: z.object({ id: z.string() }),
   },
@@ -126,14 +145,20 @@ attachmentsRouter.openapi(inlineRoute, async (c) => {
     return c.json({ error: "File not found in storage" }, 404);
   }
 
+  // Inline only for raster images. Anything else still loads in an `<img>`
+  // (which ignores the disposition), but opened directly it downloads rather
+  // than rendering on our origin.
   return new Response(object.body, {
     headers: {
       "Content-Type": att.contentType,
-      "Content-Disposition": "inline",
+      "Content-Disposition": isInlineImageType(att.contentType)
+        ? "inline"
+        : attachmentDisposition(att.filename),
       "Content-Length": att.size.toString(),
       // `public` would let shared caches serve this mailbox content to another
       // caller.
       "Cache-Control": "private, max-age=31536000, immutable",
+      ...UNTRUSTED_CONTENT_HEADERS,
     },
   });
 });

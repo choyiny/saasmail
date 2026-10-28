@@ -10,6 +10,17 @@ import {
   MAX_SIGNATURE_HTML_LENGTH,
   sanitizeSignatureHtml,
 } from "../lib/sanitize-signature";
+import { GmailApiError, listSendAs } from "../lib/gmail/api";
+import { GoogleAuthError } from "../lib/gmail/oauth";
+import { getAccessToken } from "../lib/gmail/token";
+import { clearGmailThreadIds } from "../lib/gmail/thread-ids";
+import { ensureBackfillJobs } from "../lib/gmail/backfill-job";
+import { gmailAuthConfig } from "../lib/gmail/sync";
+import { getOutlookAccessToken, outlookAuthConfig } from "../lib/outlook/token";
+import {
+  getProfile as getOutlookProfile,
+  MicrosoftAuthError,
+} from "../lib/outlook/oauth";
 import type { Variables } from "../variables";
 import {
   readSpamModels,
@@ -24,8 +35,14 @@ import {
   startThreadBackfill,
 } from "../lib/messages/thread-backfill";
 
+type InboxesEnv = CloudflareBindings & {
+  GOOGLE_OAUTH_CLIENT_ID?: string;
+  GOOGLE_OAUTH_CLIENT_SECRET?: string;
+  TOKEN_ENCRYPTION_KEY?: string;
+};
+
 export const adminInboxesRouter = new OpenAPIHono<{
-  Bindings: CloudflareBindings;
+  Bindings: InboxesEnv;
   Variables: Variables;
 }>();
 
@@ -72,6 +89,9 @@ const InboxRowSchema = z.object({
     /** Trained on 20 junk and 20 not-junk messages: it scores new mail. */
     ready: z.boolean(),
   }),
+  source: z.enum(["cloudflare", "gmail", "outlook"]),
+  gmailAccountId: z.string().nullable(),
+  outlookAccountId: z.string().nullable(),
 });
 
 const listInboxesRoute = createRoute({
@@ -98,6 +118,9 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     agentInstructions: string | null;
     agentAutodraft: number | null;
     assignedUserIds: string | null;
+    source: "cloudflare" | "gmail" | "outlook" | null;
+    gmailAccountId: string | null;
+    outlookAccountId: string | null;
   };
   const rows = await db.all<Row>(sql`
     WITH universe AS (
@@ -115,6 +138,9 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       s.spam_threshold AS spamThreshold,
       s.agent_instructions AS agentInstructions,
       s.agent_autodraft AS agentAutodraft,
+      s.source AS source,
+      s.gmail_account_id AS gmailAccountId,
+      s.outlook_account_id AS outlookAccountId,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -147,6 +173,9 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       agentInstructions: r.agentInstructions,
       agentAutodraft: r.agentAutodraft === 1,
       assignedUserIds: r.assignedUserIds ? JSON.parse(r.assignedUserIds) : [],
+      source: r.source ?? "cloudflare",
+      gmailAccountId: r.gmailAccountId,
+      outlookAccountId: r.outlookAccountId,
     })),
     200,
   );
@@ -283,6 +312,19 @@ const PatchInboxBodySchema = z
      * JMAP client resync once the rekeying is done.
      */
     threadingMode: z.enum(["relationship", "headers"]).optional(),
+    // Where this inbox's mail comes from. Absent = unchanged.
+    source: z.enum(["cloudflare", "gmail", "outlook"]).optional(),
+    // FK to gmail_accounts.id. Absent = unchanged; null clears it.
+    gmailAccountId: z.string().nullable().optional(),
+    // FK to outlook_accounts.id. Absent = unchanged; null clears it.
+    outlookAccountId: z.string().nullable().optional(),
+    // Google Group routing was attempted in this slice and withdrawn after
+    // adversarial review found List-ID and Delivered-To are both
+    // sender-forgeable — an attacker could pick which customer's timeline
+    // their message lands on. The column still exists for a later slice;
+    // nothing may configure it yet, so a non-null value here is rejected
+    // outright (see the handler) rather than silently accepted or ignored.
+    gmailGroupAddress: z.string().nullable().optional(),
   })
   .refine(
     (b) =>
@@ -293,7 +335,11 @@ const PatchInboxBodySchema = z
       b.forwardTo !== undefined ||
       b.spamThreshold !== undefined ||
       b.agentInstructions !== undefined ||
-      b.agentAutodraft !== undefined,
+      b.agentAutodraft !== undefined ||
+      b.source !== undefined ||
+      b.gmailAccountId !== undefined ||
+      b.outlookAccountId !== undefined ||
+      b.gmailGroupAddress !== undefined,
     "must update at least one field",
   );
 
@@ -302,7 +348,7 @@ const patchInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Update display name, display mode, conversation (threading) mode, signature HTML, forward destination, spam threshold, agent instructions, and/or automatic suggested replies for an inbox. Row is deleted only when all fields are at defaults. A new threading mode starts a background backfill (409 while one runs for the inbox), clears the inbox's snoozes and assignments, and resets JMAP clients when the backfill ends.",
+    "Update display name, display mode, conversation (threading) mode, signature HTML, forward destination, spam threshold, agent instructions, automatic suggested replies, and/or Gmail or Outlook source mapping for an inbox. Row is deleted only when all fields are at defaults. A new threading mode starts a background backfill (409 while one runs for the inbox), clears the inbox's snoozes and assignments, and resets JMAP clients when the backfill ends. Google Group routing (gmailGroupAddress) is not accepted in this release.",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -326,11 +372,32 @@ const patchInboxRoute = createRoute({
         spamThreshold: z.number().nullable(),
         agentInstructions: z.string().nullable(),
         agentAutodraft: z.boolean(),
+        source: z.enum(["cloudflare", "gmail", "outlook"]),
+        gmailAccountId: z.string().nullable(),
+        outlookAccountId: z.string().nullable(),
       }),
       "Updated",
     ),
     400: {
-      description: "Invalid forward destination",
+      description:
+        "Invalid forward destination, invalid source, a group address was supplied, or the connected Google account cannot send as this inbox",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
+    502: {
+      description:
+        "Gmail could not be reached to verify the mapping; nothing was saved",
+      content: {
+        "application/json": {
+          schema: z.object({ error: z.string() }),
+        },
+      },
+    },
+    503: {
+      description: "Gmail integration is not configured on this instance",
       content: {
         "application/json": {
           schema: z.object({ error: z.string() }),
@@ -354,6 +421,21 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   const email = rawEmail.trim().toLowerCase();
   const body = c.req.valid("json");
   const now = Math.floor(Date.now() / 1000);
+
+  // Google Group routing was attempted in this slice and withdrawn after
+  // adversarial review found List-ID and Delivered-To are both
+  // sender-forgeable — an attacker could choose which customer's timeline
+  // their message landed on. Reject outright, before touching the row at
+  // all: a rejected request must not half-apply the rest of the body.
+  if (body.gmailGroupAddress != null) {
+    return c.json(
+      {
+        error:
+          "Google Group routing is not supported yet. Only personal mailboxes can be mapped to an inbox in this release.",
+      },
+      400,
+    );
+  }
 
   // Load current row (if any) so we can apply a partial update without losing
   // the field the caller didn't touch.
@@ -408,6 +490,79 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       : (currentRow?.agentAutodraft ?? 0);
   const currentThreadingMode = currentRow?.threadingMode ?? "relationship";
   const nextThreadingMode = body.threadingMode ?? currentThreadingMode;
+  // `source` and `gmail_account_id` are one fact, not two.
+  //
+  // Merging them independently let either field be written without the other,
+  // and the two halves of the feature read the pair differently: the sync
+  // routes on `gmail_account_id` and the send path on `source`. So
+  // `{"gmailAccountId": "..."}` alone wrote a mapping the send-as check never
+  // saw, and `{"source": "cloudflare"}` alone left the id in place — the
+  // operator had unmapped the inbox, the cron had not, and the UI rendered
+  // "Cloudflare" for a row that was plainly Gmail-fed. Both are reachable
+  // from the documented HTTP API and the MCP surface; only the admin UI
+  // happens to always send the pair.
+  //
+  // What is written is therefore derived from the resulting STATE, and the
+  // send-as verification below keys off that same state rather than off which
+  // fields the request happened to carry.
+  const sourceGiven = body.source !== undefined;
+  const accountGiven = body.gmailAccountId !== undefined;
+  const outlookGiven = body.outlookAccountId !== undefined;
+
+  // Naming both providers' mailboxes, or an Outlook mailbox with a source
+  // other than "outlook", has no single meaning — refuse rather than guess.
+  // (Gmail's own contradiction with source "cloudflare" is checked below.)
+  const gmailNamed = accountGiven && body.gmailAccountId !== null;
+  const outlookNamed = outlookGiven && body.outlookAccountId !== null;
+  if (
+    (gmailNamed && outlookNamed) ||
+    (gmailNamed && body.source === "outlook") ||
+    (outlookNamed && sourceGiven && body.source !== "outlook")
+  ) {
+    return c.json(
+      {
+        error:
+          'The source and the mailbox in this request contradict each other. Send source: "gmail" with a gmailAccountId, source: "outlook" with an outlookAccountId, or source: "cloudflare" on its own to unmap.',
+      },
+      400,
+    );
+  }
+
+  // One body that says both things at once is a mistake worth naming rather
+  // than silently resolving in a direction the caller may not have meant.
+  if (
+    sourceGiven &&
+    accountGiven &&
+    body.source === "cloudflare" &&
+    body.gmailAccountId !== null
+  ) {
+    return c.json(
+      {
+        error:
+          'source: "cloudflare" and a gmailAccountId contradict each other. Send source: "gmail" with the mailbox to map it, or source: "cloudflare" on its own to unmap it.',
+      },
+      400,
+    );
+  }
+
+  let nextSource = sourceGiven
+    ? body.source!
+    : (currentRow?.source ?? "cloudflare");
+  let nextGmailAccountId = accountGiven
+    ? body.gmailAccountId!
+    : (currentRow?.gmailAccountId ?? null);
+
+  let nextOutlookAccountId = outlookGiven
+    ? body.outlookAccountId!
+    : (currentRow?.outlookAccountId ?? null);
+
+  // Naming a mailbox is choosing its provider...
+  if (gmailNamed && !sourceGiven) nextSource = "gmail";
+  if (outlookNamed && !sourceGiven) nextSource = "outlook";
+  // ...and an inbox reads from one place, so the provider it is not mapped
+  // to (both, for Cloudflare) gives its mailbox up.
+  if (nextSource !== "gmail") nextGmailAccountId = null;
+  if (nextSource !== "outlook") nextOutlookAccountId = null;
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
@@ -420,6 +575,156 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     );
   }
 
+  // A Gmail source with no mailbox names nothing to sync from, and the
+  // sendAs check below is skipped for it because there is no account to ask —
+  // so without this it is the one way to write an unverified "gmail" row.
+  // Not reachable from the UI, which always sends both fields together.
+  if (nextSource === "gmail" && nextGmailAccountId === null) {
+    return c.json(
+      {
+        error:
+          'A Gmail inbox must name the connected mailbox it reads from. Send gmailAccountId alongside source: "gmail", or use source: "cloudflare" to unmap it.',
+      },
+      400,
+    );
+  }
+
+  // A Gmail mapping is only usable if the connected account may actually put
+  // this address in a From: header. Until this check existed, a wrong mapping
+  // was saved happily and only surfaced when a real reply bounced.
+  //
+  // Keyed on the RESULTING mapping, not on `body.source`. Entering this block
+  // only when the request carried `source` is what let
+  // `{"gmailAccountId": "..."}` write a mapping with no `sendAs` call at all
+  // — the gate skipped entirely by the one field that creates the thing it
+  // gates. A non-null `nextGmailAccountId` now implies `nextSource ===
+  // "gmail"` by construction above, so this is the whole condition.
+  //
+  // Still only when the mapping is new or changed: re-checking on every
+  // unrelated edit would make renaming an inbox fail whenever Gmail is
+  // unreachable, and an unchanged mapping was already checked when it was
+  // saved.
+  if (
+    nextGmailAccountId !== null &&
+    (currentRow?.source !== "gmail" ||
+      currentRow?.gmailAccountId !== nextGmailAccountId)
+  ) {
+    const cfg = await gmailAuthConfig(db, c.env);
+    if (!cfg) {
+      return c.json(
+        {
+          error:
+            "Google is not set up yet. Add its OAuth client ID and secret under Inboxes → Connected mailboxes → Google settings.",
+        },
+        503,
+      );
+    }
+
+    let sendAs: string[];
+    try {
+      const accessToken = await getAccessToken(db, nextGmailAccountId, cfg);
+      sendAs = await listSendAs(accessToken);
+    } catch (e) {
+      // Log a code, never the error's free text and never the token: this
+      // path holds an access token, and an admin-facing message plus a log
+      // line are both places it must never reach.
+      const reason =
+        e instanceof GmailApiError || e instanceof GoogleAuthError
+          ? e.code
+          : "sendas_check_failed";
+      console.error(
+        `[admin-inboxes] could not verify the Gmail mapping for ${email} (account ${nextGmailAccountId}): ${reason}`,
+      );
+      // Refuse rather than save something unverified — an unchecked mapping
+      // that looks checked is exactly the failure this guard exists to stop.
+      return c.json(
+        {
+          error: `Could not verify that ${email} can be sent from the connected Google account, so the mapping was not saved. Please try again.`,
+        },
+        502,
+      );
+    }
+
+    // Both sides are normalised: `listSendAs` lowercases Gmail's, and `email`
+    // was normalised at the top of this handler.
+    if (!sendAs.includes(email)) {
+      return c.json(
+        {
+          error: `The connected Google account cannot send as ${email}, so the mapping was not saved. Add ${email} under "Send mail as" in that account's Gmail settings, verify it, then map this inbox again.`,
+        },
+        400,
+      );
+    }
+  }
+
+  if (nextSource === "outlook" && nextOutlookAccountId === null) {
+    return c.json(
+      {
+        error:
+          'An Outlook inbox must name the connected mailbox it reads from. Send outlookAccountId alongside source: "outlook", or use source: "cloudflare" to unmap it.',
+      },
+      400,
+    );
+  }
+
+  // The Outlook counterpart of the send-as check above: the mailbox must
+  // receive (and so can send) as this address — its own address or one of
+  // its aliases. Microsoft lists aliases for work and school accounts; a
+  // personal account offers only its own address.
+  if (
+    nextOutlookAccountId !== null &&
+    (currentRow?.source !== "outlook" ||
+      currentRow?.outlookAccountId !== nextOutlookAccountId)
+  ) {
+    const cfg = await outlookAuthConfig(db, c.env);
+    if (!cfg) {
+      return c.json(
+        {
+          error:
+            "Microsoft is not set up yet. Add its app registration's client ID and secret under Inboxes → Connected mailboxes → Microsoft settings.",
+        },
+        503,
+      );
+    }
+    let addresses: string[];
+    try {
+      const token = await getOutlookAccessToken(db, nextOutlookAccountId, cfg);
+      const profile = await getOutlookProfile(token);
+      addresses = [profile.emailAddress, ...profile.aliases];
+    } catch (e) {
+      const reason =
+        e instanceof MicrosoftAuthError ? e.code : "address_check_failed";
+      console.error(
+        `[admin-inboxes] could not verify the Outlook mapping for ${email} (account ${nextOutlookAccountId}): ${reason}`,
+      );
+      return c.json(
+        {
+          error: `Could not verify that ${email} belongs to the connected Microsoft mailbox, so the mapping was not saved. Please try again.`,
+        },
+        502,
+      );
+    }
+    if (!addresses.includes(email)) {
+      return c.json(
+        {
+          error: `The connected Microsoft mailbox does not receive mail as ${email}, so the mapping was not saved. Map its own address (${addresses[0]}), or add ${email} as an alias of that mailbox in Microsoft 365 first.`,
+        },
+        400,
+      );
+    }
+  }
+
+  const outlookMappingChanged =
+    nextOutlookAccountId !== (currentRow?.outlookAccountId ?? null);
+
+  // The mailbox this inbox's stored Gmail thread ids came from is about to
+  // stop being the mailbox it reads from. Those ids are per-MAILBOX and
+  // nothing records which account issued them, so from here on they are
+  // claims no one can check — and handing one to a different account's
+  // `messages.send` is a 4xx, which is terminal, which is never queued. See
+  // `clearGmailThreadIds`.
+  const mappingChanged =
+    nextGmailAccountId !== (currentRow?.gmailAccountId ?? null);
   // What this request changes, for the audit log. The signature and the
   // agent instructions are named, not copied.
   const changes: Record<string, unknown> = {};
@@ -445,6 +750,18 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   );
   track("agentAutodraft", currentRow?.agentAutodraft ?? 0, nextAgentAutodraft);
   track("threadingMode", currentThreadingMode, nextThreadingMode);
+  // The mapping by source and account id; the mailbox's address stays out.
+  track("source", currentRow?.source ?? "cloudflare", nextSource);
+  track(
+    "gmailAccountId",
+    currentRow?.gmailAccountId ?? null,
+    nextGmailAccountId,
+  );
+  track(
+    "outlookAccountId",
+    currentRow?.outlookAccountId ?? null,
+    nextOutlookAccountId,
+  );
 
   // A new conversation mode claims the inbox for its backfill before anything
   // is saved, so a second switch while one runs changes nothing. Asking for
@@ -532,7 +849,10 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextSpamThreshold === null &&
     nextAgentInstructions === null &&
     nextAgentAutodraft === 0 &&
-    nextThreadingMode === "relationship"
+    nextThreadingMode === "relationship" &&
+    nextSource === "cloudflare" &&
+    nextGmailAccountId === null &&
+    nextOutlookAccountId === null
   ) {
     // Only while the mode is still the default: another admin may have just
     // switched it (their backfill is running).
@@ -544,6 +864,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
           eq(senderIdentities.threadingMode, "relationship"),
         ),
       );
+    if (mappingChanged) await clearGmailThreadIds(db, [email]);
     await startBackfill();
     await auditInboxUpdate();
     return c.json(
@@ -558,6 +879,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         spamThreshold: null,
         agentInstructions: null,
         agentAutodraft: false,
+        source: "cloudflare",
+        gmailAccountId: null,
+        outlookAccountId: null,
       },
       200,
     );
@@ -575,6 +899,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       agentInstructions: nextAgentInstructions,
       agentAutodraft: nextAgentAutodraft,
       threadingMode: nextThreadingMode,
+      source: nextSource,
+      gmailAccountId: nextGmailAccountId,
+      outlookAccountId: nextOutlookAccountId,
       createdAt: now,
       updatedAt: now,
     })
@@ -593,12 +920,29 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         spamThreshold: nextSpamThreshold,
         agentInstructions: nextAgentInstructions,
         agentAutodraft: nextAgentAutodraft,
+        source: nextSource,
+        gmailAccountId: nextGmailAccountId,
+        outlookAccountId: nextOutlookAccountId,
         updatedAt: now,
       },
     });
 
   await startBackfill();
   await auditInboxUpdate();
+  if (mappingChanged) await clearGmailThreadIds(db, [email]);
+
+  // A mailbox is usually connected before any inbox is mapped to it, so this
+  // is the moment its import can actually run. Start it now rather than at
+  // the next cron tick; the cron starts it anyway if this does not.
+  // Best effort: the mapping is already saved, and must not be reported as
+  // failed because a job did not start.
+  if (mappingChanged && nextGmailAccountId) {
+    await ensureBackfillJobs(db, c.env, nextGmailAccountId).catch(() => {});
+  }
+  if (outlookMappingChanged && nextOutlookAccountId) {
+    await ensureBackfillJobs(db, c.env, nextOutlookAccountId).catch(() => {});
+  }
+
   return c.json(
     {
       email,
@@ -611,6 +955,9 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       spamThreshold: nextSpamThreshold,
       agentInstructions: nextAgentInstructions,
       agentAutodraft: nextAgentAutodraft === 1,
+      source: nextSource,
+      gmailAccountId: nextGmailAccountId,
+      outlookAccountId: nextOutlookAccountId,
     },
     200,
   );

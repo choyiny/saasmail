@@ -1,6 +1,7 @@
 {
   // Copy this file to wrangler.jsonc and fill in your values.
   // wrangler.jsonc is gitignored so each deployer has their own config.
+  // Recommended: `yarn saasmail install` generates it from this file and creates the resources.
   "name": "saasmail",
   "main": "worker/src/index.ts",
   "account_id": "<your-cloudflare-account-id>",
@@ -48,9 +49,6 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": true
   },
-  "email_routing": {
-    "enabled": true
-  },
   "observability": {
     "enabled": true
   },
@@ -69,6 +67,17 @@
       }
     ]
   },
+  // The one-off mailbox import, for Gmail and Outlook alike
+  // (worker/src/lib/gmail/backfill-job.ts). Created on deploy; nothing to
+  // provision. Without it the import still runs, slower, inside the cron
+  // sync's budget.
+  "workflows": [
+    {
+      "name": "saasmail-gmail-backfill",
+      "binding": "GMAIL_BACKFILL",
+      "class_name": "GmailBackfillWorkflow"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
@@ -133,7 +142,13 @@
     // Set to "false" to stop every connected MCP agent from sending: the
     // send_email, reply_email, send_template and enroll_sequence tools stay
     // listed but refuse with MCP_SEND_DISABLED. On when unset.
-    "MCP_SEND_ENABLED": "true"
+    "MCP_SEND_ENABLED": "true",
+
+    /* installer */
+    // Written by `yarn saasmail install` so `/.well-known/saasmail` can report
+    // which installation this is. Leave blank when deploying by hand.
+    "SAASMAIL_INSTALLATION": "",
+    "SAASMAIL_VERSION": ""
     // DO NOT set DISABLE_PASSKEY_GATE in production. It's intended for local
     // dev only (see .dev.vars.example) and turns off the server-side passkey
     // requirement for /api/* when set to "true".

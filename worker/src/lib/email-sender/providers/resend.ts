@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { toBase64, withoutHeader } from "../shared";
 import { classifyErrorMessage } from "../classify";
+import { inlineDataImages } from "../inline-images";
 
 export class ResendSender implements EmailSender {
   readonly provider = "resend" as const;
@@ -11,7 +12,9 @@ export class ResendSender implements EmailSender {
     this.client = new Resend(apiKey);
   }
 
-  async send(params: SendEmailParams): Promise<SendEmailResult> {
+  async send(input: SendEmailParams): Promise<SendEmailResult> {
+    // Pasted images as inline cid: parts, which every client shows.
+    const params = inlineDataImages(input);
     // With a key, a retry of an accepted send gets Resend's original answer
     // instead of a second message; the same key with a different payload is a
     // permanent error ("invalid_idempotent_request"), never a resend.

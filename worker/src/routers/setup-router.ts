@@ -1,7 +1,9 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { sql } from "drizzle-orm";
 import { users } from "../db/auth.schema";
+import { publicAuthFailure } from "../lib/public-error";
 import { createAuth } from "../auth";
+import { setupCodeRequired, verifySetupCode } from "../lib/setup-code";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 
@@ -12,6 +14,8 @@ export const setupRouter = new OpenAPIHono<{
 
 const StatusSchema = z.object({
   setupRequired: z.boolean(),
+  /** The first admin must present the one-time setup code. */
+  codeRequired: z.boolean(),
 });
 
 const MigrationRequiredSchema = z.object({
@@ -22,7 +26,7 @@ const MigrationRequiredSchema = z.object({
 
 const MIGRATION_REQUIRED_RESPONSE = {
   error:
-    "Database migrations have not been applied yet. Run `yarn db:migrate:prod` to create the production D1 tables, or run `/saasmail-onboarding` to walk through setup, then reload saasmail.",
+    "Database migrations have not been applied yet. Run `yarn db:migrate:prod` to create the production D1 tables, or run `yarn saasmail install --resume` to continue setup, then reload saasmail.",
   code: "DATABASE_MIGRATION_REQUIRED",
   command: "yarn db:migrate:prod",
 } as const;
@@ -40,6 +44,8 @@ const SetupRequestSchema = z.object({
   name: z.string().min(1).max(100),
   email: z.string().email(),
   password: z.string().min(8).max(128),
+  /** The one-time setup code, when the instance has one. */
+  code: z.string().max(200).optional(),
 });
 
 const SetupResponseSchema = z.object({
@@ -73,7 +79,14 @@ setupRouter.openapi(statusRoute, async (c) => {
   const db = c.get("db");
   try {
     const count = await countUsers(db);
-    return c.json({ setupRequired: count === 0 }, 200);
+    const setupRequired = count === 0;
+    return c.json(
+      {
+        setupRequired,
+        codeRequired: setupRequired && setupCodeRequired(c.env),
+      },
+      200,
+    );
   } catch (err) {
     if (isMissingUsersTableError(err)) {
       return c.json(MIGRATION_REQUIRED_RESPONSE, 503);
@@ -100,7 +113,8 @@ const createRouteDef = createRoute({
   responses: {
     ...json200Response(SetupResponseSchema, "First user created"),
     403: {
-      description: "Setup has already been completed",
+      description:
+        "Setup has already been completed, or the setup code is missing or wrong",
       content: { "application/json": { schema: ErrorSchema } },
     },
     400: {
@@ -131,7 +145,10 @@ setupRouter.openapi(createRouteDef, async (c) => {
     return c.json({ error: "Setup has already been completed" }, 403);
   }
 
-  const { name, email, password } = c.req.valid("json");
+  const { name, email, password, code } = c.req.valid("json");
+  if (!(await verifySetupCode(c.env, code))) {
+    return c.json({ error: "The setup code is missing or wrong." }, 403);
+  }
 
   const auth = createAuth(c.env);
 
@@ -140,8 +157,13 @@ setupRouter.openapi(createRouteDef, async (c) => {
       body: { name, email, password, role: "admin" },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Signup failed";
-    return c.json({ error: message }, 400);
+    // Public route, same rule as the invite acceptance — and the same code,
+    // so the two cannot drift. See lib/public-error.ts.
+    const failure = publicAuthFailure(err, "Signup failed. Please try again.");
+    if (failure.internal !== null) {
+      console.error(`[setup] admin creation failed: ${failure.internal}`);
+    }
+    return c.json({ error: failure.body }, 400);
   }
 
   return c.json({ success: true }, 200);

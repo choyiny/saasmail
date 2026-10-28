@@ -1,11 +1,12 @@
 export function parseFrom(input: string): { name?: string; address: string } {
   const match = input.match(/^\s*(.*)\s*<([^>]+)>\s*$/);
   if (match && match[2]) {
-    const rawName = match[1].trim();
-    const name =
-      rawName.length >= 2 && rawName.startsWith('"') && rawName.endsWith('"')
-        ? rawName.slice(1, -1).replace(/\\(["\\])/g, "$1")
-        : rawName;
+    // Trim before unquoting: the greedy capture keeps the space before `<`, so
+    // a quoted name (see encodeDisplayName) would otherwise keep its closing quote.
+    let name = match[1].trim();
+    if (name.length >= 2 && name.startsWith('"') && name.endsWith('"')) {
+      name = name.slice(1, -1).replace(/\\(.)/g, "$1");
+    }
     return { name: name || undefined, address: match[2].trim() };
   }
   return { address: input.trim() };

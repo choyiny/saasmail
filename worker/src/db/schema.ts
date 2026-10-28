@@ -47,6 +47,8 @@ import { authRateLimits } from "./auth-rate-limits.schema";
 import { spamModels, spamTokens, spamTraining } from "./spam-filter.schema";
 import { backupRuns } from "./backup-runs.schema";
 import { gmailAccounts } from "./gmail-accounts.schema";
+import { outlookAccounts } from "./outlook-accounts.schema";
+import { installState } from "./install-state.schema";
 
 export const schema = {
   ...authSchema,
@@ -101,4 +103,6 @@ export const schema = {
   spamTraining,
   backupRuns,
   gmailAccounts,
+  outlookAccounts,
+  installState,
 } as const;

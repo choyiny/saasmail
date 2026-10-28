@@ -1,13 +1,50 @@
 ---
 name: update-saasmail
-description: Sync the local saasmail repo with the latest upstream changes from https://github.com/choyiny/saasmail. Use this skill whenever the user wants to update saasmail, pull upstream changes, sync with upstream, rebase on upstream, get the latest saasmail, or says "/update-saasmail". Handles adding the upstream remote if missing, rebases local commits on top of upstream/main, auto-stashes uncommitted work, and resolves conflicts by preferring upstream.
+description: Update a deployed saasmail instance to the latest release (npx saasmail@latest upgrade), or sync a fork or local clone with https://github.com/choyiny/saasmail. Use this skill whenever the user wants to update saasmail, upgrade it, get the latest saasmail, pull upstream changes, sync or rebase on upstream, adopt an existing install into the npm package, or says "/update-saasmail". For a fork it adds the upstream remote if missing, rebases local commits on upstream/main, auto-stashes uncommitted work, and prefers upstream on conflicts.
 ---
 
-# Update saasmail from upstream
+# Update saasmail
+
+Three paths. Pick by how the instance was installed:
+
+- **Installed with `npx saasmail install`** (state in `~/.saasmail/<slug>/`, or `SAASMAIL_HOME`): follow **Upgrade from npm**.
+- **Installed from a clone** (`yarn saasmail install`, state in the checkout's `.saasmail/`) that the user wants to hand to the package, or a worker made by the old onboarding skill: **Adopt first**, then upgrade.
+- **A fork or modified code the user keeps running from a clone**: follow **Sync a fork from upstream** (the original flow, below).
+
+Ask if unsure. Never deploy from a clone with `yarn deploy` for an install the package owns.
+
+## Upgrade from npm
+
+`upgrade` and `adopt` are npm-only; run them from any directory. Same rule as onboarding: you run the read-only plan, **the user runs the apply in their own terminal, not with `!`**, because the apply prints the setup code and credential prompts must stay out of this conversation.
+
+1. `npx saasmail status [--name <name>]` shows the recorded install, the running version and **Latest** on npm.
+2. Plan (read-only, safe from your shell):
+
+   ```bash
+   npx saasmail@latest upgrade --plan [--name <name>]
+   ```
+
+   Walk the user through it: new migrations, resources and secrets, and the plan digest. Say plainly that **migrations cannot be undone**; if a release is broken, the way back is the next release.
+
+3. It stops, changing nothing, in two cases:
+   - **Downgrade**: the site runs a newer version than the package. Tell the user the version it names; never work around it.
+   - **Custom code**: the running version is not a release (a modified fork, a dirty or diverged commit, or unknown). Ask explicitly whether they want to replace it. Only on a clear yes, the plan and apply get `--replace-custom-code`.
+4. Ask for an explicit yes, then give the user the apply command the plan printed (it ends with `--expect-plan <digest> --yes`) to run in their own terminal.
+5. If it fails, the message prints the command to continue. Ask for the error lines (never a `Setup code:` line), help fix the cause, and have them run `npx saasmail@latest upgrade --resume [--name <name>]` in their terminal. `--resume` continues even if the site is down. "The plan changed since it was reviewed" means something moved: plan again.
+6. Run `npx saasmail status [--name <name>]` yourself and confirm the running version matches Latest.
+
+## Adopt first (once)
+
+- A clone install: `npx saasmail adopt --from <checkout> [--name <name>]` copies its state and `wrangler.jsonc` to `~/.saasmail/<slug>/`. Nothing on Cloudflare changes; the clone then refuses to install or resume it. Confirm with the user before running it.
+- An install with no CLI state (old onboarding skill): `npx saasmail adopt --worker <name> [--account <id|name>] [--inbound-domain <domain>] [--send-domain <domain>] --plan`, review it with the user, then they run the printed apply in their terminal. It reads the worker's bindings and deploys nothing; without the domain flags it records the zones whose catch-all goes to the worker (Email Routing on) and, with Email Sending, the enabled sending subdomains in them. If the running version is unknown, the first upgrade needs `--replace-custom-code`. Zone routes other than custom domains are not supported. It stops, writing nothing, on worker vars the first upgrade would drop or change (a var saasmail's config does not set, one it sets to another value such as a hand-edited `TRUSTED_ORIGINS`, or a plain var named like a generated secret such as `TOKEN_ENCRYPTION_KEY`); it lists each with its current and new value. Retired vars (`APP_NAME`, `APP_LOGO_LETTER`) and a `TRUSTED_ORIGINS` trimmed only of localhost origins don't stop it; the plan lists them as dropped. The user changes or removes the others on the worker (dashboard → Settings → Variables), then runs adopt again. A secret-named var keeps its value as a Secret (dashboard: change its type to Secret), so the data it protects stays readable.
+
+Then continue with **Upgrade from npm**.
+
+## Sync a fork from upstream
 
 Sync the local saasmail fork with the latest changes from `choyiny/saasmail` while preserving the user's local commits on top.
 
-## Why this exists
+### Why this exists
 
 The user maintains a fork (or local clone) of `https://github.com/choyiny/saasmail` with their own commits layered on top. They want a one-shot command that:
 
@@ -17,23 +54,23 @@ The user maintains a fork (or local clone) of `https://github.com/choyiny/saasma
 
 Regular `git pull` creates merge commits and doesn't give conflict preference. Regular `git rebase` halts on conflicts. This skill wraps the right invocation.
 
-## Preconditions
+### Preconditions
 
 Before running anything, confirm:
 
 - Working directory is the saasmail repo (check for `wrangler.jsonc` or `wrangler.jsonc.example` and `worker/` directory). If not, stop and tell the user.
 - The current branch is the one they want to update. Usually `main`. If they're on a feature branch, ask which branch to rebase onto upstream/main before proceeding.
 
-## Steps
+### Steps
 
-### 1. Ensure the `upstream` remote exists
+#### 1. Ensure the `upstream` remote exists
 
 Run `git remote -v` and check for an `upstream` entry pointing at `https://github.com/choyiny/saasmail` (allow `.git` suffix and `git@github.com:choyiny/saasmail.git` SSH form).
 
 - If missing: `git remote add upstream https://github.com/choyiny/saasmail.git`
 - If present but pointing elsewhere: stop and ask the user — don't silently rewrite a remote they configured deliberately.
 
-### 2. Stash uncommitted changes if any
+#### 2. Stash uncommitted changes if any
 
 Run `git status --porcelain`. If there is any output (tracked modifications or staged changes):
 
@@ -43,13 +80,13 @@ git stash push -u -m "update-saasmail auto-stash"
 
 Remember that you stashed, so you can restore at the end. Untracked-but-ignored files are fine to leave alone (`-u` covers untracked, not ignored).
 
-### 3. Fetch upstream
+#### 3. Fetch upstream
 
 ```bash
 git fetch upstream
 ```
 
-### 4. Rebase onto upstream/main with upstream-wins conflict strategy
+#### 4. Rebase onto upstream/main with upstream-wins conflict strategy
 
 ```bash
 git rebase upstream/main -X ours
@@ -64,15 +101,9 @@ If the rebase still stops (e.g., a whole file conflict that `-X ours` can't reso
 
 Never run `git rebase --skip` without asking — that silently drops one of the user's commits.
 
-### 5. Check `wrangler.jsonc` against the tracked example
+#### 5. Bring `wrangler.jsonc` up to date
 
-After rebasing, run:
-
-```bash
-diff -u wrangler.jsonc.example wrangler.jsonc
-```
-
-Inspect the diff and report any missing bindings, Durable Object migrations, or variables to the user. Do **not** edit `wrangler.jsonc` silently; it is gitignored and may contain deployment-specific settings.
+`wrangler.jsonc` is gitignored, so the rebase never touches it: bindings, crons and vars that upstream added to `wrangler.jsonc.example` are missing until they are copied over. Compare the two files and show the user each top-level block or `vars` key present in the example but absent from their config (for example `workflows`, `durable_objects` and its `migrations`, or a changed `triggers.crons`). Add the ones they accept, keeping their own values and IDs; never overwrite a value they already set.
 
 For the mailbox/agent/JMAP release, explicitly check for:
 
@@ -87,9 +118,7 @@ Also run `wrangler secret list` and check that `UNSUBSCRIBE_SECRET` is set; if i
 
 Tell the user that the worker fails at runtime without the `MailAgent` binding and migration. Also warn that enabling the `AI` binding enables paid Workers AI fallback usage when neither `ANTHROPIC_API_KEY` nor `OPENAI_API_KEY` is configured.
 
-### 6. Check for new VAPID configuration
-
-Run:
+Then check push notifications:
 
 ```bash
 wrangler secret list
@@ -98,7 +127,7 @@ grep "VAPID_PUBLIC_KEY" wrangler.jsonc
 
 If `VAPID_PRIVATE_KEY` is missing from `wrangler secret list` **or** `VAPID_PUBLIC_KEY` is missing from `wrangler.jsonc`, prompt the user:
 
-> This update adds browser push notifications. Generate VAPID keys now? (If skipped, push remains disabled until you run `yarn vapid:generate`.)
+> Browser push notifications aren't configured. Generate VAPID keys now? (If skipped, push remains disabled until you run `yarn vapid:generate`.)
 
 **If yes**, run the same flow as the onboarding step:
 
@@ -112,7 +141,7 @@ If `VAPID_PRIVATE_KEY` is missing from `wrangler secret list` **or** `VAPID_PUBL
 
 **If no**, proceed without blocking.
 
-### 6a. Apply database migrations
+#### 5a. Apply database migrations
 
 Run:
 
@@ -120,9 +149,9 @@ Run:
 yarn db:migrate:prod
 ```
 
-This ensures any new migrations (including the push-subscriptions table) are applied to the remote D1 database. If the command reports nothing to migrate, that's fine — continue.
+This ensures any new migrations are applied to the remote D1 database. If the command reports nothing to migrate, that's fine — continue.
 
-### 7. Restore stashed changes
+#### 6. Restore stashed changes
 
 If you stashed in step 2:
 
@@ -132,16 +161,16 @@ git stash pop
 
 If `stash pop` itself conflicts, leave the stash entry in place and tell the user — don't drop their uncommitted work.
 
-### 8. Report what happened
+#### 7. Report what happened
 
 Give the user a concise summary:
 
 - Whether `upstream` was newly added or already configured.
-- How many commits were pulled from upstream (`git rev-list --count HEAD@{1}..HEAD` after the rebase, or count from the fetch output).
+- How many commits were pulled from upstream: `git rev-list --count ORIG_HEAD..upstream/main`, run right after the rebase while `ORIG_HEAD` still points at the pre-rebase branch. (`HEAD@{1}` is the rebase's last step, not the old branch, so it counts 0.)
 - Whether any conflicts were auto-resolved in favor of upstream (check rebase output for `CONFLICT` lines that were resolved by the strategy).
 - Whether stashed changes were restored cleanly.
 
-## Non-goals
+### Non-goals
 
 - Do NOT push to `origin` afterward. The user pushes when they're ready.
 - Do NOT touch branches other than the current one.

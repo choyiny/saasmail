@@ -224,6 +224,36 @@ describe("CloudflareSender", () => {
       transient: false,
     });
   });
+
+  it("keeps every Cc recipient", async () => {
+    // Regression: mimetext's setCc REPLACES the Cc header rather than
+    // appending, so calling it once per recipient (as a loop would) leaves
+    // only the last one. See providers/gmail.ts for the identical bug fixed
+    // during the previous slice.
+    const fakeBinding = {
+      send: vi.fn().mockResolvedValue({ messageId: "msg-cc" }),
+    };
+    const sender = createEmailSender({
+      EMAIL: fakeBinding,
+    } as unknown as CloudflareBindings);
+
+    const result = await sender.send({
+      from: "Support <support@example.com>",
+      to: "jane@example.com",
+      cc: ["a@x.com", "Bob <b@y.com>", "c@z.com"],
+      subject: "Hi",
+      html: "<p>Hi</p>",
+    });
+
+    expect(result.error).toBeNull();
+    // The structured send API, not a raw MIME message: every Cc is its own
+    // entry of the call's `cc` list.
+    const sent = fakeBinding.send.mock.calls[0][0] as { cc?: unknown[] };
+    expect(JSON.stringify(sent.cc)).toContain("a@x.com");
+    expect(JSON.stringify(sent.cc)).toContain("b@y.com");
+    expect(JSON.stringify(sent.cc)).toContain("c@z.com");
+    expect(sent.cc).toHaveLength(3);
+  });
 });
 
 describe("maxAttachmentBytes", () => {

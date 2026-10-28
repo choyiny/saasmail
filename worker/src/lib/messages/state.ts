@@ -15,7 +15,7 @@ import {
   mailboxFlagsBefore,
   needsFlagsBefore,
 } from "../audit/mail-events";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { users } from "../../db/auth.schema";
@@ -817,4 +817,42 @@ export async function deleteMessageState(
       }
     }
   }
+}
+
+/**
+ * The statements of `deleteMessageState` for the sent messages a subquery
+ * selects, for a caller that must run them in the same `db.batch` as the hard
+ * delete: the rows are matched when the batch runs, not when it is built, so a
+ * row written in between loses its state with it.
+ */
+export function deleteSentMessageStateStatements(
+  db: DrizzleD1Database<any>,
+  sentIds: SQL,
+) {
+  return [
+    db
+      .delete(messageUserState)
+      .where(
+        and(
+          eq(messageUserState.messageKind, "sent"),
+          sql`${messageUserState.messageId} IN ${sentIds}`,
+        ),
+      ),
+    db
+      .delete(mailboxMessageState)
+      .where(
+        and(
+          eq(mailboxMessageState.messageKind, "sent"),
+          sql`${mailboxMessageState.messageId} IN ${sentIds}`,
+        ),
+      ),
+    db
+      .delete(messageMailboxes)
+      .where(
+        and(
+          eq(messageMailboxes.messageKind, "sent"),
+          sql`${messageMailboxes.messageId} IN ${sentIds}`,
+        ),
+      ),
+  ];
 }

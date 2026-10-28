@@ -1,5 +1,7 @@
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { people } from "../../db/people.schema";
 import { sentEmails } from "../../db/sent-emails.schema";
 import { computeConversationId, externalsOnly } from "../conversation-id";
 import type { ParsedAttachment, ParsedEmail } from "../email-parser";
@@ -20,8 +22,14 @@ import {
 type Db = DrizzleD1Database<any>;
 
 export interface StoredSent {
+  /**
+   * False when a row for the same Gmail or Outlook message from this inbox
+   * was already there: nothing was written and the files were discarded.
+   */
+  inserted: boolean;
   sentId: string;
-  personId: string;
+  /** Null when `createPerson` is false and the recipient is unknown. */
+  personId: string | null;
   conversationId: string | null;
   storedAttachments: ParsedAttachment[];
   droppedAttachments: number;
@@ -33,6 +41,10 @@ export interface StoredSent {
  * recipient's person (created without touching any counts), the conversation
  * id a live send to the same people gets, and its attachments. No outbox row,
  * no provider. Returns null for a message with no recipient at all.
+ *
+ * A message carrying a Gmail or Outlook id is written at most once per inbox
+ * (the two unique indexes on `sent_emails`); a second store of it returns
+ * `inserted: false`, so two overlapping syncs mirror it once.
  */
 export async function storeSentMessage(
   db: Db,
@@ -49,17 +61,40 @@ export async function storeSentMessage(
     importJobId?: string | null;
     /** The inbox's threading mode, when the caller read it. */
     threadingMode?: ThreadingMode;
+    /**
+     * The counterparty, when the caller chose it from the headers (a synced
+     * Sent folder does). Else the first To, Cc or Bcc address.
+     */
+    counterparty?: string;
+    /**
+     * False: look the person up and never create one (a synced Sent message
+     * to an address we have never heard from stays off every timeline).
+     */
+    createPerson?: boolean;
+    /** The synced mailbox's ids for the message, written with the row. */
+    gmailMessageId?: string | null;
+    gmailThreadId?: string | null;
+    outlookMessageId?: string | null;
   },
 ): Promise<StoredSent | null> {
   const { parsed, inbox, sentAt, now } = input;
   const recipients = [...parsed.toList, ...parsed.cc, ...parsed.bcc];
-  const primary = recipients[0];
-  if (!primary) return null;
+  const primaryEmail = input.counterparty ?? recipients[0]?.email;
+  if (!primaryEmail) return null;
   const additionalTo = parsed.toList.filter(
-    (address) => address.email !== primary.email,
+    (address) => address.email !== primaryEmail,
   );
 
-  const personId = await findOrCreatePersonId(db, primary.email, sentAt);
+  const personId =
+    input.createPerson === false
+      ? ((
+          await db
+            .select({ id: people.id })
+            .from(people)
+            .where(eq(people.email, primaryEmail))
+            .limit(1)
+        )[0]?.id ?? null)
+      : await findOrCreatePersonId(db, primaryEmail, sentAt);
   const externals = externalsOnly(
     [...parsed.toList, ...parsed.cc].map((address) => address.email),
     input.ourDomains,
@@ -87,7 +122,7 @@ export async function storeSentMessage(
     id: sentId,
     personId,
     fromAddress: inbox,
-    toAddress: primary.email,
+    toAddress: primaryEmail,
     subject: parsed.subject || "",
     bodyHtml: storedBody(bodyHtml),
     bodyText: storedBody(parsed.bodyText),
@@ -100,17 +135,39 @@ export async function storeSentMessage(
     conversationId,
     threadKey,
     importJobId: input.importJobId ?? null,
+    gmailMessageId: input.gmailMessageId ?? null,
+    gmailThreadId: input.gmailThreadId ?? null,
+    outlookMessageId: input.outlookMessageId ?? null,
     sentAt,
     createdAt: now,
   };
+  let inserted: { id: string }[];
   try {
-    await db.insert(sentEmails).values(row);
+    inserted = await db
+      .insert(sentEmails)
+      .values(row)
+      .onConflictDoNothing()
+      .returning({ id: sentEmails.id });
   } catch (error) {
     await discardStoredFiles(db, env, sentId, null);
     throw error;
   }
+  if (inserted.length === 0) {
+    // Already stored (a concurrent sync of the same message): the files
+    // written above belong to no row.
+    await discardStoredFiles(db, env, sentId, null);
+    return {
+      inserted: false,
+      sentId,
+      personId,
+      conversationId,
+      storedAttachments: [],
+      droppedAttachments: 0,
+    };
+  }
 
   return {
+    inserted: true,
     sentId,
     personId,
     conversationId,

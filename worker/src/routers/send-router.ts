@@ -1,8 +1,12 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { createEmailSender } from "../lib/email-sender";
 import type { Variables } from "../variables";
+import { maxAttachmentBytesForInbox } from "../lib/email-sender/for-inbox";
+import { assertInboxAllowed } from "../lib/inbox-permissions";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { replyToEmail, sendEmail } from "../lib/send-email";
+import { MAILBOX_SEND_NOT_HELD_CODE } from "../lib/direct-send";
+import type { IdempotentResponse } from "../lib/send-idempotency";
 import { bearerSecurity } from "../lib/openapi-auth";
 import { MAX_CC_ENTRIES } from "../lib/send-limits";
 import { respondIdempotently } from "../lib/idempotent-send-route";
@@ -13,11 +17,35 @@ import {
   idempotencyKeyHeader,
   idempotent201Response,
   inboxForbiddenResponse,
+  mailboxSendErrorResponses,
   multipartParseErrorResponses,
   replyNotFoundResponse,
   replyValidationErrorResponse,
 } from "../lib/openapi-send-errors";
 import { templateVariablesSchema } from "../lib/template-variables-schema";
+
+/**
+ * The answer for a reply a Gmail or Outlook inbox did not send: 409 when it
+ * would have had to be held, 502 otherwise. A 502 whose outcome is unknown is
+ * kept as the idempotency key's answer.
+ */
+function mailboxFailure(
+  code: "SEND_FAILED" | "SEND_HELD",
+  message: string,
+  keepIdempotencyKey: boolean,
+): IdempotentResponse {
+  if (code === "SEND_HELD") {
+    return {
+      status: 409,
+      body: { error: message, code: MAILBOX_SEND_NOT_HELD_CODE },
+    };
+  }
+  return {
+    status: 502,
+    body: { error: message, code: "SEND_FAILED" },
+    ...(keepIdempotencyKey ? { remember: true } : {}),
+  };
+}
 
 export const sendRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -315,18 +343,29 @@ const replyEmailRoute = createRoute({
     ...replyNotFoundResponse,
     ...idempotencyConflictResponses,
     ...dailySendLimitResponses,
+    ...mailboxSendErrorResponses,
   },
 });
 
 sendRouter.openapi(replyEmailRoute, async (c) => {
   const db = c.get("db");
   const { emailId } = c.req.valid("param");
-  const sender = createEmailSender(c.env);
-  const parsed = await parseSendBody(
-    c,
-    ReplyEmailSchema,
-    sender.maxAttachmentBytes(),
-  );
+  // Budget from the sender that will actually carry this reply, which for a
+  // Gmail-mapped inbox is Gmail — not `createEmailSender(c.env)`, the
+  // configured provider, which never sends a Gmail reply at all. Resolved
+  // from the parsed payload's fromAddress, so it has to be a callback, and
+  // only called at all when the request actually carries an attachment.
+  const parsed = await parseSendBody(c, ReplyEmailSchema, (payload) => {
+    const fromAddress = payload.fromAddress.trim().toLowerCase();
+    // Authorize BEFORE answering anything about this address. The budget is
+    // Gmail's for a Gmail-mapped inbox and the configured provider's
+    // otherwise, so the `limitBytes` in a 413 tells the caller which — and
+    // without this, it would tell them that about an inbox they do not own.
+    // `replyToEmail` asserts the same thing on the same normalised value;
+    // this only moves the refusal in front of the disclosure.
+    assertInboxAllowed(c.get("allowedInboxes")!, fromAddress);
+    return maxAttachmentBytesForInbox(db, c.env, fromAddress);
+  });
   if (!parsed.ok) {
     const { status, body } = sendParseErrorResponse(parsed.err);
     return c.json(body, status);
@@ -376,6 +415,19 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
           result.code === "TEMPLATE_PARSE_ERROR"
         ) {
           return { status: 400, body: { error: result.message } };
+        }
+        // Cast: the worker build does not narrow this union (strict is off).
+        const refused = result as {
+          code: string;
+          message: string;
+          keepIdempotencyKey?: boolean;
+        };
+        if (refused.code === "SEND_FAILED" || refused.code === "SEND_HELD") {
+          return mailboxFailure(
+            refused.code,
+            refused.message,
+            refused.keepIdempotencyKey === true,
+          );
         }
         return { status: 404, body: { error: result.message } };
       }

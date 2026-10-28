@@ -98,7 +98,11 @@ async function runCounted(
   }
   try {
     const response = await run();
-    if (response.status < 200 || response.status >= 300) {
+    // A failure that may have sent the message keeps its slot.
+    if (
+      (response.status < 200 || response.status >= 300) &&
+      !response.remember
+    ) {
       await reservation.release();
     }
     return response;
