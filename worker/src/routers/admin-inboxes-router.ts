@@ -750,6 +750,18 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   );
   track("agentAutodraft", currentRow?.agentAutodraft ?? 0, nextAgentAutodraft);
   track("threadingMode", currentThreadingMode, nextThreadingMode);
+  // The mapping by source and account id; the mailbox's address stays out.
+  track("source", currentRow?.source ?? "cloudflare", nextSource);
+  track(
+    "gmailAccountId",
+    currentRow?.gmailAccountId ?? null,
+    nextGmailAccountId,
+  );
+  track(
+    "outlookAccountId",
+    currentRow?.outlookAccountId ?? null,
+    nextOutlookAccountId,
+  );
 
   // A new conversation mode claims the inbox for its backfill before anything
   // is saved, so a second switch while one runs changes nothing. Asking for
