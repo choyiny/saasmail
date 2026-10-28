@@ -24,6 +24,7 @@ import {
   createTestUser,
   getDb,
 } from "./helpers";
+import { attachments } from "../db/attachments.schema";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
 import { outlookAccounts } from "../db/outlook-accounts.schema";
 import { outboxEmails } from "../db/outbox-emails.schema";
@@ -141,6 +142,7 @@ beforeEach(async () => {
   saved = {
     RESEND_API_KEY: mutableEnv.RESEND_API_KEY,
     EMAIL: mutableEnv.EMAIL,
+    TOKEN_ENCRYPTION_KEY: mutableEnv.TOKEN_ENCRYPTION_KEY,
   };
   cloudflareSend = vi.fn(async () => ({ messageId: "<cf-1@acme.dev>" }));
   mutableEnv.RESEND_API_KEY = "";
@@ -266,6 +268,119 @@ describe.each(PROVIDERS)("a reply from an inbox mapped to $name", (p) => {
     expect(sends).toHaveLength(1);
     expect(cloudflareSend).not.toHaveBeenCalled();
     await nothingStored();
+  });
+
+  // Spec § 5.3: an unknown outcome keeps the key and the daily slot (the
+  // message may be out); a definite refusal, a 429 included, gives both back.
+  it.each([
+    {
+      label: "a 5xx",
+      answer: () => new Response("backend error", { status: 503 }),
+      unknown: true,
+    },
+    ...(p.name === "gmail"
+      ? [
+          {
+            label: "a 2xx without a message id",
+            answer: () =>
+              new Response("<html>ok</html>", {
+                status: 200,
+                headers: { "content-type": "text/html" },
+              }),
+            unknown: true,
+          },
+        ]
+      : []),
+    {
+      label: "a 429",
+      answer: () =>
+        new Response(JSON.stringify({ error: { message: "rate limited" } }), {
+          status: 429,
+          headers: { "content-type": "application/json" },
+        }),
+      unknown: false,
+    },
+  ])(
+    "$label: the key and the daily slot are kept only when the outcome is unknown",
+    async ({ answer, unknown }) => {
+      await setDailySendLimits(getDb(), { api: 1 });
+      const sends = stubMailbox(answer, p.accepted);
+
+      const first = await reply("key-first");
+      expect(first.status).toBe(502);
+      expect(await first.json()).toMatchObject({ code: "SEND_FAILED" });
+
+      const retry = await reply("key-first");
+      if (unknown) {
+        // Replayed: not sent again, and no second slot taken.
+        expect(retry.status).toBe(502);
+        expect(retry.headers.get("Idempotency-Replayed")).toBe("true");
+        const other = await reply("key-other");
+        expect(other.status).toBe(429);
+        expect(await other.json()).toMatchObject({
+          code: "DAILY_SEND_LIMIT_REACHED",
+        });
+        expect(sends).toHaveLength(1);
+        await nothingStored();
+      } else {
+        // The key and the only slot were given back: the retry sends.
+        expect(retry.status).toBe(201);
+        expect(sends).toHaveLength(2);
+        expect(await getDb().select().from(sentEmails)).toHaveLength(1);
+      }
+      expect(cloudflareSend).not.toHaveBeenCalled();
+    },
+  );
+
+  // Spec § 5.1: the refusal follows the sender the reply resolves to, not the
+  // inbox's mapping; an inbox that falls back to the configured provider is
+  // held while paused, like any other.
+  it("while paused, a mailbox reply with a file stores nothing; the same inbox falling back is held", async () => {
+    await setSendingPaused(getDb(), true);
+    const sends = stubMailbox(p.accepted);
+    const objects = async () =>
+      (await (env as unknown as CloudflareBindings).R2.list()).objects
+        .map((o) => o.key)
+        .filter((key) => key.startsWith("attachments/sent/"));
+    const before = new Set(await objects());
+    const withFile = () =>
+      authFetch("/api/send/reply/rcv-1", {
+        apiKey,
+        method: "POST",
+        body: buildSendForm(
+          { fromAddress: p.inbox, bodyHtml: "<p>See attached.</p>" },
+          [
+            {
+              name: "quote.pdf",
+              type: "application/pdf",
+              bytes: new Uint8Array([37, 80, 68, 70]),
+            },
+          ],
+        ),
+      });
+
+    const refused = await withFile();
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({
+      code: "MAILBOX_SEND_NOT_HELD",
+    });
+    await nothingStored();
+    expect(await getDb().select().from(attachments)).toHaveLength(0);
+    expect((await objects()).filter((key) => !before.has(key))).toEqual([]);
+
+    // No TOKEN_ENCRYPTION_KEY: the mapping falls back to the configured
+    // provider (as upstream), and that send is held as usual.
+    mutableEnv.TOKEN_ENCRYPTION_KEY = "";
+    const held = await withFile();
+    expect(held.status).toBe(201);
+    expect(await held.json()).toMatchObject({
+      status: "retrying",
+      paused: true,
+    });
+    expect(await getDb().select().from(outboxEmails)).toHaveLength(1);
+    expect(await getDb().select().from(attachments)).toHaveLength(1);
+    expect(sends).toHaveLength(0);
+    expect(cloudflareSend).not.toHaveBeenCalled();
   });
 
   it("(e) after a real disconnect the inbox is Cloudflare's, and the reply goes through it", async () => {
