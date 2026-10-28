@@ -8,6 +8,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryRouter, Outlet, RouterProvider } from "react-router-dom";
 import { AgentContextProvider, useAgentContext } from "@/agent/AgentContext";
+import type { MailMessageState } from "@/lib/api";
 
 const api = vi.hoisted(() => ({
   messageEmlUrl: (ref: string) => `/api/messages/${ref}/raw.eml`,
@@ -56,7 +57,7 @@ function AgentContextProbe() {
   );
 }
 
-const baseState = {
+const baseState: MailMessageState = {
   seen: false,
   starredAt: null,
   archivedAt: null,
