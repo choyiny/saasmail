@@ -24,24 +24,27 @@ export default function SetupPasskeyPage() {
   }
 
   return (
-    <div className="flex w-full max-w-sm flex-col items-center gap-8">
+    <div className="flex w-full max-w-[420px] flex-col items-center gap-7">
       <WordmarkLarge />
-      <div className="w-full rounded-2xl bg-white/10 p-8 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl">
+      <div className="pt-auth-card">
         <div className="mb-6">
-          <h2 className="text-xl font-extrabold tracking-tight text-white">
+          <h2 className="text-[20px] font-semibold leading-tight tracking-[-0.02em] text-text-primary">
             Register a passkey
           </h2>
-          <p className="mt-1.5 text-sm font-light text-white/60">
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-secondary">
             For security, you must register a passkey before accessing saasmail.
           </p>
         </div>
         {error && (
-          <p className="mb-4 text-sm text-red-300" role="alert">
+          <p
+            className="mb-4 rounded-lg border border-destructive/25 bg-destructive-subtle px-3 py-2 text-[13px] text-destructive"
+            role="alert"
+          >
             {error}
           </p>
         )}
         <button
-          className="w-full rounded-full bg-white py-2.5 text-sm font-medium text-[#0a0a0a] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-[13.5px] font-medium text-accent-foreground shadow-card transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
           onClick={handleRegister}
           disabled={loading}
         >

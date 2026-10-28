@@ -42,7 +42,7 @@ npx saasmail@latest upgrade   # move to the newest release
 npx saasmail status           # what is installed, what is latest
 ```
 
-Installed from a clone before? `npx saasmail adopt --from <checkout>` moves it; see [Updating](docs/updating.md). Running a fork or modified code? Clone the repo and use `yarn saasmail install` instead ([Setup](docs/setup.md#install-from-a-clone)).
+Running a fork or modified code? Clone the repo and use `yarn saasmail install` instead ([Setup](docs/setup.md#install-from-a-clone)); a clone's install is updated from the clone ([Updating](docs/updating.md#forks-and-modified-code)).
 
 Prefer a guide? Clone the repo, run `claude` and then `/saasmail-onboarding`.
 
@@ -86,13 +86,15 @@ https://github.com/user-attachments/assets/937d45e9-744e-461f-83fd-71e90a4c38b0
 
 ![Unified customer timeline](docs/screenshots/inbox-timeline.jpg)
 
-**Agent Plan (WebMCP)** — connect a browser AI agent and watch it work the inbox: it reads a playbook, lays out a live plan, and ticks steps off while a bottom-right feed groups each tool call as it runs.
-
-![Agent Plan with live plan and activity feed](docs/screenshots/agent-plan.jpg)
-
 **Table overview** — stat tiles plus a sortable people table spanning every inbox, with unread and attachment indicators.
 
 ![Table overview](docs/screenshots/table-view.jpg)
+
+**Gmail- and Outlook-style layouts** — each user can switch to a familiar layout in Settings → Appearance: Gmail-style with category tabs and labels per inbox, or Outlook-style with Focused/Other, a ribbon and a reading pane.
+
+![Gmail-style layout](docs/screenshots/gmail-layout.jpg)
+
+![Outlook-style layout](docs/screenshots/outlook-layout.jpg)
 
 **Templates & sequences** — reusable `{{variable}}` email templates, written as raw HTML or arranged in a visual block editor, and multi-step drip campaigns you enroll contacts into.
 

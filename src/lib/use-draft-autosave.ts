@@ -1,4 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+
+/** Where the draft stands, for a "Draft saved" indicator. */
+export type DraftStatus = "idle" | "saving" | "saved" | "error";
 import {
   fetchDraft,
   saveDraft,
@@ -69,6 +72,7 @@ export function useDraftAutosave({
 }: UseDraftAutosaveOptions) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const publishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [status, setStatus] = useState<DraftStatus>("idle");
   // Latest render values/flags, read inside async + cleanup callbacks so they
   // never operate on stale closure state.
   const valuesRef = useRef(values);
@@ -87,12 +91,14 @@ export function useDraftAutosave({
     if (!enabled) return;
     clearedRef.current = false;
     savedRef.current = false;
+    setStatus("idle");
     let cancelled = false;
     if (restore) {
       fetchDraft(contextKey)
         .then((draft) => {
           if (cancelled || !draft) return;
           savedRef.current = true;
+          setStatus("saved");
           onRestoreRef.current(draft);
         })
         .catch(() => {});
@@ -117,11 +123,14 @@ export function useDraftAutosave({
           savedRef.current = false;
           deleteDraft(contextKey).catch(() => {});
         }
+        setStatus("idle");
         return;
       }
       savedRef.current = true;
+      setStatus("saving");
       saveDraft({ contextKey, ...valuesRef.current })
         .then(() => {
+          if (!clearedRef.current) setStatus("saved");
           // Publish once the user has stopped editing for a while.
           if (publishTimer.current) clearTimeout(publishTimer.current);
           publishTimer.current = setTimeout(() => {
@@ -129,7 +138,7 @@ export function useDraftAutosave({
             publishDraft(contextKey).catch(() => {});
           }, publishIdleMs);
         })
-        .catch(() => {});
+        .catch(() => setStatus("error"));
     }, debounceMs);
     return () => {
       if (timer.current) clearTimeout(timer.current);
@@ -182,5 +191,5 @@ export function useDraftAutosave({
     }
   }
 
-  return { clear };
+  return { clear, status };
 }

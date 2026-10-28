@@ -5,9 +5,20 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { html } from "@codemirror/lang-html";
 import {
   syntaxHighlighting,
-  defaultHighlightStyle,
+  HighlightStyle,
   bracketMatching,
 } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
+
+/** Syntax colours from the theme tokens, so the editor follows dark mode. */
+const tokenHighlight = HighlightStyle.define([
+  { tag: [t.tagName, t.angleBracket], color: "var(--sm-accent-ink)" },
+  { tag: t.attributeName, color: "var(--sm-run)" },
+  { tag: [t.attributeValue, t.string], color: "var(--sm-ok)" },
+  { tag: t.comment, color: "var(--sm-faint)", fontStyle: "italic" },
+  { tag: [t.keyword, t.processingInstruction], color: "var(--sm-warn)" },
+  { tag: t.invalid, color: "var(--sm-bad)" },
+]);
 
 interface HtmlCodeEditorProps {
   value: string;
@@ -35,7 +46,7 @@ export default function HtmlCodeEditor({
         history(),
         bracketMatching(),
         html(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(tokenHighlight),
         keymap.of([...defaultKeymap, ...historyKeymap]),
         EditorView.domEventHandlers({
           paste(event, view) {
@@ -60,21 +71,35 @@ export default function HtmlCodeEditor({
           "&": {
             height: "100%",
             fontSize: "13px",
-            backgroundColor: "#ffffff",
-            color: "#0f172a",
+            backgroundColor: "var(--sm-surface)",
+            color: "var(--sm-ink)",
           },
-          ".cm-scroller": { overflow: "auto" },
+          "&.cm-focused": { outline: "none" },
+          ".cm-scroller": {
+            overflow: "auto",
+            fontFamily: "var(--sm-font-mono)",
+            lineHeight: "1.6",
+          },
+          ".cm-content": { caretColor: "var(--sm-accent)" },
           ".cm-gutters": {
-            backgroundColor: "#f9fafb",
-            color: "#94a3b8",
+            backgroundColor: "var(--sm-surface-2)",
+            color: "var(--sm-faint)",
             border: "none",
-            borderRight: "1px solid #e5e7eb",
+            borderRight: "1px solid var(--sm-line)",
           },
-          ".cm-activeLine": { backgroundColor: "#f3f4f6" },
-          ".cm-activeLineGutter": { backgroundColor: "#f3f4f6" },
-          ".cm-cursor": { borderLeftColor: "#2563eb" },
-          ".cm-selectionBackground, ::selection": {
-            backgroundColor: "#dbeafe",
+          ".cm-activeLine": { backgroundColor: "var(--sm-surface-2)" },
+          ".cm-activeLineGutter": {
+            backgroundColor: "var(--sm-surface-3)",
+            color: "var(--sm-ink-2)",
+          },
+          ".cm-cursor": { borderLeftColor: "var(--sm-accent)" },
+          "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection":
+            {
+              backgroundColor: "var(--sm-accent-tint-2)",
+            },
+          ".cm-matchingBracket": {
+            backgroundColor: "var(--sm-accent-tint)",
+            outline: "1px solid var(--sm-accent-tint-2)",
           },
         }),
       ],

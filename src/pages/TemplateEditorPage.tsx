@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useUnsavedGuard } from "@/hooks/useUnsavedGuard";
 import {
   useParams,
   useNavigate,
@@ -41,6 +42,7 @@ import {
   type TemplateAnalysis,
 } from "@/lib/template-syntax";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 const EMPTY_ANALYSIS: TemplateAnalysis = {
   required: [],
@@ -96,6 +98,20 @@ export default function TemplateEditorPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(isEdit);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
+  // What was last loaded or saved, to tell when there are unsaved edits.
+  const [saved, setSaved] = useState(() =>
+    JSON.stringify({
+      name: "",
+      slugValue: "",
+      subject: "",
+      bodyHtml: "",
+      bodyJson: null,
+    }),
+  );
+  const dirty =
+    !loading &&
+    JSON.stringify({ name, slugValue, subject, bodyHtml, bodyJson }) !== saved;
+  const { confirmLeave, release } = useUnsavedGuard(dirty);
 
   /**
    * For a block template the body is compiled here, by the same module the
@@ -144,6 +160,15 @@ export default function TemplateEditorPage() {
         setBodyHtml(t.bodyHtml);
         setFormat(t.format ?? "html");
         setBodyJson(t.bodyJson ?? null);
+        setSaved(
+          JSON.stringify({
+            name: t.name,
+            slugValue: t.slug,
+            subject: t.subject,
+            bodyHtml: t.bodyHtml,
+            bodyJson: t.bodyJson ?? null,
+          }),
+        );
       })
       .catch(() => setError("Template not found"))
       .finally(() => setLoading(false));
@@ -166,6 +191,7 @@ export default function TemplateEditorPage() {
       } else {
         await createTemplate({ slug: slugValue, name, subject, ...body });
       }
+      release();
       navigate("/templates");
     } catch {
       setError("Failed to save template");
@@ -177,7 +203,11 @@ export default function TemplateEditorPage() {
   if (loading) {
     return (
       <PageContainer>
-        <p className="pt-10 text-sm text-text-tertiary">Loading…</p>
+        <div className="flex flex-col gap-4" aria-busy="true">
+          <span className="pt-skel h-6 w-48" />
+          <span className="pt-skel h-40 w-full rounded-2xl" />
+          <span className="pt-skel h-[420px] w-full rounded-2xl" />
+        </div>
       </PageContainer>
     );
   }
@@ -187,9 +217,9 @@ export default function TemplateEditorPage() {
       {/* Breadcrumb back-link, sits above the page header. */}
       <Link
         to="/templates"
-        className="-mt-1 mb-1 inline-flex items-center gap-1 text-xs font-medium text-text-tertiary transition-colors hover:text-text-primary"
+        className="-mt-1 mb-2 inline-flex items-center gap-1 text-[13px] font-medium text-text-secondary transition-colors hover:text-text-primary"
       >
-        <ArrowLeft size={12} />
+        <ArrowLeft size={14} />
         Templates
       </Link>
 
@@ -197,28 +227,27 @@ export default function TemplateEditorPage() {
         title={isEdit ? name || "Edit template" : "New template"}
         subtitle={
           isEdit && slugValue ? (
-            <span className="font-mono">{slugValue}</span>
+            <span className="font-code text-xs">{slugValue}</span>
           ) : (
             "Reusable HTML email with {{variable}} interpolation."
           )
         }
         action={
           <div className="flex items-center gap-2">
-            <button
+            <Button
               type="button"
-              onClick={() => navigate("/templates")}
-              className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+              variant="outline"
+              onClick={() => confirmLeave() && navigate("/templates")}
             >
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => handleSave()}
               disabled={saving}
-              className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Saving…" : isEdit ? "Save changes" : "Create template"}
-            </button>
+            </Button>
           </div>
         }
       />
@@ -226,7 +255,7 @@ export default function TemplateEditorPage() {
       {error && (
         <div
           role="alert"
-          className="mb-4 rounded-[8px] border border-red-200 bg-red-50 px-4 py-2.5 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+          className="mb-4 rounded-xl border border-destructive/25 bg-destructive-subtle px-4 py-2.5 text-[13px] text-destructive"
         >
           {error}
         </div>
@@ -234,7 +263,7 @@ export default function TemplateEditorPage() {
 
       <form onSubmit={handleSave} className="space-y-5">
         {/* --- Details card --- */}
-        <section className="rounded-[8px] bg-card p-5 ring-1 ring-border">
+        <section className="pt-card p-5">
           <SectionHeader
             icon={Sparkles}
             title="Details"
@@ -271,7 +300,7 @@ export default function TemplateEditorPage() {
                   required
                   className={cn(
                     FORM_INPUT_CLASS,
-                    "font-mono",
+                    "font-code",
                     isEdit && "opacity-60",
                   )}
                 />
@@ -282,7 +311,7 @@ export default function TemplateEditorPage() {
                 hint={
                   <>
                     Use{" "}
-                    <code className="rounded bg-bg-muted px-1 py-0.5 font-mono text-[10px]">
+                    <code className="font-code rounded bg-bg-muted px-1 py-0.5 text-[11px]">
                       {`{{variable}}`}
                     </code>{" "}
                     for placeholders. Plain text here, not HTML — values are
@@ -303,18 +332,18 @@ export default function TemplateEditorPage() {
         </section>
 
         {/* --- Body card with HTML editor + live preview --- */}
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <section className="pt-card overflow-hidden">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
             <div className="min-w-0">
-              <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-text-primary">
+              <h2 className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em] text-text-primary">
                 {format === "block" ? (
-                  <Blocks size={13} className="text-text-tertiary" />
+                  <Blocks size={15} className="text-text-secondary" />
                 ) : (
-                  <Code2 size={13} className="text-text-tertiary" />
+                  <Code2 size={15} className="text-text-secondary" />
                 )}
                 Body
               </h2>
-              <p className="mt-0.5 text-xs font-light text-text-secondary">
+              <p className="mt-0.5 text-[13px] text-text-secondary">
                 {format === "block"
                   ? "Arrange blocks on the left, see the compiled email on the right."
                   : "Author HTML on the left, see the rendered email on the right."}
@@ -333,9 +362,9 @@ export default function TemplateEditorPage() {
                 onClick={() => setBodyHtml(formatHtml(bodyHtml))}
                 hidden={format === "block"}
                 disabled={!bodyHtml}
-                className="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-border bg-card px-2.5 text-[11px] font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-card px-2.5 text-[13px] font-medium text-text-primary shadow-card ring-1 ring-inset ring-border-strong transition-colors hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <Wand2 size={11} />
+                <Wand2 size={14} className="text-text-secondary" />
                 Format
               </button>
             </div>
@@ -349,7 +378,7 @@ export default function TemplateEditorPage() {
           {(analysis.required.length > 0 ||
             analysis.optional.length > 0 ||
             analysis.sections.length > 0) && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-bg-subtle/40 px-5 py-2.5">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-bg-subtle px-5 py-2.5">
               <VarGroup
                 label="Required"
                 // Section names get their own accurate chip (with the right
@@ -359,7 +388,7 @@ export default function TemplateEditorPage() {
                 items={analysis.required
                   .filter((v) => !isSectionName(analysis, v))
                   .map((v) => ({ name: v, label: `{{${v}}}` }))}
-                className="bg-violet/10 text-[#7c5cfc]"
+                className="accent"
               />
               <VarGroup
                 label="Optional"
@@ -369,7 +398,7 @@ export default function TemplateEditorPage() {
                 items={analysis.optional
                   .filter((v) => !isSectionName(analysis, v))
                   .map((v) => ({ name: v, label: `{{${v}?}}` }))}
-                className="bg-bg-muted text-text-secondary"
+                className=""
               />
               <VarGroup
                 label="Sections"
@@ -377,7 +406,7 @@ export default function TemplateEditorPage() {
                   name: s.name,
                   label: sectionChipLabel(s, analysis),
                 }))}
-                className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                className="ok"
               />
             </div>
           )}
@@ -415,7 +444,7 @@ export default function TemplateEditorPage() {
                 )}
               >
                 <PaneLabel>Preview</PaneLabel>
-                <div className="min-h-0 flex-1 bg-white">
+                <div className="email-surface min-h-0 flex-1 !rounded-none !shadow-none">
                   <iframe
                     title="Email preview"
                     sandbox="allow-same-origin"
@@ -447,7 +476,7 @@ interface ViewToggleProps {
 
 function ViewToggle({ mode, onChange }: ViewToggleProps) {
   return (
-    <div className="inline-flex rounded-[6px] bg-bg-muted/70 p-0.5 ring-1 ring-border">
+    <div className="pt-seg" role="group" aria-label="Editor view">
       <ToggleButton
         active={mode === "code"}
         onClick={() => onChange("code")}
@@ -485,14 +514,10 @@ function ToggleButton({
     <button
       type="button"
       onClick={onClick}
-      className={cn(
-        "inline-flex h-6 items-center gap-1 rounded-[4px] px-2 text-[11px] font-medium transition-all",
-        active
-          ? "bg-card text-text-primary shadow-sm"
-          : "text-text-secondary hover:text-text-primary",
-      )}
+      aria-pressed={active}
+      className={cn(active && "on")}
     >
-      <Icon size={11} />
+      <Icon />
       {label}
     </button>
   );
@@ -514,16 +539,13 @@ function VarGroup({
   if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
+      <span className="font-label text-[10.5px] text-text-tertiary">
         {label}
       </span>
       {items.map((item) => (
         <code
           key={item.name}
-          className={cn(
-            "rounded-full px-2 py-0.5 font-mono text-[11px]",
-            className,
-          )}
+          className={cn("pt-chip font-code !font-medium", className)}
         >
           {item.label}
         </code>
@@ -586,19 +608,19 @@ const MULTILINE_SNIPPET = `<div style="white-space: pre-line">
 function SyntaxCard() {
   const [open, setOpen] = useState(false);
   return (
-    <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+    <section className="pt-card overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-bg-muted/30"
+        className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-bg-subtle"
       >
         <div className="min-w-0">
-          <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-text-primary">
-            <BookOpen size={13} className="text-text-tertiary" />
+          <h2 className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em] text-text-primary">
+            <BookOpen size={15} className="text-text-secondary" />
             Syntax &amp; styling
           </h2>
-          <p className="mt-0.5 text-xs font-light text-text-secondary">
+          <p className="mt-0.5 text-[13px] text-text-secondary">
             Every tag you can use, and the styles worth knowing about.
           </p>
         </div>
@@ -614,21 +636,19 @@ function SyntaxCard() {
       {open && (
         <div className="space-y-5 border-t border-border px-5 py-5">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-[13px]">
               <tbody>
                 {SYNTAX_ROWS.map((row) => (
                   <tr
                     key={row.tag}
-                    className="border-b border-border/60 last:border-0"
+                    className="border-b border-border-subtle last:border-0"
                   >
                     <td className="whitespace-nowrap py-2 pr-4 align-top">
-                      <code className="rounded bg-bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                      <code className="font-code rounded-md bg-bg-muted px-1.5 py-0.5 text-xs text-text-primary">
                         {row.tag}
                       </code>
                     </td>
-                    <td className="py-2 font-light text-text-secondary">
-                      {row.meaning}
-                    </td>
+                    <td className="py-2 text-text-secondary">{row.meaning}</td>
                   </tr>
                 ))}
               </tbody>
@@ -649,36 +669,38 @@ function SyntaxCard() {
             <CodeBlock value={MULTILINE_SNIPPET} />
           </Field>
 
-          <div className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-light text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-            <strong className="font-medium">Escaped by default.</strong> A value
-            containing HTML renders as visible text, so it can't introduce tags
-            into an email signed by your domain. Use{" "}
-            <code className="rounded bg-amber-100 px-1 font-mono dark:bg-amber-500/20">
+          <div className="rounded-xl border border-warning-border bg-warning-bg px-3.5 py-3 text-[13px] text-text-primary">
+            <strong className="font-semibold text-warning">
+              Escaped by default.
+            </strong>{" "}
+            A value containing HTML renders as visible text, so it can't
+            introduce tags into an email signed by your domain. Use{" "}
+            <code className="font-code rounded bg-card/60 px-1">
               {`{{{key}}}`}
             </code>{" "}
             only for HTML your own code produced.
             <div className="mt-1.5">
-              Escaping covers <code className="font-mono">{`& < > " '`}</code>{" "}
+              Escaping covers <code className="font-code">{`& < > " '`}</code>{" "}
               only — it is not a URL check. Keep every attribute quoted (
-              <code className="font-mono">{`href="{{url}}"`}</code>, never{" "}
-              <code className="font-mono">{`href={{url}}`}</code>), and don't
+              <code className="font-code">{`href="{{url}}"`}</code>, never{" "}
+              <code className="font-code">{`href={{url}}`}</code>), and don't
               put an untrusted value in an{" "}
-              <code className="font-mono">href</code> without checking its
-              scheme: <code className="font-mono">javascript:</code> passes
+              <code className="font-code">href</code> without checking its
+              scheme: <code className="font-code">javascript:</code> passes
               through.
             </div>
           </div>
 
-          <div className="rounded-[6px] border border-border bg-bg-subtle/50 px-3 py-2.5 text-xs font-light text-text-secondary">
-            <strong className="font-medium text-text-primary">
+          <div className="rounded-xl border border-border bg-bg-subtle px-3.5 py-3 text-[13px] text-text-secondary">
+            <strong className="font-semibold text-text-primary">
               Adding a variable affects live senders.
             </strong>{" "}
             A new{" "}
-            <code className="rounded bg-bg-muted px-1 font-mono">{`{{key}}`}</code>{" "}
+            <code className="font-code rounded bg-bg-muted px-1">{`{{key}}`}</code>{" "}
             takes effect the moment you save, and callers that don't send it
             start failing with 400. Deploy the caller first, or mark it optional
             with{" "}
-            <code className="rounded bg-bg-muted px-1 font-mono">{`{{key?}}`}</code>
+            <code className="font-code rounded bg-bg-muted px-1">{`{{key?}}`}</code>
             .
           </div>
         </div>
@@ -746,19 +768,19 @@ function ApiReferenceCard({
   );
 
   return (
-    <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+    <section className="pt-card overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-bg-muted/30"
+        className="flex w-full items-start justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-bg-subtle"
       >
         <div className="min-w-0">
-          <h2 className="inline-flex items-center gap-1.5 text-sm font-semibold text-text-primary">
-            <Code2 size={13} className="text-text-tertiary" />
+          <h2 className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em] text-text-primary">
+            <Code2 size={15} className="text-text-secondary" />
             Send via API
           </h2>
-          <p className="mt-0.5 text-xs font-light text-text-secondary">
+          <p className="mt-0.5 text-[13px] text-text-secondary">
             Trigger this template from your backend with a single authenticated
             POST.
           </p>
@@ -787,8 +809,7 @@ function ApiReferenceCard({
                 {variables.map((v) => (
                   <code
                     key={v}
-                    className="rounded-full bg-violet/10 px-2 py-0.5 text-[11px] font-mono"
-                    style={{ color: "#7c5cfc" }}
+                    className="pt-chip accent font-code !font-medium"
                   >
                     {chipLabel(v, analysis)}
                   </code>

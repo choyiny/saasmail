@@ -3,39 +3,32 @@ import { cn } from "@/lib/utils";
 interface PageHeaderProps {
   title: string;
   subtitle?: React.ReactNode;
+  /** Tabs or a segmented control shown next to the title. */
+  tabs?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
 }
 
 /**
- * Consistent page header used across dashboard pages.
- * Big extrabold title + optional subtitle + optional right-side action.
- * Mobile-compact, desktop-expansive — matches the Inbox page treatment.
+ * The portal's one-row module header: title (with an optional muted
+ * subtitle), optional tabs, and actions pushed to the right. Wraps on
+ * narrow screens.
  */
 export default function PageHeader({
   title,
   subtitle,
+  tabs,
   action,
   className,
 }: PageHeaderProps) {
   return (
-    <div
-      className={cn(
-        "mb-3 flex items-center justify-between gap-3 pt-3 sm:mb-4 sm:pt-4",
-        className,
-      )}
-    >
-      <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-3">
-        <h1 className="shrink-0 text-xl font-extrabold tracking-tight text-text-primary sm:text-2xl">
-          {title}
-        </h1>
-        {subtitle && (
-          <p className="min-w-0 max-w-2xl truncate text-xs font-light text-text-tertiary sm:text-sm">
-            {subtitle}
-          </p>
-        )}
+    <div className={cn("pt-head", className)}>
+      <div className="flex min-w-0 flex-col">
+        <h1>{title}</h1>
+        {subtitle && <p className="pt-head-sub mt-0.5 max-w-2xl">{subtitle}</p>}
       </div>
-      {action && <div className="shrink-0">{action}</div>}
+      {tabs && <div className="pt-tabs min-w-0">{tabs}</div>}
+      {action && <div className="pt-head-actions">{action}</div>}
     </div>
   );
 }
@@ -43,20 +36,18 @@ export default function PageHeader({
 interface PageContainerProps {
   children: React.ReactNode;
   className?: string;
+  /** Narrower reading width for forms and settings. */
+  narrow?: boolean;
 }
 
-/**
- * Standard width-capped, padded container for dashboard pages.
- * Caps at 1600px on desktop so the chrome lines up with the inbox + nav.
- */
-export function PageContainer({ children, className }: PageContainerProps) {
+/** Standard page frame inside the paper panel. */
+export function PageContainer({
+  children,
+  className,
+  narrow,
+}: PageContainerProps) {
   return (
-    <div
-      className={cn(
-        "mx-auto w-full max-w-[1600px] flex-1 px-4 pb-12 md:px-6",
-        className,
-      )}
-    >
+    <div className={cn("pt-page flex-1", narrow && "narrow", className)}>
       {children}
     </div>
   );

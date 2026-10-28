@@ -25,11 +25,11 @@ interface TrayClassOpts {
  */
 export function trayContentClass({ fullscreen, width }: TrayClassOpts): string {
   const base =
-    "tray-content fixed z-50 flex flex-col overflow-hidden bg-card shadow-[0_24px_60px_-15px_rgba(15,23,42,0.35)] ring-1 ring-border focus:outline-none transition-[inset,width,height,border-radius] duration-200 ease-out";
+    "tray-content fixed z-50 flex flex-col overflow-hidden border border-border-strong bg-card text-text-primary shadow-overlay focus:outline-none transition-[inset,width,height,border-radius] duration-200 ease-out";
   if (fullscreen) {
     // Full viewport with a comfortable margin so the inbox peeks
     // around the edges and Esc/click-outside is easy to discover.
-    return cn(base, "inset-3 rounded-[14px] sm:inset-8 sm:rounded-[16px]");
+    return cn(base, "inset-3 rounded-2xl sm:inset-8");
   }
   // Compact: anchored bottom-right, taller than before so the editor
   // gets more room. Width depends on the tray's content type.
@@ -39,7 +39,7 @@ export function trayContentClass({ fullscreen, width }: TrayClassOpts): string {
       : "sm:h-[700px] sm:w-[640px]";
   return cn(
     base,
-    "bottom-0 right-0 h-[92vh] w-full rounded-t-[14px] sm:right-6 sm:max-h-[calc(100vh-2rem)]",
+    "bottom-0 right-0 h-[92dvh] w-full rounded-t-2xl sm:bottom-4 sm:right-6 sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl",
     compactSize,
   );
 }
@@ -63,7 +63,7 @@ export function TrayMetaRow({
     <div className="flex items-center gap-2 px-4 sm:px-5">
       <label
         htmlFor={htmlFor}
-        className="w-14 shrink-0 text-[11px] font-medium uppercase tracking-wider text-text-tertiary"
+        className="font-label w-16 shrink-0 text-[10.5px] text-text-tertiary"
       >
         {label}
       </label>
@@ -91,7 +91,7 @@ export function TrayMaximizeButton({
       onClick={onToggle}
       aria-label={fullscreen ? "Restore size" : "Maximize"}
       title={fullscreen ? "Restore size" : "Maximize"}
-      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-text-tertiary transition-colors hover:bg-bg-muted hover:text-text-primary"
+      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
     >
       <Icon size={14} />
     </button>

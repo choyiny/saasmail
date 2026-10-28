@@ -67,7 +67,7 @@ export default function ImageAttachments({
             aria-label={`View ${att.filename}`}
             data-testid={`image-attachment-${att.id}`}
             className={cn(
-              "overflow-hidden rounded-[8px] border border-border bg-bg-muted transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              "overflow-hidden rounded-lg border border-border bg-bg-muted shadow-card transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               box,
             )}
           >
@@ -124,7 +124,7 @@ export function ImageViewer({
   }, [open, many, step]);
 
   const iconButton =
-    "inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20";
+    "inline-flex h-9 w-9 items-center justify-center rounded-full bg-chrome-hover text-chrome-fg transition-colors hover:bg-chrome-on";
 
   return (
     <DialogPrimitive.Root
@@ -132,7 +132,7 @@ export function ImageViewer({
       onOpenChange={(next) => !next && onIndexChange(null)}
     >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-black/85" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-chrome/95" />
         <DialogPrimitive.Content
           className="fixed inset-0 z-[60] flex flex-col outline-none"
           onClick={(e) => e.stopPropagation()}
@@ -141,11 +141,14 @@ export function ImageViewer({
         >
           {current && (
             <>
-              <div className="flex shrink-0 items-center gap-3 px-4 py-3 text-white">
+              <div
+                className="flex shrink-0 items-center gap-3 px-4 py-3 text-chrome-fg"
+                style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+              >
                 <DialogPrimitive.Title className="min-w-0 flex-1 truncate text-sm font-medium">
                   {current.filename}
                   {many && (
-                    <span className="ml-2 font-light text-white/60">
+                    <span className="tabular ml-2 font-normal text-chrome-dim">
                       {index! + 1} / {images.length}
                     </span>
                   )}
@@ -188,7 +191,7 @@ export function ImageViewer({
                   key={current.id}
                   src={inlineUrl(current)}
                   alt={current.filename}
-                  className="max-h-full max-w-full rounded-[4px] object-contain shadow-2xl"
+                  className="max-h-full max-w-full rounded-md object-contain shadow-overlay"
                 />
                 {many && (
                   <button

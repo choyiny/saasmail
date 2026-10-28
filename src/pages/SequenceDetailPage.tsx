@@ -10,6 +10,8 @@ import {
   XCircle,
 } from "lucide-react";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
+import { avatarColor } from "@/lib/avatar";
 import { SectionHeader } from "@/components/PageForm";
 import {
   fetchSequence,
@@ -49,27 +51,29 @@ const STATUS_META: Record<
   Status,
   {
     label: string;
-    chipClass: string;
+    /** pt-chip tone */
+    tone: string;
+    /** Token colour for the progress bar / icon. */
     color: string;
     Icon: React.ElementType;
   }
 > = {
   active: {
     label: "Active",
-    chipClass: "bg-emerald-50 ring-emerald-200/60 dark:bg-emerald-500/10",
-    color: "#047857",
+    tone: "info",
+    color: "var(--sm-run)",
     Icon: Clock,
   },
   completed: {
     label: "Completed",
-    chipClass: "bg-violet/10 ring-violet/20",
-    color: "#7c5cfc",
+    tone: "ok",
+    color: "var(--sm-ok)",
     Icon: CheckCircle2,
   },
   cancelled: {
     label: "Cancelled",
-    chipClass: "bg-bg-muted ring-border",
-    color: "#6b7280",
+    tone: "",
+    color: "var(--sm-faint)",
     Icon: XCircle,
   },
 };
@@ -81,14 +85,8 @@ function StatusBadge({ status }: { status: string }) {
       : "cancelled";
   const meta = STATUS_META[key];
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1",
-        meta.chipClass,
-      )}
-      style={{ color: meta.color }}
-    >
-      <meta.Icon size={10} />
+    <span className={cn("pt-chip", meta.tone)}>
+      <meta.Icon />
       {meta.label}
     </span>
   );
@@ -141,7 +139,11 @@ export default function SequenceDetailPage() {
   if (loading || !sequence) {
     return (
       <PageContainer>
-        <p className="pt-10 text-sm text-text-tertiary">Loading…</p>
+        <div className="flex flex-col gap-4" aria-busy="true">
+          <span className="pt-skel h-6 w-56" />
+          <span className="pt-skel h-48 w-full rounded-2xl" />
+          <span className="pt-skel h-40 w-full rounded-2xl" />
+        </div>
       </PageContainer>
     );
   }
@@ -150,9 +152,9 @@ export default function SequenceDetailPage() {
     <PageContainer>
       <Link
         to="/sequences"
-        className="-mt-1 mb-1 inline-flex items-center gap-1 text-xs font-medium text-text-tertiary transition-colors hover:text-text-primary"
+        className="-mt-1 mb-2 inline-flex items-center gap-1 text-[13px] font-medium text-text-secondary transition-colors hover:text-text-primary"
       >
-        <ArrowLeft size={12} />
+        <ArrowLeft size={14} />
         Sequences
       </Link>
 
@@ -167,20 +169,20 @@ export default function SequenceDetailPage() {
           </>
         }
         action={
-          <button
+          <Button
             type="button"
+            variant="outline"
             onClick={() => navigate(`/sequences/${sequence.id}/edit`)}
-            className="inline-flex items-center gap-1.5 rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
           >
-            <Pencil size={12} />
+            <Pencil />
             Edit sequence
-          </button>
+          </Button>
         }
       />
 
       <div className="space-y-5">
         {/* --- Steps timeline --- */}
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <section className="pt-card overflow-hidden">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
               icon={ListOrdered}
@@ -200,17 +202,19 @@ export default function SequenceDetailPage() {
                   {!isLast && (
                     <span
                       aria-hidden
-                      className="absolute left-[34px] top-12 h-[calc(100%-2.5rem)] w-px bg-border"
+                      className="absolute left-[34px] top-12 h-[calc(100%-2.5rem)] w-px bg-border-strong"
                     />
                   )}
-                  <span className="relative z-10 mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet/10 text-[11px] font-semibold tabular-nums">
-                    <span style={{ color: "#7c5cfc" }}>{idx + 1}</span>
+                  <span className="tabular relative z-10 mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-accent-subtle bg-accent-subtle text-xs font-semibold text-accent-subtle-fg">
+                    {idx + 1}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-text-primary">
-                      <code className="font-mono">{step.templateSlug}</code>
+                    <p className="truncate text-[14px] font-medium text-text-primary">
+                      <code className="font-code text-[13px]">
+                        {step.templateSlug}
+                      </code>
                     </p>
-                    <p className="mt-0.5 text-xs font-light text-text-tertiary">
+                    <p className="mt-0.5 text-[13px] text-text-secondary">
                       {idx === 0
                         ? "Sends right when someone is enrolled."
                         : `Sends ${formatDelay(step.delayHours)} after step ${idx}.`}
@@ -223,7 +227,7 @@ export default function SequenceDetailPage() {
         </section>
 
         {/* --- Enrollments --- */}
-        <section className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
+        <section className="pt-card overflow-hidden">
           <div className="border-b border-border px-5 py-4">
             <SectionHeader
               icon={Users}
@@ -233,20 +237,17 @@ export default function SequenceDetailPage() {
           </div>
 
           {enrollments.length === 0 ? (
-            <div className="px-5 py-10 text-center">
-              <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-violet/10">
-                <Users size={16} style={{ color: "#7c5cfc" }} />
+            <div className="pt-empty">
+              <span className="ic">
+                <Users size={18} />
               </span>
-              <p className="text-sm font-medium text-text-primary">
-                No enrollments yet
-              </p>
-              <p className="mt-1 text-xs font-light text-text-tertiary">
-                Open a contact's profile and pick this sequence to enroll them,
-                or call the API.
+              <p>
+                No enrollments yet. Open a conversation and choose “Add to
+                sequence”, or enroll contacts through the API.
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-border/60">
+            <div className="divide-y divide-border">
               {(["active", "completed", "cancelled"] as Status[]).map(
                 (statusKey) => {
                   const rows = grouped[statusKey] ?? [];
@@ -281,13 +282,13 @@ function EnrollmentGroup({
   const meta = STATUS_META[status];
   return (
     <div>
-      <div className="flex items-center gap-2 bg-bg-subtle/40 px-5 py-2">
-        <meta.Icon size={11} style={{ color: meta.color }} />
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
+      <div className="flex h-9 items-center gap-2 border-b border-border bg-bg-subtle px-5">
+        <span className="pt-sdot" style={{ background: meta.color }} />
+        <h3 className="font-label text-text-secondary">
           {meta.label} · {rows.length}
         </h3>
       </div>
-      <ul className="divide-y divide-border/60">
+      <ul className="divide-y divide-border-subtle">
         {rows.map((enr) => {
           const progress =
             enr.totalSteps > 0 ? enr.sentSteps / enr.totalSteps : 0;
@@ -302,25 +303,31 @@ function EnrollmentGroup({
               data-enrollment-id={enr.id}
               className="flex items-center gap-3 px-5 py-3"
             >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg-muted text-xs font-semibold text-text-secondary">
+              <span
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold"
+                style={{
+                  backgroundColor: avatarColor(enr.personEmail).bg,
+                  color: avatarColor(enr.personEmail).fg,
+                }}
+              >
                 {initial || "?"}
               </span>
 
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <p className="truncate text-sm font-medium text-text-primary">
+                  <p className="truncate text-[14px] font-medium text-text-primary">
                     {enr.personName ?? enr.personEmail}
                   </p>
                   <StatusBadge status={enr.status} />
                 </div>
-                <p className="truncate text-xs font-light text-text-tertiary">
+                <p className="truncate text-[13px] text-text-secondary">
                   {enr.personEmail} · enrolled {relativeTime(enr.enrolledAt)}
                 </p>
               </div>
 
               <div className="hidden shrink-0 items-center gap-3 sm:flex">
                 <div className="w-32">
-                  <div className="flex items-center justify-between text-[11px] tabular-nums">
+                  <div className="tabular flex items-center justify-between text-xs">
                     <span className="text-text-tertiary">
                       {enr.sentSteps}/{enr.totalSteps}
                     </span>
@@ -341,14 +348,16 @@ function EnrollmentGroup({
               </div>
 
               {enr.status === "active" && (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={() => onCancel(enr.id)}
                   aria-label="Cancel"
-                  className="shrink-0 rounded-[6px] border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-text-secondary transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  className="shrink-0 hover:text-destructive"
                 >
                   Cancel
-                </button>
+                </Button>
               )}
             </li>
           );

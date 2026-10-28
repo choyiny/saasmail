@@ -4,6 +4,7 @@ import { Plus, FileText, Pencil, Trash2, Hash, Blocks } from "lucide-react";
 import { fetchTemplates, deleteTemplate } from "@/lib/api";
 import type { EmailTemplate } from "@/lib/api";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
 import { analyzeTemplateClient } from "@/lib/template-syntax";
 
 /**
@@ -51,49 +52,73 @@ export default function TemplatesPage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Email Templates"
-        subtitle="Reusable HTML email templates with {{variable}} interpolation. Send via the UI or API."
+        title="Email templates"
+        subtitle="Reusable HTML emails with {{variable}} interpolation. Send from the app or the API."
         action={
           <div className="flex items-center gap-2">
             {/* Two entry points rather than a format switch inside the editor:
                 converting HTML to blocks is refused by the API (the parse would
                 be lossy), so the choice belongs at creation time. */}
-            <button
+            <Button
+              variant="outline"
               onClick={() => navigate("/templates/new?format=block")}
-              className="inline-flex items-center gap-1.5 rounded-[8px] border border-border bg-card px-4 py-2 text-sm font-medium text-text-secondary shadow-sm transition-colors hover:bg-bg-muted hover:text-text-primary"
             >
-              <Blocks size={14} />
+              <Blocks />
               New block template
-            </button>
-            <button
-              onClick={() => navigate("/templates/new")}
-              className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
-            >
-              <Plus size={14} />
+            </Button>
+            <Button onClick={() => navigate("/templates/new")}>
+              <Plus />
               New template
-            </button>
+            </Button>
           </div>
         }
       />
 
-      <div className="max-w-4xl">
+      <div>
         {loading ? (
-          <p className="text-sm font-light text-text-tertiary">Loading…</p>
+          <div
+            className="pt-card divide-y divide-border-subtle"
+            aria-busy="true"
+          >
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-5 py-4">
+                <span className="pt-skel h-9 w-9 rounded-lg" />
+                <span className="flex flex-1 flex-col gap-2">
+                  <span className="pt-skel h-3 w-1/3" />
+                  <span className="pt-skel h-2.5 w-1/2" />
+                </span>
+              </div>
+            ))}
+          </div>
         ) : templates.length === 0 ? (
-          <div className="rounded-[8px] bg-card p-10 text-center ring-1 ring-border">
-            <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet/10">
-              <FileText size={20} style={{ color: "#7c5cfc" }} />
+          <div className="pt-card pt-empty">
+            <span className="ic">
+              <FileText size={18} />
             </span>
-            <p className="mb-1 text-sm font-medium text-text-primary">
-              No templates yet
+            <p>
+              No templates yet. Create one to reuse it from the composer,
+              sequences or the API.
             </p>
-            <p className="text-xs font-light text-text-tertiary">
-              Use the "New template" button above to create your first one.
-            </p>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/templates/new")}
+            >
+              <Plus />
+              Create a template
+            </Button>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-[8px] bg-card ring-1 ring-border">
-            <ul className="divide-y divide-border/60">
+          <div className="pt-card overflow-hidden">
+            <div className="hidden h-9 items-center gap-4 border-b border-border bg-bg-subtle px-5 sm:flex">
+              <span className="font-label flex-1 text-text-secondary">
+                Template
+              </span>
+              <span className="font-label w-24 text-right text-text-secondary">
+                Variables
+              </span>
+              <span className="w-[104px]" />
+            </div>
+            <ul className="divide-y divide-border-subtle">
               {templates.map((t) => {
                 const varCount = countVariables(t);
                 return (
@@ -102,52 +127,61 @@ export default function TemplatesPage() {
                     data-testid="template-row"
                     data-template-name={t.name}
                     data-template-slug={t.slug}
-                    className="group flex items-center justify-between gap-4 px-5 py-3.5 transition-colors hover:bg-text-primary/[0.02]"
+                    className="group flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-bg-subtle sm:gap-4 sm:px-5"
                   >
                     <Link
                       to={`/templates/${t.slug}/edit`}
                       className="flex min-w-0 flex-1 items-center gap-3 text-left"
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[6px] bg-bg-muted">
-                        <FileText size={14} className="text-text-tertiary" />
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-subtle">
+                        <FileText size={15} className="text-text-secondary" />
                       </span>
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="truncate text-sm font-medium text-text-primary">
-                            {t.name}
-                          </p>
-                          {varCount > 0 && (
-                            <span
-                              title={`${varCount} variable${varCount === 1 ? "" : "s"}`}
-                              className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-violet/10 px-1.5 py-0.5 text-[10px] font-mono"
-                              style={{ color: "#7c5cfc" }}
-                            >
-                              <Hash size={9} />
-                              {varCount}
-                            </span>
-                          )}
-                        </div>
-                        <p className="truncate text-xs font-light text-text-tertiary">
-                          <span className="font-mono">{t.slug}</span> ·{" "}
+                        <p className="truncate text-[14px] font-medium text-text-primary">
+                          {t.name}
+                        </p>
+                        <p className="truncate text-[13px] text-text-secondary">
+                          <span className="font-code text-xs text-text-tertiary">
+                            {t.slug}
+                          </span>
+                          <span className="text-text-tertiary"> · </span>
                           {t.subject}
                         </p>
                       </div>
                     </Link>
-                    <div className="flex shrink-0 items-center gap-1 opacity-60 transition-opacity group-hover:opacity-100">
-                      <button
+                    <span className="hidden w-24 justify-end sm:flex">
+                      {varCount > 0 ? (
+                        <span
+                          title={`${varCount} variable${varCount === 1 ? "" : "s"}`}
+                          className="pt-chip accent tabular"
+                        >
+                          <Hash />
+                          {varCount}
+                        </span>
+                      ) : (
+                        <span className="text-[13px] text-text-tertiary">
+                          —
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex shrink-0 items-center justify-end sm:w-[104px] gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => navigate(`/templates/${t.slug}/edit`)}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
                       >
-                        <Pencil size={12} />
-                        Edit
-                      </button>
-                      <button
+                        <Pencil />
+                        <span className="max-sm:sr-only">Edit</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => handleDelete(t.slug)}
                         aria-label="Delete"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+                        className="h-8 w-8 hover:bg-destructive-subtle hover:text-destructive"
                       >
-                        <Trash2 size={12} />
-                      </button>
+                        <Trash2 />
+                      </Button>
                     </div>
                   </li>
                 );

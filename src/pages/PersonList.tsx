@@ -1,29 +1,33 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { createPortal } from "react-dom";
+import { useMemo } from "react";
 import {
   ChevronLeft,
   ChevronRight,
   Paperclip,
-  MoreHorizontal,
-  Trash2,
   CheckCheck,
   RefreshCw,
+  Pin,
+  Star,
+  Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  deletePerson,
   type GroupedItem,
   type GroupedPerson,
   type GroupedConversation,
 } from "@/lib/api";
 import GroupRow from "@/components/GroupRow";
+import SwipeRow from "@/components/SwipeRow";
+import {
+  MailActionButtons,
+  MailRowMenu,
+  type MailActionHandlers,
+} from "@/components/MailActions";
+import { avatarColor, initials } from "@/lib/avatar";
 import { usePullToRefresh } from "@/hooks/usePullToRefresh";
 
 interface PersonListProps {
   /** Mixed list of person + group rows from /api/people/grouped. */
   items: GroupedItem[];
-  /** Replaces the items list (used for optimistic delete). */
-  setItems: (items: GroupedItem[]) => void;
   loading: boolean;
   total: number;
   pageSize: number;
@@ -33,7 +37,7 @@ interface PersonListProps {
   selectedConversationId: string | null;
   onSelectPerson: (person: GroupedPerson) => void;
   onSelectConversation: (conv: GroupedConversation) => void;
-  onPersonDeleted?: (personId: string) => void;
+  /** Admins get the `person-kebab-menu` test id on the row menu. */
   isAdmin?: boolean;
   selectedIds?: Set<string>;
   onToggleSelected?: (id: string) => void;
@@ -50,24 +54,13 @@ interface PersonListProps {
    * resizable sidebar dropping below COMPACT_THRESHOLD.
    */
   compact?: boolean;
-}
-
-// Deterministic pastel-on-violet palette per person initial.
-const AVATAR_PALETTE = [
-  { bg: "rgba(124, 92, 252, 0.12)", fg: "#5b3ce6" },
-  { bg: "rgba(34, 197, 94, 0.12)", fg: "#15803d" },
-  { bg: "rgba(244, 114, 182, 0.14)", fg: "#be185d" },
-  { bg: "rgba(251, 146, 60, 0.14)", fg: "#c2410c" },
-  { bg: "rgba(56, 189, 248, 0.14)", fg: "#0369a1" },
-  { bg: "rgba(168, 85, 247, 0.14)", fg: "#7e22ce" },
-  { bg: "rgba(20, 184, 166, 0.14)", fg: "#0f766e" },
-  { bg: "rgba(234, 179, 8, 0.16)", fg: "#a16207" },
-];
-
-function avatarColor(seed: string) {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+  /**
+   * Star / pin / archive / snooze / trash handlers for a row (InboxPage).
+   * In Trash these are Restore and, for admins, Delete forever.
+   */
+  mailActions?: (item: GroupedItem) => MailActionHandlers;
+  /** Shown when the list is empty (depends on the folder). */
+  emptyMessage?: string;
 }
 
 function formatTime(ts: number) {
@@ -91,16 +84,8 @@ function formatTime(ts: number) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function initials(name: string | null, email: string) {
-  const source = name || email.split("@")[0];
-  const parts = source.split(/[\s.\-_]+/).filter(Boolean);
-  const letters = (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "");
-  return letters.toUpperCase() || "?";
-}
-
 export default function PersonList({
   items,
-  setItems,
   loading,
   total,
   pageSize,
@@ -110,7 +95,6 @@ export default function PersonList({
   selectedConversationId,
   onSelectPerson,
   onSelectConversation,
-  onPersonDeleted,
   isAdmin,
   selectedIds,
   onToggleSelected,
@@ -118,13 +102,9 @@ export default function PersonList({
   onMarkConversationRead,
   onRefresh,
   compact = false,
+  mailActions,
+  emptyMessage,
 }: PersonListProps) {
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(
-    null,
-  );
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
   // Mobile pull-to-refresh on the scrollable list. No-op when onRefresh isn't
   // provided (e.g. the handler is wired through from InboxPage).
   const {
@@ -136,36 +116,6 @@ export default function PersonList({
   const pullActive = pullDistance > 0 || refreshing;
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
-  useEffect(() => {
-    if (!menuOpenId) return;
-    function handleClose(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpenId(null);
-      }
-    }
-    document.addEventListener("mousedown", handleClose);
-    document.addEventListener("scroll", () => setMenuOpenId(null), true);
-    return () => {
-      document.removeEventListener("mousedown", handleClose);
-      document.removeEventListener("scroll", () => setMenuOpenId(null), true);
-    };
-  }, [menuOpenId]);
-
-  async function handleDeletePerson(person: GroupedPerson) {
-    setMenuOpenId(null);
-    if (
-      !confirm(
-        `Permanently delete ${person.name || person.email} and all ${person.totalCount} email${person.totalCount !== 1 ? "s" : ""}? This cannot be undone.`,
-      )
-    )
-      return;
-    await deletePerson(person.id);
-    setItems(
-      items.filter((it) => !(it.type === "person" && it.id === person.id)),
-    );
-    onPersonDeleted?.(person.id);
-  }
 
   // Quick predicates for the union mapping below.
   const persons = items.filter(
@@ -183,14 +133,11 @@ export default function PersonList({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Header strip — count only; search lives in the page toolbar above.
-          In compact mode the strip would be wider than the visible avatars,
-          so we hide it to keep the column tidy. */}
+          Hidden in compact mode, where it would be wider than the avatars. */}
       {!compact && (
-        <div className="flex shrink-0 items-center justify-between border-b border-border bg-bg-subtle/70 px-4 py-2.5 backdrop-blur-sm">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-text-tertiary">
-            People
-          </span>
-          <span className="text-[11px] tabular-nums text-text-tertiary">
+        <div className="flex h-9 shrink-0 items-center justify-between border-b border-border px-4">
+          <span className="font-label text-text-tertiary">Conversations</span>
+          <span className="tabular text-xs text-text-tertiary">
             {showingRange}
           </span>
         </div>
@@ -202,8 +149,7 @@ export default function PersonList({
         className="smooth-scroll relative min-h-0 flex-1 overflow-y-auto"
         style={onRefresh ? { overscrollBehaviorY: "contain" } : undefined}
       >
-        {/* Pull-to-refresh indicator (mobile). Sits above the list; the list
-            content slides down to reveal it as the user pulls. */}
+        {/* Pull-to-refresh indicator (mobile). */}
         {onRefresh && pullActive && (
           <div
             className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-center"
@@ -232,21 +178,25 @@ export default function PersonList({
               pullDistance === 0 ? "transform 0.2s ease-out" : undefined,
           }}
         >
-          {loading ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-4 py-16 text-center">
-              <p className="text-sm font-light text-text-tertiary">Loading…</p>
-            </div>
+          {loading && items.length === 0 ? (
+            <ListSkeleton compact={compact} />
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
-              <p className="text-sm font-medium text-text-primary">
-                No people found
+            <div className="pt-empty py-20">
+              <p className="font-medium text-text-primary">
+                {emptyMessage ?? "No conversations here"}
               </p>
-              <p className="text-xs font-light text-text-tertiary">
+              <p className="text-[13px]">
                 Try a different search, or wait for new mail.
               </p>
             </div>
           ) : (
-            <ul className="divide-y divide-border/60">
+            <ul
+              className={cn(
+                // Clear the phone's floating Compose button.
+                "pb-24 sm:pb-0",
+                loading && "opacity-60 transition-opacity",
+              )}
+            >
               {items.map((item) => {
                 if (item.type === "group") {
                   return (
@@ -257,6 +207,7 @@ export default function PersonList({
                       onSelect={() => onSelectConversation(item)}
                       onMarkRead={onMarkConversationRead}
                       compact={compact}
+                      actions={mailActions?.(item)}
                     />
                   );
                 }
@@ -265,25 +216,42 @@ export default function PersonList({
                 const isChecked = selectedIds?.has(person.id) ?? false;
                 const selectionMode = selectedIds !== undefined;
                 const anySelected = (selectedIds?.size ?? 0) > 0;
-                const menuOpen = menuOpenId === person.id;
                 const color = avatarColor(person.email);
                 const display = person.name || person.email;
+                const unread = person.unreadCount > 0;
+                const handlers: MailActionHandlers = {
+                  ...(mailActions?.(person) ?? {}),
+                  ...(unread && onMarkPersonRead
+                    ? { onMarkRead: () => onMarkPersonRead(person.id) }
+                    : {}),
+                };
+                const hasMenu = !compact && Object.keys(handlers).length > 0;
                 return (
-                  <li
+                  <SwipeRow
                     key={person.id}
-                    className={cn(
-                      "group relative transition-colors",
+                    className="group border-b border-border-subtle"
+                    innerClassName={cn(
+                      "transition-colors",
                       isSelected
-                        ? "bg-text-primary/[0.04]"
+                        ? "bg-accent-subtle/70"
                         : isChecked
-                          ? "bg-violet/[0.04]"
-                          : "hover:bg-text-primary/[0.025]",
+                          ? "bg-accent-subtle/40"
+                          : "[@media(hover:hover)]:hover:bg-bg-subtle",
                     )}
+                    onSwipeLeft={handlers.onArchive}
+                    onSwipeRight={handlers.onToggleStar}
+                    archived={!!person.archivedAt}
+                    starred={person.starred}
                   >
                     {isSelected && (
                       <span
-                        className="absolute inset-y-2 left-0 w-0.5 rounded-full"
-                        style={{ backgroundColor: "#7c5cfc" }}
+                        className="absolute inset-y-0 left-0 w-[3px] bg-accent"
+                        aria-hidden
+                      />
+                    )}
+                    {unread && !compact && (
+                      <span
+                        className="absolute left-[6px] top-[calc(var(--sm-row-pad)+19px)] h-1.5 w-1.5 rounded-full bg-accent"
                         aria-hidden
                       />
                     )}
@@ -292,66 +260,73 @@ export default function PersonList({
                       data-testid="person-row"
                       data-person-id={person.id}
                       onClick={() => onSelectPerson(person)}
+                      aria-current={isSelected ? "true" : undefined}
                       className={cn(
-                        "flex w-full items-start gap-2.5 px-3 py-2.5 text-left active:bg-text-primary/[0.04] sm:py-2",
-                        compact &&
-                          "items-center justify-center px-2 py-2 sm:py-1.5",
+                        "flex w-full items-center gap-3 py-[calc(var(--sm-row-pad)+1px)] pl-4 pr-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50",
+                        compact && "justify-center px-2",
                       )}
                     >
-                      {/* Selection checkbox — appears on hover or when any selected.
-                        Clicking it toggles selection without opening the person. */}
-                      {selectionMode && (
+                      {/* Avatar slot. On hover (or while anything is
+                          selected) the avatar turns into a checkbox. */}
+                      <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
                         <span
-                          role="checkbox"
-                          aria-checked={isChecked}
-                          aria-label={`Select ${display}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleSelected?.(person.id);
-                          }}
                           className={cn(
-                            "mt-1.5 flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded-[4px] border transition-all",
-                            isChecked
-                              ? "border-text-primary bg-text-primary text-white opacity-100"
-                              : anySelected
-                                ? "border-border bg-card opacity-100 hover:border-text-primary/40"
-                                : "border-border bg-card opacity-0 group-hover:opacity-100",
+                            "flex h-9 w-9 items-center justify-center rounded-full text-[12px] font-semibold",
+                            selectionMode &&
+                              !compact &&
+                              (anySelected || isChecked
+                                ? "hidden"
+                                : "[@media(hover:hover)]:group-hover:hidden"),
                           )}
+                          style={{ backgroundColor: color.bg, color: color.fg }}
                         >
-                          {isChecked && (
-                            <svg
-                              className="h-3 w-3"
-                              viewBox="0 0 12 12"
-                              fill="none"
-                            >
-                              <path
-                                d="M2.5 6.5L4.75 8.75L9.5 4"
-                                stroke="currentColor"
-                                strokeWidth="1.8"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          )}
+                          {initials(person.name, person.email)}
                         </span>
-                      )}
-
-                      {/* Avatar — hidden behind checkbox when hovering in selection mode */}
-                      <span
-                        className={cn(
-                          "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold tracking-tight",
-                          selectionMode &&
-                            (anySelected || isChecked) &&
-                            "hidden sm:flex",
-                        )}
-                        style={{ backgroundColor: color.bg, color: color.fg }}
-                      >
-                        {initials(person.name, person.email)}
-                        {/* In compact mode, the unread badge is anchored to the avatar */}
-                        {compact && person.unreadCount > 0 && (
+                        {selectionMode && !compact && (
                           <span
-                            className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white ring-2 ring-bg-subtle"
-                            style={{ backgroundColor: "#7c5cfc" }}
+                            role="checkbox"
+                            aria-checked={isChecked}
+                            aria-label={`Select ${display}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onToggleSelected?.(person.id);
+                            }}
+                            className={cn(
+                              "h-9 w-9 cursor-pointer items-center justify-center",
+                              anySelected || isChecked
+                                ? "flex"
+                                : "hidden [@media(hover:hover)]:group-hover:flex",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border transition-colors",
+                                isChecked
+                                  ? "border-accent bg-accent text-accent-foreground"
+                                  : "border-border-strong bg-card hover:border-text-tertiary",
+                              )}
+                            >
+                              {isChecked && (
+                                <svg
+                                  className="h-3 w-3"
+                                  viewBox="0 0 12 12"
+                                  fill="none"
+                                >
+                                  <path
+                                    d="M2.5 6.5L4.75 8.75L9.5 4"
+                                    stroke="currentColor"
+                                    strokeWidth="1.8"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              )}
+                            </span>
+                          </span>
+                        )}
+                        {compact && unread && (
+                          <span
+                            className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9.5px] font-semibold text-accent-foreground ring-2 ring-card"
                             aria-label={`${person.unreadCount} unread`}
                           >
                             {person.unreadCount}
@@ -359,21 +334,23 @@ export default function PersonList({
                         )}
                       </span>
 
+                      {/* Two lines: who + when, then what. Counts and
+                          inboxes live in the reading pane and Table view. */}
                       <div
                         className={cn("min-w-0 flex-1", compact && "hidden")}
                       >
-                        <div className="flex items-baseline justify-between gap-3">
+                        <div className="flex items-baseline gap-2">
                           <span
                             className={cn(
-                              "truncate text-sm",
-                              person.unreadCount > 0
+                              "min-w-0 flex-1 truncate text-sm",
+                              unread
                                 ? "font-semibold text-text-primary"
                                 : "font-medium text-text-primary",
                             )}
                           >
                             {display}
                             {person.name && (
-                              <span className="ml-1.5 font-light text-text-tertiary">
+                              <span className="ml-1.5 text-[13px] font-normal text-text-tertiary">
                                 {person.email}
                               </span>
                             )}
@@ -387,40 +364,82 @@ export default function PersonList({
                               +{person.linkedCount}
                             </span>
                           )}
-                          <span className="shrink-0 text-[11px] font-light text-text-tertiary">
-                            {formatTime(person.lastEmailAt)}
+                          <span
+                            className={cn(
+                              "flex shrink-0 items-center gap-1.5 text-xs transition-opacity",
+                              unread
+                                ? "font-semibold text-accent-subtle-fg"
+                                : "text-text-tertiary",
+                              hasMenu &&
+                                "[@media(hover:hover)]:group-hover:opacity-0 [@media(hover:none)]:mr-8",
+                            )}
+                          >
+                            {person.pinned && (
+                              <Pin
+                                size={12}
+                                className="text-accent"
+                                aria-label="Pinned"
+                              />
+                            )}
+                            {person.snoozedUntil && (
+                              <Clock
+                                size={12}
+                                className="text-warning"
+                                aria-label="Snoozed"
+                              />
+                            )}
+                            {person.starred && (
+                              <Star
+                                size={13}
+                                className="fill-current text-star"
+                                aria-label="Starred"
+                              />
+                            )}
+                            <span className="tabular">
+                              {formatTime(person.lastEmailAt)}
+                            </span>
                           </span>
                         </div>
 
-                        <div className="mt-0.5 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
-                            <span>
-                              {person.totalCount} email
-                              {person.totalCount !== 1 ? "s" : ""}
-                            </span>
-                            {person.recipientCount > 1 && (
-                              <>
-                                <span className="text-text-tertiary/40">·</span>
-                                <span>{person.recipientCount} inboxes</span>
-                              </>
+                        <div className="mt-0.5 flex items-center gap-2">
+                          <p className="min-w-0 flex-1 truncate text-[13px] text-text-tertiary">
+                            {person.latestSubject && (
+                              <span
+                                className={cn(
+                                  unread
+                                    ? "font-medium text-text-primary"
+                                    : "text-text-secondary",
+                                )}
+                              >
+                                {person.latestSubject}
+                              </span>
                             )}
-                            {person.hasAttachment === 1 && (
-                              <Paperclip
-                                size={10}
-                                className="text-text-tertiary"
-                                aria-label="Has attachment"
-                              />
+                            {person.latestSubject && person.snippet && (
+                              <span aria-hidden> — </span>
                             )}
-                          </div>
-
-                          {/* Click unread badge to mark all read for this person.
-                            Larger tap target on mobile (h-6 vs h-5). */}
-                          {person.unreadCount > 0 && (
+                            {person.snippet}
+                            {!person.latestSubject && !person.snippet && (
+                              <span>
+                                {person.totalCount} email
+                                {person.totalCount !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </p>
+                          {person.hasAttachment === 1 && (
+                            <Paperclip
+                              size={12}
+                              className="shrink-0 text-text-tertiary"
+                              aria-label="Has attachment"
+                            />
+                          )}
+                          {/* Click the unread badge to mark all read. */}
+                          {unread && (
                             <span
                               role="button"
                               tabIndex={0}
                               data-testid="person-unread-badge"
-                              title="Tap to mark all as read"
+                              title="Mark all as read (Shift+I)"
+                              aria-label={`${person.unreadCount} unread. Mark all as read`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onMarkPersonRead?.(person.id);
@@ -432,14 +451,13 @@ export default function PersonList({
                                   onMarkPersonRead?.(person.id);
                                 }
                               }}
-                              className="group/badge flex h-6 min-w-6 cursor-pointer items-center justify-center rounded-full px-2 text-[11px] font-bold text-white transition-all active:scale-95 sm:h-5 sm:min-w-5 sm:px-1.5 sm:text-[10px] sm:hover:scale-110"
-                              style={{ backgroundColor: "#7c5cfc" }}
+                              className="group/badge tabular flex h-[18px] min-w-[18px] shrink-0 cursor-pointer items-center justify-center rounded-full bg-accent px-1.5 text-[11px] font-semibold text-accent-foreground transition-transform active:scale-95"
                             >
                               <span className="group-hover/badge:hidden">
                                 {person.unreadCount}
                               </span>
                               <CheckCheck
-                                size={11}
+                                size={12}
                                 className="hidden group-hover/badge:block"
                               />
                             </span>
@@ -448,36 +466,31 @@ export default function PersonList({
                       </div>
                     </button>
 
-                    {isAdmin && !compact && (
-                      <button
-                        data-testid="person-kebab-menu"
-                        data-person-id={person.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (menuOpen) {
-                            setMenuOpenId(null);
-                          } else {
-                            const rect =
-                              e.currentTarget.getBoundingClientRect();
-                            setMenuPos({
-                              top: rect.bottom + 4,
-                              right: window.innerWidth - rect.right,
-                            });
-                            setMenuOpenId(person.id);
-                          }
-                        }}
-                        className={cn(
-                          "absolute right-2 top-3 rounded p-1 text-text-tertiary transition-opacity hover:bg-bg-subtle hover:text-text-secondary",
-                          menuOpen
-                            ? "opacity-100"
-                            : "opacity-0 group-hover:opacity-100",
-                        )}
-                        aria-label="Person actions"
-                      >
-                        <MoreHorizontal size={14} />
-                      </button>
+                    {hasMenu && (
+                      <div className="absolute bottom-1.5 right-2 flex items-center gap-0.5">
+                        {/* Desktop hover bar */}
+                        <div className="hidden rounded-lg bg-card/95 shadow-card ring-1 ring-border [@media(hover:hover)]:group-hover:flex [@media(hover:hover)]:group-has-[:focus-visible]:flex">
+                          <MailActionButtons
+                            compact
+                            state={person}
+                            handlers={handlers}
+                          />
+                          <MailRowMenu
+                            state={person}
+                            handlers={handlers}
+                            testId={isAdmin ? "person-kebab-menu" : undefined}
+                            personId={person.id}
+                          />
+                        </div>
+                        {/* Touch: the menu, with a full-size hit area */}
+                        <MailRowMenu
+                          state={person}
+                          handlers={handlers}
+                          className="-mr-1.5 -mt-0.5 h-10 w-10 [@media(hover:hover)]:hidden"
+                        />
+                      </div>
                     )}
-                  </li>
+                  </SwipeRow>
                 );
               })}
             </ul>
@@ -485,56 +498,56 @@ export default function PersonList({
         </div>
       </div>
 
-      {menuOpenId &&
-        menuPos &&
-        createPortal(
-          <div
-            ref={menuRef}
-            style={{ top: menuPos.top, right: menuPos.right }}
-            className="fixed z-50 w-44 rounded-[8px] border border-border bg-card py-1 shadow-lg"
-          >
-            <button
-              data-testid="person-delete-button"
-              onClick={(e) => {
-                e.stopPropagation();
-                const person = items.find(
-                  (it): it is GroupedPerson =>
-                    it.type === "person" && it.id === menuOpenId,
-                );
-                if (person) handleDeletePerson(person);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-xs text-red-600 transition-colors hover:bg-red-50"
-            >
-              <Trash2 size={12} />
-              Delete person
-            </button>
-          </div>,
-          document.body,
-        )}
-
       {totalPages > 1 && (
-        <div className="flex shrink-0 items-center justify-between border-t border-border bg-bg-subtle/40 px-4 py-2.5">
+        <div className="flex h-11 shrink-0 items-center justify-between border-t border-border px-3 max-sm:pr-[88px]">
           <button
             onClick={() => onPageChange(Math.max(1, page - 1))}
             disabled={page <= 1}
-            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
             aria-label="Previous page"
           >
-            <ChevronLeft size={14} />
+            <ChevronLeft size={15} />
           </button>
-          <span className="text-[11px] font-medium text-text-tertiary">
+          <span className="tabular text-xs text-text-tertiary">
             Page {page} of {totalPages}
           </span>
           <button
             onClick={() => onPageChange(Math.min(totalPages, page + 1))}
             disabled={page >= totalPages}
-            className="flex h-7 w-7 items-center justify-center rounded-[8px] text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary disabled:opacity-30 disabled:hover:bg-transparent"
             aria-label="Next page"
           >
-            <ChevronRight size={14} />
+            <ChevronRight size={15} />
           </button>
         </div>
       )}
     </div>
+  );
+}
+
+function ListSkeleton({ compact }: { compact: boolean }) {
+  return (
+    <ul aria-label="Loading conversations" aria-busy="true">
+      {Array.from({ length: 9 }).map((_, i) => (
+        <li
+          key={i}
+          className="flex items-start gap-3 border-b border-border-subtle px-4 py-3"
+        >
+          <span className="pt-skel h-9 w-9 shrink-0 rounded-full" />
+          {!compact && (
+            <span className="flex flex-1 flex-col gap-2 pt-1">
+              <span
+                className="pt-skel h-3"
+                style={{ width: `${55 + ((i * 17) % 30)}%` }}
+              />
+              <span
+                className="pt-skel h-2.5"
+                style={{ width: `${70 + ((i * 11) % 25)}%` }}
+              />
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

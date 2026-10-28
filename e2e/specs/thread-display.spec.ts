@@ -25,8 +25,13 @@ test.describe.serial("thread-mode display (marketing@)", () => {
       .locator(`[data-testid="inbox-tab"]`, { hasText: "marketing" })
       .click();
 
-    // The latest email (e_m_a2) subject should be visible in the thread
-    await expect(page.getByText("Re: Welcome to our product")).toBeVisible();
+    // The latest email (e_m_a2) subject should be visible in the thread.
+    // Scoped to the thread: the inbox list row shows the latest subject too.
+    await expect(
+      page
+        .getByTestId(TEST_IDS.threadMessage)
+        .getByText("Re: Welcome to our product"),
+    ).toBeVisible();
 
     // The latest email body HTML is rendered: "Thanks for signing up!" from
     // <p>Thanks for signing up!</p><blockquote>...</blockquote>

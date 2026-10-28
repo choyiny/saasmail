@@ -31,11 +31,11 @@ export default function MarkAllReadButton({
       data-testid="mark-all-read"
       onClick={onMarkAllRead}
       title={`Mark all ${unreadCount} unread in ${scopeLabel} as read`}
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-[6px] border border-border bg-card px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
+      className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-card px-3 text-[13px] font-medium text-text-primary shadow-card ring-1 ring-inset ring-border-strong transition-colors hover:bg-bg-subtle"
     >
-      <CheckCheck size={13} />
+      <CheckCheck size={14} className="text-text-secondary" />
       Mark all read
-      <span className="ml-0.5 rounded-full bg-text-primary/[0.06] px-1.5 text-[10px] font-bold tabular-nums text-text-secondary">
+      <span className="tabular ml-0.5 rounded-full bg-accent-subtle px-1.5 text-[11px] font-semibold text-accent-subtle-fg">
         {unreadCount}
       </span>
     </button>

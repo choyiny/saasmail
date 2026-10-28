@@ -51,7 +51,7 @@ function labelOf(c: CcEntry): string {
 /**
  * Editable list of CC contacts. Type an email (or "Name <addr>") and press
  * Enter, comma, or Tab to commit. Click the × on a chip to remove it.
- * Internal contacts (matching `internalDomains`) get a lime accent.
+ * Internal contacts (matching `internalDomains`) get a accent tint.
  */
 export default function CcInput({
   value,
@@ -96,7 +96,7 @@ export default function CcInput({
 
   return (
     <div
-      className="flex min-h-[34px] flex-wrap items-center gap-1 rounded-[6px] border border-border bg-card px-2 py-1.5 focus-within:ring-2 focus-within:ring-text-primary/15"
+      className="flex min-h-9 flex-wrap items-center gap-1 rounded-lg border border-border-strong bg-card px-2 py-1 shadow-card transition-[border-color,box-shadow] focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/15"
       onClick={() => inputRef.current?.focus()}
     >
       {value.map((c) => {
@@ -106,12 +106,11 @@ export default function CcInput({
             key={c.email}
             title={c.email}
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-medium leading-none",
+              "inline-flex items-center gap-1 h-6 rounded-full border pl-2 pr-1 text-xs font-medium leading-none",
               internal
-                ? "border-lime-400/40 bg-lime-400/10"
-                : "border-border bg-bg-muted/60 text-text-secondary",
+                ? "border-accent-subtle bg-accent-subtle text-accent-subtle-fg"
+                : "border-border bg-bg-subtle text-text-secondary",
             )}
-            style={internal ? { color: "#5b7700" } : undefined}
           >
             {labelOf(c)}
             <button
@@ -121,7 +120,7 @@ export default function CcInput({
                 remove(c.email);
               }}
               aria-label={`Remove ${c.email}`}
-              className="rounded-full p-0.5 hover:bg-black/10"
+              className="rounded-full p-0.5 text-text-tertiary hover:bg-bg-muted hover:text-text-primary"
             >
               <X size={9} />
             </button>

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  MAX_LIST_WIDTH as MAX_WIDTH,
+  MIN_LIST_WIDTH as MIN_WIDTH,
+  clampListWidth,
+  useDefaultLayoutSettings,
+} from "@/lib/default-layout-settings";
 
-const STORAGE_KEY = "saasmail.sidebarWidth";
-const DEFAULT_WIDTH = 384; // matches the original w-96
-const MIN_WIDTH = 56; // tighter than this and the avatars overflow
-const MAX_WIDTH = 640;
 /** Below this, the list collapses to "compact" mode (just avatars). */
 export const COMPACT_THRESHOLD = 110;
 
@@ -13,25 +15,22 @@ export const COMPACT_THRESHOLD = 110;
  * below COMPACT_THRESHOLD), and a `startDrag` handler to wire to a
  * resize handle's `onMouseDown` / `onTouchStart`.
  *
- * Persists to localStorage so the user's choice sticks across reloads.
+ * The width is an account setting (layoutSettings.default.listWidth), so
+ * it follows the user to other devices. It is saved once, when a drag ends.
  */
 export function useResizableSidebar() {
-  const [width, setWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return DEFAULT_WIDTH;
-    const saved = window.localStorage?.getItem(STORAGE_KEY);
-    if (!saved) return DEFAULT_WIDTH;
-    const n = Number(saved);
-    if (!Number.isFinite(n)) return DEFAULT_WIDTH;
-    return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, n));
-  });
+  const [settings, setLayout] = useDefaultLayoutSettings();
+  const savedWidth = clampListWidth(settings.listWidth);
+  const [width, setWidth] = useState<number>(savedWidth);
+  // Follow the account value (it loads after the first paint, and may
+  // change on another device) whenever we're not mid-drag.
+  const draggingRef = useRef(false);
+  useEffect(() => {
+    if (!draggingRef.current) setWidth(savedWidth);
+  }, [savedWidth]);
   const [dragging, setDragging] = useState(false);
   const startXRef = useRef(0);
   const startWidthRef = useRef(0);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage?.setItem(STORAGE_KEY, String(width));
-  }, [width]);
 
   const startDrag = useCallback(
     (e: React.MouseEvent | React.TouchEvent) => {
@@ -39,6 +38,7 @@ export function useResizableSidebar() {
       const x = "touches" in e ? e.touches[0].clientX : e.clientX;
       startXRef.current = x;
       startWidthRef.current = width;
+      draggingRef.current = true;
       setDragging(true);
     },
     [width],
@@ -59,6 +59,7 @@ export function useResizableSidebar() {
       setWidth(next);
     }
     function onUp() {
+      draggingRef.current = false;
       setDragging(false);
     }
     window.addEventListener("mousemove", onMove);
@@ -77,6 +78,20 @@ export function useResizableSidebar() {
       document.body.style.userSelect = prev;
       document.body.style.cursor = "";
     };
+  }, [dragging]);
+
+  // Save to the account once the drag ends.
+  const wasDragging = useRef(false);
+  useEffect(() => {
+    if (dragging) {
+      wasDragging.current = true;
+      return;
+    }
+    if (!wasDragging.current) return;
+    wasDragging.current = false;
+    if (Math.round(width) !== savedWidth)
+      setLayout({ listWidth: Math.round(width) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dragging]);
 
   return {

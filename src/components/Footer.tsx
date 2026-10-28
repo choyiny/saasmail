@@ -1,82 +1,44 @@
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
-interface FooterProps {
-  /** "light" (default) for dashboard pages on white-ish bg.
-   *  "dark" for auth pages on the near-black gradient backdrop. */
-  variant?: "light" | "dark";
-}
+const link =
+  "rounded-md px-1.5 py-0.5 text-chrome-dim transition-colors hover:bg-chrome-hover hover:text-chrome-fg";
 
 /**
- * Single-row minimal footer matching givefeedback.dev's app footer.
- * Adapts to dark vs light parent bg via the `variant` prop so the same
- * markup works on both the dashboard and auth screens.
+ * One-row footer for public screens (auth, legal, unsubscribe). Drawn on
+ * the navy chrome, under the paper or auth card.
  */
-export default function Footer({ variant = "light" }: FooterProps) {
-  const dark = variant === "dark";
-
+export default function Footer() {
   return (
-    <footer
-      className={cn("border-t", dark ? "border-white/10" : "border-border/60")}
-    >
-      <div className="mx-auto flex w-full max-w-[1600px] flex-col items-center gap-2 px-4 py-2 text-[11px] sm:flex-row sm:justify-between md:px-6">
-        {/* Left: Privacy / Terms pills */}
-        <div className="flex items-center gap-1.5">
-          <Link
-            to="/privacy"
-            className={cn(
-              "rounded-[6px] px-2 py-0.5 font-semibold uppercase tracking-wider ring-1 transition-colors",
-              dark
-                ? "text-white/60 ring-white/15 hover:bg-white/5 hover:text-white"
-                : "text-text-secondary ring-border hover:bg-bg-subtle hover:text-text-primary",
-            )}
-          >
+    <footer className="w-full">
+      <div
+        className="mx-auto flex w-full max-w-[1200px] flex-col items-center gap-2 px-4 py-4 text-[12px] text-chrome-dim sm:flex-row sm:justify-between md:px-6"
+        style={{
+          paddingBottom: "max(1rem, env(safe-area-inset-bottom))",
+        }}
+      >
+        <nav className="flex items-center gap-1" aria-label="Legal">
+          <Link to="/privacy" className={link}>
             Privacy
           </Link>
-          <Link
-            to="/terms"
-            className={cn(
-              "rounded-[6px] px-2 py-0.5 font-semibold uppercase tracking-wider ring-1 transition-colors",
-              dark
-                ? "text-white/60 ring-white/15 hover:bg-white/5 hover:text-white"
-                : "text-text-secondary ring-border hover:bg-bg-subtle hover:text-text-primary",
-            )}
-          >
+          <span aria-hidden className="opacity-50">
+            ·
+          </span>
+          <Link to="/terms" className={link}>
             Terms
           </Link>
-        </div>
+        </nav>
 
-        {/* Center: copyright */}
-        <div
-          className={cn(
-            "font-light",
-            dark ? "text-white/50" : "text-text-tertiary",
-          )}
-        >
-          © {new Date().getFullYear()} saasmail
-        </div>
+        <div className="tabular">© {new Date().getFullYear()} saasmail</div>
 
-        {/* Right: sponsor */}
-        <div
-          className={cn(
-            "flex items-center gap-1.5",
-            dark ? "text-white/50" : "text-text-tertiary",
-          )}
-        >
-          <span className="font-light">Sponsored by</span>
+        <div className="flex items-center gap-1">
+          <span>Sponsored by</span>
           <a
             href="https://givefeedback.dev/saas"
             target="_blank"
             rel="noreferrer"
-            className={cn(
-              "inline-flex items-center gap-1 rounded-[6px] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 transition-colors",
-              dark
-                ? "bg-white/[0.06] text-white ring-white/15 hover:bg-white/[0.1]"
-                : "bg-violet/10 text-violet ring-violet/20 hover:bg-violet/15",
-            )}
-            style={!dark ? { color: "#7c5cfc" } : undefined}
+            className={cn(link, "font-medium text-chrome-fg-2")}
           >
-            <span style={{ color: "#bfff00" }}>✦</span>
             givefeedback.dev
           </a>
         </div>

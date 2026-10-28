@@ -42,6 +42,16 @@ const linkedCustomer = {
 };
 
 const person = {
+  // GroupedPerson's list-row fields (the API mock has no EMPTY_MAIL_ROW_STATE).
+  starred: false,
+  pinned: false,
+  archivedAt: null,
+  snoozedUntil: null,
+  trashedAt: null,
+  hasSent: false,
+  latestSubject: null,
+  snippet: null,
+  category: "primary" as const,
   type: "person" as const,
   id: "person-1",
   email: "one@example.com",

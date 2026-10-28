@@ -16,9 +16,9 @@ export default function ComposeFab({ onClick }: ComposeFabProps) {
       type="button"
       onClick={onClick}
       aria-label="Compose new email"
-      className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-text-primary text-white shadow-2xl ring-1 ring-black/10 transition-all active:scale-95 sm:hidden"
+      className="compose-fab fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent text-accent-foreground shadow-overlay transition-transform active:scale-95 sm:hidden"
       style={{
-        bottom: "max(1.25rem, env(safe-area-inset-bottom))",
+        bottom: "max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem))",
       }}
     >
       <PenSquare className="h-5 w-5" strokeWidth={2.25} />

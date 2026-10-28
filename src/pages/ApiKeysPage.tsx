@@ -17,6 +17,8 @@ import {
 import type { ApiKeyInfo } from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function ApiKeysPage() {
   const { data: session } = useSession();
@@ -65,136 +67,119 @@ export default function ApiKeysPage() {
 
       <div className="max-w-3xl space-y-5">
         {loading ? (
-          <p className="text-sm font-light text-text-tertiary">Loading…</p>
+          <div className="pt-card space-y-3 p-5" aria-busy="true">
+            <span className="pt-skel block h-4 w-1/3" />
+            <span className="pt-skel block h-3 w-1/2" />
+          </div>
         ) : (
           <>
             {/* Newly generated key — must copy now */}
             {newKey && (
-              <div className="rounded-[8px] border border-warning-border bg-warning-bg px-4 py-3">
-                <p className="mb-2 text-xs font-medium text-warning-text">
-                  Your API key — copy it now, it won't be shown again.
+              <div className="rounded-2xl border border-warning-border bg-warning-bg p-4">
+                <p className="mb-2.5 text-[13px] font-medium text-warning-text">
+                  Copy your API key now. It won't be shown again.
                 </p>
                 <div className="flex items-center gap-2">
-                  <input
+                  <Input
                     readOnly
                     data-testid="api-key-revealed"
                     value={newKey}
-                    className="h-9 flex-1 rounded-[6px] border border-border bg-card px-3 font-mono text-xs text-text-primary focus:outline-none"
+                    className="font-code flex-1 text-xs"
                   />
-                  <button
-                    onClick={handleCopy}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-[6px] border border-border px-3 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-                  >
-                    {copied ? (
-                      <>
-                        <Check size={12} />
-                        Copied
-                      </>
-                    ) : (
-                      <>
-                        <Copy size={12} />
-                        Copy
-                      </>
-                    )}
-                  </button>
+                  <Button variant="outline" onClick={handleCopy}>
+                    {copied ? <Check /> : <Copy />}
+                    {copied ? "Copied" : "Copy"}
+                  </Button>
                 </div>
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setNewKey(null)}
-                  className="mt-2 text-xs font-light text-text-tertiary transition-colors hover:text-text-secondary"
+                  className="-ml-2 mt-2"
                 >
                   Done
-                </button>
+                </Button>
               </div>
             )}
 
             {/* Existing key */}
             {keyInfo && !newKey && (
-              <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-violet/10 text-violet">
-                      <Key size={16} style={{ color: "#7c5cfc" }} />
-                    </span>
-                    <div>
-                      <p className="font-mono text-sm font-medium text-text-primary">
-                        {keyInfo.prefix}
-                      </p>
-                      <p className="mt-0.5 text-xs font-light text-text-tertiary">
-                        Created{" "}
-                        {new Date(
-                          keyInfo.createdAt * 1000,
-                        ).toLocaleDateString()}
-                      </p>
-                    </div>
+              <div className="pt-card" data-testid="api-key-row">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-3 p-4 sm:px-5">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-bg-muted">
+                    <Key size={16} className="text-text-secondary" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-mono text-[13.5px] font-medium text-text-primary">
+                      {keyInfo.prefix}
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-text-tertiary">
+                      <span className="pt-sdot ok" aria-hidden />
+                      Active · created{" "}
+                      {new Date(keyInfo.createdAt * 1000).toLocaleDateString()}
+                    </p>
                   </div>
                   <div className="flex shrink-0 gap-2">
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => setConfirmAction("regenerate")}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-border px-3 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
                     >
-                      <RefreshCw size={12} />
+                      <RefreshCw />
                       Regenerate
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => setConfirmAction("revoke")}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-border px-3 text-xs font-medium text-destructive transition-colors hover:bg-destructive/10"
+                      className="text-destructive hover:bg-destructive-subtle"
                     >
-                      <Trash2 size={12} />
+                      <Trash2 />
                       Revoke
-                    </button>
+                    </Button>
                   </div>
                 </div>
               </div>
             )}
 
             {!keyInfo && !newKey && (
-              <div className="rounded-[8px] bg-card p-8 text-center ring-1 ring-border">
-                <span className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-violet/10 text-violet">
-                  <Key size={20} style={{ color: "#7c5cfc" }} />
+              <div className="pt-card pt-empty">
+                <span className="ic">
+                  <Key size={18} />
                 </span>
-                <p className="mb-1 text-sm font-medium text-text-primary">
-                  No API key yet
-                </p>
-                <p className="mb-4 text-xs font-light text-text-tertiary">
-                  Generate a key to start using the API programmatically.
-                </p>
-                <button
-                  onClick={handleGenerate}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] bg-text-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-text-primary/90"
-                >
-                  Generate API Key
-                </button>
+                <p>Generate a key to use the API from your own code.</p>
+                <Button onClick={handleGenerate}>Generate API Key</Button>
               </div>
             )}
 
             {/* Usage */}
-            <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
-              <h2 className="mb-2 text-sm font-semibold text-text-primary">
-                Usage
-              </h2>
-              <p className="mb-3 text-xs font-light text-text-secondary">
-                Include your API key in the{" "}
-                <code className="rounded bg-bg-muted px-1 py-0.5 font-mono">
-                  Authorization
-                </code>{" "}
-                header.
-              </p>
-              <pre className="overflow-x-auto rounded-[6px] bg-bg-subtle p-3 text-[12px] font-mono text-text-secondary ring-1 ring-border">
-                {`curl -H "Authorization: Bearer sk_..." \\
+            <section className="pt-card overflow-hidden">
+              <div className="pt-card-head">
+                <div>
+                  <h2>Usage</h2>
+                  <p>
+                    Send the key in the{" "}
+                    <code className="font-code">Authorization</code> header.
+                  </p>
+                </div>
+              </div>
+              <div className="p-5">
+                <pre className="font-code overflow-x-auto rounded-lg border border-border bg-bg-subtle p-3 text-xs leading-relaxed text-text-primary">
+                  {`curl -H "Authorization: Bearer sk_..." \\
   ${typeof window !== "undefined" ? window.location.origin : "https://your-instance"}/api/people`}
-              </pre>
-              <p className="mt-3 text-xs font-light text-text-secondary">
-                The key grants full access to the API as your user account. See{" "}
-                <a
-                  href="/swagger-ui"
-                  className="font-medium text-violet hover:underline"
-                  style={{ color: "#7c5cfc" }}
-                >
-                  API docs
-                </a>{" "}
-                for available endpoints.
-              </p>
-            </div>
+                </pre>
+                <p className="mt-3 text-[13px] text-text-secondary">
+                  The key acts as your user account. See the{" "}
+                  <a
+                    href="/swagger-ui"
+                    className="font-medium text-accent-subtle-fg underline-offset-2 hover:underline"
+                  >
+                    API docs
+                  </a>{" "}
+                  for available endpoints.
+                </p>
+              </div>
+            </section>
 
             {isAdmin && <WebhookSection />}
           </>
@@ -206,38 +191,31 @@ export default function ApiKeysPage() {
         open={confirmAction !== null}
         onOpenChange={() => setConfirmAction(null)}
       >
-        <DialogContent className="border-border bg-card text-text-primary ring-1 ring-border">
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-text-primary">
+            <DialogTitle>
               {confirmAction === "regenerate"
                 ? "Regenerate API Key?"
                 : "Revoke API Key?"}
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm font-light text-text-secondary">
+          <p className="text-sm text-text-secondary">
             {confirmAction === "regenerate"
               ? "This will invalidate your current key and generate a new one. Any integrations using the old key will stop working."
               : "This will permanently delete your API key. Any integrations using it will stop working."}
           </p>
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              onClick={() => setConfirmAction(null)}
-              className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary"
-            >
+          <div className="mt-2 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setConfirmAction(null)}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
+              variant={confirmAction === "revoke" ? "destructive" : "default"}
               onClick={
                 confirmAction === "regenerate" ? handleGenerate : handleRevoke
               }
-              className={`rounded-[6px] px-3 py-1.5 text-xs font-medium text-white ${
-                confirmAction === "revoke"
-                  ? "bg-destructive hover:bg-destructive/90"
-                  : "bg-text-primary hover:bg-text-primary/90"
-              }`}
             >
               {confirmAction === "regenerate" ? "Regenerate" : "Revoke"}
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -343,44 +321,52 @@ function WebhookSection() {
   }
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-base font-semibold text-text-primary">Webhook</h2>
-      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
-        <p className="text-xs font-light text-text-secondary">
-          Fire an HTTP <code>POST</code> to an external automation (n8n, Make,
-          etc.) whenever a new inbound message is received. Global, single
-          best-effort attempt, disabled by default. When a signing secret is
-          set, requests carry an{" "}
-          <code>X-SaaSMail-Signature: sha256=&lt;hmac&gt;</code> header over the
-          raw body.
+    <section className="pt-card overflow-hidden">
+      <div className="pt-card-head">
+        <div>
+          <h2>Webhook</h2>
+          <p>POST new inbound messages to an external automation.</p>
+        </div>
+      </div>
+      <div className="p-5">
+        <p className="text-[13px] text-text-secondary">
+          Fire an HTTP <code className="font-code">POST</code> to n8n, Make or
+          similar whenever a new inbound message is received. Global, single
+          best-effort attempt, disabled by default. With a signing secret set,
+          requests carry an{" "}
+          <code className="font-code">
+            X-SaaSMail-Signature: sha256=&lt;hmac&gt;
+          </code>{" "}
+          header over the raw body.
         </p>
 
-        <div className="mt-4 space-y-2">
+        <div className="mt-5 space-y-1.5">
           <label
             htmlFor="webhook-url"
-            className="text-xs font-medium uppercase tracking-wider text-text-tertiary"
+            className="block text-[13px] font-medium text-text-primary"
           >
             Destination URL
           </label>
-          <input
+          <Input
             id="webhook-url"
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="https://your-automation/webhook"
             disabled={busy}
-            className="h-10 w-full rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
+            className="font-code"
           />
         </div>
 
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-1.5">
           <label
             htmlFor="webhook-secret"
-            className="text-xs font-medium uppercase tracking-wider text-text-tertiary"
+            className="block text-[13px] font-medium text-text-primary"
           >
-            Signing secret (optional)
+            Signing secret{" "}
+            <span className="font-normal text-text-tertiary">(optional)</span>
           </label>
-          <input
+          <Input
             id="webhook-secret"
             type="password"
             value={secret}
@@ -389,14 +375,14 @@ function WebhookSection() {
               hasSecret ? "•••••••• (set — leave blank to keep)" : "none"
             }
             disabled={busy}
-            className="h-10 w-full max-w-sm rounded-[6px] border border-border bg-bg-subtle px-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/30"
+            className="max-w-sm"
           />
           {hasSecret && (
             <button
               type="button"
               onClick={onClearSecret}
               disabled={busy}
-              className="text-xs font-light text-text-secondary hover:text-text-primary hover:underline disabled:opacity-60"
+              className="text-xs text-text-secondary hover:text-text-primary hover:underline disabled:opacity-60"
             >
               Clear secret
             </button>
@@ -405,65 +391,46 @@ function WebhookSection() {
 
         {/* In-app verification guidance — no docs site, so hand the user an
             AI prompt that generates verifier code for whatever stack they use. */}
-        <div className="mt-4 rounded-[6px] border border-border bg-bg-subtle p-3">
+        <div className="mt-5 rounded-xl border border-border bg-bg-subtle p-3.5">
           <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-text-primary">
+            <p className="text-[13px] font-medium text-text-primary">
               Verifying signatures
             </p>
-            <button
-              type="button"
-              onClick={copyVerifyPrompt}
-              className="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-border px-2.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-muted hover:text-text-primary"
-            >
-              {promptCopied ? (
-                <>
-                  <Check size={12} />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Copy size={12} />
-                  Copy prompt
-                </>
-              )}
-            </button>
+            <Button variant="outline" size="sm" onClick={copyVerifyPrompt}>
+              {promptCopied ? <Check /> : <Copy />}
+              {promptCopied ? "Copied" : "Copy prompt"}
+            </Button>
           </div>
-          <p className="mt-1 text-xs font-light text-text-secondary">
-            To check the signature on your receiver, paste this prompt into your
-            AI assistant — it generates verification code for your stack.
+          <p className="mt-1 text-xs text-text-secondary">
+            Paste this prompt into your AI assistant to generate verification
+            code for your stack.
           </p>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-[6px] bg-card p-2.5 text-[11px] font-mono leading-relaxed text-text-secondary ring-1 ring-border">
+          <pre className="font-code mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-card p-2.5 text-[11.5px] leading-relaxed text-text-secondary">
             {VERIFY_PROMPT}
           </pre>
         </div>
 
         {error && (
-          <p className="mt-3 text-xs text-red-600" role="alert">
+          <p className="mt-3 text-[13px] text-destructive" role="alert">
             {error}
           </p>
         )}
-        {success && <p className="mt-3 text-xs text-emerald-600">{success}</p>}
+        {success && <p className="mt-3 text-[13px] text-success">{success}</p>}
         {testResult && (
-          <p className="mt-3 text-xs text-text-secondary">{testResult}</p>
+          <p className="mt-3 text-[13px] text-text-secondary">{testResult}</p>
         )}
 
-        <div className="mt-4 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={busy}
-            className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
+        <div className="mt-5 flex items-center gap-2">
+          <Button onClick={onSave} disabled={busy}>
             {busy ? "Saving…" : "Save"}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="outline"
             onClick={onTest}
             disabled={busy || !url.trim()}
-            className="rounded-[6px] border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:bg-bg-muted hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-60"
           >
             Send test
-          </button>
+          </Button>
         </div>
       </div>
     </section>

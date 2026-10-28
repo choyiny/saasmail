@@ -241,6 +241,17 @@ describe("outbox router", () => {
     });
   });
 
+  it("rejects a malformed cursor with 400", async () => {
+    for (const cursor of ["1700000000", "abc_ob-1", "_ob-1", "1700000000_"]) {
+      const res = await authFetch(
+        `/api/outbox?cursor=${encodeURIComponent(cursor)}`,
+        { apiKey },
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "Invalid cursor" });
+    }
+  });
+
   it("returns 404 for retry on a nonexistent id", async () => {
     const res = await authFetch("/api/outbox/does-not-exist/retry", {
       apiKey,

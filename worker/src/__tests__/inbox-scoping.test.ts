@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   applyMigrations,
@@ -174,39 +174,6 @@ describe("emails scoping", () => {
       .where(eq(emails.id, "e2"))
       .limit(1);
     expect(row[0].isRead).toBe(0);
-  });
-
-  // Note: PATCH /api/emails/bulk is unreachable because PATCH /{id} is
-  // registered first and "bulk" matches as an {id} param. Skipping this
-  // test for the same reason as in emails-router.test.ts.
-  it.skip("member bulk PATCH skips disallowed ids and updates allowed ones", async () => {
-    const { apiKey, userId } = await createTestUser({
-      id: "u-mem",
-      role: "member",
-      email: "m@x.com",
-    });
-    await createTestPerson({ id: "p1" });
-    await createTestEmail({ id: "e1", personId: "p1", recipient: "a@x.com" });
-    await createTestEmail({
-      id: "e2",
-      personId: "p1",
-      recipient: "b@x.com",
-      messageId: "m2",
-    });
-    await grantInbox(userId, "a@x.com");
-    const res = await authFetch("/api/emails/bulk", {
-      apiKey,
-      method: "PATCH",
-      body: JSON.stringify({ ids: ["e1", "e2"], isRead: true }),
-    });
-    expect(res.status).toBe(200);
-    const rows = await getDb()
-      .select()
-      .from(emails)
-      .where(inArray(emails.id, ["e1", "e2"]));
-    const byId = Object.fromEntries(rows.map((r) => [r.id, r.isRead]));
-    expect(byId.e1).toBe(1);
-    expect(byId.e2).toBe(0);
   });
 
   it("member DELETE disallowed email returns 404 and row still exists", async () => {

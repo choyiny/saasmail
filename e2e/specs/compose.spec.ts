@@ -26,7 +26,7 @@ test.describe.serial("compose & send", () => {
     await expect(page.getByText("Alice Anderson")).toBeVisible();
 
     // Click Compose button in sidebar
-    await page.getByRole("button", { name: "Compose" }).click();
+    await page.getByRole("button", { name: "Compose", exact: true }).click();
 
     // Wait for the compose dialog to open. The slim tray header now
     // reads "New message" (or "New message · <recipient>" once To is
@@ -162,7 +162,7 @@ test.describe.serial("compose & send", () => {
     await expect(page.getByText("Alice Anderson")).toBeVisible();
 
     // Open Compose
-    await page.getByRole("button", { name: "Compose" }).click();
+    await page.getByRole("button", { name: "Compose", exact: true }).click();
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
@@ -183,10 +183,8 @@ test.describe.serial("compose & send", () => {
     // Now the Send button should be enabled
     await expect(sendButton).toBeEnabled();
 
-    // Clear the text (select all, delete). ProseMirror binds select-all to
-    // "Mod", which is Cmd on macOS and Ctrl elsewhere, so a hard-coded
-    // Control+a silently does nothing on a Mac dev machine (it passes on Linux
-    // CI). ControlOrMeta is the platform-portable spelling.
+    // Clear the text (select all, delete)
+    // ControlOrMeta: on macOS, Control+A moves to line start in ProseMirror.
     await page.keyboard.press("ControlOrMeta+a");
     await page.keyboard.press("Backspace");
 

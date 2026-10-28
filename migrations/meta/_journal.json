@@ -610,6 +610,13 @@
       "when": 1793186236220,
       "tag": "0086_upstream_gmail_outlook",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1793200836303,
+      "tag": "0087_upstream_user_preferences",
+      "breakpoints": true
     }
   ]
 }

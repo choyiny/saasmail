@@ -32,6 +32,8 @@ DELETE FROM sent_emails;
 DELETE FROM people;
 DELETE FROM inbox_permissions;
 DELETE FROM sender_identities;
+-- Per-user tab corrections would otherwise survive a reseed.
+DELETE FROM category_overrides;
 
 -- Inboxes
 INSERT INTO sender_identities (email, display_name, display_mode, created_at, updated_at)

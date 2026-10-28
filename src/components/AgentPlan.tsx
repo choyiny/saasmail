@@ -32,38 +32,36 @@ export default function AgentPlan() {
     <div className="smooth-scroll flex h-full min-h-0 flex-col overflow-y-auto bg-card">
       <div className="mx-auto w-full max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
         <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-violet/10 ring-1 ring-violet/30">
-            <Bot size={15} className="text-violet" />
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-bg-subtle">
+            <Bot size={16} className="text-text-secondary" />
           </span>
-          <h2 className="text-base font-semibold text-text-primary">
-            {plan.title || "Agent Plan"}
+          <h2 className="text-base font-semibold tracking-[-0.01em] text-text-primary">
+            {plan.title || "Agent plan"}
           </h2>
-          {activeStep && (
-            <span className="ml-1 h-1.5 w-1.5 animate-pulse rounded-full bg-violet" />
-          )}
+          {activeStep && <span className="pt-sdot accent ml-1 animate-pulse" />}
         </div>
 
         {/* Progress */}
         <div className="mt-4">
-          <div className="mb-1.5 flex items-center justify-between text-[11px] font-medium text-text-tertiary">
+          <div className="mb-1.5 flex items-center justify-between text-xs text-text-secondary">
             <span>
               {done} of {total} done
             </span>
-            <span className="tabular-nums">{pct}%</span>
+            <span className="tabular font-medium">{pct}%</span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-muted">
             <div
-              className="h-full rounded-full bg-violet transition-[width] duration-500 ease-out"
+              className="h-full rounded-full bg-accent transition-[width] duration-500 ease-out"
               style={{ width: `${pct}%` }}
             />
           </div>
           {/* Current step — surfaces "who's being read right now" even when the
               list runs long. */}
           {activeStep && (
-            <div className="mt-2 flex items-center gap-2 text-[12px] text-text-secondary">
+            <div className="mt-2 flex items-center gap-2 text-[13px] text-text-secondary">
               <Loader2
-                size={12}
-                className="shrink-0 animate-spin text-violet"
+                size={13}
+                className="shrink-0 animate-spin text-accent"
               />
               <span className="min-w-0 truncate">
                 <span className="text-text-tertiary">Now:</span>{" "}
@@ -76,10 +74,8 @@ export default function AgentPlan() {
         {/* Result — the finished output, kept at the top so it's the first
             thing read once the work is done. */}
         {plan.result && (
-          <div className="mt-4 rounded-[10px] bg-bg-subtle/60 p-4 ring-1 ring-border">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-text-tertiary">
-              Result
-            </p>
+          <div className="mt-4 rounded-2xl border border-border bg-bg-subtle p-4">
+            <p className="font-label mb-2 text-text-tertiary">Result</p>
             <p className="whitespace-pre-wrap break-words text-sm text-text-primary">
               {plan.result}
             </p>
@@ -87,16 +83,14 @@ export default function AgentPlan() {
         )}
 
         {/* Steps */}
-        <ol className="mt-5 space-y-1">
+        <ol className="mt-5 overflow-hidden rounded-2xl border border-border bg-card p-1.5 shadow-card">
           {plan.steps.map((step, i) => (
             <li
               key={i}
               className={cn(
-                "flex items-start gap-2.5 rounded-[8px] px-3 ring-1 transition-colors",
-                step.status === "done" ? "py-1" : "py-2.5",
-                step.status === "active"
-                  ? "bg-violet/[0.04] ring-violet/30"
-                  : "ring-transparent",
+                "flex items-start gap-2.5 rounded-xl px-3 transition-colors",
+                step.status === "done" ? "py-1.5" : "py-2.5",
+                step.status === "active" && "bg-accent-subtle",
               )}
             >
               <StepIcon status={step.status} />
@@ -136,44 +130,39 @@ function StepIcon({ status }: { status: AgentPlanStepStatus }) {
   const base = "mt-0.5 shrink-0";
   if (status === "active")
     return (
-      <Loader2 size={16} className={cn(base, "animate-spin text-violet")} />
+      <Loader2 size={16} className={cn(base, "animate-spin text-accent")} />
     );
   if (status === "done")
-    return (
-      <Check
-        size={14}
-        className={cn(base, "text-emerald-600 dark:text-emerald-400")}
-      />
-    );
+    return <Check size={14} className={cn(base, "text-success")} />;
   if (status === "error")
     return <AlertCircle size={16} className={cn(base, "text-destructive")} />;
-  return <Circle size={16} className={cn(base, "text-text-tertiary/50")} />;
+  return <Circle size={16} className={cn(base, "text-border-strong")} />;
 }
 
 function EmptyState() {
   return (
-    <div className="flex h-full min-h-0 flex-col items-center justify-center bg-card px-6 py-10 text-center">
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-violet/10 ring-1 ring-violet/30">
-        <Bot size={22} className="text-violet" />
+    <div className="pt-empty h-full min-h-0 bg-card">
+      <span className="ic">
+        <Bot size={18} />
       </span>
-      <h2 className="mt-4 text-base font-semibold text-text-primary">
+      <h2 className="text-base font-semibold text-text-primary">
         No agent plan yet
       </h2>
-      <p className="mt-2 max-w-md text-sm text-text-secondary">
+      <p className="max-w-md text-[13.5px] text-text-secondary">
         Connect a WebMCP-capable agent (ChatGPT's in-app browser, or Chrome with
         WebMCP enabled) and ask it to work your inbox. It reads the playbook via
         the{" "}
-        <code className="rounded bg-bg-muted px-1 py-0.5 text-[12px]">
+        <code className="font-code rounded bg-bg-muted px-1 py-0.5 text-[12px] text-text-primary">
           get_playbook
         </code>{" "}
         tool, then calls{" "}
-        <code className="rounded bg-bg-muted px-1 py-0.5 text-[12px]">
+        <code className="font-code rounded bg-bg-muted px-1 py-0.5 text-[12px] text-text-primary">
           visualize_plan
         </code>{" "}
         to lay out its steps here — so you can watch the plan fill in and tick
         off while it works, instead of staring at a spinner.
       </p>
-      <p className="mt-3 max-w-md text-[12px] text-text-tertiary">
+      <p className="max-w-md text-[12.5px] text-text-tertiary">
         Try: “summarize all my unread email”, “draft replies to everything
         unread”, or “enroll new contacts into the onboarding sequence”.
       </p>

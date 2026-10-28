@@ -9,6 +9,7 @@ import {
   isInboxAllowed,
   jsonList,
 } from "../lib/inbox-permissions";
+import { computeGroupedRows, GroupedQuerySchema } from "./people-router";
 import type { Variables } from "../variables";
 
 export const statsRouter = new OpenAPIHono<{
@@ -19,8 +20,17 @@ export const statsRouter = new OpenAPIHono<{
 const StatsSchema = z.object({
   totalPeople: z.number(),
   totalEmails: z.number(),
+  /**
+   * Unread rows (people and group conversations) in the caller's Inbox
+   * folder — the same rows as `GET /api/people/grouped?folder=inbox&unread=1`
+   * (narrowed to `recipient` when given), so archived, snoozed and trashed
+   * rows don't count until new mail or an expired snooze brings them back.
+   */
   unreadCount: z.number(),
   recipients: z.array(z.string()),
+  /** Unread Inbox rows per inbox address (as `unreadCount`, per
+   *  `recipient`), for folder/label counts. Inboxes with none are omitted. */
+  inboxUnread: z.record(z.string(), z.number()),
   senderIdentities: z.array(
     z.object({
       email: z.string(),
@@ -62,14 +72,43 @@ statsRouter.openapi(statsRoute, async (c) => {
   const whereEmails = and(scopeFilter, recipientFilter);
 
   const emailAgg = await db
-    .select({
-      total: sql<number>`COUNT(*)`,
-      unread: sql<number>`SUM(CASE WHEN ${emails.isRead} = 0 THEN 1 ELSE 0 END)`,
-    })
+    .select({ total: sql<number>`COUNT(*)` })
     .from(emails)
     .where(whereEmails ?? sql`1=1`);
   const totalEmails = emailAgg[0]?.total ?? 0;
-  const unreadCount = emailAgg[0]?.unread ?? 0;
+
+  // Unread counts follow the Inbox list, not raw unread messages: reuse the
+  // grouped-list computation (the caller's archive / snooze / trash state and
+  // its wake rules, the blocklist, inbox scoping) and count its rows.
+  const { merged: unreadInboxRows } = await computeGroupedRows(
+    c,
+    GroupedQuerySchema.parse({ folder: "inbox", unread: "1" }),
+    { categories: false },
+  );
+  // A person row belongs to every inbox it has received 1:1 mail at — the
+  // same test as the list's `recipient` filter.
+  const personInboxes = new Map<string, string[]>();
+  if (unreadInboxRows.some((r) => r.type === "person")) {
+    const pairs = await db
+      .selectDistinct({ personId: emails.personId, inbox: emails.recipient })
+      .from(emails)
+      .where(and(sql`${emails.conversationId} IS NULL`, scopeFilter));
+    for (const p of pairs) {
+      const list = personInboxes.get(p.personId);
+      if (list) list.push(p.inbox);
+      else personInboxes.set(p.personId, [p.inbox]);
+    }
+  }
+  const inboxUnread: Record<string, number> = {};
+  let unreadCount = 0;
+  for (const r of unreadInboxRows) {
+    const inboxes =
+      r.type === "person" ? (personInboxes.get(r.id) ?? []) : [r.inbox];
+    for (const inbox of inboxes) {
+      inboxUnread[inbox] = (inboxUnread[inbox] ?? 0) + 1;
+    }
+    if (!recipient || inboxes.includes(recipient)) unreadCount++;
+  }
 
   const personCountRow = await db
     .select({ count: sql<number>`COUNT(*)` })
@@ -93,6 +132,7 @@ statsRouter.openapi(statsRoute, async (c) => {
       totalEmails,
       unreadCount,
       recipients: identityRows.map((r) => r.email),
+      inboxUnread,
       senderIdentities: identityRows.map((r) => ({
         email: r.email,
         displayName: r.displayName,

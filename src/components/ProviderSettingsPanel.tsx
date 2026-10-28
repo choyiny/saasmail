@@ -150,11 +150,11 @@ export default function ProviderSettingsPanel({
       : { text: "Not set up", tone: "warn" as const };
 
   const input =
-    "h-9 w-full rounded-[6px] bg-card px-3 text-sm text-text-primary ring-1 ring-border placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
+    "h-9 w-full rounded-lg bg-card px-3 text-sm text-text-primary ring-1 ring-border placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50";
 
   return (
     <div
-      className="rounded-[8px] bg-card ring-1 ring-border"
+      className="rounded-lg bg-card ring-1 ring-border"
       data-testid={`${provider}-settings`}
     >
       <button
@@ -172,8 +172,8 @@ export default function ProviderSettingsPanel({
           className={cn(
             "ml-auto rounded-full px-2 py-0.5 text-[11px] font-medium",
             status.tone === "ok"
-              ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-              : "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+              ? "bg-success-subtle text-success"
+              : "bg-warning-bg text-warning",
           )}
         >
           {status.text}
@@ -183,7 +183,7 @@ export default function ProviderSettingsPanel({
       {open && (
         <div className="space-y-3 border-t border-border px-4 py-3 text-xs">
           {!keyConfigured && (
-            <div className="flex gap-2 rounded-[6px] bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-400">
+            <div className="flex gap-2 rounded-lg bg-warning-bg px-3 py-2 text-warning">
               <AlertTriangle size={14} className="mt-px shrink-0" />
               <span>
                 <span className="font-medium">
@@ -202,12 +202,10 @@ export default function ProviderSettingsPanel({
           )}
 
           <div>
-            <p className="mb-1.5 font-light text-text-secondary">
-              {copy.steps}
-            </p>
+            <p className="mb-1.5 text-text-secondary">{copy.steps}</p>
             <div className="flex items-center gap-2">
               <code
-                className="min-w-0 flex-1 truncate rounded-[6px] bg-bg-muted px-2 py-1.5 font-mono text-text-primary"
+                className="min-w-0 flex-1 truncate rounded-lg bg-bg-muted px-2 py-1.5 font-mono text-text-primary"
                 data-testid={`${provider}-redirect-uri`}
               >
                 {settings.redirectUri}
@@ -215,7 +213,7 @@ export default function ProviderSettingsPanel({
               <button
                 type="button"
                 onClick={copyRedirect}
-                className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-text-secondary ring-1 ring-border hover:bg-bg-muted"
+                className="inline-flex h-7 items-center gap-1 rounded-lg px-2 text-text-secondary ring-1 ring-border hover:bg-bg-muted"
               >
                 {copied ? <Check size={12} /> : <Copy size={12} />}
                 {copied ? "Copied" : "Copy"}
@@ -224,7 +222,7 @@ export default function ProviderSettingsPanel({
           </div>
 
           {settings.source === "env" && copy.envVars && (
-            <p className="font-light text-text-tertiary">
+            <p className="text-text-tertiary">
               These are currently read from{" "}
               <code className="font-mono">{copy.envVars}</code>. Saving here
               takes over from them; you can then remove the vars.
@@ -282,7 +280,7 @@ export default function ProviderSettingsPanel({
                 spellCheck={false}
                 data-testid={`${provider}-tenant`}
               />
-              <span className="mt-1 block font-light text-text-tertiary">
+              <span className="mt-1 block text-text-tertiary">
                 A directory ID or domain (contoso.onmicrosoft.com) limits
                 sign-in to that organization.
               </span>
@@ -291,7 +289,7 @@ export default function ProviderSettingsPanel({
 
           {clientIdChanged && settings.connectedMailboxes > 0 && (
             <div
-              className="flex gap-2 rounded-[6px] bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-400"
+              className="flex gap-2 rounded-lg bg-warning-bg px-3 py-2 text-warning"
               data-testid={`${provider}-client-change-warning`}
             >
               <AlertTriangle size={14} className="mt-px shrink-0" />
@@ -321,16 +319,12 @@ export default function ProviderSettingsPanel({
               onClick={handleSave}
               disabled={!canSave}
               data-testid={`${provider}-settings-save`}
-              className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-text-primary px-3 text-xs font-medium text-white hover:bg-text-primary/90 disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-accent-foreground hover:bg-accent-hover disabled:opacity-50"
             >
               {saving && <Loader2 size={12} className="animate-spin" />}
               Save
             </button>
-            {saved && (
-              <span className="text-emerald-700 dark:text-emerald-400">
-                Saved.
-              </span>
-            )}
+            {saved && <span className="text-success">Saved.</span>}
           </div>
         </div>
       )}

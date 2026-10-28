@@ -28,20 +28,6 @@ npx saasmail@latest upgrade
 Moves an installation to the package's version: applies new migrations, adds new resources and secrets, and
 deploys. It never downgrades.
 
-## Adopt an existing installation
-
-From a checkout that ran `yarn saasmail install`:
-
-```bash
-npx saasmail adopt --from path/to/checkout
-```
-
-Or a worker deployed by hand:
-
-```bash
-npx saasmail adopt --worker <worker name>
-```
-
 ## Status
 
 ```bash

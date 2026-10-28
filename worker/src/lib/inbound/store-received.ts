@@ -239,9 +239,8 @@ export async function storeReceivedMessage(
       },
     });
 
-  // Get the actual person ID (could be existing). Lookup by the
-  // canonical (lowercased) email so legacy mixed-case rows still
-  // resolve to the same person.
+  // Get the actual person ID (the upsert above may have hit an existing row).
+  // Exact match on the lowercased address the upsert used.
   const personRow = await db
     .select({ id: people.id })
     .from(people)

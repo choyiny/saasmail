@@ -137,12 +137,27 @@ describe("interpolate — inherited object members are not variables", () => {
 });
 
 describe("interpolate — tag names match the legacy grammar exactly", () => {
-  it.each(["{{ spaced }}", "{{ name }}", "{{example.com}}", "{{user.name}}"])(
-    "leaves %s as literal text",
-    (template) => {
-      expect(interpolate(template, { spaced: "S", name: "N" })).toBe(template);
-    },
-  );
+  it.each([
+    "{{ spaced }}",
+    "{{ name }}",
+    "{{example.com}}",
+    "{{user.name}}",
+    "{{not-a-var}}",
+  ])("leaves %s as literal text", (template) => {
+    expect(
+      interpolate(template, {
+        spaced: "S",
+        name: "N",
+        "example.com": "E",
+        "user.name": "U",
+        "not-a-var": "nope",
+      }),
+    ).toBe(template);
+  });
+
+  it("renders an empty template as empty", () => {
+    expect(interpolate("", { name: "Alice" })).toBe("");
+  });
 });
 
 describe("interpolate — non-string values", () => {

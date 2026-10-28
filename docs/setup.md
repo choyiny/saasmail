@@ -73,7 +73,7 @@ If a run stops, it prints the step that failed and the command to continue: `npx
 
 A zone whose Email Routing never becomes ready within 60 seconds fails that step, and fails again each resume until the zone is healthy. `--resume` never upgrades a deployed instance: updates go through `npx saasmail@latest upgrade` ([Updating](updating.md)).
 
-`npx saasmail status` shows the recorded installation (add `--name <name>` when there are several), the **Latest** version on npm with the command that upgrades to it (`npx saasmail@<latest> upgrade --name <name>`), and asks the deployed worker's public `/.well-known/saasmail` whether it matches. For an install still in a clone, `npx saasmail status --from <checkout>` reads the checkout's state without moving or writing anything; its upgrade hint adopts from that checkout first.
+`npx saasmail status` shows the recorded installation (add `--name <name>` when there are several), the **Latest** version on npm with the command that upgrades to it (`npx saasmail@<latest> upgrade --name <name>`), and asks the deployed worker's public `/.well-known/saasmail` whether it matches. In a clone, `yarn saasmail status` points at the fork update path instead ([Updating](updating.md#forks-and-modified-code)).
 
 ### Install from a clone
 
@@ -87,7 +87,7 @@ yarn wrangler login
 yarn saasmail install
 ```
 
-`upgrade` and `adopt` are npm-only: in a clone they print the `npx` command to run. To hand a clone's install to the package, run `npx saasmail adopt --from <checkout>` (see [Updating](updating.md#adopt-an-existing-install)); the clone then refuses to deploy it. `npx saasmail upgrade` stops on modified code unless you pass `--replace-custom-code`.
+`upgrade` is npm-only and manages only installs made with `npx saasmail install`; a clone's install is updated from the clone (see [Updating](updating.md#forks-and-modified-code)). `npx saasmail upgrade` stops on modified code unless you pass `--replace-custom-code`.
 
 ### Token permissions
 

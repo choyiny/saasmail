@@ -76,18 +76,18 @@ export default function InviteAcceptPage() {
   }
 
   if (status === "loading") {
-    return <p className="text-sm text-white/60">Validating invitation…</p>;
+    return <p className="text-sm text-chrome-dim">Validating invitation…</p>;
   }
 
   if (status === "invalid") {
     return (
-      <div className="flex w-full max-w-sm flex-col items-center gap-8">
+      <div className="flex w-full max-w-[420px] flex-col items-center gap-7">
         <WordmarkLarge />
-        <div className="w-full rounded-2xl bg-white/10 p-8 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl">
-          <h2 className="text-xl font-extrabold tracking-tight text-white">
+        <div className="pt-auth-card">
+          <h2 className="text-[20px] font-semibold leading-tight tracking-[-0.02em] text-text-primary">
             Invalid invitation
           </h2>
-          <p className="mt-3 text-sm font-light text-white/60">
+          <p className="mt-3 text-[13.5px] leading-relaxed text-text-secondary">
             This invitation link is invalid, expired, or has already been used.
           </p>
         </div>
@@ -96,14 +96,14 @@ export default function InviteAcceptPage() {
   }
 
   return (
-    <div className="flex w-full max-w-sm flex-col items-center gap-8">
+    <div className="flex w-full max-w-[420px] flex-col items-center gap-7">
       <WordmarkLarge />
-      <div className="w-full rounded-2xl bg-white/10 p-8 shadow-2xl ring-1 ring-white/20 backdrop-blur-xl">
+      <div className="pt-auth-card">
         <div className="mb-6">
-          <h2 className="text-xl font-extrabold tracking-tight text-white">
+          <h2 className="text-[20px] font-semibold leading-tight tracking-[-0.02em] text-text-primary">
             Join {brandName}
           </h2>
-          <p className="mt-1.5 text-sm font-light text-white/60">
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-secondary">
             Create your account to get started.
           </p>
         </div>
@@ -111,7 +111,7 @@ export default function InviteAcceptPage() {
           <div className="space-y-1.5">
             <label
               htmlFor="invite-name"
-              className="text-xs font-medium uppercase tracking-wider text-white/50"
+              className="text-[13px] font-medium text-text-primary"
             >
               Name
             </label>
@@ -127,7 +127,7 @@ export default function InviteAcceptPage() {
           <div className="space-y-1.5">
             <label
               htmlFor="invite-email"
-              className="text-xs font-medium uppercase tracking-wider text-white/50"
+              className="text-[13px] font-medium text-text-primary"
             >
               Email
             </label>
@@ -145,7 +145,7 @@ export default function InviteAcceptPage() {
           <div className="space-y-1.5">
             <label
               htmlFor="invite-password"
-              className="text-xs font-medium uppercase tracking-wider text-white/50"
+              className="text-[13px] font-medium text-text-primary"
             >
               Password
             </label>
@@ -159,18 +159,19 @@ export default function InviteAcceptPage() {
               autoComplete="new-password"
               className={INPUT_CLASS}
             />
-            <p className="text-xs font-light text-white/40">
-              At least 8 characters.
-            </p>
+            <p className="text-xs text-text-tertiary">At least 8 characters.</p>
           </div>
           {error && (
-            <p className="text-sm text-red-300" role="alert">
+            <p
+              className="rounded-lg border border-destructive/25 bg-destructive-subtle px-3 py-2 text-[13px] text-destructive"
+              role="alert"
+            >
               {error}
             </p>
           )}
           <button
             type="submit"
-            className="w-full rounded-full bg-white py-2.5 text-sm font-medium text-[#0a0a0a] transition-colors hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-accent px-4 text-[13.5px] font-medium text-accent-foreground shadow-card transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
             disabled={loading}
           >
             {loading ? "Creating account…" : "Create account"}
@@ -182,4 +183,4 @@ export default function InviteAcceptPage() {
 }
 
 const INPUT_CLASS =
-  "h-10 w-full rounded-md border-0 bg-white/5 px-3 text-sm text-white ring-1 ring-white/15 placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-white/40 transition-all";
+  "flex h-10 w-full rounded-lg border border-border-strong bg-card px-3 text-sm text-text-primary shadow-card transition-[border-color,box-shadow] placeholder:text-text-tertiary hover:border-text-tertiary/60 focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/15 disabled:cursor-not-allowed";
