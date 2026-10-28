@@ -3,30 +3,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import DashboardLayout from "@/components/DashboardLayout";
 
-vi.mock("@/hooks/useReducedAnimations", () => ({
-  useReducedAnimations: () => true,
-}));
-
-vi.mock("@/components/TopNav", () => ({
-  default: ({
-    agentOpen,
-    onAgentToggle,
-  }: {
-    agentOpen: boolean;
-    onAgentToggle: () => void;
-  }) => (
-    <button
-      type="button"
-      aria-label="Toggle mail agent"
-      aria-pressed={agentOpen}
-      onClick={onAgentToggle}
-    >
-      Agent
-    </button>
-  ),
-}));
-vi.mock("@/components/Breadcrumbs", () => ({ default: () => null }));
-vi.mock("@/components/Footer", () => ({ default: () => null }));
+// Each layout's shell renders the shared toggle in its global actions; the
+// stand-in shell here renders just that and the page.
+vi.mock("@/components/shell/PortalShell", async () => {
+  const { AgentToggleButton } = await import("@/agent/AgentPanelToggle");
+  return {
+    default: ({ children }: { children: React.ReactNode }) => (
+      <div>
+        <AgentToggleButton>Agent</AgentToggleButton>
+        {children}
+      </div>
+    ),
+  };
+});
+vi.mock("@/lib/preferences", () => ({ useUiTheme: () => "default" }));
+vi.mock("@/components/SendingPausedBanner", () => ({ default: () => null }));
 vi.mock("@/components/ComposeFab", () => ({ default: () => null }));
 vi.mock("@/pages/ComposeModal", () => ({ default: () => null }));
 vi.mock("@/components/Toaster", () => ({ default: () => null }));
@@ -66,12 +57,15 @@ beforeEach(() => {
 });
 
 describe("DashboardLayout agent panel", () => {
-  it("toggles from TopNav and persists open state", () => {
+  it("toggles from the shell's agent button and persists open state", () => {
     renderLayout();
 
     expect(screen.queryByTestId("agent-panel")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Toggle mail agent" }));
+    const toggle = screen.getByRole("button", { name: /Toggle mail agent/ });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
     expect(screen.getByTestId("agent-panel")).toBeTruthy();
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
     expect(window.localStorage.getItem("saasmail.agentPanelOpen")).toBe("true");
 
     fireEvent.click(screen.getByText("Close"));

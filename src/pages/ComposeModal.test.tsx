@@ -24,6 +24,17 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+// The From inbox is the composer's one <select>; the To field is a combobox
+// too (recipient suggestions).
+async function findFromSelect() {
+  await waitFor(() =>
+    expect(
+      screen.getAllByRole("combobox").some((el) => el.tagName === "SELECT"),
+    ).toBe(true),
+  );
+  return screen.getAllByRole("combobox").find((el) => el.tagName === "SELECT")!;
+}
+
 describe("ComposeModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -55,7 +66,7 @@ describe("ComposeModal", () => {
       senderIdentities: [],
     });
 
-    const from = await screen.findByRole("combobox");
+    const from = await findFromSelect();
     await waitFor(() =>
       expect((from as HTMLSelectElement).value).toBe("support@example.test"),
     );
@@ -70,7 +81,7 @@ describe("ComposeModal", () => {
 
     render(<ComposeModal open onClose={() => {}} contextKey="draft:new" />);
 
-    const from = await screen.findByRole("combobox");
+    const from = await findFromSelect();
     await waitFor(() =>
       expect((from as HTMLSelectElement).value).toBe("marketing@example.test"),
     );
