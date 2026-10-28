@@ -18,6 +18,14 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { MailFolder } from "@/lib/api";
+import { mailStateFolderAvailable } from "@/lib/mail-state-actions";
+import {
+  FORK_ADMIN_LINKS,
+  FORK_DETAIL_BASES,
+  FORK_PAGE_TITLES,
+  FORK_WORKSPACE_LINKS,
+  forkMailCrumbs,
+} from "./fork-nav";
 
 /** Mail views reachable from the rail. All live on `/` with URL params. */
 export interface MailView {
@@ -62,7 +70,7 @@ export const MAIL_VIEWS: MailView[] = [
     icon: Trash2,
     params: { folder: "trash" },
   },
-];
+].filter((v) => mailStateFolderAvailable(v.id));
 
 export const FOLDERS: MailFolder[] = [
   "inbox",
@@ -71,7 +79,7 @@ export const FOLDERS: MailFolder[] = [
   "archive",
   "sent",
   "trash",
-];
+].filter((f) => mailStateFolderAvailable(f)) as MailFolder[];
 
 /** Parse the mail folder from the URL; anything unknown means inbox. */
 export function folderFromParams(sp: URLSearchParams): MailFolder {
@@ -112,6 +120,7 @@ export const WORKSPACE_LINKS: PageLink[] = [
   },
   { id: "outbox", label: "Outbox", path: "/outbox", icon: Timer },
   { id: "api-keys", label: "API keys", path: "/api-keys", icon: Key },
+  ...FORK_WORKSPACE_LINKS,
 ];
 
 export const ADMIN_LINKS: PageLink[] = [
@@ -143,6 +152,7 @@ export const ADMIN_LINKS: PageLink[] = [
     icon: ShieldBan,
     admin: true,
   },
+  ...FORK_ADMIN_LINKS,
 ];
 
 export interface Crumb {
@@ -160,10 +170,13 @@ const PAGE_TITLES: Record<string, string> = {
   "/admin/suppressions": "Suppressions",
   "/blocklist": "Blocklist",
   "/settings": "Settings",
+  ...Object.fromEntries(FORK_PAGE_TITLES),
 };
 
 /** Breadcrumb trail for the top band. */
 export function crumbsFor(pathname: string, sp: URLSearchParams): Crumb[] {
+  const mailCrumbs = forkMailCrumbs(pathname);
+  if (mailCrumbs) return mailCrumbs;
   if (pathname === "/" || pathname.startsWith("/inbox/")) {
     const view = MAIL_VIEWS.find((v) => v.id === activeMailView(sp));
     const out: Crumb[] = [{ label: "Mail", to: "/" }];
@@ -178,7 +191,7 @@ export function crumbsFor(pathname: string, sp: URLSearchParams): Crumb[] {
   }
   if (pathname.startsWith("/m/"))
     return [{ label: "Mail", to: "/" }, { label: "Message" }];
-  for (const base of ["/templates", "/sequences"]) {
+  for (const base of ["/templates", "/sequences", ...FORK_DETAIL_BASES]) {
     if (pathname.startsWith(base + "/")) {
       const rest = pathname.slice(base.length + 1);
       const tail =

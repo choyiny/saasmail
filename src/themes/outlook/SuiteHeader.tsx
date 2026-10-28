@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Ban,
+  Bot,
   ChevronDown,
   FileText,
   Grid3x3,
@@ -36,6 +37,11 @@ import {
   MenuTrigger,
 } from "./Menu";
 import { Avatar, IconButton } from "./ui";
+import { AgentToggleButton } from "@/agent/AgentPanelToggle";
+import {
+  FORK_ADMIN_LINKS,
+  FORK_WORKSPACE_LINKS,
+} from "@/components/shell/fork-nav";
 
 /** Apps reachable from the waffle (app launcher). */
 export function useAppLinks() {
@@ -47,11 +53,13 @@ export function useAppLinks() {
       { label: "Sequences", path: "/sequences", icon: ListOrdered },
       { label: "Outbox", path: "/outbox", icon: Send },
       { label: "API keys", path: "/api-keys", icon: Key },
+      ...FORK_WORKSPACE_LINKS,
       ...(isAdmin
         ? [
             { label: "Inboxes", path: "/inboxes", icon: InboxIcon },
             { label: "Users", path: "/admin/users", icon: Users },
             { label: "Suppressions", path: "/admin/suppressions", icon: Ban },
+            ...FORK_ADMIN_LINKS,
           ]
         : []),
       { label: "Blocklist", path: "/blocklist", icon: ShieldBan },
@@ -368,6 +376,9 @@ export default function SuiteHeader() {
       </div>
 
       <div className="flex items-center gap-0.5">
+        <AgentToggleButton className="ol-icon-btn ol-suite-btn">
+          <Bot size={18} />
+        </AgentToggleButton>
         <IconButton
           label="Settings"
           className={cn("ol-suite-btn", settingsOpen && "ol-suite-btn-on")}
