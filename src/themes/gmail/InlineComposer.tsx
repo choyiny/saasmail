@@ -22,6 +22,7 @@ import { dispatchEmailSent } from "@/lib/email-events";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { useDraftAutosave } from "@/lib/use-draft-autosave";
 import { sendWithUndo } from "@/lib/undo-send";
+import { showToast } from "@/lib/toast";
 import {
   beginSend,
   finishSend,
@@ -249,7 +250,15 @@ export function InlineComposer({
       },
       onError: (e) => {
         finishSend(sendContext, idempotencyKey, "failed");
-        sendKeyProblem(e, sendContext);
+        // The box reopens without an error line, so a key problem (an
+        // earlier attempt may have gone out) is told in a toast.
+        const problem = sendKeyProblem(e, sendContext);
+        if (problem)
+          showToast({
+            kind: "error",
+            message: "Message not sent",
+            description: problem,
+          });
         void kept.then(() => onReopen());
       },
     });

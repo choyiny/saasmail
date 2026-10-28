@@ -23,6 +23,7 @@ import {
   deleteDraft,
   type Email,
 } from "@/lib/api";
+import { showToast } from "@/lib/toast";
 
 /**
  * The Gmail and Outlook layouts' composers send with the same idempotency
@@ -78,6 +79,7 @@ const original: Email = {
 };
 
 beforeEach(() => {
+  vi.mocked(showToast).mockReset();
   // jsdom has no layout; the Outlook reply card scrolls itself into view.
   Element.prototype.scrollIntoView = vi.fn();
   sessionStorage.clear();
@@ -158,6 +160,27 @@ describe("Gmail layout: the send key", () => {
     expect(mReply.mock.calls[0]![1]).toMatchObject({ recipient: "sender" });
     expect(mReply.mock.calls[1]![1]).toMatchObject({ recipient: "sender" });
     // Sent: the next reply is a new message.
+    expect(
+      sessionStorage.getItem("saasmail:send-key:send:reply:em_1"),
+    ).toBeNull();
+  });
+
+  it("a reply refused for a reused key warns to check Sent and forgets the key", async () => {
+    mReply.mockRejectedValueOnce(
+      Object.assign(new Error("reused"), { code: "IDEMPOTENCY_KEY_REUSED" }),
+    );
+    render(<GmailHost mode="reply" />);
+    await typeBody("first try");
+    fireEvent.click(screen.getByTestId("gmail-inline-send"));
+    await afterWindow();
+    expect(mReply).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "error",
+        description: expect.stringMatching(/Check Sent/),
+      }),
+    );
+    // The next Send is a new message.
     expect(
       sessionStorage.getItem("saasmail:send-key:send:reply:em_1"),
     ).toBeNull();
