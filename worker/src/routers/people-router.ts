@@ -23,6 +23,7 @@ import {
   jsonList,
 } from "../lib/inbox-permissions";
 import { deleteMessageState } from "../lib/messages/state";
+import { buildMessageQuerySql } from "../lib/messages/query";
 import { cancelScheduledSendsFor } from "../lib/scheduled-sends";
 import {
   collectPersonGroupConversations,
@@ -592,6 +593,7 @@ export async function computeGroupedRows(
       JOIN ${people} p ON p.id = e.person_id
       WHERE e.conversation_id IS NOT NULL
       AND (p.email LIKE ${pattern} ESCAPE '\\' OR p.name LIKE ${pattern} ESCAPE '\\')
+      ${inboxScopeSql(allowed, sql`e.recipient`)}
     )`);
   }
   const groupExtraConditions =
@@ -686,6 +688,7 @@ export async function computeGroupedRows(
         await db.all<{ k: string }>(sql`
         SELECT DISTINCT person_id AS k FROM ${emails}
         WHERE conversation_id IS NULL AND lower(raw_headers) LIKE '%list-unsubscribe%'
+        ${inboxScopeSql(allowed, sql`recipient`)}
       `)
       ).map((r) => r.k),
     );
@@ -694,6 +697,7 @@ export async function computeGroupedRows(
         await db.all<{ k: string }>(sql`
         SELECT DISTINCT conversation_id AS k FROM ${emails}
         WHERE conversation_id IS NOT NULL AND lower(raw_headers) LIKE '%list-unsubscribe%'
+        ${inboxScopeSql(allowed, sql`recipient`)}
       `)
       ).map((r) => r.k),
     );
@@ -761,30 +765,29 @@ export async function computeGroupedRows(
     merged = merged.filter((r) => r.lastEmailAt >= after);
   if (before !== undefined)
     merged = merged.filter((r) => r.lastEmailAt < before);
-  if (subject) {
-    const pattern = `%${escapeLike(subject)}%`;
-    const personHits = new Set(
-      (
-        await db.all<{ k: string }>(sql`
-          SELECT DISTINCT person_id AS k FROM ${emails}
-          WHERE conversation_id IS NULL AND subject LIKE ${pattern} ESCAPE '\\'
-          UNION
-          SELECT DISTINCT person_id AS k FROM ${sentEmails}
-          WHERE conversation_id IS NULL AND person_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
-        `)
-      ).map((r) => r.k),
-    );
-    const convHits = new Set(
-      (
-        await db.all<{ k: string }>(sql`
-          SELECT DISTINCT conversation_id AS k FROM ${emails}
-          WHERE conversation_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
-          UNION
-          SELECT DISTINCT conversation_id AS k FROM ${sentEmails}
-          WHERE conversation_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
-        `)
-      ).map((r) => r.k),
-    );
+  const subjectSearch = subject?.trim();
+  if (subjectSearch) {
+    // Subject hits come from the shared message query (AGENTS.md § Message
+    // reads), scoped to the caller's inboxes like the rows themselves.
+    const built = buildMessageQuerySql(allowed, {
+      search: subjectSearch,
+      searchMode: "subject",
+      limit: null,
+    });
+    const hits = built
+      ? await db.all<{
+          person_id: string | null;
+          conversation_id: string | null;
+        }>(
+          sql`SELECT DISTINCT person_id, conversation_id FROM (${built.statement})`,
+        )
+      : [];
+    const personHits = new Set<string>();
+    const convHits = new Set<string>();
+    for (const h of hits) {
+      if (h.conversation_id) convHits.add(h.conversation_id);
+      else if (h.person_id) personHits.add(h.person_id);
+    }
     merged = merged.filter((r) =>
       r.type === "person" ? personHits.has(r.id) : convHits.has(r.id),
     );
@@ -867,16 +870,19 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     const keyCol = sql.raw(column);
     const onlyOneToOne =
       column === "person_id" ? sql`AND conversation_id IS NULL` : sql``;
-    for (const [table, atCol] of [
-      [emails, sql.raw("received_at")],
-      [sentEmails, sql.raw("sent_at")],
+    // Only messages in the caller's inboxes: a row they may see can also
+    // have mail in an inbox they may not.
+    for (const [table, atCol, inboxCol] of [
+      [emails, sql.raw("received_at"), sql.raw("recipient")],
+      [sentEmails, sql.raw("sent_at"), sql.raw("from_address")],
     ] as const) {
       const rows = await db.all<Latest & { k: string }>(sql`
         SELECT k, subject, body, at FROM (
           SELECT ${keyCol} AS k, subject, substr(body_text, 1, 400) AS body,
             ${atCol} AS at,
             ROW_NUMBER() OVER (PARTITION BY ${keyCol} ORDER BY ${atCol} DESC) AS rn
-          FROM ${table} WHERE ${keyCol} IN ${ids} ${onlyOneToOne}
+          FROM ${table} WHERE ${keyCol} IN ${jsonList(ids)} ${onlyOneToOne}
+            ${inboxScopeSql(allowed, inboxCol)}
         ) WHERE rn = 1
       `);
       for (const r of rows) {
@@ -1096,14 +1102,14 @@ peopleRouter.openapi(categoryOverrideRoute, async (c) => {
   const { senders, category } = c.req.valid("json");
   const keys = [...new Set(senders.map((s) => s.toLowerCase()))];
   if (category === null) {
-    await db
-      .delete(categoryOverrides)
-      .where(
-        and(
-          eq(categoryOverrides.userId, user.id),
-          inArray(categoryOverrides.senderEmail, keys),
-        ),
-      );
+    await db.delete(categoryOverrides).where(
+      and(
+        eq(categoryOverrides.userId, user.id),
+        // One bound JSON array, not one parameter per key (D1 caps a
+        // statement at 100 bound parameters).
+        sql`${categoryOverrides.senderEmail} IN ${jsonList(keys)}`,
+      ),
+    );
   } else {
     const now = Math.floor(Date.now() / 1000);
     await db.batch(
