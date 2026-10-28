@@ -587,11 +587,12 @@ SPF/DKIM does not authorise, fails DMARC, and is retried every hour.
 
 The line is drawn on the mapping, not on the error. An inbox that is **not**
 Gmail-mapped still uses the configured provider with no fuss, because that
-provider genuinely is its transport — including when the three OAuth secrets
-are unset, which makes no inbox Gmail-mapped at all. An inbox that **is**
-Gmail-mapped and cannot produce a token is refused: a revoked grant, a
-mailbox that was disconnected while an inbox still pointed at it, or Google
-being unreachable.
+provider genuinely is its transport. An inbox that **is** Gmail-mapped and
+cannot produce a token is refused: a revoked grant, a mapping left pointing
+at a mailbox that no longer exists, Google being unreachable, or the Google
+OAuth client or `TOKEN_ENCRYPTION_KEY` missing. (Disconnecting a mailbox
+resets its inboxes to the configured provider, so they are no longer
+Gmail-mapped.)
 
 A revocation is discovered when saasmail next refreshes the access token,
 which is either when the cached one expires or when Gmail rejects it
