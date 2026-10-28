@@ -793,31 +793,18 @@ async function processMessage(
     if (already.length > 0) continue;
 
     parsed.to = inbox;
-    const outcome = await ingestParsedEmail(
-      db,
-      parsed,
-      env,
-      ctx,
-      historical ? { historical: { receivedAt } } : {},
-    );
+    // Gmail's ids go into the row's own insert: a later UPDATE of `emails`
+    // would write a JMAP change and re-index the message for search.
+    const outcome = await ingestParsedEmail(db, parsed, env, ctx, {
+      ...(historical ? { historical: { receivedAt } } : {}),
+      gmailMessageId: messageId,
+      gmailThreadId: message.threadId || null,
+    });
 
     // Count what happened, not what was attempted: a blocked sender or a
     // duplicate is a skip, never an ingest — and neither stalls the run.
     if (outcome.status !== "stored") continue;
     stored++;
-
-    // `gmailMessageId` / `gmailThreadId` are not ParsedEmail fields, so they
-    // are written back afterwards — by PRIMARY KEY, using the id the ingest
-    // just handed back. Matching on `emails.message_id` instead would let a
-    // stranger who reuses a Message-ID we hold get this mailbox's Gmail ids
-    // stamped onto a row created by a different source.
-    await db
-      .update(emails)
-      .set({
-        gmailMessageId: messageId,
-        gmailThreadId: message.threadId || null,
-      })
-      .where(eq(emails.id, outcome.emailId));
   }
   return stored > 0
     ? { ingested: 1, mirrored: 0, skipped: 0, at }

@@ -81,8 +81,16 @@ export type IngestOptions = {
    * cancellation. Replaying a year of those would page the team for
    * mail they have already handled, re-forward it all, and stop sequences
    * because of a reply someone sent weeks before they were enrolled.
+   *
+   * Stored the way the mail importer stores history (`source: "import"`):
+   * no spam scoring, rules, suggested reply, conversation wake, audit,
+   * realtime, push, webhook, forward or sequence cancellation.
    */
   historical?: { receivedAt: number };
+  /** The synced mailbox's ids for the message, written with the row. */
+  gmailMessageId?: string | null;
+  gmailThreadId?: string | null;
+  outlookMessageId?: string | null;
 };
 
 /** Cloudflare Email Worker entry point. */
@@ -200,6 +208,29 @@ export async function ingestParsedEmail(
     }
   }
 
+  const providerIds = {
+    gmailMessageId: opts.gmailMessageId ?? null,
+    gmailThreadId: opts.gmailThreadId ?? null,
+    outlookMessageId: opts.outlookMessageId ?? null,
+  };
+
+  if (historical) {
+    // History, stored as the mail importer stores it: read, at its own time,
+    // and none of the live steps below.
+    const { emailId } = await storeReceivedMessage(db, env, {
+      parsed,
+      inbox: recipientCanonical,
+      fromAddress: fromAddressCanonical,
+      receivedAt,
+      now,
+      source: "import",
+      ourDomains: domainsOf(identityRows.map((r) => r.email)),
+      threadingMode: inboxIdentity?.threadingMode ?? "relationship",
+      ...providerIds,
+    });
+    return { status: "stored", emailId };
+  }
+
   // The inbox's learning filter scores the message, when it is on and
   // trained; a rule acts on the score. Never fatal.
   let spamProbability: number | null = null;
@@ -280,6 +311,7 @@ export async function ingestParsedEmail(
     ourDomains: domainsOf(identityRows.map((r) => r.email)),
     spamProbability,
     threadingMode: inboxIdentity?.threadingMode ?? "relationship",
+    ...providerIds,
   });
   // The webhook and the forward describe the first 50 attachments, as they
   // always have.

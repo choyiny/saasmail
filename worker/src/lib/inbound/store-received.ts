@@ -169,6 +169,10 @@ export interface StoreReceivedInput {
   importJobId?: string | null;
   /** The inbox's threading mode, when the caller read it (else read here). */
   threadingMode?: ThreadingMode;
+  /** The synced mailbox's ids, for mail a Gmail or Outlook sync stores. */
+  gmailMessageId?: string | null;
+  gmailThreadId?: string | null;
+  outlookMessageId?: string | null;
 }
 
 export interface StoredReceived {
@@ -327,6 +331,9 @@ export async function storeReceivedMessage(
       conversationId,
       threadKey,
       importJobId: imported ? (input.importJobId ?? null) : null,
+      gmailMessageId: input.gmailMessageId ?? null,
+      gmailThreadId: input.gmailThreadId ?? null,
+      outlookMessageId: input.outlookMessageId ?? null,
       receivedAt,
       createdAt: now,
     };
