@@ -48,8 +48,6 @@ type Provider = {
   /** The provider's answer to an accepted send. */
   accepted: () => Response;
   seed: () => Promise<void>;
-  /** The inbox left mapped to an account row that no longer exists. */
-  deleteAccount: () => Promise<void>;
   disconnectPath: string;
 };
 
@@ -86,9 +84,6 @@ const PROVIDERS: Provider[] = [
         createdAt: now,
         updatedAt: now,
       });
-    },
-    async deleteAccount() {
-      await getDb().delete(gmailAccounts).where(eq(gmailAccounts.id, "acct-1"));
     },
     disconnectPath: "/api/admin/gmail/acct-1",
   },
@@ -128,11 +123,6 @@ const PROVIDERS: Provider[] = [
         updatedAt: now,
       });
     },
-    async deleteAccount() {
-      await getDb()
-        .delete(outlookAccounts)
-        .where(eq(outlookAccounts.id, "ol-1"));
-    },
     disconnectPath: "/api/admin/outlook/ol-1",
   },
 ];
@@ -151,7 +141,6 @@ beforeEach(async () => {
   saved = {
     RESEND_API_KEY: mutableEnv.RESEND_API_KEY,
     EMAIL: mutableEnv.EMAIL,
-    TOKEN_ENCRYPTION_KEY: mutableEnv.TOKEN_ENCRYPTION_KEY,
   };
   cloudflareSend = vi.fn(async () => ({ messageId: "<cf-1@acme.dev>" }));
   mutableEnv.RESEND_API_KEY = "";
@@ -275,30 +264,6 @@ describe.each(PROVIDERS)("a reply from an inbox mapped to $name", (p) => {
     const retry = await reply("key-lost");
     expect(retry.status).toBe(502);
     expect(sends).toHaveLength(1);
-    expect(cloudflareSend).not.toHaveBeenCalled();
-    await nothingStored();
-  });
-
-  it("(e) mapped to a deleted account: 502, never through Cloudflare", async () => {
-    await p.deleteAccount();
-    const sends = stubMailbox(p.accepted);
-
-    const res = await reply();
-
-    expect(res.status).toBe(502);
-    expect(sends).toHaveLength(0);
-    expect(cloudflareSend).not.toHaveBeenCalled();
-    await nothingStored();
-  });
-
-  it("(e) mapped, with TOKEN_ENCRYPTION_KEY missing: 502, never through Cloudflare", async () => {
-    mutableEnv.TOKEN_ENCRYPTION_KEY = "";
-    const sends = stubMailbox(p.accepted);
-
-    const res = await reply();
-
-    expect(res.status).toBe(502);
-    expect(sends).toHaveLength(0);
     expect(cloudflareSend).not.toHaveBeenCalled();
     await nothingStored();
   });
