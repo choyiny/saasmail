@@ -46,6 +46,15 @@ streamable HTTP as the transport. Clients configured by file usually want:
 
 `"streamable-http"` is accepted as a synonym for `"http"`.
 
+Desktop and CLI clients that register a `http://localhost` callback (Claude
+Code, Cursor) are registered as native apps.
+
+**Staying connected.** A client that asked for `offline_access` gets a refresh
+token and renews its access with it; each refresh returns a new refresh token
+and retires the old one. Presenting a retired refresh token again is refused
+(`invalid_grant`) and ends the grant: every refresh token that client holds for
+that user stops working, and the user connects it again.
+
 ## Naming the connection
 
 The server identifies itself with this instance's **brand name** (Settings →
