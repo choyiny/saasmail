@@ -48,7 +48,7 @@ function parseDrafts(drafts: LimitDrafts): DailySendLimits | string {
   return limits;
 }
 
-/** Settings → Sending (admins): the outbound pause and the daily limits. */
+/** Settings → Sending controls (admins): the outbound pause and the daily limits. */
 export default function SendingSettings() {
   const { outboundPaused, refresh: refreshBranding } = useBranding();
   const [settings, setSettings] = useState<AdminSettings | null>(null);
@@ -144,7 +144,9 @@ export default function SendingSettings() {
 
   return (
     <section className="space-y-3" data-testid="sending-settings">
-      <h2 className="text-base font-semibold text-text-primary">Sending</h2>
+      <h2 className="text-base font-semibold text-text-primary">
+        Sending controls
+      </h2>
 
       <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
         <div className="flex flex-wrap items-start justify-between gap-3">
