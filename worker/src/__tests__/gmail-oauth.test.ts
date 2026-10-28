@@ -55,6 +55,32 @@ describe("buildAuthUrl", () => {
     expect(url.searchParams.get("scope")).toBe(GMAIL_SCOPES.join(" "));
   });
 
+  it("pre-selects the mailbox being reconnected", () => {
+    const url = new URL(
+      buildAuthUrl({
+        clientId: "cid",
+        redirectUri: "https://mail.example.com/api/admin/gmail/callback",
+        state: "signed-state",
+        loginHint: "ops@example.com",
+      }),
+    );
+    // The hint must be the mailbox, not the redirect or the client id — a
+    // wrong argument here silently reopens the whichever-account-is-signed-in
+    // path this parameter exists to close.
+    expect(url.searchParams.get("login_hint")).toBe("ops@example.com");
+  });
+
+  it("omits login_hint for a first connection, where any account is valid", () => {
+    const url = new URL(
+      buildAuthUrl({
+        clientId: "cid",
+        redirectUri: "https://mail.example.com/api/admin/gmail/callback",
+        state: "signed-state",
+      }),
+    );
+    expect(url.searchParams.has("login_hint")).toBe(false);
+  });
+
   it("requests only gmail.modify and gmail.send", () => {
     expect(GMAIL_SCOPES).toEqual([
       "https://www.googleapis.com/auth/gmail.modify",

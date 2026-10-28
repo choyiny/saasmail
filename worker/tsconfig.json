@@ -7,6 +7,8 @@
     "jsxImportSource": "hono/jsx",
     "types": ["@cloudflare/workers-types", "vite/client"],
     "skipLibCheck": true,
+    // The frontend aliases, for worker tests that import frontend modules.
+    "paths": { "@/*": ["../src/*"], "@worker/*": ["./src/*"] },
     "noEmit": true
   },
   "include": ["src", "../worker-configuration.d.ts"]

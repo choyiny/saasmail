@@ -145,7 +145,8 @@ export type ReplyEmailFailure =
         | "EMAIL_HAS_NO_PERSON"
         | "TEMPLATE_NOT_FOUND"
         | "MISSING_BODY"
-        | "TEMPLATE_PARSE_ERROR";
+        | "TEMPLATE_PARSE_ERROR"
+        | "SEND_FAILED";
       message: string;
     }
   | {

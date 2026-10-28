@@ -1,5 +1,6 @@
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
 import { toBase64 } from "../shared";
+import { inlineDataImages } from "../inline-images";
 import { transientFromStatus, classifyErrorMessage } from "../classify";
 
 async function extractPostmarkError(res: Response): Promise<string> {
@@ -26,8 +27,9 @@ export class PostmarkSender implements EmailSender {
     this.fetchFn = fetchFn ?? fetch.bind(globalThis);
   }
 
-  async send(params: SendEmailParams): Promise<SendEmailResult> {
+  async send(input: SendEmailParams): Promise<SendEmailResult> {
     try {
+      const params = inlineDataImages(input);
       const payload: Record<string, unknown> = {
         From: params.from,
         To: [params.to, ...(params.additionalTo ?? [])].join(","),

@@ -58,6 +58,8 @@ export interface SendInput {
    * somebody else.
    */
   unsubscribeContext?: { url: string };
+  /** Gmail thread to reply within; ignored by every other provider. */
+  threadId?: string;
 }
 
 export interface SendOutput {
@@ -152,6 +154,7 @@ export async function sendWithSuppressionCheck(
     transactional,
     unsubscribeContext,
     idempotencyKey,
+    threadId,
   } = input;
   if (
     transactional !== true &&
@@ -224,6 +227,7 @@ export async function sendWithSuppressionCheck(
       ...(headers ? { headers } : {}),
       ...(attachments ? { attachments } : {}),
       ...(idempotencyKey ? { idempotencyKey } : {}),
+      ...(threadId ? { threadId } : {}),
     });
 
     renderedHtml = html;

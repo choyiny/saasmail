@@ -11,6 +11,9 @@ import {
   UserPen,
 } from "lucide-react";
 import CcChips from "@/components/CcChips";
+import ImageAttachments, {
+  splitAttachments,
+} from "@/components/ImageAttachments";
 import { messageEmlUrl, type Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import DeliveryBadge from "@/components/mail/DeliveryBadge";
@@ -98,10 +101,10 @@ export default function MessageBubble({
     day: "numeric",
   });
 
-  // Filter to non-inline attachments only
-  const downloadableAttachments = (email.attachments ?? []).filter(
-    (att) => !att.contentId,
-  );
+  // Embedded (CID) images are already in the body. Image attachments get
+  // thumbnails that open in the viewer; everything else is a download chip.
+  const { images: imageAttachments, files: downloadableAttachments } =
+    splitAttachments(email.attachments);
 
   function handleClick() {
     if (isUnread) {
@@ -226,6 +229,12 @@ export default function MessageBubble({
           {expanded ? "Show less" : "Show more"}
         </button>
       )}
+
+      <ImageAttachments
+        images={imageAttachments}
+        size="sm"
+        className="mt-1.5"
+      />
 
       {/* Downloadable attachments */}
       {downloadableAttachments.length > 0 && (

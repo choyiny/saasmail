@@ -31,6 +31,8 @@ import { adminInboxesRouter } from "./routers/admin-inboxes-router";
 import { adminRulesRouter } from "./routers/admin-rules-router";
 import { adminAuditRouter } from "./routers/admin-audit-router";
 import { adminGmailRouter } from "./routers/admin-gmail-router";
+import { adminIntegrationsRouter } from "./routers/admin-integrations-router";
+import { adminOutlookRouter } from "./routers/admin-outlook-router";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
@@ -62,6 +64,11 @@ import { exportsRouter } from "./routers/exports-router";
 import { collectUnreferencedContent } from "./jmap/content";
 import { runJmapSubmissionMaintenance } from "./jmap/recovery";
 import { reapExpiredUploads } from "./jmap/upload";
+import { syncAllGmailAccounts } from "./lib/gmail/sync";
+import { ensureBackfillJobs } from "./lib/gmail/backfill-job";
+import { syncAllOutlookAccounts } from "./lib/outlook/sync";
+import { drizzle } from "drizzle-orm/d1";
+import { schema } from "./db/schema";
 import { notificationsRouter } from "./routers/notifications-router";
 import { blocklistRouter } from "./routers/blocklist-router";
 import { suppressionsRouter } from "./routers/suppressions-router";
@@ -84,6 +91,7 @@ import { publicAssetsRouter } from "./routers/public-assets-router";
 import { bootstrapRouter } from "./routers/bootstrap-router";
 export { NotificationsHub } from "./do/notifications";
 export { MailAgent } from "./agent/mail-agent";
+export { GmailBackfillWorkflow } from "./lib/gmail/backfill-job";
 import type { Variables } from "./variables";
 import type { MiddlewareHandler } from "hono";
 import { injectAllowedInboxes } from "./middleware/inject-allowed-inboxes";
@@ -93,6 +101,7 @@ import { passkeys } from "./db/auth.schema";
 import { isDevEnvironment } from "./lib/is-dev";
 import { registerMcpRoutes } from "./mcp/http";
 import { registerJmapRoutes } from "./jmap/http";
+import { installRouter } from "./routers/install-router";
 import {
   BEARER_AUTH_SCHEME,
   bearerAuthSecurityScheme,
@@ -339,6 +348,8 @@ app.route("/api/admin/audit", adminAuditRouter);
 app.route("/api/admin/imports", importsRouter);
 app.route("/api/admin/backups", backupsRouter);
 app.route("/api/admin/gmail", adminGmailRouter);
+app.route("/api/admin/integrations", adminIntegrationsRouter);
+app.route("/api/admin/outlook", adminOutlookRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a
@@ -415,6 +426,8 @@ app.all("/agents/mail-agent/*", async (c) => {
 
   return response ?? c.json({ error: "Not found" }, 404);
 });
+// Public: what `yarn saasmail install` reads to recognise an installation.
+app.route("/", installRouter);
 
 // Swagger UI
 app.get("/swagger-ui", swaggerUI({ url: "/doc" }));
@@ -464,6 +477,54 @@ export default {
     ctx: ExecutionContext,
   ) {
     ctx.waitUntil(runWithAudit(systemActor("cron"), () => scheduledChain(env)));
+    // Isolated from sequence dispatch / outbox processing above: a Gmail
+    // sync failure must not be able to break either. `syncAllGmailAccounts`
+    // already isolates per-account failures internally (see its own
+    // Promise.allSettled) and no-ops when the integration isn't configured,
+    // so this call either does nothing or runs to completion.
+    //
+    // Neither provider's sync hands per-account outcomes back to this
+    // handler (Gmail returns only whether it used the inline import's turn,
+    // which the Outlook sync needs). They log them themselves
+    // instead: a distinct line for an account that synced but failed to
+    // ingest a message, and another for an account whose history cursor
+    // expired and had to be re-seeded (see its `results.forEach` for both).
+    // The `.catch()` below only covers a hard failure of the whole call
+    // (e.g. thrown before/outside its own per-account isolation) — per
+    // -account failures never reach it, by design.
+    ctx.waitUntil(
+      runWithAudit(systemActor("cron"), async () => {
+        const db = drizzle(env.DB, { schema });
+        // Each provider isolated from the other: a hard Gmail failure must
+        // not stop Outlook mailboxes syncing, or the reverse.
+        let importTaken = false;
+        try {
+          importTaken = (await syncAllGmailAccounts(db, env, ctx)).importTaken;
+        } catch (err) {
+          console.error(
+            `[cron] gmail sync failed: ${err instanceof Error ? err.message : "unknown error"}`,
+          );
+        }
+        try {
+          await syncAllOutlookAccounts(db, env, ctx, { importTaken });
+        } catch (err) {
+          console.error(
+            `[cron] outlook sync failed: ${err instanceof Error ? err.message : "unknown error"}`,
+          );
+        }
+        // After the sync, so an account it just found unmapped is skipped.
+        await ensureBackfillJobs(db, env);
+      }).catch((err) =>
+        // The message only, never the error object. This frame begins with
+        // `getAccessToken`, whose last act is a D1 UPDATE binding the
+        // plaintext access token and the sealed refresh token — and a D1
+        // error's serialised form carries the parameters bound to it. Same
+        // rule `syncAllGmailAccounts` and the OAuth callback already hold.
+        console.error(
+          `[cron] gmail sync failed: ${err instanceof Error ? err.message : "unknown error"}`,
+        ),
+      ),
+    );
   },
   async queue(batch: MessageBatch<unknown>, env: CloudflareBindings) {
     await runWithAudit(systemActor("queue"), () =>

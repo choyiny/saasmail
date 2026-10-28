@@ -9,6 +9,10 @@ Inbound is always Cloudflare. Outbound is your pick of four.
 | **Sending**   | ✅         | ✅     | ✅       | ✅       |
 | **Receiving** | ✅         | ❌     | ❌       | ❌       |
 
+## Inline images
+
+Images pasted or dropped into the composer are stored as `data:` URIs, which most mail clients won't display. On sending, saasmail moves each one into an inline attachment and points the `<img>` at it by `cid:`. This happens with Cloudflare, Resend, Postmark, and with Gmail and Outlook mailboxes. Bavimail's API has no way to set a content ID, so Bavimail sends the HTML unchanged and many clients won't show those images.
+
 ## Choosing one
 
 Pick one outbound provider at deploy time:

@@ -6,6 +6,7 @@ import {
   authFetch,
   getDb,
 } from "./helpers";
+import { env } from "cloudflare:workers";
 import { invitations } from "../db/invitations.schema";
 
 describe("invites router", () => {
@@ -147,6 +148,67 @@ describe("invites router", () => {
         }),
       });
       expect(res.status).toBe(400);
+    });
+
+    it("tells an unauthenticated visitor nothing about an internal failure", async () => {
+      // This route is public. Dropping a table better-auth writes to makes
+      // account creation throw a raw D1 error instead of its own APIError —
+      // and a D1 error's message names the statement it was running, on a
+      // path whose bound parameters are the credentials being registered.
+      const invite = await createInvite();
+      await env.DB.prepare("DROP TABLE accounts").run();
+      try {
+        const res = await authFetch("/api/invites/accept", {
+          method: "POST",
+          body: JSON.stringify({
+            token: invite.token,
+            name: "User",
+            email: "leaky@example.com",
+            password: "securepassword123",
+          }),
+        });
+
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).not.toMatch(/no such table/i);
+        expect(body.error).not.toMatch(/accounts/i);
+        expect(body.error).not.toMatch(/insert|select|sql|d1_error/i);
+        // Still says what happened, in the visitor's terms.
+        expect(body.error).toMatch(/try again/i);
+      } finally {
+        await applyMigrations();
+      }
+    });
+
+    it("forwards better-auth's own message for an address already registered", async () => {
+      // The other half of the rule: the text written for the person filling
+      // the form must survive, or every failure becomes "try again".
+      const invite = await createInvite();
+      await authFetch("/api/invites/accept", {
+        method: "POST",
+        body: JSON.stringify({
+          token: invite.token,
+          name: "First",
+          email: "taken@example.com",
+          password: "securepassword123",
+        }),
+      });
+
+      const second = await createInvite();
+      const res = await authFetch("/api/invites/accept", {
+        method: "POST",
+        body: JSON.stringify({
+          token: second.token,
+          name: "Second",
+          email: "taken@example.com",
+          password: "securepassword123",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toMatch(/already exist/i);
+      expect(body.error).not.toMatch(/try again/i);
     });
 
     it("accepts when email matches invite email", async () => {

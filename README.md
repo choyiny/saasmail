@@ -25,19 +25,30 @@ SaaS teams that want a self-hosted email stack on Cloudflare Workers — one sha
 
 ## Quickstart
 
-**Prerequisites:** a domain on Cloudflare with Email Routing available, the Workers Paid plan, and [Node.js](https://nodejs.org/) v18+.
+**Prerequisites:** [Node.js](https://nodejs.org/) 22 or newer, a Cloudflare account on the Workers Paid plan, and a domain on Cloudflare for mail (any domains you will use must be active zones).
 
-The fastest path is the Claude Code onboarding skill — it provisions every Cloudflare resource, fills out your config, runs migrations, and deploys for you:
+One command provisions every Cloudflare resource, writes your config, runs migrations, generates the secrets, deploys, and wires up Email Routing and Email Sending. No clone needed:
 
 ```bash
-git clone https://github.com/choyiny/saasmail.git
-cd saasmail
-claude   # then run /saasmail-onboarding
+npx saasmail install   # not signed in? it prints the login command to run first
 ```
 
-**First successful result:** your worker is live at your domain, and visiting it prompts you to create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+Sign in to Cloudflare with the login command the installer prints (its pinned wrangler), or set `CLOUDFLARE_API_TOKEN`.
 
-Prefer to wire it up by hand? See [Setup](docs/setup.md) (~8 steps).
+Your install's state and generated `wrangler.jsonc` live in `~/.saasmail/<name>/` (`SAASMAIL_HOME` overrides), never in a repository. Later:
+
+```bash
+npx saasmail@latest upgrade   # move to the newest release
+npx saasmail status           # what is installed, what is latest
+```
+
+Installed from a clone before? `npx saasmail adopt --from <checkout>` moves it; see [Updating](docs/updating.md). Running a fork or modified code? Clone the repo and use `yarn saasmail install` instead ([Setup](docs/setup.md#install-from-a-clone)).
+
+Prefer a guide? Clone the repo, run `claude` and then `/saasmail-onboarding`.
+
+**First successful result:** your worker is live, the installer prints a one-time setup code, and `/onboarding` on your URL asks for it before you create the first admin account. Name an inbox, send yourself a test email, and watch it land on a customer timeline.
+
+Prefer to wire it up by hand? See [Setup](docs/setup.md#manual-setup) (~8 steps).
 
 ## Documentation
 
@@ -47,7 +58,7 @@ Full docs live in **[docs/](docs/README.md)**.
 
 **Deploy and operate:** [Setup](docs/setup.md) · [Email providers](docs/email-providers.md) · [Configuration](docs/configuration.md) · [Updating](docs/updating.md) · [Architecture](docs/architecture.md) · [Local development](docs/development.md)
 
-**Features:** [Inboxes and timelines](docs/inboxes.md) · [Customers](docs/customers.md) · [Mailbox state](docs/mailbox-state.md) · [JMAP](docs/jmap.md) · [Automations](docs/automations.md) · [Email templates](docs/templates.md) · [Sequences](docs/sequences.md) · [Newsletters](docs/newsletters.md) · [Suppressions and unsubscribe](docs/suppressions.md) · [Users and API keys](docs/users-and-api-keys.md) · [Audit log](docs/audit-log.md) · [Export, import and backups](docs/data.md) · [Sending controls](docs/sending.md) · [Native mail agent](docs/agent.md) · [MCP server](docs/mcp.md) · [WebMCP](docs/webmcp.md) · [Webhooks](docs/webhooks.md)
+**Features:** [Inboxes and timelines](docs/inboxes.md) · [Gmail integration](docs/gmail.md) · [Customers](docs/customers.md) · [Mailbox state](docs/mailbox-state.md) · [JMAP](docs/jmap.md) · [Automations](docs/automations.md) · [Email templates](docs/templates.md) · [Sequences](docs/sequences.md) · [Newsletters](docs/newsletters.md) · [Suppressions and unsubscribe](docs/suppressions.md) · [Users and API keys](docs/users-and-api-keys.md) · [Audit log](docs/audit-log.md) · [Export, import and backups](docs/data.md) · [Sending controls](docs/sending.md) · [Native mail agent](docs/agent.md) · [MCP server](docs/mcp.md) · [WebMCP](docs/webmcp.md) · [Webhooks](docs/webhooks.md)
 
 ## Architecture at a glance
 
@@ -112,6 +123,7 @@ https://github.com/user-attachments/assets/937d45e9-744e-461f-83fd-71e90a4c38b0
 - <a id="thread-or-chat-per-inbox"></a>**[Thread or chat, per inbox](docs/inboxes.md#thread-or-chat-per-inbox)** — formal threading for `marketing@`, iMessage-style bubbles for `support@`.
 - <a id="conversations-per-inbox"></a>**[Conversations by customer or by thread](docs/inboxes.md#conversations-by-customer-or-by-thread)** — one conversation per customer, or threads by `In-Reply-To`/`References` like a mail client, per inbox.
 - <a id="per-inbox-forwarding"></a>**[Per-inbox forwarding](docs/inboxes.md#per-inbox-forwarding)** — re-send inbound mail to any address through your own provider, sidestepping the IP blocks that break Email Routing forwards.
+- <a id="gmail-integration"></a>**[Gmail integration](docs/gmail.md)** — put a Google Workspace mailbox on a saasmail timeline without moving its MX records: mail syncs in over the Gmail API, replies go back out as that mailbox, and anything typed in Gmail shows up too. [Local setup guide](docs/gmail-local-setup.md).
 - **[Customers and linked addresses](docs/customers.md)** — link several addresses to one customer without merging the people or widening anyone's inbox access.
 - **[Mailbox view](docs/mailbox-state.md#conventional-mailbox-ui)** — a conventional three-pane mail client at `/mail` over the same mail: Inbox, Starred, Snoozed, Sent, Drafts, Archive, Junk, Trash and custom folders, bulk actions, keyboard shortcuts, and a spam filter that learns from the team's marks.
 - **[JMAP](docs/jmap.md)** — RFC 8620/8621 access for standard mail clients: read, search, drafts, attachments, live push and sending, under the same permissions as the web app.

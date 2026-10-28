@@ -53,17 +53,19 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, display_name TEXT, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS customer_people (customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE, person_id TEXT NOT NULL UNIQUE REFERENCES people(id) ON DELETE CASCADE, linked_by TEXT REFERENCES users(id) ON DELETE SET NULL, linked_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS customer_people_customer_idx ON customer_people(customer_id)`,
-    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT, in_reply_to TEXT, references_header TEXT, raw_r2_key TEXT, raw_size INTEGER, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, spam_probability REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, reply_to TEXT, conversation_id TEXT, import_job_id TEXT, thread_key TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT, in_reply_to TEXT, references_header TEXT, raw_r2_key TEXT, raw_size INTEGER, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, spam_probability REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, reply_to TEXT, conversation_id TEXT, import_job_id TEXT, thread_key TEXT, gmail_message_id TEXT, gmail_thread_id TEXT, outlook_message_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS emails_message_id_recipient_unique ON emails(message_id, recipient)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
-    `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, additional_to TEXT, bcc TEXT, conversation_id TEXT, campaign_id TEXT, sequence_id TEXT, sequence_enrollment_id TEXT, jmap_content_id TEXT, jmap_email_id TEXT, jmap_received_at INTEGER, alias_restore INTEGER NOT NULL DEFAULT 0, import_job_id TEXT, thread_key TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sent_emails (id TEXT PRIMARY KEY, person_id TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, in_reply_to TEXT, message_id TEXT, resend_id TEXT, status TEXT NOT NULL DEFAULT 'sent', cc TEXT, additional_to TEXT, bcc TEXT, conversation_id TEXT, campaign_id TEXT, sequence_id TEXT, sequence_enrollment_id TEXT, jmap_content_id TEXT, jmap_email_id TEXT, jmap_received_at INTEGER, alias_restore INTEGER NOT NULL DEFAULT 0, import_job_id TEXT, thread_key TEXT, gmail_message_id TEXT, gmail_thread_id TEXT, outlook_message_id TEXT, sent_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_person_sent_idx ON sent_emails(person_id, sent_at)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_from_sent_idx ON sent_emails(from_address, sent_at)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_sequence_sent_idx ON sent_emails(sequence_id, sent_at)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_jmap_content_idx ON sent_emails(jmap_content_id)`,
     `CREATE INDEX IF NOT EXISTS sent_emails_message_id_idx ON sent_emails(message_id)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS sent_emails_jmap_email_id_unique ON sent_emails(jmap_email_id)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sent_emails_gmail_message_from_unique ON sent_emails(gmail_message_id, from_address)`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sent_emails_outlook_message_from_unique ON sent_emails(outlook_message_id, from_address)`,
     `CREATE TABLE IF NOT EXISTS attachments (id TEXT PRIMARY KEY, email_id TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'inbound', filename TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, r2_key TEXT NOT NULL, content_id TEXT, created_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS email_templates (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, name TEXT NOT NULL, subject TEXT NOT NULL, body_html TEXT NOT NULL, format TEXT NOT NULL DEFAULT 'html', body_json TEXT, from_address TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS newsletter_assets (id TEXT PRIMARY KEY, r2_key TEXT NOT NULL, content_type TEXT NOT NULL, size INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`,
@@ -75,7 +77,7 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS enrollments_person_status_idx ON sequence_enrollments(person_id, status)`,
     `CREATE TABLE IF NOT EXISTS sequence_emails (id TEXT PRIMARY KEY, enrollment_id TEXT NOT NULL, step_order INTEGER NOT NULL, template_slug TEXT NOT NULL, scheduled_at INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending', sent_at INTEGER, sent_email_id TEXT)`,
     `CREATE INDEX IF NOT EXISTS seq_emails_status_scheduled_idx ON sequence_emails(status, scheduled_at)`,
-    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, spam_threshold REAL, agent_instructions TEXT, agent_autodraft INTEGER NOT NULL DEFAULT 0, threading_mode TEXT NOT NULL DEFAULT 'relationship', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS sender_identities (email TEXT PRIMARY KEY NOT NULL, display_name TEXT, display_mode TEXT NOT NULL DEFAULT 'thread', signature_html TEXT, forward_to TEXT, spam_threshold REAL, agent_instructions TEXT, agent_autodraft INTEGER NOT NULL DEFAULT 0, threading_mode TEXT NOT NULL DEFAULT 'relationship', source TEXT NOT NULL DEFAULT 'cloudflare', gmail_account_id TEXT, gmail_group_address TEXT, outlook_account_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS inbox_permissions (user_id TEXT NOT NULL, email TEXT NOT NULL, created_at INTEGER NOT NULL, created_by TEXT, PRIMARY KEY(user_id, email), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE, FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL)`,
     `CREATE INDEX IF NOT EXISTS inbox_permissions_email_idx ON inbox_permissions(email)`,
     `CREATE TABLE IF NOT EXISTS message_user_state (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, message_kind TEXT NOT NULL, message_id TEXT NOT NULL, seen_at INTEGER, starred_at INTEGER, updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, message_kind, message_id))`,
@@ -222,7 +224,9 @@ export async function applyMigrations() {
     `CREATE UNIQUE INDEX IF NOT EXISTS campaign_events_click_unique ON campaign_events(campaign_id, contact_id, campaign_link_id) WHERE event_type = 'click'`,
     `CREATE TABLE IF NOT EXISTS campaign_unsubscribe_attributions (id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL, list_member_id TEXT NOT NULL, occurred_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS campaign_unsub_attr_campaign_member_unique ON campaign_unsubscribe_attributions(campaign_id, list_member_id)`,
-    `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, last_gap_at INTEGER, backfill_until INTEGER, backfill_since INTEGER, backfill_page_token TEXT, backfill_offset INTEGER NOT NULL DEFAULT 0, backfill_count INTEGER NOT NULL DEFAULT 0, backfill_completed_at INTEGER, backfill_reached INTEGER, backfill_job_id TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS outlook_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, inbox_cursor TEXT, inbox_cursor_offset INTEGER NOT NULL DEFAULT 0, sent_cursor TEXT, sent_cursor_offset INTEGER NOT NULL DEFAULT 0, sync_from INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, last_gap_at INTEGER, backfill_until INTEGER, backfill_since INTEGER, backfill_link TEXT, backfill_offset INTEGER NOT NULL DEFAULT 0, backfill_count INTEGER NOT NULL DEFAULT 0, backfill_completed_at INTEGER, backfill_reached INTEGER, backfill_job_id TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS install_state (installation_id TEXT PRIMARY KEY, ownership_nonce TEXT NOT NULL, version TEXT, manifest_json TEXT, updated_at INTEGER NOT NULL)`,
   ];
 
   for (const sql of statements) {
@@ -527,6 +531,7 @@ export async function cleanDb() {
     DELETE FROM agent_sessions;
     DELETE FROM suggested_replies;
     DELETE FROM gmail_accounts;
+    DELETE FROM outlook_accounts;
     DELETE FROM drafts;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;

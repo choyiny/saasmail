@@ -9,7 +9,13 @@ export default defineConfig({
     host: "::",
     port: 8080,
   },
-  plugins: [cloudflare(), react(), tailwindcss()],
+  plugins: [
+    // The npm package is built from a placeholder config (scripts/saasmail/pack.mjs); a
+    // normal build reads ./wrangler.jsonc.
+    cloudflare({ configPath: process.env.SAASMAIL_BUILD_CONFIG }),
+    react(),
+    tailwindcss(),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

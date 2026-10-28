@@ -31,6 +31,50 @@ export interface ParsedEmail {
   deliveredTo: string[];
   /** Where the sender asked for replies (Reply-To); empty when absent. */
   replyTo: ParsedEmailAddress[];
+  /**
+   * The recipient headers as written — unparsed, unfiltered, undecoded.
+   *
+   * Each is the value of the FIRST header of that name in the message. Not
+   * quite byte-for-byte what was on the wire: postal-mime unfolds the header
+   * and then collapses EVERY whitespace run to one space and trims the ends
+   * (`processHeaders`, `mime-node.js`). Tabs, runs of spaces, and the
+   * whitespace JS counts as such — NBSP, U+FEFF — are gone before this value
+   * exists. That does not disturb a caller reading positions out of it, since
+   * it is this same collapsed string that gets masked and indexed, but it is
+   * not the untouched original and should not be described as one.
+   *
+   * `null` means the message carried no header of that name at all; an empty
+   * string means it carried an empty one, and the two are not the same thing
+   * to a caller that must decide whether to look at the next header.
+   *
+   * Deliberately raw, and deliberately not `ParsedEmailAddress[]`. A caller
+   * that needs the FIRST-WRITTEN recipient cannot get it from a parsed list:
+   * any list that has been filtered has silently renumbered itself, so its
+   * element 0 is the first SURVIVING recipient, which is a different person
+   * from the first written one exactly when the first written one is
+   * malformed. Only the original text can answer "was anything ahead of
+   * this?", so the original text is what is handed over.
+   *
+   * "First header of that name" matters too: postal-mime's own `to`/`cc`
+   * arrays concatenate duplicate headers LAST-header-first, which reverses
+   * the written order of a message carrying two `To:` lines.
+   *
+   * NOT a substitute for `to`, which is the SMTP envelope recipient and the
+   * only thing that decides where inbound mail lands. These are what the
+   * sender typed, which may be a mailing list, an alias, a group, a dozen
+   * people, or nobody at all.
+   *
+   * Exists for the Gmail Sent-folder mirror, which has no envelope to go on:
+   * a message the mailbox sent has its counterparty on these lines. `bcc` is
+   * there because received mail normally has it stripped in transit, but a
+   * message in the SENDER's own Sent folder usually keeps the Bcc it went out
+   * with, and that is the only counterparty a blind-copied send has.
+   */
+  recipientHeaders: {
+    to: string | null;
+    cc: string | null;
+    bcc: string | null;
+  };
   subject: string;
   /** Quote-trimmed HTML body, with `cid:` refs left intact. For display/storage. */
   bodyHtml: string | null;
@@ -276,6 +320,13 @@ export async function parseRawEmail(
     ),
   );
 
+  // The FIRST header of each name, in the order the message wrote them.
+  // `parsed.headers` preserves duplicates and document order; the `headers`
+  // map built above does not (a second `To:` overwrites the first), and
+  // postal-mime's own `parsed.to` concatenates duplicates last-header-first.
+  const firstHeaderValue = (key: string): string | null =>
+    parsed.headers?.find((h) => h.key === key)?.value ?? null;
+
   return {
     // A view of an import's file is kept as it is, not copied.
     raw: rawEmail instanceof Uint8Array ? rawEmail : new Uint8Array(rawEmail),
@@ -290,6 +341,11 @@ export async function parseRawEmail(
     date: parsed.date || headers["date"] || null,
     deliveredTo,
     replyTo,
+    recipientHeaders: {
+      to: firstHeaderValue("to"),
+      cc: firstHeaderValue("cc"),
+      bcc: firstHeaderValue("bcc"),
+    },
     subject: parsed.subject || "",
     bodyHtml: bodyHtml ? trimQuotedHtml(bodyHtml) : null,
     bodyText: bodyText ? trimQuotedText(bodyText) : null,

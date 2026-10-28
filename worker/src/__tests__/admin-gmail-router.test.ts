@@ -10,13 +10,17 @@ import {
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { gmailAccounts } from "../db/gmail-accounts.schema";
+import { senderIdentities } from "../db/sender-identities.schema";
+import { emails } from "../db/emails.schema";
 import { decryptSecret } from "../lib/crypto";
-import { signState } from "../lib/gmail/state";
+import { signState, verifyState } from "../lib/gmail/state";
 import {
   getDb,
   applyMigrations,
   cleanDb,
   createTestUser,
+  createTestPerson,
+  createTestEmail,
   authFetch,
 } from "./helpers";
 
@@ -71,6 +75,51 @@ describe("GET /api/admin/gmail/connect", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(
       "http://localhost:8080/api/admin/gmail/callback",
     );
+  });
+
+  it("targets the named mailbox in both login_hint and the signed state", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      "/api/admin/gmail/connect?email=ops%40example.com",
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { authUrl: string };
+    const url = new URL(body.authUrl);
+    expect(url.searchParams.get("login_hint")).toBe("ops@example.com");
+    // And the same address inside the state, which is the half Google cannot
+    // override: the hint alone is only a suggestion.
+    const verified = await verifyState(url.searchParams.get("state")!, KEY);
+    expect(verified.expectedEmail).toBe("ops@example.com");
+  });
+
+  it("lowercases the reconnect target on the way in", async () => {
+    // Both sides have to agree: the callback compares against Gmail's own
+    // lowercase address, so an address typed with capitals must be folded
+    // here or a legitimate reconnect refuses itself with wrong_account.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      "/api/admin/gmail/connect?email=Ops%40Example.COM",
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { authUrl: string };
+    const url = new URL(body.authUrl);
+    const verified = await verifyState(url.searchParams.get("state")!, KEY);
+    expect(verified.expectedEmail).toBe("ops@example.com");
+    expect(url.searchParams.get("login_hint")).toBe("ops@example.com");
+  });
+
+  it("carries no expected mailbox for a plain connect", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch("/api/admin/gmail/connect", { apiKey });
+    const body = (await res.json()) as { authUrl: string };
+    const url = new URL(body.authUrl);
+    expect(url.searchParams.has("login_hint")).toBe(false);
+    const verified = await verifyState(url.searchParams.get("state")!, KEY);
+    expect(verified.expectedEmail).toBeNull();
   });
 
   it("returns 503 when the integration is unconfigured", async () => {
@@ -133,6 +182,64 @@ describe("GET /api/admin/gmail/callback", () => {
     expect(await decryptSecret(row.refreshTokenEncrypted, KEY)).toBe(
       "rt-secret",
     );
+  });
+
+  it("attributes the connection to the admin whose flow it is", async () => {
+    const { userId, apiKey } = await createTestUser({
+      id: "admin-starter",
+      role: "admin",
+      email: "starter@example.com",
+    });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].connectedBy).toBe("admin-starter");
+  });
+
+  it("refuses a callback finished by a different admin", async () => {
+    // The signed state names the admin who began the flow. That binding is
+    // the point of signing it: without the check, a state minted in one
+    // admin's browser completes in another's, and whatever Google hands back
+    // is stored under their session.
+    await createTestUser({
+      id: "admin-starter",
+      role: "admin",
+      email: "starter@example.com",
+    });
+    const { apiKey } = await createTestUser({
+      id: "admin-finisher",
+      role: "admin",
+      email: "finisher@example.com",
+    });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const state = await signState("admin-starter", KEY);
+    const res = await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("gmail=wrong_admin");
+    // Nothing stored, and — because the check runs before `exchangeCode` —
+    // the authorization code was never spent either.
+    expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
+    expect(vi.mocked(globalThis.fetch)).not.toHaveBeenCalled();
   });
 
   it("refuses a grant that returns no refresh token", async () => {
@@ -198,6 +305,225 @@ describe("GET /api/admin/gmail/callback", () => {
     expect(rows[0].lastError).toBeNull();
     expect(await decryptSecret(rows[0].refreshTokenEncrypted, KEY)).toBe(
       "rt-new",
+    );
+  });
+
+  it("records a sync gap when a reconnect re-seeds the cursor", async () => {
+    // Reconnecting moves historyId to the mailbox's current head, so mail
+    // between the old cursor and now is never fetched. That is the same loss
+    // an expired cursor causes, and it must leave the same durable record —
+    // otherwise it happens under a green "Mailbox connected" banner.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-old",
+        emailAddress: "collector@xyspace.dev",
+        refreshTokenEncrypted: "stale-sealed",
+        historyId: "1",
+        lastSyncedAt: now - 86_400,
+        lastError: "invalid_grant",
+        lastGapAt: null,
+        connectedBy: userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    stubGoogle({
+      access_token: "at-2",
+      refresh_token: "rt-new",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    // The cursor really did jump to head — that is what makes the gap real.
+    expect(rows[0].historyId).toBe("4242");
+    expect(rows[0].lastGapAt).not.toBeNull();
+    expect(rows[0].lastGapAt).toBeGreaterThanOrEqual(now);
+    expect(rows[0].lastGapAt).toBeLessThanOrEqual(
+      Math.floor(Date.now() / 1000),
+    );
+  });
+
+  it("restarts the one-year import on reconnect, to refill the gap", async () => {
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-old",
+        emailAddress: "collector@xyspace.dev",
+        refreshTokenEncrypted: "stale-sealed",
+        historyId: "1",
+        backfillUntil: now - 86_400,
+        backfillPageToken: "tok",
+        backfillOffset: 7,
+        backfillCount: 120,
+        backfillCompletedAt: now - 3600,
+        backfillJobId: "gmail-backfill-acct-old-1",
+        connectedBy: userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    stubGoogle({
+      access_token: "at-2",
+      refresh_token: "rt-new",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const [row] = await getDb().select().from(gmailAccounts);
+    expect(row.backfillUntil).toBeNull();
+    expect(row.backfillPageToken).toBeNull();
+    expect(row.backfillOffset).toBe(0);
+    expect(row.backfillCount).toBe(0);
+    expect(row.backfillCompletedAt).toBeNull();
+    // The old job lost its claim, and the restart got a job of its own.
+    expect(row.backfillJobId).not.toBe("gmail-backfill-acct-old-1");
+    expect(row.backfillJobId).toMatch(/^gmail-backfill-acct-old-\d+$/);
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    const body = (await res.json()) as {
+      accounts: Array<{ backfill: { status: string; count: number } }>;
+    };
+    expect(body.accounts[0].backfill).toEqual({
+      status: "pending",
+      count: 0,
+      completedAt: null,
+      progress: 0,
+      reachedAt: null,
+    });
+  });
+
+  it("records no sync gap on a first connection", async () => {
+    // Nothing was skipped: there was no earlier cursor to jump past. An
+    // unconditional stamp would put a permanent "mail was lost" notice on
+    // every freshly connected mailbox.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    stubGoogle({
+      access_token: "at-1",
+      refresh_token: "rt-secret",
+      expires_in: 3599,
+    });
+
+    const state = await signState(userId, KEY);
+    await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastGapAt).toBeNull();
+  });
+
+  it("refuses a grant for a mailbox other than the one being reconnected", async () => {
+    // The operator clicks Reconnect on desk@, but the browser is signed in as
+    // jane@ and the chooser is skipped. Upserting on the returned address
+    // would reset *jane's* healthy cursor to head — silent mail loss on a
+    // mailbox that was working, while desk@ stays broken.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-jane",
+        emailAddress: "jane@example.com",
+        refreshTokenEncrypted: "jane-sealed",
+        accessToken: "jane-at",
+        historyId: "111",
+        lastSyncedAt: now - 300,
+        lastError: null,
+        lastGapAt: null,
+        connectedBy: userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    stubGoogle(
+      { access_token: "at-9", refresh_token: "rt-9", expires_in: 3599 },
+      { emailAddress: "jane@example.com", historyId: "999" },
+    );
+
+    const state = await signState(
+      userId,
+      KEY,
+      Math.floor(Date.now() / 1000),
+      "desk@example.com",
+    );
+    const res = await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("gmail=wrong_account");
+    // Both addresses, so the operator can tell what happened.
+    expect(decodeURIComponent(location)).toContain("desk@example.com");
+    expect(decodeURIComponent(location)).toContain("jane@example.com");
+    expect(location).not.toContain("gmail=connected");
+
+    // Nothing written: no new row, and jane's row byte-for-byte as it was.
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].emailAddress).toBe("jane@example.com");
+    expect(rows[0].historyId).toBe("111");
+    expect(rows[0].lastGapAt).toBeNull();
+    expect(rows[0].refreshTokenEncrypted).toBe("jane-sealed");
+    expect(rows[0].lastSyncedAt).toBe(now - 300);
+  });
+
+  it("accepts the reconnect when the granted mailbox is the expected one", async () => {
+    // The mismatch guard must not refuse the case it exists to protect, and
+    // the comparison is case-insensitive — Gmail echoes the address with the
+    // casing the account was created with.
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-desk",
+      emailAddress: "desk@example.com",
+      refreshTokenEncrypted: "stale-sealed",
+      historyId: "111",
+      lastError: "invalid_grant",
+      connectedBy: userId,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    stubGoogle(
+      { access_token: "at-9", refresh_token: "rt-9", expires_in: 3599 },
+      { emailAddress: "Desk@Example.com", historyId: "999" },
+    );
+
+    const state = await signState(
+      userId,
+      KEY,
+      Math.floor(Date.now() / 1000),
+      "desk@example.com",
+    );
+    const res = await authFetch(
+      `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+      { apiKey, redirect: "manual" },
+    );
+
+    expect(res.headers.get("location")).toContain("gmail=connected");
+    const rows = await getDb().select().from(gmailAccounts);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].lastError).toBeNull();
+    expect(await decryptSecret(rows[0].refreshTokenEncrypted, KEY)).toBe(
+      "rt-9",
     );
   });
 });
@@ -311,6 +637,51 @@ describe("GET /api/admin/gmail", () => {
     };
     expect(body.accounts[0].connectedBy).toBeNull();
   });
+
+  it("returns lastGapAt when a gap was recorded", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values({
+        id: "acct-1",
+        emailAddress: "collector@xyspace.dev",
+        refreshTokenEncrypted: "sealed-blob",
+        historyId: "1",
+        lastGapAt: now - 3600,
+        connectedBy: "test-user-1",
+        createdAt: now,
+        updatedAt: now,
+      });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      accounts: Array<{ id: string; lastGapAt: number | null }>;
+    };
+    expect(body.accounts[0].lastGapAt).toBe(now - 3600);
+  });
+
+  it("returns lastGapAt as null when no gap has occurred", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(gmailAccounts).values({
+      id: "acct-1",
+      emailAddress: "collector@xyspace.dev",
+      refreshTokenEncrypted: "sealed-blob",
+      historyId: "1",
+      connectedBy: "test-user-1",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/admin/gmail", { apiKey });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      accounts: Array<{ id: string; lastGapAt: number | null }>;
+    };
+    expect(body.accounts[0].lastGapAt).toBeNull();
+  });
 });
 
 describe("DELETE /api/admin/gmail/{id}", () => {
@@ -333,6 +704,148 @@ describe("DELETE /api/admin/gmail/{id}", () => {
     });
     expect(res.status).toBe(200);
     expect(await getDb().select().from(gmailAccounts)).toHaveLength(0);
+  });
+
+  it("unmaps the inboxes that read from it, and leaves other inboxes alone", async () => {
+    // A mapping left pointing at a deleted account is an inbox that claims
+    // Gmail, names a mailbox that does not exist, and silently receives
+    // nothing. Two accounts and three inboxes: unmapping "all gmail rows"
+    // rather than "this account's rows" would pass a single-account fixture.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values([
+        {
+          id: "acct-gone",
+          emailAddress: "gone@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "acct-stays",
+          emailAddress: "stays@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    await getDb()
+      .insert(senderIdentities)
+      .values([
+        {
+          email: "mapped@acme.dev",
+          displayName: "Mapped",
+          source: "gmail",
+          gmailAccountId: "acct-gone",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          email: "other@acme.dev",
+          source: "gmail",
+          gmailAccountId: "acct-stays",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          email: "plain@acme.dev",
+          source: "cloudflare",
+          gmailAccountId: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+
+    await authFetch("/api/admin/gmail/acct-gone", { method: "DELETE", apiKey });
+
+    const rows = await getDb().select().from(senderIdentities);
+    const byEmail = Object.fromEntries(rows.map((r) => [r.email, r]));
+    expect(byEmail["mapped@acme.dev"].source).toBe("cloudflare");
+    expect(byEmail["mapped@acme.dev"].gmailAccountId).toBeNull();
+    // The unmap must not take the rest of the row with it.
+    expect(byEmail["mapped@acme.dev"].displayName).toBe("Mapped");
+    // The other account's inbox is untouched.
+    expect(byEmail["other@acme.dev"].source).toBe("gmail");
+    expect(byEmail["other@acme.dev"].gmailAccountId).toBe("acct-stays");
+  });
+
+  it("forgets the disconnected mailbox's Gmail threads, and only those", async () => {
+    // The mailbox that issued these thread ids is gone, so replying on one
+    // would hand a stranger's id to whatever account the inbox is mapped to
+    // next: 4xx, terminal, never queued. See `clearGmailThreadIds`.
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(gmailAccounts)
+      .values([
+        {
+          id: "acct-gone",
+          emailAddress: "gone@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "acct-stays",
+          emailAddress: "stays@xyspace.dev",
+          refreshTokenEncrypted: "sealed",
+          historyId: "1",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    await getDb()
+      .insert(senderIdentities)
+      .values([
+        {
+          email: "mapped@acme.dev",
+          source: "gmail",
+          gmailAccountId: "acct-gone",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          email: "other@acme.dev",
+          source: "gmail",
+          gmailAccountId: "acct-stays",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    const person = await createTestPerson({ id: "p-d", email: "c@ex.com" });
+    await createTestEmail({
+      id: "rcv-gone",
+      personId: person.id,
+      recipient: "mapped@acme.dev",
+      messageId: "gone@ex.com",
+    });
+    await createTestEmail({
+      id: "rcv-stays",
+      personId: person.id,
+      recipient: "other@acme.dev",
+      messageId: "stays@ex.com",
+    });
+    await getDb()
+      .update(emails)
+      .set({ gmailThreadId: "th-gone" })
+      .where(eq(emails.id, "rcv-gone"));
+    await getDb()
+      .update(emails)
+      .set({ gmailThreadId: "th-stays" })
+      .where(eq(emails.id, "rcv-stays"));
+
+    await authFetch("/api/admin/gmail/acct-gone", { method: "DELETE", apiKey });
+
+    const rows = await getDb().select().from(emails);
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId["rcv-gone"].gmailThreadId).toBeNull();
+    // The mailbox still connected keeps its threading.
+    expect(byId["rcv-stays"].gmailThreadId).toBe("th-stays");
   });
 
   it("answers 404 for an id that is not connected, and deletes nothing", async () => {

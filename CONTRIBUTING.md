@@ -44,6 +44,10 @@ saasmail is licensed under [Apache License 2.0](LICENSE). There is **no CLA**. B
 - Hono + Zod OpenAPI for backend routes
 - Drizzle ORM for database queries
 
+## Releases
+
+Publishing a GitHub release on `choyiny/saasmail` publishes the `saasmail` package to npm (`.github/workflows/publish.yml`; the tag must be `vX.Y.Z` or `vX.Y.Z-pre`). A prerelease version publishes under the `next` tag, so `latest` stays on the last release. It uses npm trusted publishing (no npm token is stored): the package's trusted publisher on npmjs.com is `choyiny/saasmail`, workflow `publish.yml`, with `npm publish` allowed. The installer's source is `scripts/saasmail/`; `yarn saasmail ...` runs it from a checkout, and its tests run with `yarn vitest run --config scripts/saasmail/vitest.config.ts`.
+
 ## Reporting Issues
 
 Open an issue on GitHub with:

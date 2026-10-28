@@ -21,3 +21,9 @@ docs/superpowers/
 
 # Per-developer Claude Code preview launch config
 .claude/launch.json
+
+# yarn saasmail install state (per installation, holds the ownership nonce)
+.saasmail/
+
+# yarn pack:npm output (the npm package and its build)
+build/
