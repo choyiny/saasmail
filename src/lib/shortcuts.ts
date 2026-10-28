@@ -4,6 +4,8 @@
  * chords) and InboxPage (triage keys), so keep this list in step with them.
  */
 
+import { mailStateShortcutAvailable } from "@/lib/mail-state-gates";
+
 export interface ShortcutDef {
   keys: string[];
   label: string;
@@ -56,7 +58,10 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
       { keys: ["?"], label: "Show this list" },
     ],
   },
-];
+].map((g) => ({
+  ...g,
+  items: g.items.filter((it) => mailStateShortcutAvailable(it.keys)),
+}));
 
 /**
  * The "g" go-to chord, shared by the shell (which owns it) and the inbox's

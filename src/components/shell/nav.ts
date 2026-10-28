@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { MailFolder } from "@/lib/api";
-import { mailStateFolderAvailable } from "@/lib/mail-state-actions";
+import { mailStateFolderAvailable } from "@/lib/mail-state-gates";
 import {
   FORK_ADMIN_LINKS,
   FORK_DETAIL_BASES,

@@ -16,6 +16,7 @@ import {
   StarToggle,
   type MailActionHandlers,
 } from "@/components/MailActions";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 import {
   defaultDirectionFor,
   type GroupedItem,
@@ -316,7 +317,7 @@ export default function PeopleTable({
                     )}
                   </th>
                 )}
-                {mailActions && (
+                {mailActions && MAIL_STATE_ACTIONS_ENABLED && (
                   <th className="w-8 !px-0">
                     <span className="sr-only">Starred</span>
                   </th>
@@ -404,7 +405,7 @@ export default function PeopleTable({
                         />
                       </td>
                     )}
-                    {actions && (
+                    {actions && MAIL_STATE_ACTIONS_ENABLED && (
                       <td className="w-8 !px-0">
                         <StarToggle
                           starred={person.starred}
@@ -666,7 +667,7 @@ function GroupTableRow({
           />
         </td>
       )}
-      {actions && (
+      {actions && MAIL_STATE_ACTIONS_ENABLED && (
         <td className="w-8 !px-0">
           <StarToggle
             starred={group.starred}

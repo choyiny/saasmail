@@ -1,5 +1,6 @@
 import type { BlockDocument } from "@worker/lib/blocks/schema";
 import { statusFallbackMessage } from "@/lib/error-message";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 
 export interface Person {
   id: string;
@@ -465,6 +466,8 @@ export async function updateMailState(
     trashed?: boolean;
   },
 ): Promise<{ data: MailItemState[] }> {
+  if (!MAIL_STATE_ACTIONS_ENABLED)
+    throw new Error("Mail state arrives in a later release");
   return apiFetch(`/api/mail-state`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

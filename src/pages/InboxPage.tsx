@@ -69,6 +69,8 @@ import {
 } from "@/components/shell/nav";
 import { refreshMailCounts } from "@/components/shell/useMailCounts";
 import SnoozeDialog from "@/components/SnoozeDialog";
+import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
+import { gateMailActions, ifMailState } from "@/lib/mail-state-gates";
 import { goChord, shouldIgnoreKey } from "@/lib/shortcuts";
 import { shellStore } from "@/components/shell/shellStore";
 
@@ -778,6 +780,8 @@ export default function InboxPage() {
 
   const inTrash = queryFolder === "trash";
   const mailActionsFor = (it: GroupedItem): MailActionHandlers =>
+    gateMailActions(allMailActionsFor(it));
+  const allMailActionsFor = (it: GroupedItem): MailActionHandlers =>
     inTrash
       ? {
           onRestore: () => restoreMany([it]),
@@ -1336,6 +1340,8 @@ export default function InboxPage() {
       } else showToast({ kind: "info", message: "Nothing to undo" });
     } else if (targets.length === 0) {
       handled = false;
+    } else if (!MAIL_STATE_ACTIONS_ENABLED && "#espb".includes(k)) {
+      handled = false;
     } else if (k === "#") {
       // Trash (with Undo). Inside Trash, admins delete forever (asks).
       if (!inTrash) trashMany(targets);
@@ -1438,12 +1444,12 @@ export default function InboxPage() {
       onMarkRead={handleBulkMarkRead}
       onBlock={allMatching || inTrash ? undefined : handleBlockSelected}
       onClear={clearSelection}
-      onArchive={inTrash ? undefined : handleBulkArchive}
+      onArchive={inTrash ? undefined : ifMailState(handleBulkArchive)}
       archiveLabel={folder === "archive" ? "Move to inbox" : "Archive"}
-      onSnooze={inTrash ? undefined : handleBulkSnooze}
-      onStar={inTrash ? undefined : handleBulkStar}
-      onTrash={inTrash ? undefined : handleBulkTrash}
-      onRestore={inTrash ? handleBulkRestore : undefined}
+      onSnooze={inTrash ? undefined : ifMailState(handleBulkSnooze)}
+      onStar={inTrash ? undefined : ifMailState(handleBulkStar)}
+      onTrash={inTrash ? undefined : ifMailState(handleBulkTrash)}
+      onRestore={inTrash ? ifMailState(handleBulkRestore) : undefined}
       onDeleteForever={inTrash && isAdmin ? handleBulkDeleteForever : undefined}
       matchingTotal={peopleTotal}
       allMatching={allMatching}
