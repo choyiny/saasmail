@@ -8,7 +8,8 @@ export async function hashKey(key: string): Promise<string> {
 
 const IV_BYTES = 12;
 
-function b64ToBytes(b64: string): Uint8Array {
+// Typed over a plain ArrayBuffer, which is what WebCrypto's BufferSource takes.
+function b64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
 }
 
