@@ -197,6 +197,8 @@ test.describe.serial("shell navigation", () => {
         page,
         api,
       }) => {
+        // About a dozen page loads: more than 30 s on a cold CI runner.
+        test.slow();
         // State the /mail page sets, through its own API: archive one
         // message, star one, snooze one conversation, trash one.
         const archived = "received:e_s_a1";
