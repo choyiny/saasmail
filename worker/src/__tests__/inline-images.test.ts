@@ -61,7 +61,7 @@ describe("inlineDataImages", () => {
 });
 
 describe("providers send data-URI images as inline CID parts", () => {
-  it("Cloudflare: MIME carries a related inline part, not a data: URI", async () => {
+  it("Cloudflare: the structured send carries an inline part, not a data: URI", async () => {
     const binding = { send: vi.fn().mockResolvedValue({ messageId: "m" }) };
     const sender = createEmailSender({
       EMAIL: binding,
@@ -76,12 +76,14 @@ describe("providers send data-URI images as inline CID parts", () => {
     });
 
     expect(result.error).toBeNull();
-    const raw = JSON.stringify(binding.send.mock.calls[0][0]);
-    expect(raw).toContain("multipart/related");
-    expect(raw).toContain("Content-ID: <");
-    expect(raw).toContain("Content-Disposition: inline");
-    expect(raw).toContain('src=\\"cid:');
-    expect(raw).not.toContain("data:image/png");
+    // The fork sends through the binding's structured form, so the inline
+    // part is an attachment object rather than MIME text.
+    const sent = binding.send.mock.calls[0][0];
+    expect(sent.attachments).toHaveLength(1);
+    expect(sent.attachments[0].disposition).toBe("inline");
+    expect(sent.attachments[0].contentId).toMatch(/@saasmail$/);
+    expect(sent.html).toContain(`src="cid:${sent.attachments[0].contentId}"`);
+    expect(JSON.stringify(sent)).not.toContain("data:image/png");
   });
 
   it("Gmail/Outlook: the raw MIME carries a related inline part", () => {

@@ -76,6 +76,13 @@ export interface SendEmailError {
    * not add a retry instruction; `message` already says what happened.
    */
   delivered?: boolean;
+  /**
+   * Set when the request may have reached the provider and been accepted:
+   * a timeout, a network error or a 5xx after the request went out. Only the
+   * Gmail and Outlook senders set it: their mail is never queued, so the
+   * caller must not let a retry send it again (see lib/direct-send.ts).
+   */
+  uncertain?: boolean;
 }
 
 export interface SendEmailResult {
