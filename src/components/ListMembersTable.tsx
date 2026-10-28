@@ -139,7 +139,7 @@ export default function ListMembersTable({ listId }: { listId: string }) {
               onClick={() => setFilter(f.value)}
               className={`rounded-[6px] px-2.5 py-1.5 text-xs font-medium transition-colors ${
                 filter === f.value
-                  ? "bg-text-primary text-white"
+                  ? "bg-text-primary text-background"
                   : "text-text-secondary hover:bg-bg-muted"
               }`}
             >
@@ -195,7 +195,7 @@ export default function ListMembersTable({ listId }: { listId: string }) {
           />
           <button
             type="submit"
-            className="rounded-[6px] bg-text-primary px-3 py-2 text-xs font-medium text-white"
+            className="rounded-[6px] bg-text-primary px-3 py-2 text-xs font-medium text-background"
           >
             Add
           </button>

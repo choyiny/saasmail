@@ -327,7 +327,7 @@ export default function AdminAuditPage() {
           <div className="flex items-center gap-2 sm:col-span-2 lg:col-span-6">
             <button
               type="submit"
-              className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-text-primary/90"
+              className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-background shadow-sm transition-colors hover:bg-text-primary/90"
             >
               Apply filters
             </button>

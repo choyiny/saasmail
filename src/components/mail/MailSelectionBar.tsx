@@ -74,14 +74,14 @@ export default function MailSelectionBar({
   if (count === 0) return null;
 
   const actionClass =
-    "inline-flex shrink-0 items-center gap-1 rounded-[6px] bg-white/[0.08] px-2 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-white/[0.14] disabled:cursor-not-allowed disabled:opacity-50";
+    "inline-flex shrink-0 items-center gap-1 rounded-[6px] bg-background/[0.08] px-2 py-1.5 text-[11px] font-medium text-background transition-colors hover:bg-background/[0.14] disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
     <div
       data-testid="mail-selection-bar"
-      className="fixed bottom-3 left-3 right-3 z-40 flex items-center gap-1 overflow-x-auto rounded-[8px] bg-text-primary px-2 py-2 text-white shadow-lg ring-1 ring-text-primary/20 md:static md:mx-2 md:mt-2 md:shrink-0"
+      className="fixed bottom-3 left-3 right-3 z-40 flex items-center gap-1 overflow-x-auto rounded-[8px] bg-text-primary px-2 py-2 text-background shadow-lg ring-1 ring-text-primary/20 md:static md:mx-2 md:mt-2 md:shrink-0"
     >
-      <span className="inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-white/15 px-2 text-xs font-bold tabular-nums">
+      <span className="inline-flex h-6 min-w-6 shrink-0 items-center justify-center rounded-full bg-background/15 px-2 text-xs font-bold tabular-nums">
         {count}
       </span>
 
@@ -226,7 +226,7 @@ export default function MailSelectionBar({
         type="button"
         onClick={onClear}
         disabled={busy}
-        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-[6px] px-2 py-1.5 text-xs font-medium text-white/70 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-50"
+        className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-[6px] px-2 py-1.5 text-xs font-medium text-background/70 transition-colors hover:bg-background/[0.08] hover:text-background disabled:opacity-50"
         aria-label="Clear mail selection"
       >
         {busy ? (

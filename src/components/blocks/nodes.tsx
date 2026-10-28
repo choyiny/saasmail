@@ -62,7 +62,7 @@ function ButtonView({ node, updateAttributes, selected }: NodeViewProps) {
         }}
       >
         <span
-          className="inline-block rounded-[6px] bg-text-primary px-6 py-2.5 text-xs font-semibold text-white"
+          className="inline-block rounded-[6px] bg-text-primary px-6 py-2.5 text-xs font-semibold text-background"
           style={full ? { display: "block" } : undefined}
         >
           {label || "Button"}

@@ -84,7 +84,7 @@ export default function SendingPausedBanner() {
         type="button"
         onClick={resume}
         disabled={busy}
-        className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-white hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
+        className="rounded-[6px] bg-text-primary px-3 py-1.5 text-xs font-medium text-background hover:bg-text-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {busy ? "Resuming…" : "Resume"}
       </button>
