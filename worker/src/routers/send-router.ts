@@ -5,6 +5,8 @@ import { maxAttachmentBytesForInbox } from "../lib/email-sender/for-inbox";
 import { assertInboxAllowed } from "../lib/inbox-permissions";
 import { parseSendBody, sendParseErrorResponse } from "../lib/multipart-send";
 import { replyToEmail, sendEmail } from "../lib/send-email";
+import { MAILBOX_SEND_NOT_HELD_CODE } from "../lib/direct-send";
+import type { IdempotentResponse } from "../lib/send-idempotency";
 import { bearerSecurity } from "../lib/openapi-auth";
 import { MAX_CC_ENTRIES } from "../lib/send-limits";
 import { respondIdempotently } from "../lib/idempotent-send-route";
@@ -15,11 +17,35 @@ import {
   idempotencyKeyHeader,
   idempotent201Response,
   inboxForbiddenResponse,
+  mailboxSendErrorResponses,
   multipartParseErrorResponses,
   replyNotFoundResponse,
   replyValidationErrorResponse,
 } from "../lib/openapi-send-errors";
 import { templateVariablesSchema } from "../lib/template-variables-schema";
+
+/**
+ * The answer for a reply a Gmail or Outlook inbox did not send: 409 when it
+ * would have had to be held, 502 otherwise. A 502 whose outcome is unknown is
+ * kept as the idempotency key's answer.
+ */
+function mailboxFailure(
+  code: "SEND_FAILED" | "SEND_HELD",
+  message: string,
+  keepIdempotencyKey: boolean,
+): IdempotentResponse {
+  if (code === "SEND_HELD") {
+    return {
+      status: 409,
+      body: { error: message, code: MAILBOX_SEND_NOT_HELD_CODE },
+    };
+  }
+  return {
+    status: 502,
+    body: { error: message, code: "SEND_FAILED" },
+    ...(keepIdempotencyKey ? { remember: true } : {}),
+  };
+}
 
 export const sendRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -317,6 +343,7 @@ const replyEmailRoute = createRoute({
     ...replyNotFoundResponse,
     ...idempotencyConflictResponses,
     ...dailySendLimitResponses,
+    ...mailboxSendErrorResponses,
   },
 });
 
@@ -388,6 +415,19 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
           result.code === "TEMPLATE_PARSE_ERROR"
         ) {
           return { status: 400, body: { error: result.message } };
+        }
+        // Cast: the worker build does not narrow this union (strict is off).
+        const refused = result as {
+          code: string;
+          message: string;
+          keepIdempotencyKey?: boolean;
+        };
+        if (refused.code === "SEND_FAILED" || refused.code === "SEND_HELD") {
+          return mailboxFailure(
+            refused.code,
+            refused.message,
+            refused.keepIdempotencyKey === true,
+          );
         }
         return { status: 404, body: { error: result.message } };
       }

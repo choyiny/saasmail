@@ -148,3 +148,31 @@ export const replyNotFoundResponse = {
     },
   },
 };
+
+/**
+ * A reply from an inbox connected to Gmail or Outlook that did not go out
+ * through that mailbox. Such mail is never queued for retry.
+ */
+export const mailboxSendErrorResponses = {
+  409: {
+    description:
+      "Outbound sending is paused, and mail from an inbox connected to Gmail or Outlook cannot be held (`MAILBOX_SEND_NOT_HELD`). Nothing was sent or stored.",
+    content: {
+      "application/json": {
+        schema: z.object({
+          error: z.string(),
+          code: z.literal("MAILBOX_SEND_NOT_HELD"),
+        }),
+      },
+    },
+  },
+  502: {
+    description:
+      "The reply was to go out through the inbox's Gmail or Outlook mailbox and did not (`SEND_FAILED`): the mailbox could not be reached, refused it, or may have sent it. Not queued for retry. When the outcome is unknown the message says so, and a retry with the same idempotency key replays this answer instead of sending again.",
+    content: {
+      "application/json": {
+        schema: z.object({ error: z.string(), code: z.literal("SEND_FAILED") }),
+      },
+    },
+  },
+};

@@ -139,10 +139,19 @@ export function sendRequestFields(payload: {
   };
 }
 
-/** What a send route or tool answered. Only a 2xx answer is remembered. */
+/**
+ * What a send route or tool answered. Only a 2xx answer is remembered, and a
+ * failure marked `remember`.
+ */
 export interface IdempotentResponse<T = unknown> {
   status: number;
   body: T;
+  /**
+   * Keep this failure as the key's answer instead of releasing the key: the
+   * message may have gone out (a Gmail or Outlook send whose outcome is
+   * unknown), so a retry with the same key must replay it, not send again.
+   */
+  remember?: boolean;
   sentEmailId?: string | null;
   /** Response headers of a refusal (never stored: only 2xx answers are). */
   headers?: Record<string, string>;
@@ -335,7 +344,8 @@ export async function withIdempotency<T>(
   }
 
   if (response.status < 200 || response.status >= 300) {
-    if (!accepted) await release();
+    if (response.remember) await complete(response);
+    else if (!accepted) await release();
     return { ...response, replayed: false };
   }
 
