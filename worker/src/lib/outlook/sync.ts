@@ -127,6 +127,7 @@ async function processOutlookMessage(
       return { ...SKIPPED, at };
     }
     const didMirror = await mirrorSentMessage(db, {
+      env,
       ids: { provider: "outlook", messageId },
       parsed,
       inbox,
