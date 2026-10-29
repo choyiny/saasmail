@@ -7,8 +7,8 @@
  * 2. **Formula-injection escaping** — making the file safe to *open*. A cell
  *    beginning `=`, `+`, `-` or `@` is executed as a formula by Excel, Sheets
  *    and LibreOffice, so an attacker who can get a crafted string into a list
- *    (via the public subscribe form, say) could otherwise run code on the
- *    machine of whoever opens the export.
+ *    (via an imported CSV, say) could otherwise run code on the machine of
+ *    whoever opens the export.
  *
  * Both must be applied, in that order: neutralize, then quote.
  */

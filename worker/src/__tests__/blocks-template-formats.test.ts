@@ -306,8 +306,6 @@ describe("a block-authored campaign sends through the campaign path", () => {
         name: "Weekly",
         description: null,
         fromAddress: "news@saasmail.test",
-        doubleOptIn: 0,
-        confirmationTemplateSlug: null,
         archivedAt: null,
         createdAt: now(),
         updatedAt: now(),

@@ -74,7 +74,6 @@
   "worker/src/routers/sequences-router.ts": 13,
   "worker/src/routers/setup-router.ts": 2,
   "worker/src/routers/stats-router.ts": 3,
-  "worker/src/routers/subscribe-forms-router.ts": 5,
   "worker/src/routers/suppressions-router.ts": 3,
   "worker/src/routers/unsubscribe-router.ts": 2,
   "worker/src/routers/user-router.ts": 3,

@@ -17,11 +17,6 @@ const FORK_PAGES: Array<{ label: string; path: string; heading?: string }> = [
   { label: "Mail", path: "/mail" },
   { label: "Lists", path: "/lists", heading: "Lists" },
   { label: "Campaigns", path: "/campaigns", heading: "Campaigns" },
-  {
-    label: "Subscribe forms",
-    path: "/subscribe-forms",
-    heading: "Subscribe forms",
-  },
   { label: "Automations", path: "/automations", heading: "Automations" },
   { label: "Audit log", path: "/admin/audit", heading: "Audit log" },
   { label: "Contact data", path: "/admin/contacts", heading: "Contact data" },

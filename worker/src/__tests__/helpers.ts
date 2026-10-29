@@ -201,19 +201,13 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS contacts (id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT, person_id TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS contacts_email_unique ON contacts(email)`,
     `CREATE INDEX IF NOT EXISTS contacts_person_id_idx ON contacts(person_id)`,
-    `CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, from_address TEXT NOT NULL, double_opt_in INTEGER NOT NULL DEFAULT 0, confirmation_template_slug TEXT, archived_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, from_address TEXT NOT NULL, archived_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS lists_from_address_idx ON lists(from_address)`,
     `CREATE INDEX IF NOT EXISTS lists_archived_at_idx ON lists(archived_at)`,
-    `CREATE TABLE IF NOT EXISTS list_members (id TEXT PRIMARY KEY, list_id TEXT NOT NULL, contact_id TEXT NOT NULL, email TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', source TEXT NOT NULL, form_id TEXT, submitted_ip TEXT, consent_source TEXT NOT NULL, consent_at INTEGER, import_job_id TEXT, subscribed_at INTEGER, confirmed_at INTEGER, unsubscribed_at INTEGER, unsubscribe_reason TEXT, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS list_members (id TEXT PRIMARY KEY, list_id TEXT NOT NULL, contact_id TEXT NOT NULL, email TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'subscribed', source TEXT NOT NULL, consent_source TEXT NOT NULL, consent_at INTEGER, import_job_id TEXT, subscribed_at INTEGER, unsubscribed_at INTEGER, unsubscribe_reason TEXT, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS list_members_list_contact_unique ON list_members(list_id, contact_id)`,
     `CREATE INDEX IF NOT EXISTS list_members_list_status_id_idx ON list_members(list_id, status, id)`,
     `CREATE INDEX IF NOT EXISTS list_members_email_idx ON list_members(email)`,
-    `CREATE TABLE IF NOT EXISTS subscribe_forms (id TEXT PRIMARY KEY, list_id TEXT NOT NULL, name TEXT NOT NULL, show_name_field INTEGER NOT NULL DEFAULT 1, name_required INTEGER NOT NULL DEFAULT 0, success_message TEXT NOT NULL DEFAULT 'Thanks for subscribing!', redirect_url TEXT, allowed_origins TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
-    `CREATE INDEX IF NOT EXISTS subscribe_forms_list_idx ON subscribe_forms(list_id)`,
-    `CREATE TABLE IF NOT EXISTS subscribe_attempts (id TEXT PRIMARY KEY, form_id TEXT NOT NULL, email_hash TEXT NOT NULL, ip TEXT NOT NULL, attempt_type TEXT NOT NULL, created_at INTEGER NOT NULL)`,
-    `CREATE INDEX IF NOT EXISTS subscribe_attempts_form_email_idx ON subscribe_attempts(form_id, email_hash, created_at)`,
-    `CREATE INDEX IF NOT EXISTS subscribe_attempts_ip_idx ON subscribe_attempts(ip, created_at)`,
-    `CREATE INDEX IF NOT EXISTS subscribe_attempts_created_idx ON subscribe_attempts(created_at)`,
     `CREATE TABLE IF NOT EXISTS campaigns (id TEXT PRIMARY KEY, name TEXT NOT NULL, subject TEXT NOT NULL, template_slug TEXT, format TEXT NOT NULL DEFAULT 'html', body_json TEXT, body_html TEXT NOT NULL DEFAULT '', from_address TEXT NOT NULL, list_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'draft', scheduled_at INTEGER, content_snapshot_at INTEGER, subject_snapshot TEXT, html_snapshot TEXT, text_body_override TEXT, text_snapshot TEXT, from_address_snapshot TEXT, template_revision TEXT, unsubscribe_domain_key_version INTEGER NOT NULL DEFAULT 1, fan_out_cursor TEXT, fan_out_job_id TEXT, sent_at INTEGER, stats_targeted INTEGER NOT NULL DEFAULT 0, stats_delivered INTEGER NOT NULL DEFAULT 0, stats_suppressed INTEGER NOT NULL DEFAULT 0, stats_retryable_failed INTEGER NOT NULL DEFAULT 0, stats_permanent_failed INTEGER NOT NULL DEFAULT 0, stats_unique_openers INTEGER NOT NULL DEFAULT 0, stats_unique_clicks INTEGER NOT NULL DEFAULT 0, stats_unsubscribes INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS campaigns_list_idx ON campaigns(list_id)`,
     `CREATE INDEX IF NOT EXISTS campaigns_from_address_idx ON campaigns(from_address)`,
@@ -534,8 +528,6 @@ export async function cleanDb() {
     DELETE FROM campaign_links;
     DELETE FROM campaign_recipients;
     DELETE FROM campaigns;
-    DELETE FROM subscribe_attempts;
-    DELETE FROM subscribe_forms;
     DELETE FROM list_members;
     DELETE FROM lists;
     DELETE FROM contacts;

@@ -31,7 +31,7 @@ Everything that used to live in one very long README. Start at
 | [Automations](automations.md)                     | Inbound routing rules, assignment, conditions, actions, APIs, and MCP                                  |
 | [Email templates](templates.md)                   | The `{{variable}}` grammar, sections, escaping, and the send contract                                  |
 | [Sequences](sequences.md)                         | Multi-step drip campaigns and how they're scheduled                                                    |
-| [Newsletters](newsletters.md)                     | Lists, subscribe forms, campaigns, tracking, and retention                                             |
+| [Newsletters](newsletters.md)                     | Lists, campaigns, tracking, and retention                                                              |
 | [Suppressions and unsubscribe](suppressions.md)   | The suppression list, RFC 8058 one-click, and the `transactional` flag                                 |
 | [Users and API keys](users-and-api-keys.md)       | Invites, roles, passkeys, and `sk_…` keys                                                              |
 | [Audit log](audit-log.md)                         | Who did what: what is recorded, what is not, retention, and the admin API                              |

@@ -1,18 +1,14 @@
 const encoder = new TextEncoder();
 
 /**
- * The four independent token purposes in the newsletter module.
+ * The three independent token purposes in the newsletter module.
  *
  * Each gets its own signing key derived from the root secret, so a token that
  * leaks from one context cannot be replayed against another. That matters most
  * for `track-open`: a tracking-pixel URL travels through image caches, proxy
  * logs and browser history, where an unsubscribe link generally does not.
  */
-export type TokenDomain =
-  | "subscribe-confirm"
-  | "unsubscribe"
-  | "track-open"
-  | "track-click";
+export type TokenDomain = "unsubscribe" | "track-open" | "track-click";
 
 /**
  * Derive a per-domain signing key from the root secret.
@@ -136,36 +132,12 @@ async function verify(
   return { status: "valid", payload };
 }
 
-/**
- * Verify a token.
- *
- * Returns the payload, or `null` when the token is unusable for any reason.
- * Pass `{ detailed: true }` when the caller needs to tell "expired" from
- * "invalid" — the subscribe-confirm endpoint does, so it can answer 410 Gone
- * (re-subscribe) rather than a flat rejection.
- */
+/** Verify a token. Returns the payload, or `null` when it is unusable for any reason. */
 export async function verifyPayload(
   token: string,
   secret: string,
   domain: TokenDomain,
-): Promise<TokenPayload | null>;
-export async function verifyPayload(
-  token: string,
-  secret: string,
-  domain: TokenDomain,
-  opts: { detailed: true },
-): Promise<{ status: "expired" } | { status: "invalid" } | TokenPayload>;
-export async function verifyPayload(
-  token: string,
-  secret: string,
-  domain: TokenDomain,
-  opts?: { detailed: true },
-): Promise<unknown> {
+): Promise<TokenPayload | null> {
   const result = await verify(token, secret, domain);
-  if (opts?.detailed) {
-    return result.status === "valid"
-      ? result.payload
-      : { status: result.status };
-  }
   return result.status === "valid" ? result.payload : null;
 }

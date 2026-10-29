@@ -10,9 +10,7 @@ import { purgeFinishedImports } from "./list-import";
 import {
   backfillContactPersonIds,
   purgeExpiredCampaignEvents,
-  purgeExpiredMemberIps,
 } from "./newsletter-retention";
-import { purgeExpiredAttempts } from "./subscribe-abuse";
 
 /**
  * Hourly newsletter housekeeping.
@@ -28,17 +26,11 @@ export async function runNewsletterMaintenance(
   const db = createDb(env);
   const now = Math.floor(Date.now() / 1000);
 
-  await purgeExpiredAttempts(db, now).catch((err) =>
-    console.error("[cron] subscribe-attempt purge failed:", err),
-  );
   await purgeFinishedImports(db, env, now).catch((err) =>
     console.error("[cron] finished-import purge failed:", err),
   );
   await runCampaignPass(db, env, now).catch((err) =>
     console.error("[cron] campaign pass failed:", err),
-  );
-  await purgeExpiredMemberIps(db, now).catch((err) =>
-    console.error("[cron] member-IP purge failed:", err),
   );
   await purgeExpiredCampaignEvents(db, now).catch((err) =>
     console.error("[cron] campaign-event purge failed:", err),

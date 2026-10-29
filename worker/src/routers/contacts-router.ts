@@ -5,9 +5,7 @@ import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { contacts } from "../db/contacts.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
-import { subscribeAttempts } from "../db/subscribe-attempts.schema";
 import { json200Response } from "../lib/helpers";
-import { hashEmail } from "../lib/subscribe-abuse";
 import { eraseAddressFromNewsletterAudit } from "../lib/audit/erase";
 import type { Variables } from "../variables";
 
@@ -141,7 +139,6 @@ const eraseRoute = createRoute({
         memberships: z.number(),
         events: z.number(),
         recipients: z.number(),
-        attempts: z.number(),
         auditEvents: z.number(),
       }),
       "Rows rewritten",
@@ -165,7 +162,7 @@ contactsRouter.openapi(eraseRoute, async (c) => {
 
   const memberResult = await db
     .update(listMembers)
-    .set({ email: token, submittedIp: null })
+    .set({ email: token })
     .where(eq(sql`lower(${listMembers.email})`, email));
 
   const eventResult = await db
@@ -179,12 +176,6 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     .update(campaignRecipients)
     .set({ email: token })
     .where(eq(sql`lower(${campaignRecipients.email})`, email));
-
-  // Attempts never stored the address, only its digest — so this is a delete,
-  // not a rewrite.
-  const attemptResult = await db
-    .delete(subscribeAttempts)
-    .where(eq(subscribeAttempts.emailHash, await hashEmail(email)));
 
   // Adding or removing a member, and a campaign test send, name the address in
   // the audit log.
@@ -202,7 +193,6 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     memberships: changed(memberResult),
     events: changed(eventResult),
     recipients: changed(recipientResult),
-    attempts: changed(attemptResult),
     auditEvents: auditCount,
   });
 });

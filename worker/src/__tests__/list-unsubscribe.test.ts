@@ -32,7 +32,7 @@ const EMAIL = "reader@example.com";
 async function seed(
   opts: {
     campaignListId?: string;
-    memberStatus?: "pending" | "subscribed" | "unsubscribed";
+    memberStatus?: "subscribed" | "unsubscribed";
     unsubscribedAt?: number | null;
   } = {},
 ) {
@@ -45,8 +45,6 @@ async function seed(
       name: id,
       description: null,
       fromAddress: "news@example.com",
-      doubleOptIn: 0,
-      confirmationTemplateSlug: null,
       archivedAt: null,
       createdAt: t,
       updatedAt: t,
@@ -81,13 +79,10 @@ async function seed(
     email: EMAIL,
     status: opts.memberStatus ?? "subscribed",
     source: "api",
-    formId: null,
-    submittedIp: null,
     consentSource: "api",
     consentAt: t,
     importJobId: null,
     subscribedAt: t,
-    confirmedAt: t,
     unsubscribedAt: opts.unsubscribedAt ?? null,
     unsubscribeReason: null,
     createdAt: t,

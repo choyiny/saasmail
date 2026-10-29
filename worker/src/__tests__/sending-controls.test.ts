@@ -323,41 +323,6 @@ describe("pausing outbound sending", () => {
     expect(await config.json()).toMatchObject({ outboundPaused: false });
   });
 
-  it("holds a subscription confirmation in the outbox while paused", async () => {
-    const { sendConfirmationEmail } =
-      await import("../lib/subscribe-confirmation");
-    const confirm = () =>
-      sendConfirmationEmail({
-        db: getDb(),
-        env: bindings,
-        to: "new@example.com",
-        fromAddress: "news@saasmail.test",
-        listName: "News",
-        confirmUrl: "https://mail.example.com/subscribe/confirm/t",
-        templateSlug: null,
-      });
-    (env as any).DEMO_MODE = "1";
-    try {
-      await setSendingPaused(getDb(), true);
-      expect(await confirm()).toEqual({ sent: true });
-      const [held] = await getDb().select().from(sentEmails);
-      expect(held.status).toBe("retrying");
-      expect(await outboxRow()).toMatchObject({
-        status: "pending",
-        lastError: SENDING_PAUSED_MESSAGE,
-      });
-
-      await setSendingPaused(getDb(), false);
-      expect(await confirm()).toEqual({ sent: true });
-      const statuses = (await getDb().select().from(sentEmails))
-        .map((row) => row.status)
-        .sort();
-      expect(statuses).toEqual(["retrying", "sent"]);
-    } finally {
-      (env as any).DEMO_MODE = "0";
-    }
-  });
-
   it("keeps a delayed JMAP send scheduled until sending resumes", async () => {
     const { authorId } = await seedAccount();
     const drafted = (await jmapCall(authorId, [

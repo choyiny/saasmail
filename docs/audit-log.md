@@ -71,7 +71,7 @@ not in it, is not an event.
 - The system's own work: storing inbound mail, automatic junk filing by spam
   score, stopping a contact's sequences when they write or are written to,
   push notifications.
-- A subscriber's own subscribe and unsubscribe through public links, list
+- A subscriber's own unsubscribe (and its undo) through public links, list
   imports, and sequence or campaign messages one by one (the enrollment and the
   campaign start are recorded instead).
 

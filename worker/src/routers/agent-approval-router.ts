@@ -241,14 +241,6 @@ agentApprovalRouter.openapi(summaryRoute, async (c) => {
         200,
       );
     }
-    if (existing?.status === "pending") {
-      return c.json(
-        {
-          summary: `${person.email} is already pending on list '${list.name}'`,
-        },
-        200,
-      );
-    }
 
     return c.json(
       { summary: `Add ${person.email} to list '${list.name}'` },

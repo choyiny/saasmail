@@ -317,7 +317,7 @@ export function createReadTools(deps: ReadDeps): WebMcpToolDescriptor[] {
     {
       name: "get_newsletter_list",
       description:
-        "Get one subscriber list with its member counts by status (subscribed, pending, unsubscribed).",
+        "Get one subscriber list with its member counts by status (subscribed, unsubscribed).",
       inputSchema: {
         type: "object",
         properties: {

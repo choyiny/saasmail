@@ -215,7 +215,7 @@ and every gzip library read as one stream). Every table is in it except
 sessions and tokens (`sessions`, `verifications`, `oauth_access_tokens`,
 `oauth_refresh_tokens`, `oauth_client_assertions`), the OAuth signing keys
 (`jwkss`, made again on first use) and short-lived counters (`auth_rate_limits`, `jmap_changes`,
-`send_idempotency`, `send_counters`, `subscribe_attempts`, `backup_runs`), and
+`send_idempotency`, `send_counters`, `backup_runs`), and
 the connected Gmail mailboxes (`gmail_accounts`: their refresh tokens are
 encrypted with this instance's `TOKEN_ENCRYPTION_KEY`, which another instance
 does not have, so a mailbox is reconnected after a restore).

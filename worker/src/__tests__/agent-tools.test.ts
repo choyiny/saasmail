@@ -453,8 +453,6 @@ describe("agent tools", () => {
       name: "Beta testers",
       description: null,
       fromAddress: ALLOWED,
-      doubleOptIn: 0,
-      confirmationTemplateSlug: null,
       archivedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -491,8 +489,6 @@ describe("agent tools", () => {
       name: "Revoked list",
       description: null,
       fromAddress: ALLOWED,
-      doubleOptIn: 0,
-      confirmationTemplateSlug: null,
       archivedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -524,8 +520,6 @@ describe("agent tools", () => {
       name: "Beta unsubscribed",
       description: null,
       fromAddress: ALLOWED,
-      doubleOptIn: 0,
-      confirmationTemplateSlug: null,
       archivedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -537,13 +531,10 @@ describe("agent tools", () => {
       email: allowedPerson.email.toLowerCase(),
       status: "unsubscribed",
       source: "api",
-      formId: null,
-      submittedIp: null,
       consentSource: "api",
       consentAt: now - 100,
       importJobId: null,
       subscribedAt: now - 100,
-      confirmedAt: null,
       unsubscribedAt: now - 10,
       unsubscribeReason: "user",
       createdAt: now - 100,
@@ -577,8 +568,6 @@ describe("agent tools", () => {
       name: "Beta suppressed",
       description: null,
       fromAddress: ALLOWED,
-      doubleOptIn: 0,
-      confirmationTemplateSlug: null,
       archivedAt: null,
       createdAt: now,
       updatedAt: now,
@@ -608,64 +597,54 @@ describe("agent tools", () => {
     expect(rows).toEqual([]);
   });
 
-  it("treats subscribed and pending list members as no-ops", async () => {
+  it("treats a subscribed list member as a no-op", async () => {
     const { db, tools, allowedPerson } = await fixture();
     const now = Math.floor(Date.now() / 1000);
+    const listId = "agent-list-subscribed";
+    const memberId = "agent-member-subscribed";
+    await db.insert(lists).values({
+      id: listId,
+      name: "Beta subscribed",
+      description: null,
+      fromAddress: ALLOWED,
+      archivedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await db.insert(listMembers).values({
+      id: memberId,
+      listId,
+      contactId: "agent-contact-subscribed",
+      email: allowedPerson.email.toLowerCase(),
+      status: "subscribed",
+      source: "api",
+      consentSource: "api",
+      consentAt: now - 100,
+      importJobId: null,
+      subscribedAt: now - 100,
+      unsubscribedAt: null,
+      unsubscribeReason: null,
+      createdAt: now - 100,
+    });
 
-    for (const status of ["subscribed", "pending"] as const) {
-      const listId = `agent-list-${status}`;
-      const memberId = `agent-member-${status}`;
-      await db.insert(lists).values({
-        id: listId,
-        name: `Beta ${status}`,
-        description: null,
-        fromAddress: ALLOWED,
-        doubleOptIn: 0,
-        confirmationTemplateSlug: null,
-        archivedAt: null,
-        createdAt: now,
-        updatedAt: now,
-      });
-      await db.insert(listMembers).values({
-        id: memberId,
-        listId,
-        contactId: `agent-contact-${status}`,
-        email: allowedPerson.email.toLowerCase(),
-        status,
-        source: "api",
-        formId: null,
-        submittedIp: null,
-        consentSource: "api",
-        consentAt: now - 100,
-        importJobId: null,
-        subscribedAt: status === "subscribed" ? now - 100 : null,
-        confirmedAt: null,
-        unsubscribedAt: null,
-        unsubscribeReason: null,
-        createdAt: now - 100,
-      });
+    const result = await execute(tools, "add_to_list", {
+      personId: allowedPerson.id,
+      listId,
+    });
+    expect(result).toMatchObject({
+      success: true,
+      alreadyMember: true,
+      listId,
+      personId: allowedPerson.id,
+      memberId,
+    });
 
-      const result = await execute(tools, "add_to_list", {
-        personId: allowedPerson.id,
-        listId,
-      });
-      expect(result).toMatchObject({
-        success: true,
-        alreadyMember: true,
-        listId,
-        personId: allowedPerson.id,
-        memberId,
-      });
-
-      const [after] = await db
-        .select()
-        .from(listMembers)
-        .where(eq(listMembers.id, memberId));
-      expect(after.status).toBe(status);
-      expect(after.subscribedAt).toBe(
-        status === "subscribed" ? now - 100 : null,
-      );
-    }
+    const [after] = await db
+      .select()
+      .from(listMembers)
+      .where(eq(listMembers.id, memberId));
+    expect(after.status).toBe("subscribed");
+    expect(after.subscribedAt).toBe(now - 100);
   });
 
   it("returns the guard error on a sixth approval-gated execution", async () => {

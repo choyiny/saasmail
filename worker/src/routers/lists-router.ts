@@ -7,12 +7,10 @@ import { listMembers } from "../db/list-members.schema";
 import { contacts } from "../db/contacts.schema";
 import { asyncJobs } from "../db/async-jobs.schema";
 import { campaigns } from "../db/campaigns.schema";
-import { emailTemplates } from "../db/email-templates.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import {
   assertInboxAllowed,
   inboxFilter,
-  isInboxAllowed,
   type AllowedInboxes,
 } from "../lib/inbox-permissions";
 import { findOrCreateContact, sanitizeContactName } from "../lib/contacts";
@@ -46,8 +44,6 @@ const ListSchema = z.object({
   name: z.string(),
   description: z.string().nullable(),
   fromAddress: z.string(),
-  doubleOptIn: z.boolean(),
-  confirmationTemplateSlug: z.string().nullable(),
   archivedAt: z.number().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -56,7 +52,6 @@ const ListSchema = z.object({
 const ListWithStatsSchema = ListSchema.extend({
   memberCounts: z.object({
     subscribed: z.number(),
-    pending: z.number(),
     unsubscribed: z.number(),
   }),
 });
@@ -73,15 +68,11 @@ const CreateListSchema = z.object({
   // while accepting it on update is an inconsistency callers trip over.
   description: z.string().max(2000).nullable().optional(),
   fromAddress: z.string().email(),
-  doubleOptIn: z.boolean().optional(),
-  confirmationTemplateSlug: z.string().max(200).nullable().optional(),
 });
 
 const UpdateListSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
-  doubleOptIn: z.boolean().optional(),
-  confirmationTemplateSlug: z.string().max(200).nullable().optional(),
 });
 
 const DeleteListResponseSchema = z.object({
@@ -95,12 +86,11 @@ const MemberSchema = z.object({
   contactId: z.string(),
   email: z.string(),
   name: z.string().nullable(),
-  status: z.enum(["pending", "subscribed", "unsubscribed"]),
-  source: z.enum(["form", "api", "import"]),
-  consentSource: z.enum(["form", "api", "import"]),
+  status: z.enum(["subscribed", "unsubscribed"]),
+  source: z.enum(["api", "import"]),
+  consentSource: z.enum(["api", "import"]),
   consentAt: z.number().nullable(),
   subscribedAt: z.number().nullable(),
-  confirmedAt: z.number().nullable(),
   unsubscribedAt: z.number().nullable(),
   createdAt: z.number(),
 });
@@ -151,31 +141,6 @@ async function loadListForCaller(
 }
 
 /**
- * Whether the caller may use this template as the list's opt-in confirmation.
- *
- * The confirmation mail hands the template's content to whoever subscribes, so
- * a template scoped to an inbox the caller cannot use is refused exactly like
- * one that does not exist, as `GET /api/email-templates/{slug}` does.
- */
-async function canUseConfirmationTemplate(
-  db: Variables["db"],
-  allowed: AllowedInboxes,
-  slug: string,
-): Promise<boolean> {
-  const rows = await db
-    .select({ fromAddress: emailTemplates.fromAddress })
-    .from(emailTemplates)
-    .where(eq(emailTemplates.slug, slug))
-    .limit(1);
-  const template = rows[0];
-  if (!template) return false;
-  return (
-    template.fromAddress === null ||
-    isInboxAllowed(allowed, template.fromAddress)
-  );
-}
-
-/**
  * Whether any campaign has ever targeted this list.
  *
  * A delivered campaign's audit trail references the list, so once one exists
@@ -201,7 +166,7 @@ async function memberCounts(db: Variables["db"], listId: string) {
     .where(eq(listMembers.listId, listId))
     .groupBy(listMembers.status);
 
-  const counts = { subscribed: 0, pending: 0, unsubscribed: 0 };
+  const counts = { subscribed: 0, unsubscribed: 0 };
   for (const r of rows) {
     if (r.status in counts) {
       counts[r.status as keyof typeof counts] = Number(r.n);
@@ -230,8 +195,6 @@ function serializeList(row: typeof lists.$inferSelect) {
     name: row.name,
     description: row.description,
     fromAddress: row.fromAddress,
-    doubleOptIn: row.doubleOptIn === 1,
-    confirmationTemplateSlug: row.confirmationTemplateSlug,
     archivedAt: row.archivedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -301,10 +264,6 @@ const createListRoute = createRoute({
       description: "Sending identity not allowed",
       content: { "application/json": { schema: ErrorSchema } },
     },
-    404: {
-      description: "Confirmation template not found",
-      content: { "application/json": { schema: ErrorSchema } },
-    },
   },
 });
 
@@ -315,16 +274,6 @@ listsRouter.openapi(createListRoute, async (c) => {
   const fromAddress = body.fromAddress.trim().toLowerCase();
 
   assertInboxAllowed(allowed, fromAddress);
-  if (
-    body.confirmationTemplateSlug &&
-    !(await canUseConfirmationTemplate(
-      db,
-      allowed,
-      body.confirmationTemplateSlug,
-    ))
-  ) {
-    return c.json({ error: "Template not found" }, 404);
-  }
 
   const ts = now();
   const row = {
@@ -332,8 +281,6 @@ listsRouter.openapi(createListRoute, async (c) => {
     name: body.name,
     description: body.description ?? null,
     fromAddress,
-    doubleOptIn: body.doubleOptIn ? 1 : 0,
-    confirmationTemplateSlug: body.confirmationTemplateSlug ?? null,
     archivedAt: null,
     createdAt: ts,
     updatedAt: ts,
@@ -362,7 +309,7 @@ const membershipsRoute = createRoute({
           z.object({
             listId: z.string(),
             listName: z.string(),
-            status: z.enum(["pending", "subscribed", "unsubscribed"]),
+            status: z.enum(["subscribed", "unsubscribed"]),
             subscribedAt: z.number().nullable(),
             unsubscribedAt: z.number().nullable(),
           }),
@@ -473,22 +420,6 @@ listsRouter.openapi(updateListRoute, async (c) => {
   const patch: Partial<typeof lists.$inferInsert> = { updatedAt: now() };
   if (body.name !== undefined) patch.name = body.name;
   if (body.description !== undefined) patch.description = body.description;
-  if (body.doubleOptIn !== undefined) {
-    patch.doubleOptIn = body.doubleOptIn ? 1 : 0;
-  }
-  if (body.confirmationTemplateSlug !== undefined) {
-    if (
-      body.confirmationTemplateSlug !== null &&
-      !(await canUseConfirmationTemplate(
-        db,
-        allowed,
-        body.confirmationTemplateSlug,
-      ))
-    ) {
-      return c.json({ error: "Template not found" }, 404);
-    }
-    patch.confirmationTemplateSlug = body.confirmationTemplateSlug;
-  }
 
   await db.update(lists).set(patch).where(eq(lists.id, id));
   const updated = await db
@@ -555,7 +486,7 @@ const listMembersRoute = createRoute({
     query: z.object({
       cursor: z.string().optional(),
       limit: z.string().optional(),
-      status: z.enum(["pending", "subscribed", "unsubscribed"]).optional(),
+      status: z.enum(["subscribed", "unsubscribed"]).optional(),
     }),
   },
   responses: {
@@ -602,7 +533,6 @@ listsRouter.openapi(listMembersRoute, async (c) => {
       consentSource: m.consentSource,
       consentAt: m.consentAt,
       subscribedAt: m.subscribedAt,
-      confirmedAt: m.confirmedAt,
       unsubscribedAt: m.unsubscribedAt,
       createdAt: m.createdAt,
     })),
@@ -617,7 +547,7 @@ const addMemberRoute = createRoute({
   path: "/{id}/members",
   tags: ["Lists"],
   description:
-    "Add a member directly (source `api`, bypassing double opt-in). Creates a `contacts` row if needed — never a `people` row.",
+    "Add a member directly (source `api`, subscribed at once). Creates a `contacts` row if needed — never a `people` row.",
   request: {
     params: z.object({ id: z.string() }),
     body: {
@@ -709,7 +639,6 @@ listsRouter.openapi(addMemberRoute, async (c) => {
         consentSource: m.consentSource,
         consentAt: m.consentAt,
         subscribedAt: m.subscribedAt,
-        confirmedAt: m.confirmedAt,
         unsubscribedAt: m.unsubscribedAt,
         createdAt: m.createdAt,
       },
@@ -731,13 +660,10 @@ listsRouter.openapi(addMemberRoute, async (c) => {
     email: contact.email,
     status: "subscribed" as const,
     source: "api" as const,
-    formId: null,
-    submittedIp: null,
     consentSource: "api" as const,
     consentAt: ts,
     importJobId: null,
     subscribedAt: ts,
-    confirmedAt: null,
     unsubscribedAt: null,
     unsubscribeReason: null,
     createdAt: ts,
@@ -762,7 +688,6 @@ listsRouter.openapi(addMemberRoute, async (c) => {
       consentSource: member.consentSource,
       consentAt: member.consentAt,
       subscribedAt: member.subscribedAt,
-      confirmedAt: member.confirmedAt,
       unsubscribedAt: member.unsubscribedAt,
       createdAt: member.createdAt,
     },
@@ -838,7 +763,6 @@ listsRouter.openapi(removeMemberRoute, async (c) => {
     consentSource: m.consentSource,
     consentAt: m.consentAt,
     subscribedAt: m.subscribedAt,
-    confirmedAt: m.confirmedAt,
     unsubscribedAt: m.unsubscribedAt,
     createdAt: m.createdAt,
   });
@@ -857,7 +781,7 @@ const exportRoute = createRoute({
   request: {
     params: z.object({ id: z.string() }),
     query: z.object({
-      status: z.enum(["pending", "subscribed", "unsubscribed"]).optional(),
+      status: z.enum(["subscribed", "unsubscribed"]).optional(),
     }),
   },
   responses: {

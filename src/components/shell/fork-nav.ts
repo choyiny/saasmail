@@ -1,5 +1,4 @@
 import {
-  ClipboardList,
   Mail,
   Megaphone,
   ScrollText,
@@ -14,12 +13,6 @@ export const FORK_WORKSPACE_LINKS: PageLink[] = [
   { id: "mail", label: "Mail", path: "/mail", icon: Mail },
   { id: "lists", label: "Lists", path: "/lists", icon: Users },
   { id: "campaigns", label: "Campaigns", path: "/campaigns", icon: Megaphone },
-  {
-    id: "subscribe-forms",
-    label: "Subscribe forms",
-    path: "/subscribe-forms",
-    icon: ClipboardList,
-  },
 ];
 
 export const FORK_ADMIN_LINKS: PageLink[] = [
@@ -53,7 +46,7 @@ export const FORK_PAGE_TITLES: Array<[string, string]> = [
 ].map((l) => [l.path, l.label]);
 
 /** Fork pages with a detail route (`/<base>/:id`). */
-export const FORK_DETAIL_BASES = ["/lists", "/campaigns", "/subscribe-forms"];
+export const FORK_DETAIL_BASES = ["/lists", "/campaigns"];
 
 const MAIL_FOLDER_LABELS: Record<string, string> = {
   inbox: "Inbox",

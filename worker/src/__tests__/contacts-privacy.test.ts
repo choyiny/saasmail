@@ -12,14 +12,10 @@ import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { contacts } from "../db/contacts.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
-import { subscribeAttempts } from "../db/subscribe-attempts.schema";
-import { hashEmail } from "../lib/subscribe-abuse";
 import {
   EVENT_RETENTION_SECONDS,
-  IP_RETENTION_SECONDS,
   backfillContactPersonIds,
   purgeExpiredCampaignEvents,
-  purgeExpiredMemberIps,
 } from "../lib/newsletter-retention";
 import { people } from "../db/people.schema";
 import { runNewsletterMaintenance } from "../lib/newsletter-cron";
@@ -50,8 +46,6 @@ async function seedSubject(email = EMAIL, createdAt = ts()) {
     name: "Weekly",
     description: null,
     fromAddress: "news@example.com",
-    doubleOptIn: 0,
-    confirmationTemplateSlug: null,
     archivedAt: null,
     createdAt,
     updatedAt: createdAt,
@@ -70,14 +64,11 @@ async function seedSubject(email = EMAIL, createdAt = ts()) {
     contactId: "c-1",
     email,
     status: "subscribed",
-    source: "form",
-    formId: null,
-    submittedIp: "203.0.113.4",
-    consentSource: "form",
+    source: "api",
+    consentSource: "api",
     consentAt: createdAt,
     importJobId: null,
     subscribedAt: createdAt,
-    confirmedAt: createdAt,
     unsubscribedAt: null,
     unsubscribeReason: null,
     createdAt,
@@ -120,7 +111,7 @@ describe("GET /api/contacts/:email/export", () => {
     expect(body.contact.name).toBe("Subject Person");
     expect(body.memberships).toHaveLength(1);
     expect(body.memberships[0].listName).toBe("Weekly");
-    expect(body.memberships[0].consentSource).toBe("form");
+    expect(body.memberships[0].consentSource).toBe("api");
     expect(body.events).toHaveLength(1);
   });
 
@@ -195,7 +186,7 @@ describe("POST /api/contacts/:email/erase", () => {
     }
   });
 
-  it("clears the name, person link and submission IP", async () => {
+  it("clears the name and person link", async () => {
     const apiKey = await adminKey();
     await seedSubject();
     await erase(apiKey);
@@ -203,27 +194,6 @@ describe("POST /api/contacts/:email/erase", () => {
     const contact = (await getDb().select().from(contacts))[0];
     expect(contact.name).toBeNull();
     expect(contact.personId).toBeNull();
-    expect(
-      (await getDb().select().from(listMembers))[0].submittedIp,
-    ).toBeNull();
-  });
-
-  it("deletes attempt rows, which only ever held a digest", async () => {
-    const apiKey = await adminKey();
-    await seedSubject();
-    await getDb()
-      .insert(subscribeAttempts)
-      .values({
-        id: "a-1",
-        formId: "f-1",
-        emailHash: await hashEmail(EMAIL),
-        ip: "203.0.113.4",
-        attemptType: "submission",
-        createdAt: ts(),
-      });
-
-    await erase(apiKey);
-    expect(await getDb().select().from(subscribeAttempts)).toHaveLength(0);
   });
 
   it("produces the same pseudonym for the same address, and a different one for another", async () => {
@@ -356,37 +326,6 @@ describe("POST /api/contacts/:email/erase", () => {
 });
 
 describe("retention sweeps", () => {
-  it("nulls submission IPs past the window and leaves fresh ones", async () => {
-    const old = ts() - IP_RETENTION_SECONDS - 60;
-    await seedSubject(EMAIL, old);
-    await getDb().insert(listMembers).values({
-      id: "m-2",
-      listId: "list-1",
-      contactId: "c-2",
-      email: "fresh@example.com",
-      status: "subscribed",
-      source: "form",
-      formId: null,
-      submittedIp: "203.0.113.9",
-      consentSource: "form",
-      consentAt: ts(),
-      importJobId: null,
-      subscribedAt: ts(),
-      confirmedAt: null,
-      unsubscribedAt: null,
-      unsubscribeReason: null,
-      createdAt: ts(),
-    });
-
-    expect(await purgeExpiredMemberIps(getDb(), ts())).toBe(1);
-
-    const rows = await getDb().select().from(listMembers);
-    expect(rows.find((r) => r.id === "m-1")!.submittedIp).toBeNull();
-    // The membership itself is untouched — it is the consent record.
-    expect(rows).toHaveLength(2);
-    expect(rows.find((r) => r.id === "m-2")!.submittedIp).toBe("203.0.113.9");
-  });
-
   it("deletes engagement events past the window and keeps recent ones", async () => {
     const old = ts() - EVENT_RETENTION_SECONDS - 60;
     await seedSubject(EMAIL, old);
@@ -407,7 +346,6 @@ describe("retention sweeps", () => {
 
   it("does nothing when everything is inside its window", async () => {
     await seedSubject();
-    expect(await purgeExpiredMemberIps(getDb(), ts())).toBe(0);
     expect(await purgeExpiredCampaignEvents(getDb(), ts())).toBe(0);
   });
 });
@@ -462,7 +400,7 @@ describe("the hourly pass actually runs the sweeps", () => {
    * entry point is indistinguishable from one that was never written — and the
    * worker's typecheck does not cover this file's call path.
    */
-  it("nulls old IPs, drops old events and backfills through runNewsletterMaintenance", async () => {
+  it("drops old events and backfills through runNewsletterMaintenance", async () => {
     const old = ts() - EVENT_RETENTION_SECONDS - 60;
     await seedSubject(EMAIL, old);
     await getDb().insert(people).values({
@@ -476,9 +414,6 @@ describe("the hourly pass actually runs the sweeps", () => {
 
     await runNewsletterMaintenance(env as unknown as CloudflareBindings);
 
-    expect(
-      (await getDb().select().from(listMembers))[0].submittedIp,
-    ).toBeNull();
     expect(await getDb().select().from(campaignEvents)).toHaveLength(0);
     expect((await getDb().select().from(contacts))[0].personId).toBe("p-1");
   });

@@ -176,8 +176,6 @@ describe("audit events for customers, sequences, lists and the agent", () => {
       name: "Weekly",
       description: null,
       fromAddress: INBOX,
-      doubleOptIn: 0,
-      confirmationTemplateSlug: null,
       archivedAt: null,
       createdAt: now,
       updatedAt: now,

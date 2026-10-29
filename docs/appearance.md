@@ -56,7 +56,7 @@ All three show the same mail and the same pages (templates, sequences, settings,
 admin); only the layout and look change. Every layout has a light and a dark mode.
 
 Each layout links the same pages: **Mail** (the [mailbox](mailbox-state.md#conventional-mailbox-ui)
-at `/mail`), **Lists**, **Campaigns** and **Subscribe forms**
+at `/mail`), **Lists** and **Campaigns**
 ([Newsletters](newsletters.md)), and for admins **Automations**
 ([Automations](automations.md)), **Audit log** ([Audit log](audit-log.md)) and
 **Contact data** (subject-access requests and erasure, see

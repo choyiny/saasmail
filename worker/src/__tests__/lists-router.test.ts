@@ -16,7 +16,6 @@ import { asyncJobs } from "../db/async-jobs.schema";
 import { env } from "cloudflare:workers";
 import { sourceKey } from "../lib/list-import";
 import { campaigns } from "../db/campaigns.schema";
-import { emailTemplates } from "../db/email-templates.schema";
 
 beforeAll(applyMigrations);
 beforeEach(cleanDb);
@@ -68,7 +67,6 @@ describe("lists CRUD", () => {
     expect(res.status).toBe(201);
     expect(body.name).toBe("Weekly");
     expect(body.fromAddress).toBe(FROM);
-    expect(body.doubleOptIn).toBe(false);
     expect(body.archivedAt).toBeNull();
   });
 
@@ -92,62 +90,6 @@ describe("lists CRUD", () => {
     const key = await memberKey("u-m2", "m2@example.com", FROM);
     const { res } = await createList(key);
     expect(res.status).toBe(201);
-  });
-
-  it("takes a confirmation template only when the caller can read it", async () => {
-    await adminKey();
-    const t = Math.floor(Date.now() / 1000);
-    await getDb()
-      .insert(emailTemplates)
-      .values([
-        {
-          id: "tpl-other",
-          slug: "other-confirm",
-          name: "Other",
-          subject: "Private",
-          bodyHtml: "<p>{{confirm_url}}</p>",
-          fromAddress: "other@example.com",
-          createdAt: t,
-          updatedAt: t,
-        },
-        {
-          id: "tpl-own",
-          slug: "own-confirm",
-          name: "Own",
-          subject: "Confirm",
-          bodyHtml: "<p>{{confirm_url}}</p>",
-          fromAddress: FROM,
-          createdAt: t,
-          updatedAt: t,
-        },
-      ]);
-    const key = await memberKey("u-m4", "m4@example.com", FROM);
-
-    // The confirmation mail would hand the template's content to whoever
-    // subscribes, so an unreadable template is refused like an unknown one.
-    for (const slug of ["other-confirm", "no-such-template"]) {
-      const { res } = await createList(key, { confirmationTemplateSlug: slug });
-      expect(res.status).toBe(404);
-    }
-
-    const { res, body } = await createList(key, {
-      confirmationTemplateSlug: "own-confirm",
-    });
-    expect(res.status).toBe(201);
-    expect(body.confirmationTemplateSlug).toBe("own-confirm");
-
-    const patched = await authFetch(`/api/lists/${body.id}`, {
-      apiKey: key,
-      method: "PATCH",
-      body: JSON.stringify({ confirmationTemplateSlug: "other-confirm" }),
-    });
-    expect(patched.status).toBe(404);
-    const cleared = await authFetch(`/api/lists/${body.id}`, {
-      apiKey: key,
-      method: "PATCH",
-      body: JSON.stringify({ confirmationTemplateSlug: null }),
-    });
-    expect(cleared.status).toBe(200);
   });
 
   it("returns member counts by status on the detail endpoint", async () => {
@@ -174,7 +116,6 @@ describe("lists CRUD", () => {
     const body = await res.json<any>();
     expect(body.memberCounts).toEqual({
       subscribed: 1,
-      pending: 0,
       unsubscribed: 1,
     });
   });
@@ -205,12 +146,11 @@ describe("lists CRUD", () => {
     const ok = await authFetch(`/api/lists/${list.id}`, {
       apiKey,
       method: "PATCH",
-      body: JSON.stringify({ name: "Renamed", doubleOptIn: true }),
+      body: JSON.stringify({ name: "Renamed" }),
     });
     expect(ok.status).toBe(200);
     const updated = await ok.json<any>();
     expect(updated.name).toBe("Renamed");
-    expect(updated.doubleOptIn).toBe(true);
 
     await getDb()
       .update(lists)
@@ -547,13 +487,10 @@ describe("member export", () => {
       email: "=cmd()@example.com",
       status: "subscribed",
       source: "import",
-      formId: null,
-      submittedIp: null,
       consentSource: "import",
       consentAt: ts,
       importJobId: null,
       subscribedAt: ts,
-      confirmedAt: null,
       unsubscribedAt: null,
       unsubscribeReason: null,
       createdAt: ts,
