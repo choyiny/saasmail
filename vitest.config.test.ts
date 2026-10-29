@@ -77,8 +77,10 @@ export default defineConfig({
     // Every test here boots a real workerd instance and talks to a real D1, and
     // CI runs the whole suite on a two-core runner. Vitest's 5s default is a
     // measure of contention rather than of any individual test: the file that
-    // times out in CI runs 27 tests in ~700ms locally. Bounded well below the
-    // job timeout so a genuine hang still fails rather than hanging the run.
-    testTimeout: 20_000,
+    // times out in CI runs 27 tests in ~700ms locally. The first request in a
+    // file also loads the whole Worker app (about 5s locally, 10-20s on that
+    // runner), and that cost lands on the file's first test. Bounded well below
+    // the job timeout so a genuine hang still fails rather than hanging the run.
+    testTimeout: 60_000,
   },
 });
