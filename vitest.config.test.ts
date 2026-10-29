@@ -1,8 +1,26 @@
 import { defineConfig } from "vitest/config";
 import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 import path from "path";
+import { readdirSync } from "fs";
 
 export default defineConfig({
+  // A fixed build stamp for the Worker (the real one comes from
+  // `scripts/build-stamp.mjs` in vite.config.ts), with the real migrations.
+  define: {
+    __SAASMAIL_BUILD__: JSON.stringify({
+      version: "0.0.0-test",
+      commit: "0123456789abcdef0123456789abcdef01234567",
+      commitShort: "0123456",
+      commitTime: "2026-01-01T00:00:00Z",
+      dirty: false,
+      dirtyFiles: [],
+      dirtyCount: 0,
+      builtAt: "2026-01-01T00:00:00.000Z",
+      migrations: readdirSync(path.resolve(__dirname, "migrations"))
+        .filter((name) => name.endsWith(".sql"))
+        .sort(),
+    }),
+  },
   // The frontend's `@/…` alias, so a worker test can import the REAL
   // `src/lib/api.ts` and send its real path strings at the real worker
   // (`__tests__/frontend-api-contract.test.ts`). Without this the client

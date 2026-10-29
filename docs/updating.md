@@ -46,6 +46,8 @@ git rebase upstream/main -X ours
 
 The `-X ours` flag tells rebase to prefer upstream for conflicting hunks (during a rebase, "ours" is the branch being rebased onto). Your local commits are still replayed on top. `/update-saasmail` does this for you.
 
+After every update and deploy, run `yarn doctor --config wrangler.jsonc --url <your URL>`: it shows which commit the deployment runs and finds a migration not applied, a missing secret or binding, or a dev flag left on ([Doctor](doctor.md)).
+
 ## Upstream migrations
 
 This fork numbers its D1 migrations on its own, so upstream's

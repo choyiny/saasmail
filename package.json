@@ -21,6 +21,7 @@
     "pack:npm": "node scripts/saasmail/pack.mjs",
     "vapid:generate": "tsx scripts/generate-vapid.ts",
     "jmap:e2e": "node scripts/jmap-send-e2e.mjs",
+    "doctor": "node scripts/doctor.mjs",
     "test": "vitest run --config scripts/saasmail/vitest.config.ts && vitest run --config vitest.config.test.ts",
     "test:watch": "vitest --config vitest.config.test.ts",
     "test:web": "vitest run --config vitest.config.web.ts",

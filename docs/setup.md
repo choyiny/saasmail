@@ -236,6 +236,19 @@ wrangler r2 bucket create saasmail-backups
 openssl rand -hex 32 | wrangler secret put BACKUP_ENCRYPTION_KEY   # optional
 ```
 
+### 10. Check the deployment
+
+Create an API key for your admin user on the **API keys** page (see
+[API keys](users-and-api-keys.md#api-keys)), then run the
+doctor: it checks migrations, secrets, bindings, the provider, the cron and,
+with a Cloudflare token, Email Routing. See [Doctor](doctor.md).
+
+```bash
+SAASMAIL_ADMIN_KEY=sk_… yarn doctor --config wrangler.jsonc --url https://mail.example.com
+```
+
+The cron check fails until the first hourly tick after the first deploy.
+
 ---
 
 **Next:** [Email providers](email-providers.md) · [Configuration](configuration.md) · [Local development](development.md) · [Updating](updating.md)

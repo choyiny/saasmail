@@ -34,6 +34,8 @@ import { adminAuditRouter } from "./routers/admin-audit-router";
 import { adminGmailRouter } from "./routers/admin-gmail-router";
 import { adminIntegrationsRouter } from "./routers/admin-integrations-router";
 import { adminOutlookRouter } from "./routers/admin-outlook-router";
+import { adminDoctorRouter } from "./routers/admin-doctor-router";
+import { recordCronTick } from "./lib/doctor/cron";
 import { oauthAppsRouter } from "./routers/oauth-apps-router";
 import { invitesRouter } from "./routers/invites-router";
 import { userRouter } from "./routers/user-router";
@@ -343,6 +345,7 @@ app.route("/api/admin/backups", backupsRouter);
 app.route("/api/admin/gmail", adminGmailRouter);
 app.route("/api/admin/integrations", adminIntegrationsRouter);
 app.route("/api/admin/outlook", adminOutlookRouter);
+app.route("/api/admin/doctor", adminDoctorRouter);
 
 // Registered OAuth clients. Admin-only: registration is open to any caller so
 // MCP clients can self-register, which makes an operator-visible list and a
@@ -635,6 +638,12 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
           env,
           Math.floor(Date.now() / 1000),
         ).catch((err) => console.error("[cron] JMAP content GC failed:", err)),
+      )
+      // Last: the doctor's proof that the chain ran (docs/doctor.md).
+      .then(() =>
+        recordCronTick(createDb(env), Math.floor(Date.now() / 1000)).catch(
+          (err) => console.error("[cron] cron tick record failed:", err),
+        ),
       )
   );
 }

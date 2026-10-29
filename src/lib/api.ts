@@ -2972,3 +2972,35 @@ export async function saveIntegration(
     body: JSON.stringify(body),
   });
 }
+
+// ── Doctor (admin): the build stamp and runtime checks, docs/doctor.md ──
+
+export type DoctorStatus = "pass" | "warn" | "fail" | "info";
+
+export interface DoctorCheck {
+  id: string;
+  group: string;
+  status: DoctorStatus;
+  summary: string;
+  hint?: string;
+}
+
+export interface DoctorReport {
+  build: {
+    version: string;
+    commit: string;
+    commitShort: string;
+    commitTime: string | null;
+    dirty: boolean;
+    dirtyFiles: string[];
+    dirtyCount: number;
+    builtAt: string;
+  };
+  /** Unix seconds. */
+  checkedAt: number;
+  checks: DoctorCheck[];
+}
+
+export async function fetchDoctorReport(): Promise<DoctorReport> {
+  return apiFetch("/api/admin/doctor");
+}

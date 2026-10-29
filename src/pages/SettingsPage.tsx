@@ -20,6 +20,7 @@ import {
 } from "@/lib/default-view";
 import SendingSettings from "@/components/SendingSettings";
 import DataExports from "@/components/DataExports";
+import SystemSettings from "@/components/SystemSettings";
 
 interface Subscription {
   id: string;
@@ -55,6 +56,7 @@ export default function SettingsPage() {
         <DataExports showImports={isAdmin} />
         {isAdmin && <SendingSettings />}
         {isAdmin && <AppBrandingSection />}
+        {isAdmin && <SystemSettings />}
       </div>
     </PageContainer>
   );
