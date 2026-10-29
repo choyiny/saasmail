@@ -51,7 +51,7 @@ The cron check reads `app_settings.last_cron_at`, written as the last step of ea
 
 ```bash
 export SAASMAIL_ADMIN_KEY=sk_…            # an API key of an admin user
-export CLOUDFLARE_API_TOKEN=…             # optional, for the Cloudflare checks
+export DOCTOR_CLOUDFLARE_API_TOKEN=…      # optional, for the Cloudflare checks
 yarn doctor --config wrangler.jsonc --url https://mail.example.com
 ```
 
@@ -64,7 +64,7 @@ It runs, in order, one line per result (`✓` pass, `!` warning, `✗` failure, 
 3. **Secrets**: `npx wrangler secret list` (names only). Fails only when `BETTER_AUTH_SECRET` or `UNSUBSCRIBE_SECRET` is neither a secret nor a var in the config; the runtime checks are authoritative for the rest. A failing command: **warn**.
 4. **Deployed commit**: compares the stamp's commit with local `HEAD` and `origin/main` (**warn** when different); outside a git checkout it says it could not compare (`i`), and **warns** about uncommitted changes in the build that `--allow-dirty` does not cover. An endpoint that is unreachable, answers 401, 403 or 5xx, times out, or returns a report without `build`, with a malformed check (an unknown status), or without the mandatory checks (`migrations.pending`, `secrets.better_auth`, `secrets.dev_flags`, `bindings.required`, `provider.outbound`): **fail**.
 5. **Runtime checks**: the endpoint's checks as they are.
-6. **Cloudflare API** (with `CLOUDFLARE_API_TOKEN`; otherwise one `i` line):
+6. **Cloudflare API** (with `DOCTOR_CLOUDFLARE_API_TOKEN`, else `CLOUDFLARE_API_TOKEN`; otherwise one `i` line). Keep a read-only token in `DOCTOR_CLOUDFLARE_API_TOKEN`: Wrangler also signs in with `CLOUDFLARE_API_TOKEN`, so a read-only token there makes steps 2 and 3 fail.
    - For each inbox whose source is Cloudflare: its address has an enabled Email Routing rule whose action is this Worker, or, for an address on the zone's apex domain only, the catch-all does, else **fail**. An address on a subdomain needs its own rule. Gmail- and Outlook-sourced inboxes are not applicable.
    - When the outbound provider is Cloudflare Email Sending: sending is enabled for each inbox domain, else **fail**. With Resend, Postmark or Bavimail the line says not applicable.
    - A failing API call: **warn**.

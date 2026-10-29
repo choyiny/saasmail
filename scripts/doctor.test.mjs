@@ -10,6 +10,7 @@ import {
   parseArgs,
   parseWranglerConfig,
   pendingMigrations,
+  reason,
   secretNames,
   uncoveredDirtyFiles,
 } from "./doctor.mjs";
@@ -256,6 +257,41 @@ describe("main", () => {
     const out = world.out.join("\n");
     expect(out).not.toContain("sk_admin");
     expect(out).not.toContain("cf_secret_token");
+  });
+
+  it("reads the doctor's own Cloudflare token first", async () => {
+    const world = deps({
+      env: {
+        DOCTOR_CLOUDFLARE_API_TOKEN: "cf_doctor",
+        CLOUDFLARE_API_TOKEN: "cf_wrangler",
+      },
+    });
+    const auth = [];
+    const base = world.deps.fetch;
+    world.deps.fetch = async (url, init) => {
+      if (new URL(url).host === "api.cloudflare.com") {
+        auth.push(new Headers(init?.headers).get("Authorization"));
+        return json({ success: true, result: [] });
+      }
+      return base(url, init);
+    };
+    await main(ARGS, world.deps);
+    expect(auth.length).toBeGreaterThan(0);
+    expect(new Set(auth)).toEqual(new Set(["Bearer cf_doctor"]));
+  });
+
+  it("names Wrangler's error line, not its log path", () => {
+    const stderr = [
+      "\x1b[31m✘ \x1b[41;31m[\x1b[41;97mERROR\x1b[41;31m]\x1b[0m A request to the Cloudflare API (/accounts/x/workers/scripts/w/secrets) failed.",
+      "",
+      '🪵  Logs were written to "/tmp/wrangler.log"',
+    ].join("\n");
+    expect(reason({ code: 1, timedOut: false, stdout: "", stderr })).toBe(
+      "A request to the Cloudflare API (/accounts/x/workers/scripts/w/secrets) failed.",
+    );
+    expect(
+      reason({ code: 1, timedOut: false, stdout: "", stderr: "boom" }),
+    ).toBe("boom");
   });
 
   it("exits 1 when the migrations list fails", async () => {

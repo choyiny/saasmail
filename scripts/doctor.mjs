@@ -4,7 +4,7 @@
 // checks (GET /api/admin/doctor) and, with a token, Email Routing and Email
 // Sending on Cloudflare. See docs/doctor.md.
 //
-//   SAASMAIL_ADMIN_KEY=sk_… [CLOUDFLARE_API_TOKEN=…] \
+//   SAASMAIL_ADMIN_KEY=sk_… [DOCTOR_CLOUDFLARE_API_TOKEN=…] \
 //     yarn doctor --config <wrangler file> --url <base url>
 //       [--strict] [--allow-dirty <path>…] [--local]
 //
@@ -248,14 +248,22 @@ async function defaultGit(args) {
   return r.code === 0 ? r.stdout.trim() : null;
 }
 
-/** The last useful line of a failed command, for the report. */
-function reason(result) {
+/**
+ * Why a command failed, for the report: Wrangler's own `[ERROR]` line when it
+ * printed one (its last line is usually the path of its log file), else the
+ * last line of output.
+ */
+export function reason(result) {
   if (result.timedOut) return "timed out";
   const text = `${result.stderr}\n${result.stdout}`
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\[[0-9;]*m/g, "")
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  return text.at(-1)?.slice(0, 200) ?? `exit code ${result.code}`;
+  const error = text.findLast((l) => l.includes("[ERROR]"));
+  const line = error?.replace(/^✘\s*\[ERROR\]\s*/, "") ?? text.at(-1);
+  return line?.slice(0, 200) ?? `exit code ${result.code}`;
 }
 
 async function getJson(fetchImpl, url, headers) {
@@ -669,12 +677,14 @@ export async function main(argv, deps = {}) {
     }
   }
 
-  // 6. Cloudflare API.
-  const token = env.CLOUDFLARE_API_TOKEN;
+  // 6. Cloudflare API. The doctor's own variable comes first: Wrangler also
+  // signs in with CLOUDFLARE_API_TOKEN, so a read-only token there would make
+  // steps 2 and 3 fail.
+  const token = env.DOCTOR_CLOUDFLARE_API_TOKEN || env.CLOUDFLARE_API_TOKEN;
   if (!token) {
     emit({
       status: "info",
-      label: "Cloudflare API: skipped (no CLOUDFLARE_API_TOKEN).",
+      label: "Cloudflare API: skipped (no DOCTOR_CLOUDFLARE_API_TOKEN).",
     });
   } else if (!runtime || !config?.name) {
     emit({
