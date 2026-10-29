@@ -10,6 +10,7 @@ import {
   parseArgs,
   parseWranglerConfig,
   pendingMigrations,
+  secretNames,
   uncoveredDirtyFiles,
 } from "./doctor.mjs";
 
@@ -193,6 +194,16 @@ describe("helpers", () => {
       pendingMigrations("│ 0091_remove-subscribe-forms.sql │\n│ 0092_x.sql │"),
     ).toEqual(["0091_remove-subscribe-forms.sql", "0092_x.sql"]);
     expect(pendingMigrations("Something else entirely")).toBeNull();
+  });
+  it("reads secret names after a Wrangler notice on stdout", () => {
+    const json =
+      '[\n  { "name": "BETTER_AUTH_SECRET", "type": "secret_text" }\n]';
+    const notice =
+      "There is a newer version of Wrangler available (current: 4.127.0, latest: 4.156.0). Try upgrading, as it might support this configuration option.\n";
+    expect(secretNames(json)).toEqual(["BETTER_AUTH_SECRET"]);
+    expect(secretNames(notice + json)).toEqual(["BETTER_AUTH_SECRET"]);
+    expect(secretNames(notice)).toBeNull();
+    expect(secretNames("[not json")).toBeNull();
   });
   it("exits 1 on a failure, and on a warning only with --strict", () => {
     const warn = [{ status: "pass" }, { status: "warn" }];

@@ -55,7 +55,7 @@ export CLOUDFLARE_API_TOKEN=…             # optional, for the Cloudflare check
 yarn doctor --config wrangler.jsonc --url https://mail.example.com
 ```
 
-Options: `--strict` (exit 1 on a warning too), `--allow-dirty <path>…` (paths a deploy overlays on purpose, such as a logo; a directory covers what is under it), `--local` (against `yarn dev`: lists migrations with `--local` and skips the secret list). `--url` must be `https://` except for `localhost`, `127.0.0.1` and `[::1]`, so the admin key never travels in clear text. Keep the admin key outside the repository, for example in `~/.config/saasmail-doctor.env`. The script never prints the key or the token.
+Options: `--strict` (exit 1 on a warning too), `--allow-dirty <path>…` (paths a deploy overlays on purpose, such as a logo; a directory covers what is under it), `--local` (against `yarn dev`: lists migrations with `--local` and skips the secret list). `--url` must be `https://` except for `localhost`, `127.0.0.1` and `[::1]`, so the admin key never travels in clear text. `--config` must be a file in the saasmail checkout: Wrangler finds the `migrations/` folder next to the config file, so a deployment's config kept elsewhere is copied in first (as a deploy script does) and the doctor runs before it is restored. Keep the admin key outside the repository, for example in `~/.config/saasmail-doctor.env`. The script never prints the key or the token.
 
 It runs, in order, one line per result (`✓` pass, `!` warning, `✗` failure, `i` note), then a summary:
 

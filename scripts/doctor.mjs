@@ -175,6 +175,23 @@ export function pendingMigrations(stdout) {
   return names.length > 0 ? names : null;
 }
 
+/**
+ * Secret names from `wrangler secret list --format json`, or null when the
+ * output holds no JSON array. Wrangler can print a notice (a newer version is
+ * available) on stdout before the JSON, so parsing starts at the first line
+ * that opens the array.
+ */
+export function secretNames(stdout) {
+  const start = stdout.search(/^\s*\[/m);
+  if (start === -1) return null;
+  try {
+    const parsed = JSON.parse(stdout.slice(start));
+    return Array.isArray(parsed) ? parsed.map((s) => s?.name) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The Worker checks a report must carry: without them nothing was judged. */
 export const MANDATORY_RUNTIME_CHECKS = [
   "migrations.pending",
@@ -536,15 +553,7 @@ export async function main(argv, deps = {}) {
       wranglerArgs(["secret", "list", "--format", "json"]),
       { timeoutMs: WRANGLER_TIMEOUT_MS },
     );
-    let names = null;
-    if (r.code === 0 && !r.timedOut) {
-      try {
-        const parsed = JSON.parse(r.stdout);
-        if (Array.isArray(parsed)) names = parsed.map((s) => s?.name);
-      } catch {
-        names = null;
-      }
-    }
+    const names = r.code === 0 && !r.timedOut ? secretNames(r.stdout) : null;
     if (!names) {
       emit({
         status: "warn",
