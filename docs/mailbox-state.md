@@ -167,11 +167,8 @@ customer-centric inbox at `/`. The mailbox UI reads the same unified message
 rows and state described above; it does not maintain a second copy of mail.
 Every layout links it as **Mail** ([Appearance](appearance.md)).
 
-The grouped inbox at `/` does not offer star, pin, archive, snooze or Trash
-yet, in any layout: `MAIL_STATE_ACTIONS_ENABLED` in
-`src/lib/mail-state-actions.ts` is `false`, which hides those controls and
-folders, and `GET /api/people/grouped` takes only `folder=all`, `inbox` or
-`sent`. They arrive in a later release. The state on this page is unaffected.
+The grouped inbox at `/` reads and writes the same state, row by row: see
+[Rows in the inbox list](#rows-in-the-inbox-list).
 
 Routes are URL-addressable:
 
@@ -227,6 +224,97 @@ toggles selection, `e` archives, `s` stars, `#` trashes, `r` replies,
 and `?` opens the shortcuts dialog. Shortcuts are ignored while focus is in
 an input, textarea, select, or contenteditable element, and for command/control
 modifier combinations.
+
+## Rows in the inbox list
+
+The grouped inbox at `/` (every layout) lists rows, not messages. A **person
+row** holds one person's messages outside any group conversation; a **group
+row** holds the messages of one conversation. Both count received and sent
+mail in the inboxes you can see. Star, pin, archive, snooze and Trash on a row
+read and write the per-message state above, so an archive in the inbox list is
+an archive in `/mail`, JMAP and the MCP tools too. There is no second store.
+
+### Shared and personal
+
+| Action  | Scope                                    | Stored in                                     |
+| ------- | ---------------------------------------- | --------------------------------------------- |
+| Star    | Personal                                 | `message_user_state.starred_at`               |
+| Read    | Personal                                 | `message_user_state.seen_at`                  |
+| Pin     | Personal                                 | `user_row_pins` (one row per user and row)    |
+| Archive | Shared by everyone who can see the inbox | `mailbox_message_state.archived_at`           |
+| Trash   | Shared by everyone who can see the inbox | `mailbox_message_state.trashed_at`            |
+| Snooze  | Shared by everyone who can see the inbox | `inbox_conversation_state` (per conversation) |
+
+New mail brings an archived or trashed row back: the new message is in Inbox.
+
+### Row fields
+
+Every field is computed over the row's **eligible** messages: those that are
+not spam. A row with no eligible message is in no folder of the inbox list;
+spam lives in `/mail` Junk.
+
+| Field          | Value                                                                                                                             |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `starred`      | you starred at least one eligible message                                                                                         |
+| `pinned`       | you pinned the row                                                                                                                |
+| `trashedAt`    | every eligible message is trashed: the latest trash time; else null                                                               |
+| `archivedAt`   | not trashed, no received message in Inbox, at least one archived received message not trashed: the latest archive time; else null |
+| `snoozedUntil` | at least one received message in Inbox, and every such message's conversation is snoozed: the earliest wake time; else null       |
+| `unreadCount`  | eligible received messages you have not seen; in the Inbox folder, only those still in Inbox and not in a snoozed conversation    |
+
+### Folders
+
+- **All**: at least one eligible message not trashed.
+- **Inbox**: at least one received message in Inbox whose conversation is not
+  snoozed. Your pinned rows come first.
+- **Starred**: starred and not trashed.
+- **Snoozed**: snoozed, ordered by wake time.
+- **Archive**: `archivedAt` is set. **Trash**: `trashedAt` is set.
+- **Sent**: the row has sent mail and is not trashed.
+
+Filtering and ordering run before pagination, so totals, pages and the unread
+badge (rows in Inbox with unread mail) all come from the same set.
+
+A row partly archived or trashed in `/mail` (some of its messages) stays in
+Inbox while any of its messages is there; `/mail` still shows each message in
+its own folder.
+
+### Changing a row
+
+`PATCH /api/mail-state` takes `items` (1–100 `{ type, id }` rows) and any of
+`starred`, `pinned`, `archived`, `snoozedUntil` (unix seconds or `null`) and
+`trashed`. It answers `{ data, undo }`: the rows' state after the change, and
+the undo steps.
+
+- Archive moves the row's received Inbox messages to Archive; unarchive
+  brings back its archived messages. Trash and restore move every message.
+  Snooze snoozes the row's conversations (and takes the row out of Archive
+  first); star stars the row's latest message, unstar clears every star.
+- One request touches at most 5,000 messages; more answers 400 and changes
+  nothing. A bad snooze time answers 400 and changes nothing too.
+- A failure part-way answers 500 with `{ "error": ..., "partial": true }`:
+  some messages changed. Sending the same request again finishes the job.
+- A row you cannot see is skipped; its `data` entry is all false or null.
+
+**Undo is exact.** Each undo step lists the messages that change actually
+moved and their value before (`{ kind: "mailbox" | "user" | "snooze", refs, ... }`).
+The app replays them through `POST /api/messages/mailbox-state`,
+`POST /api/messages/user-state` and `POST /api/messages/snooze`, so Undo only
+touches what the action changed. Undo of a pin puts back only the pins it
+flipped, for Select all N too: `GET /api/people/grouped/ids` returns each
+row's `pinned`. If a whole-folder action fails part-way, the app drops its
+Undo and refetches the list and counts. In the Gmail and Outlook layouts, Undo
+(`z`, Ctrl+Z) is available at once, while the action is still in flight, and
+applies once the action's answer arrives; if the action fails, there is
+nothing to undo.
+
+### Delete forever and Empty Trash
+
+Delete forever and Empty Trash work as upstream's: admins only, they call
+`DELETE /api/people/{id}` for each person row in Trash, which deletes the
+person and all their mail, for everyone. Group rows can only be restored;
+they stay in Trash. Deleting a person also removes every user's pin for that
+person's row.
 
 ## Drafts
 

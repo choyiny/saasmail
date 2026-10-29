@@ -6,7 +6,6 @@ import {
 import * as DM from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 
 /**
  * Fluent-style menus (white surface, 4px radius, 32px items, overlay
@@ -42,14 +41,11 @@ export const MenuItem = forwardRef<
     icon?: ReactNode;
     shortcut?: string;
     danger?: boolean;
-    /** Deletes, archives, flags, pins, snoozes or moves: hidden while that waits. */
-    stateAction?: boolean;
   }
 >(function MenuItem(
-  { className, icon, shortcut, danger, stateAction, children, ...props },
+  { className, icon, shortcut, danger, children, ...props },
   ref,
 ) {
-  if (stateAction && !MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <DM.Item
       ref={ref}
@@ -108,14 +104,10 @@ export const MenuCheckboxItem = forwardRef<
 export function MenuSubTrigger({
   icon,
   children,
-  stateAction,
 }: {
   icon?: ReactNode;
   children: ReactNode;
-  /** Opens state actions (move, flag, snooze): hidden while that waits. */
-  stateAction?: boolean;
 }) {
-  if (stateAction && !MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <DM.SubTrigger className="ol-menu-item">
       <span className="ol-menu-icon" aria-hidden>

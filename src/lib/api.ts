@@ -1,6 +1,5 @@
 import type { BlockDocument } from "@worker/lib/blocks/schema";
 import { statusFallbackMessage } from "@/lib/error-message";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 
 export interface Person {
   id: string;
@@ -25,14 +24,15 @@ export interface GroupedPerson {
   recipients: string[];
   hasAttachment: number;
   linkedCount: number;
-  /** Per-user mail state and list-row extras (empty until a later release). */
+  /** Mail state (star and pin are the caller's own; archive, snooze and
+   *  trash are shared per inbox) and list-row extras. */
   starred: boolean;
   pinned: boolean;
   /** Unix seconds; set only while the row is archived. */
   archivedAt: number | null;
   /** Unix seconds; set only while the row is snoozed. */
   snoozedUntil: number | null;
-  /** Unix seconds; set only while the row is in this user's Trash. */
+  /** Unix seconds; set only while the row is in Trash (shared per inbox). */
   trashedAt: number | null;
   hasSent: boolean;
   latestSubject: string | null;
@@ -64,14 +64,15 @@ export interface GroupedConversation {
   unreadCount: number;
   totalCount: number;
   hasAttachment: number;
-  /** Per-user mail state and list-row extras (empty until a later release). */
+  /** Mail state (star and pin are the caller's own; archive, snooze and
+   *  trash are shared per inbox) and list-row extras. */
   starred: boolean;
   pinned: boolean;
   /** Unix seconds; set only while the row is archived. */
   archivedAt: number | null;
   /** Unix seconds; set only while the row is snoozed. */
   snoozedUntil: number | null;
-  /** Unix seconds; set only while the row is in this user's Trash. */
+  /** Unix seconds; set only while the row is in Trash (shared per inbox). */
   trashedAt: number | null;
   hasSent: boolean;
   latestSubject: string | null;
@@ -452,8 +453,24 @@ export interface MailItemState {
 }
 
 /**
- * Star, pin, archive or snooze inbox rows for the signed-in user.
- * `snoozedUntil` is unix seconds; null wakes the row.
+ * How to undo a row-state change exactly: the message refs it changed and
+ * their previous value, replayed by `undoMailState`.
+ */
+export type MailStateUndoStep =
+  | {
+      kind: "mailbox";
+      refs: string[];
+      change: { archived: boolean } | { trashed: boolean };
+    }
+  | { kind: "user"; refs: string[]; change: { starred: boolean } }
+  | { kind: "snooze"; refs: string[]; until: number | null };
+
+/**
+ * Star, pin, archive, snooze or trash inbox rows (at most 100). Star and pin
+ * are the caller's own; archive, snooze and trash change the rows' messages
+ * for everyone in the inbox, as in /mail. `snoozedUntil` is unix seconds;
+ * null wakes the row. On failure the list should be refetched: a failure
+ * after the first write leaves part of the change applied.
  */
 export async function updateMailState(
   items: MailItemRef[],
@@ -462,17 +479,37 @@ export async function updateMailState(
     pinned?: boolean;
     archived?: boolean;
     snoozedUntil?: number | null;
-    /** Per-user Trash; permanent delete is deletePerson. */
+    /** The inbox's shared Trash; permanent delete is deletePerson. */
     trashed?: boolean;
   },
-): Promise<{ data: MailItemState[] }> {
-  if (!MAIL_STATE_ACTIONS_ENABLED)
-    throw new Error("Mail state arrives in a later release");
+): Promise<{ data: MailItemState[]; undo: MailStateUndoStep[] }> {
   return apiFetch(`/api/mail-state`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items, ...patch }),
   });
+}
+
+/**
+ * Replay `updateMailState`'s undo steps, newest first, through the message
+ * state routes: only the messages the change touched go back. A previous
+ * snooze that has since passed wakes the conversation instead.
+ */
+export async function undoMailState(undo: MailStateUndoStep[]): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  for (const step of [...undo].reverse()) {
+    for (let i = 0; i < step.refs.length; i += 500) {
+      const refs = step.refs.slice(i, i + 500);
+      if (step.kind === "snooze") {
+        await snoozeMessages(
+          refs,
+          step.until !== null && step.until > now ? step.until : null,
+        );
+      } else {
+        await setMessageState({ refs, ...step.change });
+      }
+    }
+  }
 }
 
 export type UiTheme = "default" | "gmail" | "outlook";
@@ -556,7 +593,12 @@ function groupedQueryString(params: GroupedQuery): URLSearchParams {
 export async function fetchGroupedIds(
   params: Omit<GroupedQuery, "page" | "limit" | "withTabCounts">,
 ): Promise<{
-  data: Array<{ type: "person" | "group"; id: string; unread: boolean }>;
+  data: Array<{
+    type: "person" | "group";
+    id: string;
+    unread: boolean;
+    pinned: boolean;
+  }>;
   total: number;
   truncated: boolean;
 }> {

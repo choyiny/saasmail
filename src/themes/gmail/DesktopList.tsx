@@ -30,8 +30,6 @@ import {
 } from "./lib";
 import { canMoveToTab, inInboxView, type RowActions } from "./actions";
 import { GmMenu, GmMenuItem, LabelChip, SnoozeMenu } from "./ui";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
-import { mailStateOptionAvailable } from "@/lib/mail-state-gates";
 
 export type SelectPreset =
   | "all"
@@ -65,17 +63,13 @@ function IconBtn({
   onClick,
   disabled,
   testId,
-  stateAction,
 }: {
   label: string;
   children: ReactNode;
   onClick?: () => void;
   disabled?: boolean;
   testId?: string;
-  /** Stars, pins, archives, snoozes or trashes: hidden while that waits. */
-  stateAction?: boolean;
 }) {
-  if (stateAction && !MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <button
       type="button"
@@ -116,8 +110,7 @@ export function ListToolbar({
   const inTrash = folder === "trash";
   const canDelete = !inTrash || selected.some((s) => s.type === "person");
   // In Trash, Delete means delete forever: admins only.
-  const showDelete =
-    (!inTrash || act.canDeleteForever) && MAIL_STATE_ACTIONS_ENABLED;
+  const showDelete = !inTrash || act.canDeleteForever;
   const canMoveTab = canMoveToTab(selected);
 
   return (
@@ -161,13 +154,11 @@ export function ListToolbar({
               ["starred", "Starred"],
               ["unstarred", "Unstarred"],
             ] as Array<[SelectPreset, string]>
-          )
-            .filter(([p]) => mailStateOptionAvailable(p))
-            .map(([p, l]) => (
-              <GmMenuItem key={p} onSelect={() => onSelectPreset(p)}>
-                {l}
-              </GmMenuItem>
-            ))}
+          ).map(([p, l]) => (
+            <GmMenuItem key={p} onSelect={() => onSelectPreset(p)}>
+              {l}
+            </GmMenuItem>
+          ))}
         </GmMenu>
       </div>
 
@@ -200,7 +191,6 @@ export function ListToolbar({
               label="Restore"
               onClick={() => act.restore(selected)}
               testId="gmail-bulk-restore"
-              stateAction
             >
               <ArchiveRestore size={20} />
             </IconBtn>
@@ -208,7 +198,6 @@ export function ListToolbar({
             <IconBtn
               label="Move to inbox"
               onClick={() => act.moveToInbox(selected)}
-              stateAction
             >
               <InboxIcon size={20} />
             </IconBtn>
@@ -217,7 +206,6 @@ export function ListToolbar({
               label="Archive"
               onClick={() => act.archive(selected)}
               testId="gmail-bulk-archive"
-              stateAction
             >
               <Archive size={20} />
             </IconBtn>
@@ -272,7 +260,6 @@ export function ListToolbar({
           <IconBtn
             label={allStarred ? "Remove star" : "Add star"}
             onClick={() => act.star(selected, !allStarred)}
-            stateAction
           >
             <Star
               size={20}
@@ -282,7 +269,6 @@ export function ListToolbar({
           <IconBtn
             label={allPinned ? "Unpin" : "Pin"}
             onClick={() => act.pin(selected, !allPinned)}
-            stateAction
           >
             <Pin
               size={20}
@@ -333,14 +319,12 @@ export function ListToolbar({
             <GmMenuItem
               icon={<InboxIcon size={20} />}
               onSelect={() => act.moveToInbox(selected)}
-              stateAction
             >
               Move to inbox
             </GmMenuItem>
             <GmMenuItem
               icon={<Archive size={20} />}
               onSelect={() => act.archive(selected)}
-              stateAction
             >
               Archive
             </GmMenuItem>
@@ -421,7 +405,7 @@ export const MailRow = memo(function MailRow({
       data-key={itemKey(item)}
       aria-selected={selected}
       aria-label={`${unread ? "Unread, " : ""}${title}, ${item.latestSubject ?? "no subject"}, ${formatListDate(item.lastEmailAt)}`}
-      draggable={MAIL_STATE_ACTIONS_ENABLED}
+      draggable
       onDragStart={(e) => onDragStart(e, item)}
       onDragEnd={onDragEnd}
       onClick={() => onOpen(item)}
@@ -458,48 +442,44 @@ export const MailRow = memo(function MailRow({
           }}
         />
       </label>
-      {MAIL_STATE_ACTIONS_ENABLED && (
-        <>
-          <button
-            type="button"
-            className="gm-icon-btn gm-xs flex-none"
-            aria-label={item.starred ? "Starred" : "Not starred"}
-            title={item.starred ? "Starred" : "Not starred"}
-            aria-pressed={item.starred}
-            onClick={(e) => {
-              stop(e);
-              act.star([item]);
-            }}
-            data-testid="gmail-row-star"
-          >
-            <Star
-              size={18}
-              className={item.starred ? "fill-current text-star" : undefined}
-              strokeWidth={item.starred ? 1.5 : 2}
-            />
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "gm-icon-btn gm-xs flex-none",
-              !item.pinned &&
-                "opacity-0 hover:opacity-100 focus-visible:opacity-100",
-            )}
-            aria-label={item.pinned ? "Pinned" : "Pin"}
-            title={item.pinned ? "Pinned — click to unpin" : "Pin to top"}
-            aria-pressed={item.pinned}
-            onClick={(e) => {
-              stop(e);
-              act.pin([item]);
-            }}
-          >
-            <Pin
-              size={16}
-              className={item.pinned ? "fill-current text-warning" : undefined}
-            />
-          </button>
-        </>
-      )}
+      <button
+        type="button"
+        className="gm-icon-btn gm-xs flex-none"
+        aria-label={item.starred ? "Starred" : "Not starred"}
+        title={item.starred ? "Starred" : "Not starred"}
+        aria-pressed={item.starred}
+        onClick={(e) => {
+          stop(e);
+          act.star([item]);
+        }}
+        data-testid="gmail-row-star"
+      >
+        <Star
+          size={18}
+          className={item.starred ? "fill-current text-star" : undefined}
+          strokeWidth={item.starred ? 1.5 : 2}
+        />
+      </button>
+      <button
+        type="button"
+        className={cn(
+          "gm-icon-btn gm-xs flex-none",
+          !item.pinned &&
+            "opacity-0 hover:opacity-100 focus-visible:opacity-100",
+        )}
+        aria-label={item.pinned ? "Pinned" : "Pin"}
+        title={item.pinned ? "Pinned — click to unpin" : "Pin to top"}
+        aria-pressed={item.pinned}
+        onClick={(e) => {
+          stop(e);
+          act.pin([item]);
+        }}
+      >
+        <Pin
+          size={16}
+          className={item.pinned ? "fill-current text-warning" : undefined}
+        />
+      </button>
 
       <div
         className={cn(
@@ -573,7 +553,7 @@ export const MailRow = memo(function MailRow({
         className="gm-row-actions ml-2 flex-none items-center"
         onClick={stop}
       >
-        {!MAIL_STATE_ACTIONS_ENABLED ? null : item.trashedAt ? (
+        {item.trashedAt ? (
           <button
             type="button"
             className="gm-icon-btn gm-sm"
@@ -606,26 +586,25 @@ export const MailRow = memo(function MailRow({
             <InboxIcon size={18} />
           </button>
         )}
-        {(!item.trashedAt || act.canDeleteForever) &&
-          MAIL_STATE_ACTIONS_ENABLED && (
-            <button
-              type="button"
-              className="gm-icon-btn gm-sm"
-              aria-label={item.trashedAt ? "Delete forever" : "Delete"}
-              title={
-                !item.trashedAt
-                  ? "Delete"
-                  : item.type === "person"
-                    ? "Delete forever"
-                    : "Group conversations stay in Trash"
-              }
-              disabled={!!item.trashedAt && item.type !== "person"}
-              onClick={() => act.requestDelete([item])}
-              data-testid="gmail-row-delete"
-            >
-              <Trash2 size={18} />
-            </button>
-          )}
+        {(!item.trashedAt || act.canDeleteForever) && (
+          <button
+            type="button"
+            className="gm-icon-btn gm-sm"
+            aria-label={item.trashedAt ? "Delete forever" : "Delete"}
+            title={
+              !item.trashedAt
+                ? "Delete"
+                : item.type === "person"
+                  ? "Delete forever"
+                  : "Group conversations stay in Trash"
+            }
+            disabled={!!item.trashedAt && item.type !== "person"}
+            onClick={() => act.requestDelete([item])}
+            data-testid="gmail-row-delete"
+          >
+            <Trash2 size={18} />
+          </button>
+        )}
         {unread ? (
           <button
             type="button"

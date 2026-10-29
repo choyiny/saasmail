@@ -50,8 +50,13 @@ export class InvalidQueryError extends Error {
 export interface MessageQuery {
   inboxes?: string[];
   personId?: string;
+  /** Any of these people (bound as one JSON list). */
+  personIds?: string[];
   customerId?: string;
-  conversationId?: string;
+  /** `null`: only mail outside any group conversation (a person's own row). */
+  conversationId?: string | null;
+  /** Any of these group conversations (bound as one JSON list). */
+  conversationIds?: string[];
   messageRef?: MessageRef;
   messageRefs?: MessageRef[];
   threadKeys?: string[];
@@ -178,11 +183,20 @@ function customerScope(column: SQL, customerId: string | undefined): SQL {
 
 function conversationScope(
   column: SQL,
-  conversationId: string | undefined,
+  conversationId: string | null | undefined,
 ): SQL {
-  return conversationId === undefined
-    ? sql``
+  if (conversationId === undefined) return sql``;
+  return conversationId === null
+    ? sql`AND ${column} IS NULL`
     : sql`AND ${column} = ${conversationId}`;
+}
+
+function idListScope(column: SQL, ids: string[] | undefined): SQL {
+  if (ids === undefined) return sql``;
+  const unique = [...new Set(ids)];
+  return unique.length === 0
+    ? sql`AND 0`
+    : sql`AND ${column} IN ${jsonList(unique)}`;
 }
 
 export const MESSAGE_REFS_PER_QUERY = 40;
@@ -755,8 +769,10 @@ function receivedArm(
       ${allowedScope}
       ${explicitInboxScope(sql`e.recipient`, requestedInboxes)}
       ${personScope(sql`e.person_id`, query.personId)}
+      ${idListScope(sql`e.person_id`, query.personIds)}
       ${customerScope(sql`e.person_id`, query.customerId)}
       ${conversationScope(sql`e.conversation_id`, query.conversationId)}
+      ${idListScope(sql`e.conversation_id`, query.conversationIds)}
       ${messageRefScope("received", sql`e.id`, query.messageRef)}
       ${messageRefsScope("received", sql`e.id`, query.messageRefs)}
       ${threadKeysScope(
@@ -864,8 +880,10 @@ function sentArm(
       ${allowedScope}
       ${explicitInboxScope(sql`se.from_address`, requestedInboxes)}
       ${personScope(sql`se.person_id`, query.personId)}
+      ${idListScope(sql`se.person_id`, query.personIds)}
       ${customerScope(sql`se.person_id`, query.customerId)}
       ${conversationScope(sql`se.conversation_id`, query.conversationId)}
+      ${idListScope(sql`se.conversation_id`, query.conversationIds)}
       ${messageRefScope("sent", sql`se.id`, query.messageRef)}
       ${messageRefsScope("sent", sql`se.id`, query.messageRefs)}
       ${threadKeysScope(

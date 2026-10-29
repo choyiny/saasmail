@@ -10,8 +10,7 @@ import {
   type QuickAction,
   type ReadingPanePos,
 } from "./context";
-import { SWIPE_LABELS, stateActionAvailable, type SwipeAction } from "./lib";
-import { gateSwipe, mailStateOptionAvailable } from "@/lib/mail-state-gates";
+import { SWIPE_LABELS, type SwipeAction } from "./lib";
 import { UNDO_SEND_CHOICES } from "@/lib/undo-send";
 import { useUndoSendSetting } from "./sendUndo";
 
@@ -200,9 +199,7 @@ export function SettingsBody({ onDone }: { onDone?: () => void }) {
             Shown when you point at a message in the list.
           </p>
           <div className="flex flex-col gap-1">
-            {ALL_QUICK_ACTIONS.filter((a) =>
-              stateActionAvailable({ id: a }),
-            ).map((a) => (
+            {ALL_QUICK_ACTIONS.map((a) => (
               <label key={a} className="ol-check">
                 <input
                   type="checkbox"
@@ -236,20 +233,18 @@ export function SettingsBody({ onDone }: { onDone?: () => void }) {
             <label key={k} className="ol-field-row">
               <span>{label}</span>
               <select
-                value={gateSwipe(o[k])}
+                value={o[k]}
                 onChange={(e) =>
                   setLayout({ [k]: e.target.value as SwipeAction })
                 }
                 className="ol-select"
                 aria-label={label}
               >
-                {(Object.keys(SWIPE_LABELS) as SwipeAction[])
-                  .filter(mailStateOptionAvailable)
-                  .map((v) => (
-                    <option key={v} value={v}>
-                      {SWIPE_LABELS[v]}
-                    </option>
-                  ))}
+                {(Object.keys(SWIPE_LABELS) as SwipeAction[]).map((v) => (
+                  <option key={v} value={v}>
+                    {SWIPE_LABELS[v]}
+                  </option>
+                ))}
               </select>
             </label>
           ))}

@@ -19,7 +19,7 @@ import { InvalidMessageStateError, MessageStateAccessError } from "./state";
 import type { MessageRef, UnifiedMessage } from "./types";
 
 const LOOKUP_BATCH_SIZE = 40;
-const MAX_SNOOZE_SECONDS = 366 * 24 * 60 * 60;
+export const MAX_SNOOZE_SECONDS = 366 * 24 * 60 * 60;
 
 type ConversationSource = {
   conversationId: string | null;

@@ -51,10 +51,12 @@ import { outlookAccounts } from "./outlook-accounts.schema";
 import { installState } from "./install-state.schema";
 import { userPreferences } from "./user-preferences.schema";
 import { categoryOverrides } from "./mail-item-states.schema";
+import { userRowPins } from "./user-row-pins.schema";
 
 export const schema = {
   userPreferences,
   categoryOverrides,
+  userRowPins,
   ...authSchema,
   invitations,
   people,

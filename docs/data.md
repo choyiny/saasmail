@@ -219,7 +219,8 @@ sessions and tokens (`sessions`, `verifications`, `oauth_access_tokens`,
 the connected Gmail mailboxes (`gmail_accounts`: their refresh tokens are
 encrypted with this instance's `TOKEN_ENCRYPTION_KEY`, which another instance
 does not have, so a mailbox is reconnected after a restore).
-Password hashes, API key hashes and passkeys' public keys are included.
+Password hashes, API key hashes and passkeys' public keys are included, and
+so are each user's pinned inbox rows (`user_row_pins`).
 
 `manifest.json` lists the files in the order a restore loads them (parents
 before the tables that reference them), with each table's rows, columns,

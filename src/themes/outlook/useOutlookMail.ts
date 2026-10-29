@@ -8,13 +8,15 @@ import {
   fetchPerson,
   fetchPersonEmails,
   markEmailRead,
+  undoMailState,
   updateMailState,
   type GroupedItem,
   type MailCategory,
   type MailFolder,
+  type MailStateUndoStep,
   setCategoryOverride,
 } from "@/lib/api";
-import { markFolderRead } from "@/lib/folder-actions";
+import { markFolderRead, pinUndo } from "@/lib/folder-actions";
 import { emptyTrash } from "./folderOps";
 import { REPLY_REOPEN_EVENT } from "./InlineReply";
 import { usePreferences } from "@/lib/preferences";
@@ -59,24 +61,6 @@ function parseOpen(
   const id = raw.slice(i + 1);
   if ((type !== "person" && type !== "group") || !id) return null;
   return { type, id };
-}
-
-/** Snapshot of a row's mail state, so Undo restores exactly. */
-interface Snapshot {
-  item: GroupedItem;
-  state: Required<StatePatch>;
-}
-function snapshot(items: GroupedItem[]): Snapshot[] {
-  return items.map((item) => ({
-    item,
-    state: {
-      starred: item.starred,
-      pinned: item.pinned,
-      archived: !!item.archivedAt,
-      snoozedUntil: item.snoozedUntil,
-      trashed: !!item.trashedAt,
-    },
-  }));
 }
 
 /**
@@ -483,28 +467,38 @@ export function useOutlookMail() {
   );
 
   // ── Undo stack ────────────────────────────────────────────────────────
-  const [undoStack, setUndoStack] = useState<
-    Array<{ label: string; snaps: Snapshot[] }>
-  >([]);
-  const pushUndo = (labelText: string, snaps: Snapshot[]) =>
-    setUndoStack((s) => [...s.slice(-19), { label: labelText, snaps }]);
+  // Each entry puts back exactly what one change did (docs/mailbox-state.md).
+  // It is pushed before the change's request answers, as upstream, so Undo
+  // works at once; `run` waits for the answer's steps and resolves false
+  // when the change failed (nothing to undo).
+  type UndoEntry = { label: string; run: () => Promise<boolean> };
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const pushUndo = (entry: UndoEntry) =>
+    setUndoStack((s) => [...s.slice(-19), entry]);
 
-  const restore = useCallback(
-    async (snaps: Snapshot[]) => {
-      const byState = new Map<string, Snapshot[]>();
-      for (const s of snaps) {
-        const k = JSON.stringify(s.state);
-        byState.set(k, [...(byState.get(k) ?? []), s]);
-      }
-      await Promise.all(
-        [...byState.values()].map((g) =>
-          updateMailState(
-            g.map((s) => itemRef(s.item)),
-            g[0].state,
-          ),
-        ),
-      );
-      list.refresh();
+  /**
+   * The undo of one change: the server's steps (null when the change
+   * failed), then any pins it flipped.
+   */
+  const undoEntry = useCallback(
+    (
+      labelText: string,
+      items: GroupedItem[],
+      patch: StatePatch,
+      pending: Promise<MailStateUndoStep[] | null>,
+    ): UndoEntry => {
+      const pins = pinUndo(items, patch.pinned);
+      return {
+        label: labelText,
+        run: async () => {
+          const steps = await pending;
+          if (!steps) return false;
+          await undoMailState(steps);
+          if (pins) await updateMailState(pins.items, { pinned: pins.pinned });
+          list.refresh();
+          return true;
+        },
+      };
     },
     [list],
   );
@@ -517,12 +511,22 @@ export function useOutlookMail() {
     }
     setUndoStack((s) => s.slice(0, -1));
     try {
-      await restore(last.snaps);
-      showToast({ kind: "info", message: `Undone: ${last.label}` });
+      if (await last.run())
+        showToast({ kind: "info", message: `Undone: ${last.label}` });
     } catch {
       showToast({ kind: "error", message: "Couldn't undo" });
+      list.refresh();
     }
-  }, [undoStack, restore]);
+  }, [undoStack, list]);
+
+  /** Toast Undo: take the entry off the stack and run it. */
+  const undoNow = (entry: UndoEntry) => {
+    setUndoStack((s) => s.filter((e) => e !== entry));
+    entry.run().catch(() => {
+      showToast({ kind: "error", message: "Couldn't undo" });
+      list.refresh();
+    });
+  };
 
   // ── Actions ───────────────────────────────────────────────────────────
   const serverFolder = query.folder;
@@ -545,12 +549,17 @@ export function useOutlookMail() {
     toast?: string,
   ) => {
     if (!items.length) return;
-    const snaps = snapshot(items);
     const remove = leaves(patch);
     if (remove) openNeighbour(items);
-    pushUndo(labelText, snaps);
-    void list.applyState(items, patch, remove).then((ok) => {
-      if (ok && toast)
+    const pending = list.applyState(items, patch, remove);
+    const entry = undoEntry(labelText, items, patch, pending);
+    pushUndo(entry);
+    void pending.then((steps) => {
+      if (!steps) {
+        setUndoStack((s) => s.filter((e) => e !== entry));
+        return;
+      }
+      if (toast)
         showToast({
           kind: "info",
           message: toast,
@@ -558,8 +567,7 @@ export function useOutlookMail() {
             label: "Undo",
             onClick: (dismiss) => {
               dismiss();
-              setUndoStack((s) => s.filter((e) => e.snaps !== snaps));
-              void restore(snaps);
+              undoNow(entry);
             },
           },
         });
@@ -645,7 +653,7 @@ export function useOutlookMail() {
       if (items.some((i) => i.unreadCount > 0)) ops.markRead(items);
       else void ops.markUnread(items);
     },
-    /** Delete = move to Deleted Items (per-user Trash), with Undo. */
+    /** Delete = move to Deleted Items (shared by the inbox's members), with Undo. */
     delete: (items: GroupedItem[]) => {
       if (serverFolder === "trash") {
         if (canDeleteForever) return void ops.deleteForever(items);
@@ -838,11 +846,25 @@ export function useOutlookMail() {
         return 0;
       }
       if (action === "archive") {
-        const snaps = snapshot(rows);
         openNeighbour(rows);
-        pushUndo("Sweep", snaps);
+        const patch: StatePatch = { archived: true };
+        const pending = updateMailState(rows.map(itemRef), patch).then(
+          (res) => res.undo,
+        );
+        const entry = undoEntry(
+          "Sweep",
+          rows,
+          patch,
+          pending.catch(() => null),
+        );
+        pushUndo(entry);
         list.patchLocal(rows, {}, serverFolder === "inbox");
-        await updateMailState(rows.map(itemRef), { archived: true });
+        try {
+          await pending;
+        } catch (e) {
+          setUndoStack((s) => s.filter((x) => x !== entry));
+          throw e;
+        }
         showToast({
           kind: "info",
           message: `Moved ${rows.length} conversation${rows.length === 1 ? "" : "s"} from ${sender} to Archive`,
@@ -850,7 +872,7 @@ export function useOutlookMail() {
             label: "Undo",
             onClick: (dismiss) => {
               dismiss();
-              void restore(snaps);
+              undoNow(entry);
             },
           },
         });

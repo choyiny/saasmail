@@ -4,8 +4,6 @@
  * Outlook-on-the-web keyboard map. No React here so it stays unit-testable.
  */
 import type { Email, GroupedItem, MailCategory, MailFolder } from "@/lib/api";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
-import { mailStateFolderAvailable } from "@/lib/mail-state-gates";
 
 // ── Folders ──────────────────────────────────────────────────────────────
 
@@ -30,9 +28,7 @@ export const FOLDER_IDS: OlFolderId[] = [
   "sequenced",
   "unread",
   "deleted",
-].filter((f) =>
-  mailStateFolderAvailable(folderQuery(f as OlFolderId).folder),
-) as OlFolderId[];
+];
 
 export const FOLDER_LABELS: Record<OlFolderId, string> = {
   inbox: "Inbox",
@@ -77,7 +73,7 @@ export function folderQuery(id: OlFolderId): {
     case "unread":
       return { folder: "all", unread: true };
     case "deleted":
-      // Per-user Trash.
+      // Trash, shared by the inbox's members.
       return { folder: "trash" };
   }
 }
@@ -118,11 +114,6 @@ export type ListSort =
 export type ArrangeBy = "date" | "unread" | "files";
 export const ARRANGE_OPTIONS: ArrangeBy[] = ["date", "unread", "files"];
 
-/** Whether a list filter can be offered (Flagged and Pinned need state). */
-export function listFilterAvailable(f: ListFilter): boolean {
-  return MAIL_STATE_ACTIONS_ENABLED || (f !== "flagged" && f !== "pinned");
-}
-
 export const FILTER_LABELS: Record<ListFilter, string> = {
   all: "All",
   unread: "Unread",
@@ -149,7 +140,6 @@ export function filterQuery(f: ListFilter): {
   hasAttachment?: boolean;
   pinned?: boolean;
 } {
-  if (!listFilterAvailable(f)) return {};
   switch (f) {
     case "unread":
       return { unread: true };
@@ -440,43 +430,6 @@ export interface KeyLike {
  * single-key Q / U read toggles OWA accepts.
  */
 export function commandForKey(e: KeyLike): OlCommand | null {
-  const cmd = anyCommandForKey(e);
-  return cmd && !MAIL_STATE_ACTIONS_ENABLED && STATE_COMMANDS.includes(cmd)
-    ? null
-    : cmd;
-}
-
-/** Row and sheet action ids that need the mail state. */
-const STATE_ACTION_IDS = [
-  "flag",
-  "snooze",
-  "move",
-  "pin",
-  "archive",
-  "inbox",
-  "restore",
-  "delete",
-  "deleteForever",
-  "empty",
-  "sweep",
-];
-
-/** Whether a row, sheet or selection action can be offered. */
-export function stateActionAvailable(a: { id: string }): boolean {
-  return MAIL_STATE_ACTIONS_ENABLED || !STATE_ACTION_IDS.includes(a.id);
-}
-
-/** Commands that delete, archive, flag or move: off while state waits. */
-const STATE_COMMANDS: OlCommand[] = ["delete", "archive", "flag", "move"];
-const STATE_HELP_LABELS = [
-  "Delete (to Deleted Items)",
-  "Delete permanently (admins)",
-  "Archive",
-  "Move to folder",
-  "Flag / unflag",
-];
-
-function anyCommandForKey(e: KeyLike): OlCommand | null {
   const mod = !!(e.ctrlKey || e.metaKey);
   const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (mod && e.shiftKey) {
@@ -580,9 +533,7 @@ export const SHORTCUT_HELP: Array<{
   { group: "Navigate", keys: "/ or Ctrl+E", label: "Search" },
   { group: "Navigate", keys: "Alt+H", label: "Go to the ribbon" },
   { group: "Navigate", keys: "?", label: "Keyboard shortcuts" },
-].filter(
-  (h) => MAIL_STATE_ACTIONS_ENABLED || !STATE_HELP_LABELS.includes(h.label),
-);
+];
 
 /** True when focus is in a field the user is typing into. */
 export function isTypingTarget(el: EventTarget | null): boolean {
@@ -721,14 +672,14 @@ export function parseSearchQuery(raw: string): ParsedQuery {
         else rest.push(m[0]);
         break;
       case "isflagged":
-        if (YES.has(lv) && MAIL_STATE_ACTIONS_ENABLED) out.flagged = true;
+        if (YES.has(lv)) out.flagged = true;
         else rest.push(m[0]);
         break;
       case "folder": {
         // An unknown folder stays in the text, so it shows rather than
         // silently vanishing from the search.
         const f = FOLDER_ALIASES[lv.replace(/\s+/g, "")];
-        if (f && FOLDER_IDS.includes(f)) out.folder = f;
+        if (f) out.folder = f;
         else rest.push(m[0]);
         break;
       }

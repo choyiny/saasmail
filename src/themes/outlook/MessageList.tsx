@@ -24,7 +24,6 @@ import {
 } from "@/lib/api";
 import { itemKey, itemTitle } from "@/hooks/useMailList";
 import { cn } from "@/lib/utils";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 import {
   FILTER_LABELS,
   SORT_LABELS,
@@ -32,7 +31,6 @@ import {
   type ArrangeBy,
   formatListTime,
   groupParticipants,
-  listFilterAvailable,
   type ListFilter,
   type ListSort,
 } from "./lib";
@@ -252,7 +250,6 @@ function Row({
   }, [focused]);
 
   const quick = (a: QuickAction) => {
-    if (a !== "read" && !MAIL_STATE_ACTIONS_ENABLED) return null;
     switch (a) {
       case "delete":
         // In Deleted Items this is permanent: admins only, people only.
@@ -339,7 +336,7 @@ function Row({
         tabIndex={focused ? 0 : -1}
         data-key={key}
         data-testid="ol-row"
-        draggable={MAIL_STATE_ACTIONS_ENABLED}
+        draggable
         className={cn(
           "ol-row group",
           unread && "ol-row-unread",
@@ -625,13 +622,11 @@ export default function MessageList({
                 value={mail.filter}
                 onValueChange={(v) => mail.setFilter(v as ListFilter)}
               >
-                {(Object.keys(FILTER_LABELS) as ListFilter[])
-                  .filter(listFilterAvailable)
-                  .map((f) => (
-                    <MenuRadioItem key={f} value={f}>
-                      {FILTER_LABELS[f]}
-                    </MenuRadioItem>
-                  ))}
+                {(Object.keys(FILTER_LABELS) as ListFilter[]).map((f) => (
+                  <MenuRadioItem key={f} value={f}>
+                    {FILTER_LABELS[f]}
+                  </MenuRadioItem>
+                ))}
               </MenuRadioGroup>
             </MenuContent>
           </Menu>

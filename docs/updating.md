@@ -85,6 +85,12 @@ When you merge upstream:
 | `0050_trash_overrides_layout_settings.sql` | `0087_upstream_user_preferences.sql` | `category_overrides`, columns in the `CREATE TABLE`; dropped: `mail_item_states.trashed_at` |
 | `0051_better_auth_1_7.sql`                 | `0088_upstream_better_auth_1_7.sql`  | same statements                                                                             |
 
+Upstream's `mail_item_states` table is never created here. The inbox list's
+star, archive, snooze and Trash live in the fork's per-message state, and pins
+in `user_row_pins` (fork migration `0089`), as
+[Mailbox state](mailbox-state.md#rows-in-the-inbox-list) describes. An upstream
+migration that touches `mail_item_states` is dropped when it is ported.
+
 Keep the fork's hourly cron (`0 * * * *` in `wrangler.jsonc.example` and
 `wrangler.jsonc.ci`) and `MAX_OUTBOX_ATTEMPTS` (24) when upstream changes
 them: upstream polls every 15 minutes. Gmail and Outlook mail therefore syncs

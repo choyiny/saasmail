@@ -4,8 +4,6 @@
  * the keyboard shortcut map. Kept free of React so they are easy to test.
  */
 import type { MailCategory, MailFolder } from "@/lib/api";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
-import { mailStateFolderAvailable } from "@/lib/mail-state-gates";
 
 /* ── Dates ─────────────────────────────────────────────────────────── */
 
@@ -93,7 +91,7 @@ export const GMAIL_FOLDERS: GmailFolder[] = [
   "archive",
   "trash",
   "all",
-].filter((f) => mailStateFolderAvailable(f)) as GmailFolder[];
+];
 
 export const CATEGORIES: MailCategory[] = [
   "primary",
@@ -409,7 +407,6 @@ export function parseSearchQuery(
           continue;
         case "is":
           if (v === "unread") s.unread = true;
-          else if (!mailStateFolderAvailable(v)) words.push(m[0]);
           else if (v === "starred") {
             s.folder = "starred";
             explicitFolder = true;
@@ -423,7 +420,7 @@ export function parseSearchQuery(
           else words.push(m[0]);
           continue;
         case "in":
-          if (IN_FOLDERS[v] && mailStateFolderAvailable(IN_FOLDERS[v])) {
+          if (IN_FOLDERS[v]) {
             s.folder = IN_FOLDERS[v];
             explicitFolder = true;
           } else words.push(m[0]);
@@ -748,44 +745,6 @@ export function isTypingTarget(t: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
-/** Shortcuts that star, pin, archive, snooze or trash, or open those views. */
-const STATE_COMMANDS: ShortcutCommand[] = [
-  "archive",
-  "archiveOlder",
-  "archiveNewer",
-  "star",
-  "delete",
-  "snooze",
-  "goStarred",
-  "goArchive",
-  "goSnoozed",
-  "goTrash",
-  "selectStarred",
-  "selectUnstarred",
-];
-const STATE_HELP_KEYS = [
-  "g then s",
-  "g then b",
-  "g then a",
-  "g then x",
-  "* then s",
-  "* then t",
-  "s",
-  "e",
-  "] / [",
-  "#",
-  "b",
-];
-
-/** A shortcut's command, or undefined while it needs the mail state. */
-export function availableCommand(
-  cmd: ShortcutCommand | undefined,
-): ShortcutCommand | undefined {
-  return cmd && !MAIL_STATE_ACTIONS_ENABLED && STATE_COMMANDS.includes(cmd)
-    ? undefined
-    : cmd;
-}
-
 export const SHORTCUT_HELP: Array<{
   group: string;
   items: Array<{ keys: string; label: string }>;
@@ -842,12 +801,7 @@ export const SHORTCUT_HELP: Array<{
       { keys: "Ctrl + Enter", label: "Send (in a reply)" },
     ],
   },
-].map((g) => ({
-  ...g,
-  items: g.items.filter(
-    (it) => MAIL_STATE_ACTIONS_ENABLED || !STATE_HELP_KEYS.includes(it.keys),
-  ),
-}));
+];
 
 /** "1–50 of 230" */
 export function rangeLabel(page: number, pageSize: number, total: number) {

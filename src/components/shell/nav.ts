@@ -18,7 +18,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { MailFolder } from "@/lib/api";
-import { mailStateFolderAvailable } from "@/lib/mail-state-gates";
 import {
   FORK_ADMIN_LINKS,
   FORK_DETAIL_BASES,
@@ -36,7 +35,7 @@ export interface MailView {
   params: Record<string, string>;
 }
 
-const ALL_MAIL_VIEWS: MailView[] = [
+export const MAIL_VIEWS: MailView[] = [
   { id: "inbox", label: "Inbox", icon: Inbox, params: {} },
   {
     id: "starred",
@@ -72,10 +71,6 @@ const ALL_MAIL_VIEWS: MailView[] = [
   },
 ];
 
-export const MAIL_VIEWS: MailView[] = ALL_MAIL_VIEWS.filter((v) =>
-  mailStateFolderAvailable(v.id),
-);
-
 export const FOLDERS: MailFolder[] = [
   "inbox",
   "starred",
@@ -83,7 +78,7 @@ export const FOLDERS: MailFolder[] = [
   "archive",
   "sent",
   "trash",
-].filter((f) => mailStateFolderAvailable(f)) as MailFolder[];
+];
 
 /** Parse the mail folder from the URL; anything unknown means inbox. */
 export function folderFromParams(sp: URLSearchParams): MailFolder {

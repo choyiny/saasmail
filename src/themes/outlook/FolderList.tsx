@@ -18,7 +18,6 @@ import {
 import type { Stats } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
-  FOLDER_IDS,
   FOLDER_LABELS,
   favoriteKey,
   parseFavorite,
@@ -312,7 +311,7 @@ export default function FolderList(props: FolderListProps) {
     "flagged",
     "sequenced",
     "deleted",
-  ].filter((f) => FOLDER_IDS.includes(f as OlFolderId)) as OlFolderId[];
+  ];
 
   const menuKey = menu
     ? favoriteKey(menu.target.folder, menu.target.label)

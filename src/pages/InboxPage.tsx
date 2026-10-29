@@ -26,6 +26,7 @@ import {
   markPeopleRead,
   markConversationsRead,
   setCategoryOverride,
+  undoMailState,
   updateMailState,
   type GroupedItem,
   type MailCategory,
@@ -39,9 +40,10 @@ import {
 } from "@/lib/api";
 import {
   applyToFolder,
-  applyToRefs,
   deleteFolderForever,
   markFolderRead,
+  pinUndo,
+  undoFolderChange,
 } from "@/lib/folder-actions";
 import {
   parseInboxSort,
@@ -69,8 +71,6 @@ import {
 } from "@/components/shell/nav";
 import { refreshMailCounts } from "@/components/shell/useMailCounts";
 import SnoozeDialog from "@/components/SnoozeDialog";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
-import { gateMailActions, ifMailState } from "@/lib/mail-state-gates";
 import { goChord, shouldIgnoreKey } from "@/lib/shortcuts";
 import { shellStore } from "@/components/shell/shellStore";
 
@@ -595,15 +595,21 @@ export default function InboxPage() {
       }
       const refs = targets.map(itemRef);
       try {
-        await updateMailState(refs, patch);
+        const res = await updateMailState(refs, patch);
         refreshMailCounts();
         // Pinned rows sort first in the inbox: refetch to reorder.
         if (patch.pinned !== undefined) refreshPeople();
-        const undo = opts.undo;
-        const runUndo = undo
+        // Undo puts back exactly what changed (docs/mailbox-state.md).
+        const pins = pinUndo(targets, patch.pinned);
+        const runUndo = opts.undo
           ? () => {
               lastUndoRef.current = null;
-              updateMailState(refs, undo)
+              undoMailState(res.undo)
+                .then(() =>
+                  pins
+                    ? updateMailState(pins.items, { pinned: pins.pinned })
+                    : undefined,
+                )
                 .then(() => {
                   refreshPeople();
                   refreshMailCounts();
@@ -631,7 +637,10 @@ export default function InboxPage() {
           });
         }
       } catch {
+        // A failure part-way leaves some messages changed: refetch.
         setItems(before);
+        refreshPeople();
+        refreshMailCounts();
         showToast({
           kind: "error",
           message: "Couldn't update the conversation",
@@ -780,8 +789,6 @@ export default function InboxPage() {
 
   const inTrash = queryFolder === "trash";
   const mailActionsFor = (it: GroupedItem): MailActionHandlers =>
-    gateMailActions(allMailActionsFor(it));
-  const allMailActionsFor = (it: GroupedItem): MailActionHandlers =>
     inTrash
       ? {
           onRestore: () => restoreMany([it]),
@@ -865,15 +872,14 @@ export default function InboxPage() {
     if (!allMatching) return false;
     setBulkBusy(true);
     applyToFolder(folderQuery, patch)
-      .then((refs: MailItemRef[]) => {
+      .then((res) => {
         clearSelection();
         refreshPeople();
         refreshMailCounts();
-        const undo = opts.undo;
-        const runUndo = undo
+        const runUndo = opts.undo
           ? () => {
               lastUndoRef.current = null;
-              applyToRefs(refs, undo)
+              undoFolderChange(res)
                 .then(() => {
                   refreshPeople();
                   refreshMailCounts();
@@ -886,7 +892,7 @@ export default function InboxPage() {
         lastUndoRef.current = runUndo;
         showToast({
           kind: "success",
-          message: opts.message(refs.length),
+          message: opts.message(res.rows),
           action: runUndo
             ? {
                 label: "Undo",
@@ -898,13 +904,18 @@ export default function InboxPage() {
             : undefined,
         });
       })
-      .catch(() =>
+      .catch(() => {
+        // A failure part-way leaves some rows changed, and an older Undo
+        // no longer matches them: refetch and drop it.
+        lastUndoRef.current = null;
+        refreshPeople();
+        refreshMailCounts();
         showToast({
           kind: "error",
           message: "Couldn't update the conversations",
           description: "Check your connection and try again.",
-        }),
-      )
+        });
+      })
       .finally(() => setBulkBusy(false));
     return true;
   }
@@ -1340,8 +1351,6 @@ export default function InboxPage() {
       } else showToast({ kind: "info", message: "Nothing to undo" });
     } else if (targets.length === 0) {
       handled = false;
-    } else if (!MAIL_STATE_ACTIONS_ENABLED && "#espb".includes(k)) {
-      handled = false;
     } else if (k === "#") {
       // Trash (with Undo). Inside Trash, admins delete forever (asks).
       if (!inTrash) trashMany(targets);
@@ -1444,12 +1453,12 @@ export default function InboxPage() {
       onMarkRead={handleBulkMarkRead}
       onBlock={allMatching || inTrash ? undefined : handleBlockSelected}
       onClear={clearSelection}
-      onArchive={inTrash ? undefined : ifMailState(handleBulkArchive)}
+      onArchive={inTrash ? undefined : handleBulkArchive}
       archiveLabel={folder === "archive" ? "Move to inbox" : "Archive"}
-      onSnooze={inTrash ? undefined : ifMailState(handleBulkSnooze)}
-      onStar={inTrash ? undefined : ifMailState(handleBulkStar)}
-      onTrash={inTrash ? undefined : ifMailState(handleBulkTrash)}
-      onRestore={inTrash ? ifMailState(handleBulkRestore) : undefined}
+      onSnooze={inTrash ? undefined : handleBulkSnooze}
+      onStar={inTrash ? undefined : handleBulkStar}
+      onTrash={inTrash ? undefined : handleBulkTrash}
+      onRestore={inTrash ? handleBulkRestore : undefined}
       onDeleteForever={inTrash && isAdmin ? handleBulkDeleteForever : undefined}
       matchingTotal={peopleTotal}
       allMatching={allMatching}
@@ -1528,8 +1537,8 @@ export default function InboxPage() {
             >
               <Trash2 size={14} className="shrink-0 text-text-tertiary" />
               <span className="min-w-0 flex-1">
-                Conversations in Trash are hidden from your other folders, for
-                you only. New mail brings one back.{" "}
+                Conversations in Trash are hidden from the inbox's other
+                folders, for everyone in the inbox. New mail brings one back.{" "}
                 {isAdmin
                   ? "Delete forever removes a person and their mail for everyone; group conversations can only be restored."
                   : "Only admins can delete mail forever."}

@@ -29,7 +29,6 @@ import {
 import { LabelDot } from "./ui";
 import { dropOn, useRowDrag, DRAG_MIME, type DropTarget } from "./dnd";
 import type { NavCounts } from "./state";
-import { mailStateFolderAvailable } from "@/lib/mail-state-gates";
 
 export function isInboxPath(pathname: string) {
   return pathname === "/" || pathname.startsWith("/inbox/");
@@ -68,9 +67,7 @@ const FOLDER_ORDER: Array<Exclude<GmailFolder, "all">> = [
   "sequenced",
   "archive",
   "trash",
-].filter((f) => mailStateFolderAvailable(f)) as Array<
-  Exclude<GmailFolder, "all">
->;
+];
 
 const DROPPABLE: Partial<Record<GmailFolder, DropTarget>> = {
   inbox: "inbox",

@@ -6,6 +6,7 @@ import {
   fetchStats,
   markConversationsRead,
   markPeopleRead,
+  undoMailState,
   updateMailState,
   type GroupedItem,
   type InboxSort,
@@ -15,7 +16,12 @@ import {
   type Stats,
 } from "@/lib/api";
 import { itemKey, itemRef } from "@/hooks/useMailList";
-import { applyToFolder, markFolderRead } from "@/lib/folder-actions";
+import {
+  applyToFolder,
+  markFolderRead,
+  pinUndo,
+  undoFolderChange,
+} from "@/lib/folder-actions";
 import { useRealtimeUpdates } from "@/hooks/useRealtimeUpdates";
 import { onInboxRefresh } from "@/lib/inbox-events";
 import { showToast } from "@/lib/toast";
@@ -235,18 +241,34 @@ export function useGmailList(query: GmailListQuery) {
           : next;
       });
       if (opts?.removeFromView) setTotal((t) => Math.max(0, t - keys.size));
-      const undoPatch = opts?.undo;
-      const undo = undoPatch
+      // Undo puts back exactly what changed (docs/mailbox-state.md). It is
+      // armed before the request answers, as upstream, so `z` works at once:
+      // it waits for the answer's steps. If the change fails, there is
+      // nothing to undo and the catch below refetches.
+      const pending = updateMailState(targets.map(itemRef), patch);
+      const pins = pinUndo(targets, patch.pinned);
+      const undo = opts?.undo
         ? () => {
             undoRef.current = null;
-            updateMailState(targets.map(itemRef), undoPatch)
-              .then(() => load({ silent: true }))
-              .catch(() => {});
+            pending.then(
+              (res) =>
+                undoMailState(res.undo)
+                  .then(() =>
+                    pins
+                      ? updateMailState(pins.items, { pinned: pins.pinned })
+                      : undefined,
+                  )
+                  .then(() => load({ silent: true }))
+                  .catch(() =>
+                    showToast({ kind: "error", message: "Couldn't undo" }),
+                  ),
+              () => undefined,
+            );
           }
         : null;
       undoRef.current = undo;
       try {
-        await updateMailState(targets.map(itemRef), patch);
+        await pending;
         if (opts?.message) {
           showToast({
             kind: "info",
@@ -264,7 +286,7 @@ export function useGmailList(query: GmailListQuery) {
         }
       } catch (e) {
         setItems(before);
-        undoRef.current = null;
+        if (undoRef.current === undo) undoRef.current = null;
         showToast({
           kind: "error",
           message: e instanceof Error ? e.message : "Could not update mail",
@@ -397,19 +419,21 @@ export function useGmailList(query: GmailListQuery) {
       undo?: StatePatch,
     ) => {
       try {
-        const refs = await applyToFolder(params(), patch);
+        const res = await applyToFolder(params(), patch);
         const undoFn = undo
           ? () => {
               undoRef.current = null;
-              void Promise.all(
-                chunk(refs).map((c) => updateMailState(c, undo)),
-              ).then(() => load({ silent: true }));
+              undoFolderChange(res)
+                .then(() => load({ silent: true }))
+                .catch(() =>
+                  showToast({ kind: "error", message: "Couldn't undo" }),
+                );
             }
           : null;
         undoRef.current = undoFn;
         showToast({
           kind: "info",
-          message: message.replace("{n}", String(refs.length)),
+          message: message.replace("{n}", String(res.rows)),
           action: undoFn
             ? {
                 label: "Undo",
@@ -422,6 +446,11 @@ export function useGmailList(query: GmailListQuery) {
         });
         refreshAll();
       } catch (e) {
+        // A failure part-way leaves some rows changed, and an older Undo
+        // no longer matches them: refetch and drop it.
+        undoRef.current = null;
+        void load({ silent: true });
+        refreshAll();
         showToast({
           kind: "error",
           message: e instanceof Error ? e.message : "Could not update mail",
@@ -532,9 +561,3 @@ export function useGmailList(query: GmailListQuery) {
 }
 
 export type GmailList = ReturnType<typeof useGmailList>;
-
-function chunk<T>(xs: T[], n = 100): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < xs.length; i += n) out.push(xs.slice(i, i + n));
-  return out;
-}

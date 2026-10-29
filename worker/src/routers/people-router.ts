@@ -22,8 +22,13 @@ import {
   isInboxAllowed,
   jsonList,
 } from "../lib/inbox-permissions";
-import { deleteMessageState } from "../lib/messages/state";
+import { deleteMessageState, deletePersonRowPins } from "../lib/messages/state";
 import { buildMessageQuerySql } from "../lib/messages/query";
+import {
+  markSeenForViewer,
+  rowKey,
+  rowMailState,
+} from "../lib/messages/row-state";
 import { cancelScheduledSendsFor } from "../lib/scheduled-sends";
 import {
   collectPersonGroupConversations,
@@ -60,9 +65,10 @@ const GroupedPersonSchema = z.object({
   recipients: z.array(z.string()),
   hasAttachment: z.number(),
   linkedCount: z.number(),
-  // Per-user mail state (empty until a later release) plus what the Gmail and
-  // Outlook layouts need to draw a row: last subject, a snippet and whether
-  // we have ever written to this thread.
+  // The row's mail state (star and pin are the caller's own; archive, snooze
+  // and trash are shared per inbox, docs/mailbox-state.md) plus what the
+  // Gmail and Outlook layouts need to draw a row: last subject, a snippet and
+  // whether we have ever written to this thread.
   starred: z.boolean(),
   pinned: z.boolean(),
   archivedAt: z.number().nullable(),
@@ -101,9 +107,10 @@ const GroupedConversationSchema = z.object({
   unreadCount: z.number(),
   totalCount: z.number(),
   hasAttachment: z.number(),
-  // Per-user mail state (empty until a later release) plus what the Gmail and
-  // Outlook layouts need to draw a row: last subject, a snippet and whether
-  // we have ever written to this thread.
+  // The row's mail state (star and pin are the caller's own; archive, snooze
+  // and trash are shared per inbox, docs/mailbox-state.md) plus what the
+  // Gmail and Outlook layouts need to draw a row: last subject, a snippet and
+  // whether we have ever written to this thread.
   starred: z.boolean(),
   pinned: z.boolean(),
   archivedAt: z.number().nullable(),
@@ -238,10 +245,14 @@ export const GroupedQuerySchema = z.object({
     description:
       "Also return per-category unread and new-since-last-viewed counts for the inbox",
   }),
-  folder: z.enum(["all", "inbox", "sent"]).optional().default("all").openapi({
-    description:
-      "Mail folder. `all` (default) and `inbox` list the same rows; `sent` keeps rows we have written to. The starred, snoozed, archive and trash folders arrive with per-user mail state in a later release.",
-  }),
+  folder: z
+    .enum(["all", "inbox", "starred", "snoozed", "archive", "sent", "trash"])
+    .optional()
+    .default("all")
+    .openapi({
+      description:
+        "Mail folder, from the rows' message state (docs/mailbox-state.md § Rows in the inbox list). `all` (default) keeps rows with untrashed mail; `inbox` keeps rows with mail in the Inbox that is not snoozed and puts the caller's pinned rows first; `snoozed` orders by wake time; `sent` keeps rows we have written to; every folder except `trash` hides trashed rows. Spam never puts a row in a folder.",
+    }),
   sort: z
     .enum(["recency", "unread", "inbox", "attachments"])
     .optional()
@@ -365,11 +376,6 @@ export async function computeGroupedRows(
   if (recipient) {
     personConditions.push(
       sql`s.id IN (SELECT person_id FROM emails WHERE recipient = ${recipient} AND conversation_id IS NULL ${inboxScopeSql(allowed, sql`recipient`)})`,
-    );
-  }
-  if (unread) {
-    personConditions.push(
-      sql`s.id IN (SELECT person_id FROM emails WHERE is_read = 0 AND conversation_id IS NULL ${inboxScopeSql(allowed, sql`recipient`)})`,
     );
   }
   if (sequenced) {
@@ -537,9 +543,6 @@ export async function computeGroupedRows(
   if (recipient) {
     groupConditions.push(sql`g.inbox = ${recipient}`);
   }
-  if (unread) {
-    groupConditions.push(sql`g.unreadCount > 0`);
-  }
   if (sequenced) {
     // Only individual contacts are enrolled in sequences — never group
     // conversations — so this filter excludes every group row.
@@ -678,8 +681,25 @@ export async function computeGroupedRows(
     r.type === "person" ? (r.recipients[0] ?? "") : r.inbox;
   let merged: Row[] = [...personRows, ...groupRows];
 
-  // Star, pin, archive, snooze and trash stay at EMPTY_ROW_STATE: the
-  // fork's mailbox-state model fills them in a later release.
+  // Star, pin, archive, snooze, trash and unread come from the per-message
+  // state (docs/mailbox-state.md § Rows in the inbox list). A row with no
+  // eligible (non-spam) message is in no folder.
+  const rowState = await rowMailState(
+    db,
+    { userId: user?.id ?? "" },
+    allowed,
+    Math.floor(Date.now() / 1000),
+  );
+  merged = merged.filter((r) => rowState.has(rowKey(r)));
+  for (const r of merged) {
+    const st = rowState.get(rowKey(r))!;
+    r.starred = st.starred;
+    r.pinned = st.pinned;
+    r.archivedAt = st.archivedAt;
+    r.snoozedUntil = st.snoozedUntil;
+    r.trashedAt = st.trashedAt;
+    r.unreadCount = folder === "inbox" ? st.inboxUnreadCount : st.unreadCount;
+  }
   // Categories: one query per row kind for "has bulk-mail headers", then
   // sender heuristics in categorize().
   if (needCategories) {
@@ -749,8 +769,8 @@ export async function computeGroupedRows(
       updates: { unread: 0, new: 0 },
     };
     for (const r of merged) {
-      if (r.archivedAt || r.snoozedUntil || r.trashedAt) continue;
-      if (r.unreadCount <= 0) continue;
+      const st = rowState.get(rowKey(r))!;
+      if (!st.inInbox || st.inboxUnreadCount <= 0) continue;
       const t = tabCounts[r.category];
       t.unread++;
       if (r.lastEmailAt > (seen[r.category] ?? 0)) t.new++;
@@ -792,8 +812,29 @@ export async function computeGroupedRows(
       r.type === "person" ? personHits.has(r.id) : convHits.has(r.id),
     );
   }
-  // `inbox` lists the same rows as `all` until rows carry mail state.
-  if (folder === "sent") merged = merged.filter((r) => r.hasSent);
+  // Trash hides a row everywhere except the Trash folder.
+  if (folder !== "trash") merged = merged.filter((r) => !r.trashedAt);
+  switch (folder) {
+    case "inbox":
+      merged = merged.filter((r) => rowState.get(rowKey(r))!.inInbox);
+      break;
+    case "starred":
+      merged = merged.filter((r) => r.starred);
+      break;
+    case "snoozed":
+      merged = merged.filter((r) => r.snoozedUntil);
+      break;
+    case "archive":
+      merged = merged.filter((r) => r.archivedAt);
+      break;
+    case "sent":
+      merged = merged.filter((r) => r.hasSent);
+      break;
+    case "trash":
+      merged = merged.filter((r) => r.trashedAt);
+      break;
+  }
+  if (unread) merged = merged.filter((r) => r.unreadCount > 0);
 
   const sign = effectiveDirection === "asc" ? -1 : 1;
   switch (sort) {
@@ -823,6 +864,12 @@ export async function computeGroupedRows(
     default:
       merged.sort((a, b) => sign * (b.lastEmailAt - a.lastEmailAt));
       break;
+  }
+  if (folder === "inbox") {
+    // Stable sort keeps the chosen order within the pinned and unpinned sets.
+    merged.sort((a, b) => Number(b.pinned) - Number(a.pinned));
+  } else if (folder === "snoozed") {
+    merged.sort((a, b) => (a.snoozedUntil ?? 0) - (b.snoozedUntil ?? 0));
   }
   return { merged, tabCounts };
 }
@@ -1034,7 +1081,7 @@ const groupedIdsRoute = createRoute({
   path: "/grouped/ids",
   tags: ["People"],
   description:
-    "Every row matching the same filters as /grouped, as `{type, id, unread}` refs (capped at 5000). Lets a client act on a whole folder — mark all read, archive all — without paging through it.",
+    "Every row matching the same filters as /grouped, as `{type, id, unread, pinned}` refs (capped at 5000). Lets a client act on a whole folder — mark all read, archive all — without paging through it; `pinned` lets it undo a pin-all exactly.",
   request: { query: GroupedQuerySchema },
   responses: {
     ...json200Response(
@@ -1044,6 +1091,7 @@ const groupedIdsRoute = createRoute({
             type: z.enum(["person", "group"]),
             id: z.string(),
             unread: z.boolean(),
+            pinned: z.boolean(),
           }),
         ),
         total: z.number(),
@@ -1063,6 +1111,7 @@ peopleRouter.openapi(groupedIdsRoute, async (c) => {
         type: r.type,
         id: r.id,
         unread: r.unreadCount > 0,
+        pinned: r.pinned,
       })),
       total: merged.length,
       truncated: merged.length > CAP,
@@ -1260,6 +1309,7 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
     })),
     ...sent.map((message) => ({ kind: "sent" as const, id: message.id })),
   ]);
+  await deletePersonRowPins(db, id);
 
   // Delete R2 attachments for all received emails belonging to this person
   const atts = await db
@@ -1414,6 +1464,14 @@ peopleRouter.openapi(bulkMarkReadRoute, async (c) => {
         .set({ unreadCount: row?.count ?? 0 })
         .where(eq(people.id, pid));
     }
+  }
+  // The inbox list reads the caller's own seen state (docs/mailbox-state.md).
+  const user = c.get("user");
+  if (user) {
+    await markSeenForViewer(db, user.id, allowed, {
+      personIds,
+      ...(recipientScope ? { inboxes: recipientScope } : {}),
+    });
   }
 
   return c.json({ success: true, affected }, 200);

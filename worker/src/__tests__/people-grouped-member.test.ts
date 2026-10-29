@@ -17,8 +17,8 @@ import { senderIdentities } from "../db/sender-identities.schema";
 /**
  * The grouped list (GET /api/people/grouped and /grouped/ids) reads each
  * row's latest subject and snippet, its group participants and its subject
- * matches only from the caller's inboxes, carries no mail state yet, and
- * takes folder=all, inbox or sent only (docs/mailbox-state.md). A member
+ * matches only from the caller's inboxes; its state folders hold only rows
+ * whose messages carry that state (docs/mailbox-state.md). A member
  * granted one inbox must not learn the subject or body of mail that the
  * same person sent to an inbox they cannot see.
  */
@@ -184,15 +184,15 @@ describe("grouped list for a member with one inbox", () => {
       (await grouped(admin.apiKey, "?folder=sent")).data.map((r) => r.id),
     ).toEqual(["p-alice"]);
     // Outlook's "Empty Deleted Items" deletes every person that
-    // /grouped/ids?folder=trash returns: a state folder must answer 400,
-    // never fall back to every row.
+    // /grouped/ids?folder=trash returns: with nothing starred, snoozed,
+    // archived or trashed, a state folder is empty, never every row.
     for (const path of ["/api/people/grouped", "/api/people/grouped/ids"]) {
       for (const folder of ["starred", "snoozed", "archive", "trash"]) {
         const res = await authFetch(`${path}?folder=${folder}`, {
           apiKey: admin.apiKey,
         });
-        expect(res.status, `${path}?folder=${folder}`).toBe(400);
-        expect(await res.json()).toMatchObject({ success: false });
+        expect(res.status, `${path}?folder=${folder}`).toBe(200);
+        expect(((await res.json()) as { total: number }).total).toBe(0);
       }
       const inbox = await authFetch(`${path}?folder=inbox`, {
         apiKey: admin.apiKey,

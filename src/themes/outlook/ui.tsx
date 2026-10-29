@@ -1,6 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 import { avatarSlot, initials } from "./lib";
 
 /** Fluent persona avatar: coloured circle with initials. */
@@ -38,14 +37,11 @@ export const IconButton = forwardRef<
     label: string;
     children: ReactNode;
     size?: "sm" | "md" | "lg";
-    /** Hidden while MAIL_STATE_ACTIONS_ENABLED is off. */
-    stateAction?: boolean;
   }
 >(function IconButton(
-  { label, children, className, size = "md", stateAction, ...props },
+  { label, children, className, size = "md", ...props },
   ref,
 ) {
-  if (stateAction && !MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <button
       ref={ref}

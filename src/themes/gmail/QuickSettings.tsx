@@ -13,7 +13,6 @@ import {
   type ReadingPane,
   type SwipeAction,
 } from "./state";
-import { gateSwipe, mailStateOptionAvailable } from "@/lib/mail-state-gates";
 
 function RadioRow({
   name,
@@ -222,19 +221,17 @@ export function QuickSettings({
               ["unread", "Unread first", "Unread conversations on top"],
               ["starred", "Starred first", "Starred conversations on top"],
             ] as Array<[InboxType, string, string]>
-          )
-            .filter(([v]) => mailStateOptionAvailable(v))
-            .map(([v, l, h]) => (
-              <RadioRow
-                key={v}
-                name="gm-inbox-type"
-                checked={view.inboxType === v}
-                onChange={() => view.update({ inboxType: v })}
-                hint={h}
-              >
-                {l}
-              </RadioRow>
-            ))}
+          ).map(([v, l, h]) => (
+            <RadioRow
+              key={v}
+              name="gm-inbox-type"
+              checked={view.inboxType === v}
+              onChange={() => view.update({ inboxType: v })}
+              hint={h}
+            >
+              {l}
+            </RadioRow>
+          ))}
           <label className="mt-2 flex cursor-pointer items-center gap-4 py-1.5 text-sm">
             <input
               type="checkbox"
@@ -292,19 +289,17 @@ export function QuickSettings({
               {l}
               <select
                 className={select}
-                value={gateSwipe(view[k])}
+                value={view[k]}
                 onChange={(e) =>
                   view.update({ [k]: e.target.value as SwipeAction })
                 }
                 data-testid={`gmail-qs-${k}`}
               >
-                {(Object.keys(SWIPE_LABELS) as SwipeAction[])
-                  .filter(mailStateOptionAvailable)
-                  .map((a) => (
-                    <option key={a} value={a}>
-                      {SWIPE_LABELS[a]}
-                    </option>
-                  ))}
+                {(Object.keys(SWIPE_LABELS) as SwipeAction[]).map((a) => (
+                  <option key={a} value={a}>
+                    {SWIPE_LABELS[a]}
+                  </option>
+                ))}
               </select>
             </label>
           ))}

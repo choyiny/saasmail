@@ -26,11 +26,14 @@ import { mailboxMessageState } from "../../db/mailbox-message-state.schema";
 import { mailboxes } from "../../db/mailboxes.schema";
 import { messageMailboxes } from "../../db/message-mailboxes.schema";
 import { suggestedReplies } from "../../db/suggested-replies.schema";
+import { userRowPins } from "../../db/user-row-pins.schema";
 import {
   isInboxAllowed,
+  jsonList,
   resolveAllowedInboxes,
   type AllowedInboxes,
 } from "../inbox-permissions";
+import { rowKey, visibleRows, type RowRef } from "./row-state";
 import type { MessageRef } from "./types";
 
 export class MessageStateAccessError extends Error {
@@ -775,6 +778,70 @@ export async function setMailboxMembership(
     "removed",
     membershipBefore,
   );
+}
+
+const ROW_PIN_ROWS_PER_STATEMENT = Math.floor(90 / 4);
+
+/**
+ * Pin or unpin inbox-list rows for one user (docs/mailbox-state.md § Rows in
+ * the inbox list). Pinning skips rows with no message in the caller's
+ * inboxes; unpinning deletes only the caller's pins.
+ */
+export async function setRowPins(
+  db: DrizzleD1Database<any>,
+  userId: string,
+  allowed: AllowedInboxes,
+  items: RowRef[],
+  pinned: boolean,
+): Promise<void> {
+  if (items.length === 0) return;
+  if (!pinned) {
+    await db
+      .delete(userRowPins)
+      .where(
+        and(
+          eq(userRowPins.userId, userId),
+          sql`(${userRowPins.itemType} || ':' || ${userRowPins.itemId}) IN ${jsonList(items.map(rowKey))}`,
+        ),
+      );
+    return;
+  }
+  const visible = await visibleRows(db, allowed, items);
+  const now = Math.floor(Date.now() / 1000);
+  const rows = items
+    .filter((item) => visible.has(rowKey(item)))
+    .map((item) => ({
+      userId,
+      itemType: item.type,
+      itemId: item.id,
+      pinnedAt: now,
+    }));
+  const statements: any[] = [];
+  for (
+    let start = 0;
+    start < rows.length;
+    start += ROW_PIN_ROWS_PER_STATEMENT
+  ) {
+    statements.push(
+      db
+        .insert(userRowPins)
+        .values(rows.slice(start, start + ROW_PIN_ROWS_PER_STATEMENT))
+        .onConflictDoNothing(),
+    );
+  }
+  await runWriteBatches(db, statements);
+}
+
+/** Every user's pin on a person's row, for when the person is deleted. */
+export async function deletePersonRowPins(
+  db: DrizzleD1Database<any>,
+  personId: string,
+): Promise<void> {
+  await db
+    .delete(userRowPins)
+    .where(
+      and(eq(userRowPins.itemType, "person"), eq(userRowPins.itemId, personId)),
+    );
 }
 
 const DELETE_BATCH_SIZE = 40;

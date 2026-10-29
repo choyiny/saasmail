@@ -624,6 +624,13 @@
       "when": 1793224212066,
       "tag": "0088_upstream_better_auth_1_7",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1793231833591,
+      "tag": "0089_row_pins",
+      "breakpoints": true
     }
   ]
 }

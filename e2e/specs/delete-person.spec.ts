@@ -9,7 +9,6 @@ import type { Page } from "@playwright/test";
 import { test, expect } from "../fixtures/test";
 import { truncateAndReseed } from "../support/reset-db";
 import { TEST_IDS } from "../support/selectors";
-import { MAIL_STATE_ACTIONS_ENABLED } from "../../src/lib/mail-state-actions";
 import { resolve } from "node:path";
 
 const AUTH_DIR = resolve(process.cwd(), "e2e/.auth");
@@ -35,7 +34,6 @@ test.describe.serial("delete person", () => {
   test("admin sees kebab menu on hover with Move to Trash", async ({
     page,
   }) => {
-    test.skip(!MAIL_STATE_ACTIONS_ENABLED, "Trash arrives later");
     await page.goto("/");
     await expect(row(page, "p_alice")).toBeVisible();
     await openKebab(page, "p_alice");
@@ -50,7 +48,6 @@ test.describe.serial("delete person", () => {
   test("Move to Trash hides the person; Restore brings them back", async ({
     page,
   }) => {
-    test.skip(!MAIL_STATE_ACTIONS_ENABLED, "Trash arrives later");
     await page.goto("/");
     await openKebab(page, "p_alice");
     await page.getByTestId(TEST_IDS.mailTrashItem).click();
@@ -69,7 +66,6 @@ test.describe.serial("delete person", () => {
   test("cancelling Delete forever keeps the person in Trash", async ({
     page,
   }) => {
-    test.skip(!MAIL_STATE_ACTIONS_ENABLED, "Trash arrives later");
     await page.goto("/");
     await openKebab(page, "p_bob");
     await page.getByTestId(TEST_IDS.mailTrashItem).click();
@@ -85,7 +81,6 @@ test.describe.serial("delete person", () => {
   test("confirming Delete forever removes the person and clears the right panel", async ({
     page,
   }) => {
-    test.skip(!MAIL_STATE_ACTIONS_ENABLED, "Trash arrives later");
     await page.goto("/?folder=trash");
     const bobRow = row(page, "p_bob");
     await expect(bobRow).toBeVisible();
@@ -105,7 +100,6 @@ test.describe.serial("delete person", () => {
   });
 
   test("deletion persists after page reload", async ({ page }) => {
-    test.skip(!MAIL_STATE_ACTIONS_ENABLED, "Trash arrives later");
     await page.goto("/?folder=trash");
     await page.reload();
     await expect(row(page, "p_bob")).not.toBeVisible();

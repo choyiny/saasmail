@@ -236,6 +236,7 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS gmail_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, history_id TEXT, last_synced_at INTEGER, last_error TEXT, last_gap_at INTEGER, backfill_until INTEGER, backfill_since INTEGER, backfill_page_token TEXT, backfill_offset INTEGER NOT NULL DEFAULT 0, backfill_count INTEGER NOT NULL DEFAULT 0, backfill_completed_at INTEGER, backfill_reached INTEGER, backfill_job_id TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS user_preferences (user_id TEXT PRIMARY KEY NOT NULL REFERENCES users(id) ON DELETE CASCADE, ui_theme TEXT, color_mode TEXT, density TEXT, palette TEXT, layout_settings TEXT, tab_seen TEXT, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS category_overrides (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, sender_email TEXT NOT NULL, category TEXT NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(user_id, sender_email))`,
+    `CREATE TABLE IF NOT EXISTS user_row_pins (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, item_type TEXT NOT NULL, item_id TEXT NOT NULL, pinned_at INTEGER NOT NULL, PRIMARY KEY(user_id, item_type, item_id))`,
     `CREATE TABLE IF NOT EXISTS outlook_accounts (id TEXT PRIMARY KEY, email_address TEXT NOT NULL UNIQUE, refresh_token_encrypted TEXT NOT NULL, access_token TEXT, expires_at INTEGER, inbox_cursor TEXT, inbox_cursor_offset INTEGER NOT NULL DEFAULT 0, sent_cursor TEXT, sent_cursor_offset INTEGER NOT NULL DEFAULT 0, sync_from INTEGER NOT NULL, last_synced_at INTEGER, last_error TEXT, last_gap_at INTEGER, backfill_until INTEGER, backfill_since INTEGER, backfill_link TEXT, backfill_offset INTEGER NOT NULL DEFAULT 0, backfill_count INTEGER NOT NULL DEFAULT 0, backfill_completed_at INTEGER, backfill_reached INTEGER, backfill_job_id TEXT, connected_by TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS install_state (installation_id TEXT PRIMARY KEY, ownership_nonce TEXT NOT NULL, version TEXT, manifest_json TEXT, updated_at INTEGER NOT NULL)`,
   ];
@@ -546,6 +547,7 @@ export async function cleanDb() {
     DELETE FROM drafts;
     DELETE FROM user_preferences;
     DELETE FROM category_overrides;
+    DELETE FROM user_row_pins;
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;
     DELETE FROM suppressions;

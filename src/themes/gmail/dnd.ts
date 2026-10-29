@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 
 /**
  * Drag and drop of list rows onto nav folders. The list owns the rows,
@@ -26,7 +25,6 @@ export function endRowDrag() {
 }
 
 export function dropOn(target: DropTarget) {
-  if (!MAIL_STATE_ACTIONS_ENABLED) return;
   window.dispatchEvent(new CustomEvent(DROP_EVENT, { detail: target }));
 }
 

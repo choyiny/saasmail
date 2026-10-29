@@ -17,6 +17,7 @@ import {
 } from "../lib/queries/emails";
 import { searchEmails } from "../lib/queries/search";
 import { citedIdsOf, threadKeyForNewMessage } from "../lib/messages/thread-key";
+import { setUserState } from "../lib/messages/state";
 import type { Variables } from "../variables";
 
 export const emailsRouter = new OpenAPIHono<{
@@ -300,6 +301,7 @@ emailsRouter.openapi(bulkPatchRoute, async (c) => {
   const db = c.get("db");
   const { ids, isRead } = c.req.valid("json");
   const allowed = c.get("allowedInboxes")!;
+  const user = c.get("user");
 
   for (const id of ids) {
     const email = await db
@@ -314,6 +316,12 @@ emailsRouter.openapi(bulkPatchRoute, async (c) => {
 
     if (email.length === 0) continue;
     if (!isInboxAllowed(allowed, email[0].recipient)) continue;
+    // The inbox list reads the caller's own seen state (docs/mailbox-state.md).
+    if (user) {
+      await setUserState(db, user.id, [{ kind: "received", id }], {
+        seen: isRead,
+      });
+    }
 
     const wasRead = email[0].isRead === 1;
     if (wasRead !== isRead) {
@@ -366,6 +374,13 @@ emailsRouter.openapi(patchEmailRoute, async (c) => {
 
   if (!result) {
     return c.json({ error: "Email not found" }, 404);
+  }
+  // The inbox list reads the caller's own seen state (docs/mailbox-state.md).
+  const user = c.get("user");
+  if (user) {
+    await setUserState(db, user.id, [{ kind: "received", id }], {
+      seen: isRead,
+    });
   }
 
   return c.json({ success: true }, 200);

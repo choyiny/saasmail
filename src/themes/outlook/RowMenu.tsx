@@ -111,7 +111,6 @@ export default function RowMenu({
           <MenuItem
             icon={<Undo2 size={16} />}
             onSelect={() => mail.ops.restore(items)}
-            stateAction
           >
             Restore
           </MenuItem>
@@ -121,7 +120,6 @@ export default function RowMenu({
               danger
               onSelect={() => void mail.ops.deleteForever(items)}
               shortcut="Del"
-              stateAction
             >
               Delete forever
             </MenuItem>
@@ -133,7 +131,6 @@ export default function RowMenu({
             icon={<Trash2 size={16} />}
             onSelect={() => mail.ops.delete(items)}
             shortcut="Del"
-            stateAction
           >
             Delete
           </MenuItem>
@@ -141,16 +138,13 @@ export default function RowMenu({
             icon={<Archive size={16} />}
             onSelect={() => mail.ops.archive(items)}
             shortcut="E"
-            stateAction
           >
             Archive
           </MenuItem>
         </>
       )}
       <MenuSub>
-        <MenuSubTrigger icon={<FolderInput size={16} />} stateAction>
-          Move
-        </MenuSubTrigger>
+        <MenuSubTrigger icon={<FolderInput size={16} />}>Move</MenuSubTrigger>
         <MenuSubContent>
           <MenuItem
             icon={<InboxIcon size={16} />}
@@ -176,10 +170,7 @@ export default function RowMenu({
       </MenuSub>
       <MenuSeparator />
       <MenuSub>
-        <MenuSubTrigger
-          icon={<FlagGlyph size={16} filled={allFlagged} />}
-          stateAction
-        >
+        <MenuSubTrigger icon={<FlagGlyph size={16} filled={allFlagged} />}>
           Flag
         </MenuSubTrigger>
         <MenuSubContent>
@@ -204,7 +195,6 @@ export default function RowMenu({
       <MenuItem
         icon={allPinned ? <PinOff size={16} /> : <Pin size={16} />}
         onSelect={() => mail.ops.pin(items, !allPinned)}
-        stateAction
       >
         {allPinned ? "Unpin" : "Pin"}
       </MenuItem>
@@ -216,9 +206,7 @@ export default function RowMenu({
         {anyUnread ? "Mark as read" : "Mark as unread"}
       </MenuItem>
       <MenuSub>
-        <MenuSubTrigger icon={<Clock size={16} />} stateAction>
-          Snooze
-        </MenuSubTrigger>
+        <MenuSubTrigger icon={<Clock size={16} />}>Snooze</MenuSubTrigger>
         <MenuSubContent>
           <SnoozeMenuItems
             onPick={(u) => mail.ops.snooze(items, u)}
@@ -254,7 +242,6 @@ export default function RowMenu({
       <MenuItem
         icon={<Brush size={16} />}
         onSelect={() => ui.requestSweep(items)}
-        stateAction
       >
         Sweep…
       </MenuItem>

@@ -44,7 +44,7 @@ export interface MailStateLike {
   pinned: boolean;
   archivedAt: number | null;
   snoozedUntil: number | null;
-  /** Set while the row is in this user's Trash. */
+  /** Set while the row is in Trash (shared per inbox). */
   trashedAt?: number | null;
   /** The inbox tab the row sorts into (primary, promotions…). */
   category?: MailCategory;
@@ -59,7 +59,7 @@ export interface MailActionHandlers {
   /** Snooze until a unix-seconds time; null wakes the row. */
   onSnooze?: (until: number | null) => void;
   onMarkRead?: () => void;
-  /** Move to this user's Trash (with Undo). */
+  /** Move to Trash, shared by the inbox's members (with Undo). */
   onTrash?: () => void;
   /** Take out of Trash. */
   onRestore?: () => void;

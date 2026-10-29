@@ -57,3 +57,4 @@ export * from "./spam-filter.schema";
 export * from "./backup-runs.schema";
 export * from "./user-preferences.schema";
 export * from "./mail-item-states.schema";
+export * from "./user-row-pins.schema";

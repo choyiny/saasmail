@@ -5,7 +5,6 @@ import { Clock, CalendarClock, X } from "lucide-react";
 import { snoozePresets } from "@/hooks/useMailList";
 import { cn } from "@/lib/utils";
 import { colorIndex, initialOf, labelName, SHORTCUT_HELP } from "./lib";
-import { MAIL_STATE_ACTIONS_ENABLED } from "@/lib/mail-state-actions";
 
 /* ── Avatar & label chip ───────────────────────────────────────────── */
 
@@ -127,17 +126,13 @@ export function GmMenuItem({
   onSelect,
   disabled,
   trailing,
-  stateAction,
 }: {
   icon?: ReactNode;
   children: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
   trailing?: ReactNode;
-  /** Stars, pins, archives, snoozes or trashes: hidden while that waits. */
-  stateAction?: boolean;
 }) {
-  if (stateAction && !MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <Menu.Item className="gm-menu-item" onSelect={onSelect} disabled={disabled}>
       {icon}
@@ -178,7 +173,6 @@ export function SnoozeMenu({
   onPick: () => void;
   align?: "start" | "end";
 }) {
-  if (!MAIL_STATE_ACTIONS_ENABLED) return null;
   return (
     <GmMenu trigger={trigger} align={align}>
       <GmMenuLabel>Snooze until…</GmMenuLabel>

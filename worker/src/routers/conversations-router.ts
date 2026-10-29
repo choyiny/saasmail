@@ -5,6 +5,7 @@ import { people } from "../db/people.schema";
 import { json200Response } from "../lib/helpers";
 import { inboxFilter, jsonList } from "../lib/inbox-permissions";
 import { queryMessages } from "../lib/messages/query";
+import { markSeenForViewer } from "../lib/messages/row-state";
 import { applyReplyGuard, replyTarget } from "../lib/reply-recipients";
 import { EmailSchema } from "./emails-router";
 import type { Variables } from "../variables";
@@ -208,6 +209,13 @@ conversationsRouter.openapi(bulkMarkConversationsReadRoute, async (c) => {
   const affected = countRows[0]?.count ?? 0;
   if (affected > 0) {
     await db.update(emails).set({ isRead: 1 }).where(where);
+  }
+  // The inbox list reads the caller's own seen state (docs/mailbox-state.md).
+  const user = c.get("user");
+  if (user) {
+    await markSeenForViewer(db, user.id, allowed, {
+      conversationIds: inScopeIds,
+    });
   }
 
   return c.json({ success: true, affected }, 200);
