@@ -58,7 +58,7 @@ Full docs live in **[docs/](docs/README.md)**.
 
 **Deploy and operate:** [Setup](docs/setup.md) · [Email providers](docs/email-providers.md) · [Configuration](docs/configuration.md) · [Updating](docs/updating.md) · [Architecture](docs/architecture.md) · [Local development](docs/development.md)
 
-**Features:** [Inboxes and timelines](docs/inboxes.md) · [Gmail integration](docs/gmail.md) · [Email templates](docs/templates.md) · [Sequences](docs/sequences.md) · [Suppressions and unsubscribe](docs/suppressions.md) · [Users and API keys](docs/users-and-api-keys.md) · [MCP server](docs/mcp.md) · [WebMCP](docs/webmcp.md) · [Webhooks](docs/webhooks.md)
+**Features:** [Inboxes and timelines](docs/inboxes.md) · [Gmail integration](docs/gmail.md) · [Email templates](docs/templates.md) · [Sequences](docs/sequences.md) · [Newsletters](docs/newsletters.md) · [Suppressions and unsubscribe](docs/suppressions.md) · [Users and API keys](docs/users-and-api-keys.md) · [MCP server](docs/mcp.md) · [WebMCP](docs/webmcp.md) · [Webhooks](docs/webhooks.md)
 
 ## Architecture at a glance
 
@@ -90,7 +90,7 @@ https://github.com/user-attachments/assets/100196d0-a4d7-4d11-848c-ebf0ffebbff4
 
 ![Outlook-style layout](docs/screenshots/outlook-layout.jpg)
 
-**Templates & sequences** — reusable `{{variable}}` email templates and multi-step drip campaigns you enroll contacts into.
+**Templates & sequences** — reusable `{{variable}}` email templates, written as raw HTML or arranged in a visual block editor, and multi-step drip campaigns you enroll contacts into.
 
 ![Email templates](docs/screenshots/templates.jpg)
 
@@ -103,8 +103,9 @@ https://github.com/user-attachments/assets/100196d0-a4d7-4d11-848c-ebf0ffebbff4
 - <a id="thread-or-chat-per-inbox"></a>**[Thread or chat, per inbox](docs/inboxes.md#thread-or-chat-per-inbox)** — formal threading for `marketing@`, iMessage-style bubbles for `support@`.
 - <a id="per-inbox-forwarding"></a>**[Per-inbox forwarding](docs/inboxes.md#per-inbox-forwarding)** — re-send inbound mail to any address through your own provider, sidestepping the IP blocks that break Email Routing forwards.
 - <a id="gmail-integration"></a>**[Gmail integration](docs/gmail.md)** — put a Google Workspace mailbox on a saasmail timeline without moving its MX records: mail syncs in over the Gmail API, replies go back out as that mailbox, and anything typed in Gmail shows up too. [Local setup guide](docs/gmail-local-setup.md).
-- <a id="email-templates"></a><a id="template-syntax"></a><a id="upgrading-escaping-is-now-the-default"></a>**[Email templates](docs/templates.md)** — reusable HTML with `{{variable}}` interpolation, sections, and a validated send contract.
+- <a id="email-templates"></a><a id="template-syntax"></a><a id="upgrading-escaping-is-now-the-default"></a>**[Email templates](docs/templates.md)** — reusable HTML with `{{variable}}` interpolation, sections, and a validated send contract; or a visual block editor whose preview is compiled by the same code that renders the send.
 - <a id="email-sequencing"></a>**[Sequences](docs/sequences.md)** — multi-step drip campaigns with delay overrides and auto-cancel on reply.
+- **[Newsletters](docs/newsletters.md)** — subscriber lists with consent records, and campaigns that carry their own content, edited in the block editor with hosted images, with per-list unsubscribe and open/click tracking.
 - <a id="suppressions-and-unsubscribe"></a>**[Suppressions and unsubscribe](docs/suppressions.md)** — RFC 8058 one-click unsubscribe, a suppression list enforced on every send path, and a `transactional` bypass.
 - <a id="user-management"></a><a id="api-keys"></a>**[Users and API keys](docs/users-and-api-keys.md)** — invite-only onboarding, passkeys, and scoped `sk_…` keys.
 - <a id="mcp-server-ai-assistant-access"></a><a id="connecting-a-client"></a><a id="naming-the-connection"></a><a id="scopes"></a>**[MCP server](docs/mcp.md)** — connect Claude or any MCP client to your inbox over OAuth 2.1, scoped to that user's inboxes.

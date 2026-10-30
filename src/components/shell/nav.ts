@@ -7,8 +7,10 @@ import {
   Key,
   ListOrdered,
   Mails,
+  Megaphone,
   PenLine,
   Send,
+  ShieldAlert,
   ShieldBan,
   Star,
   Timer,
@@ -112,6 +114,8 @@ export const WORKSPACE_LINKS: PageLink[] = [
   },
   { id: "outbox", label: "Outbox", path: "/outbox", icon: Timer },
   { id: "api-keys", label: "API keys", path: "/api-keys", icon: Key },
+  { id: "lists", label: "Lists", path: "/lists", icon: Users },
+  { id: "campaigns", label: "Campaigns", path: "/campaigns", icon: Megaphone },
 ];
 
 export const ADMIN_LINKS: PageLink[] = [
@@ -143,6 +147,13 @@ export const ADMIN_LINKS: PageLink[] = [
     icon: ShieldBan,
     admin: true,
   },
+  {
+    id: "contacts",
+    label: "Contact data",
+    path: "/admin/contacts",
+    icon: ShieldAlert,
+    admin: true,
+  },
 ];
 
 export interface Crumb {
@@ -159,6 +170,9 @@ const PAGE_TITLES: Record<string, string> = {
   "/admin/users": "Users",
   "/admin/suppressions": "Suppressions",
   "/blocklist": "Blocklist",
+  "/lists": "Lists",
+  "/campaigns": "Campaigns",
+  "/admin/contacts": "Contact data",
   "/settings": "Settings",
 };
 
@@ -178,7 +192,7 @@ export function crumbsFor(pathname: string, sp: URLSearchParams): Crumb[] {
   }
   if (pathname.startsWith("/m/"))
     return [{ label: "Mail", to: "/" }, { label: "Message" }];
-  for (const base of ["/templates", "/sequences"]) {
+  for (const base of ["/templates", "/sequences", "/lists", "/campaigns"]) {
     if (pathname.startsWith(base + "/")) {
       const rest = pathname.slice(base.length + 1);
       const tail =

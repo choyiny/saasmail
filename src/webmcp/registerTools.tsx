@@ -17,6 +17,10 @@ import {
   markEmailRead,
   saveDraft,
   enrollPerson,
+  fetchLists,
+  fetchList,
+  fetchCampaigns,
+  fetchCampaign,
 } from "@/lib/api";
 import { dispatchInboxRefresh } from "@/lib/inbox-events";
 import { dispatchAgentPlan } from "@/lib/agent-plan";
@@ -27,10 +31,10 @@ import { createActionTools } from "./tools/actions";
 import { withActivity } from "./activity";
 import { WebMcpActivityFeed } from "./WebMcpActivityFeed";
 
-// 12 read tools + 8 action tools. Pinned by
+// 16 read tools + 8 action tools. Pinned by
 // src/webmcp/__tests__/registerTools.test.tsx so this can't silently drift
 // from the tool factories it's built from.
-export const WEBMCP_TOOL_COUNT = 20;
+export const WEBMCP_TOOL_COUNT = 24;
 
 /**
  * Registers every WebMCP read + action tool with the runtime for the
@@ -57,6 +61,10 @@ export function WebMcpTools({ enabled = true }: { enabled?: boolean }) {
       fetchStats,
       searchEmails,
       getSession: () => authClient.getSession(),
+      fetchLists,
+      fetchList,
+      fetchCampaigns,
+      fetchCampaign,
     });
     const actions = createActionTools({
       bridge,
