@@ -128,3 +128,4 @@ WebMCP tools live in `src/webmcp/` (runtime + hook + `tools/`), registered in `D
 
 - A second mailbox-state table (upstream's `mail_item_states`): write row actions through `worker/src/lib/messages/state.ts`, so `/mail`, JMAP and the grouped inbox agree.
 - Holding Gmail/Outlook sends in the outbox: refuse them instead, because outbox rows store no transport and a later drain could send through another provider.
+- Gating the native agent's reads or suggested-reply history on the prompt-injection check: show the stored verdict and the untrusted-mail notice, and let the check block only unattended work (AI filing, the current message of a suggested reply), because the agent has no send tool, a person reviews every draft, and screening history costs one model call per old message.
