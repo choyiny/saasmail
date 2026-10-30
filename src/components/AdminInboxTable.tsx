@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Inbox as InboxIcon,
@@ -548,6 +548,7 @@ export default function AdminInboxTable({
           if (!target) return null;
           return (
             <SignatureEditor
+              key={target.email}
               inbox={target}
               onCancel={() => setSignatureEditingFor(null)}
               onSave={(html) => commitSignature(target, html)}
@@ -1057,6 +1058,16 @@ interface SignatureEditorProps {
 function SignatureEditor({ inbox, onCancel, onSave }: SignatureEditorProps) {
   const [html, setHtml] = useState(inbox.signatureHtml ?? "");
   const [saving, setSaving] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // The editor renders above the table, so opening it from a row further
+  // down would otherwise leave it off-screen and the click looks like a no-op.
+  useEffect(() => {
+    containerRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+  }, []);
 
   async function handleSave() {
     setSaving(true);
@@ -1069,6 +1080,7 @@ function SignatureEditor({ inbox, onCancel, onSave }: SignatureEditorProps) {
 
   return (
     <div
+      ref={containerRef}
       data-testid="inbox-signature-editor"
       className="rounded-2xl bg-card p-4 border border-border shadow-card"
     >
@@ -1093,6 +1105,7 @@ function SignatureEditor({ inbox, onCancel, onSave }: SignatureEditorProps) {
           content={html}
           onUpdate={setHtml}
           placeholder="Cheers, the Team"
+          autoFocus
         />
       </div>
       <div className="mt-3 flex items-center justify-end gap-2">
