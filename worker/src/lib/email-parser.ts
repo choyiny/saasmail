@@ -1,4 +1,4 @@
-import PostalMime, { type Address, type Mailbox } from "postal-mime";
+import PostalMime, { addressParser } from "postal-mime";
 
 export interface AuthResults {
   spf: string | null;
@@ -12,10 +12,25 @@ export interface ParsedEmailAddress {
 }
 
 export interface ParsedEmail {
+  /** The message exactly as received. */
+  raw: Uint8Array;
   from: { address: string; name: string };
   to: string;
   /** Additional recipients on the Cc: line, parsed from the MIME headers. */
   cc: ParsedEmailAddress[];
+  /** The To header's addresses (groups flattened), cleaned like Cc. */
+  toList: ParsedEmailAddress[];
+  /** The Bcc header's addresses, when the message carries one (sent copies). */
+  bcc: ParsedEmailAddress[];
+  /** The Date header, as written. */
+  date: string | null;
+  /**
+   * Addresses in every `Delivered-To` and `X-Original-To` header, lowercased:
+   * where a copy of the message was delivered.
+   */
+  deliveredTo: string[];
+  /** Where the sender asked for replies (Reply-To); empty when absent. */
+  replyTo: ParsedEmailAddress[];
   /**
    * The recipient headers as written — unparsed, unfiltered, undecoded.
    *
@@ -183,56 +198,105 @@ function parseSpamScore(headers: Record<string, string>): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Valid addresses only, lowercased, names trimmed, at most 50. */
+function cleanAddresses(
+  list: Array<{ address?: string; name?: string }>,
+): ParsedEmailAddress[] {
+  return list
+    .filter((c): c is { address: string; name?: string } => {
+      if (!c.address || typeof c.address !== "string") return false;
+      // Cheap RFC 5322-ish gate. Defers strict validation to downstream
+      // schemas; we only need to reject the obviously-not-email cases.
+      return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
+    })
+    .slice(0, 50)
+    .map((c) => ({
+      email: c.address.trim().toLowerCase(),
+      name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
+    }));
+}
+
 /**
- * Parse raw RFC822 bytes. The envelope carries the SMTP-level sender and
- * recipient, which are not always present or trustworthy in the MIME
- * headers — `from` is a fallback when the message has no parseable From,
- * and `to` is the inbox this message was delivered to.
- *
- * Split out from `parseEmail` so a non-Cloudflare source can reuse it:
- * the Gmail API's `messages.get(format=raw)` returns the same bytes the
- * Email Worker receives.
- *
- * A Gmail caller often cannot know the correct inbox before parsing — the
- * real address may live in a `Delivered-To` or `List-ID` header inside
- * `raw` rather than the envelope — so such a caller may pass a provisional
- * `envelope.to` and reassign `parsed.to` afterwards.
+ * The addresses of a stored address header (the value kept in
+ * `emails.raw_headers`), with groups flattened as RFC 8621 does and the same
+ * clean-up as the Cc list.
  */
-export async function parseRaw(
-  raw: ArrayBuffer,
-  envelope: { from: string; to: string },
+export function parseAddressHeader(value: string): ParsedEmailAddress[] {
+  return cleanAddresses(
+    addressParser(value).flatMap((entry) =>
+      "group" in entry && entry.group ? entry.group : [entry],
+    ),
+  );
+}
+
+const MAX_REPLY_TO = 10;
+
+/** A Reply-To list: each address once, at most 10. */
+function uniqueReplyTo(list: ParsedEmailAddress[]): ParsedEmailAddress[] {
+  const seen = new Set<string>();
+  const unique: ParsedEmailAddress[] = [];
+  for (const entry of list) {
+    if (seen.has(entry.email)) continue;
+    seen.add(entry.email);
+    unique.push(entry);
+  }
+  return unique.slice(0, MAX_REPLY_TO);
+}
+
+/** The Reply-To list of a stored `reply-to` header value. */
+export function parseReplyToHeader(value: string): ParsedEmailAddress[] {
+  return uniqueReplyTo(parseAddressHeader(value));
+}
+
+export async function parseEmail(
+  message: ForwardableEmailMessage,
+): Promise<ParsedEmail> {
+  const rawEmail = await new Response(message.raw).arrayBuffer();
+  return parseRawEmail(rawEmail, { from: message.from, to: message.to });
+}
+
+/** Address list fields of postal-mime, with groups flattened. */
+function flattened(
+  list: Array<{ address?: string; name?: string; group?: unknown }> | undefined,
+): Array<{ address?: string; name?: string }> {
+  return (list ?? []).flatMap((entry) =>
+    "group" in entry && Array.isArray(entry.group)
+      ? (entry.group as Array<{ address?: string; name?: string }>)
+      : [entry],
+  );
+}
+
+/**
+ * Parses a message from its bytes: what `parseEmail` does for live mail, and
+ * what an import does for a message read from a file. `envelope` gives the
+ * SMTP sender and recipient when there are any; without one, `to` is the
+ * first To address.
+ */
+export async function parseRawEmail(
+  rawEmail: ArrayBuffer | Uint8Array,
+  envelope: { from?: string; to?: string } = {},
 ): Promise<ParsedEmail> {
   const parser = new PostalMime();
-  const parsed = await parser.parse(raw);
+  const parsed = await parser.parse(rawEmail);
 
   const headers: Record<string, string> = {};
+  const deliveredTo: string[] = [];
   if (parsed.headers) {
     for (const header of parsed.headers) {
       headers[header.key] = header.value;
+      if (header.key === "delivered-to" || header.key === "x-original-to") {
+        deliveredTo.push(
+          ...parseAddressHeader(header.value).map((entry) => entry.email),
+        );
+      }
     }
   }
 
   const bodyText = parsed.text || null;
   const bodyHtml = parsed.html || null;
 
-  // postal-mime types an address list as `Address[]`, a union of a plain
-  // mailbox and an RFC 5322 GROUP (`Team: a@x.com, b@y.com;`), which arrives
-  // as `{ name, group: Mailbox[] }` with no `.address` at all. A group's
-  // members are ordinary recipients that happen to be written inside a label,
-  // so they are spliced into the list where the group stood rather than
-  // vanishing with it. An empty group (`undisclosed-recipients:;`) therefore
-  // contributes nothing, which is correct — it names nobody.
-  const flatten = (list: Address[] | undefined): Mailbox[] => {
-    const out: Mailbox[] = [];
-    for (const entry of list ?? []) {
-      if (entry.address !== undefined) out.push(entry);
-      else out.push(...entry.group);
-    }
-    return out;
-  };
-
-  // Normalize one of postal-mime's parsed address lists into the roster shape
-  // the rest of the app stores and displays. We
+  // Extract CC list from the parsed MIME structure. postal-mime exposes
+  // `parsed.cc` as an array of `{ address, name }` (or undefined). We
   // - filter to entries with a syntactically-valid email (don't trust
   //   header data — malformed Cc: lines pollute displayed rosters
   //   and the de-dupe-by-email logic elsewhere),
@@ -240,30 +304,19 @@ export async function parseRaw(
   //   don't fork conversation_id buckets,
   // - cap the array so a single inbound message can't slam storage
   //   with thousands of header-entries.
-  //
-  // Relative order survives, but ENTRIES DO NOT: a recipient this filter
-  // dislikes is deleted and everyone behind them moves up one. So this list
-  // answers "who else was on the message", and it cannot answer "who was
-  // written first" — element 0 is the first recipient that SURVIVED. Callers
-  // that need the first-written recipient must read `recipientHeaders`.
-  const addressList = (list: Address[] | undefined): ParsedEmailAddress[] =>
-    flatten(list)
-      .filter((c) => {
-        // `Mailbox.address` is a non-optional `string`, so only `""` is worth
-        // testing for here — the old `typeof` guard was left over from when
-        // this function took `unknown`.
-        if (!c.address) return false;
-        // Cheap RFC 5322-ish gate. Defers strict validation to downstream
-        // schemas; we only need to reject the obviously-not-email cases.
-        return /^[^\s<>"@]+@[^\s<>"@]+\.[^\s<>"@]+$/.test(c.address.trim());
-      })
-      .slice(0, 50)
-      .map((c) => ({
-        email: c.address.trim().toLowerCase(),
-        name: c.name && c.name.trim() ? c.name.trim().slice(0, 200) : null,
-      }));
+  const cc = cleanAddresses(flattened(parsed.cc));
+  const toList = cleanAddresses(flattened(parsed.to));
+  const bcc = cleanAddresses(flattened(parsed.bcc));
 
-  const cc: ParsedEmailAddress[] = addressList(parsed.cc);
+  // Reply-To gets the Cc clean-up, with groups flattened; replies are
+  // addressed from this list, so a duplicate would be mailed twice.
+  const replyTo = uniqueReplyTo(
+    cleanAddresses(
+      (parsed.replyTo ?? []).flatMap((entry) =>
+        "group" in entry && entry.group ? entry.group : [entry],
+      ),
+    ),
+  );
 
   // The FIRST header of each name, in the order the message wrote them.
   // `parsed.headers` preserves duplicates and document order; the `headers`
@@ -273,12 +326,19 @@ export async function parseRaw(
     parsed.headers?.find((h) => h.key === key)?.value ?? null;
 
   return {
+    // A view of an import's file is kept as it is, not copied.
+    raw: rawEmail instanceof Uint8Array ? rawEmail : new Uint8Array(rawEmail),
     from: {
-      address: parsed.from?.address || envelope.from,
+      address: parsed.from?.address || envelope.from || "",
       name: parsed.from?.name || "",
     },
-    to: envelope.to,
+    to: envelope.to ?? toList[0]?.email ?? "",
     cc,
+    toList,
+    bcc,
+    date: parsed.date || headers["date"] || null,
+    deliveredTo,
+    replyTo,
     recipientHeaders: {
       to: firstHeaderValue("to"),
       cc: firstHeaderValue("cc"),
@@ -303,10 +363,5 @@ export async function parseRaw(
   };
 }
 
-/** Adapter for the Cloudflare Email Worker entry point. */
-export async function parseEmail(
-  message: ForwardableEmailMessage,
-): Promise<ParsedEmail> {
-  const raw = await new Response(message.raw).arrayBuffer();
-  return parseRaw(raw, { from: message.from, to: message.to });
-}
+/** Upstream's name for `parseRawEmail`; mailbox syncs import it. */
+export const parseRaw = parseRawEmail;

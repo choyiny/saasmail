@@ -1,3 +1,9 @@
+import {
+  beginSend,
+  finishSend,
+  forgetSendKey,
+  sendKeyProblem,
+} from "@/lib/send-key";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Check, PenSquare, Send, X } from "lucide-react";
@@ -24,6 +30,7 @@ import { dispatchEmailSent } from "@/lib/email-events";
 import { getFromLabel } from "@/lib/format";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import AttachmentPicker from "@/components/AttachmentPicker";
+import SendingPausedNotice from "@/components/SendingPausedNotice";
 import AttachmentChips from "@/components/AttachmentChips";
 
 // Effective backend cap is ~18MB on the Cloudflare email path; we cap the
@@ -58,12 +65,14 @@ interface ComposeModalProps {
   open: boolean;
   onClose: () => void;
   prefill?: ComposePrefill | null;
+  /** Draft slot of this window ("compose" unless the caller names one). */
+  contextKey?: string;
   /**
    * Reopen the composer with this content. Undo Send needs it: the
    * composer closes as soon as Send is pressed and comes back on Undo or
    * when the send fails. Without it, sends go out at once (no Undo).
    */
-  onReopen?: (prefill: ComposePrefill) => void;
+  onReopen?: (prefill: ComposePrefill, contextKey?: string) => void;
 }
 
 /**
@@ -75,11 +84,14 @@ export default function ComposeModal({
   open,
   onClose,
   prefill,
+  contextKey = "compose",
   onReopen,
 }: ComposeModalProps) {
   const [{ undoSendSeconds }] = useCommonSettings();
   const openRef = useRef(open);
   openRef.current = open;
+  const contextKeyRef = useRef(contextKey);
+  contextKeyRef.current = contextKey;
   const [to, setTo] = useState("");
   const [fromAddress, setFromAddress] = useState("");
   const [cc, setCc] = useState<CcEntry[]>([]);
@@ -148,13 +160,14 @@ export default function ComposeModal({
       fetchStats().then((stats) => {
         setRecipients(stats.recipients);
         setSenderIdentities(stats.senderIdentities ?? []);
-        // Prefill `from` wins; otherwise keep whatever was sticky from
-        // last open; finally fall back to the first inbox.
+        // Prefill `from` wins; otherwise keep whatever is already set (sticky
+        // from last open, or a restored draft's sender that landed before
+        // this response); finally fall back to the first inbox.
         const want = prefill?.from;
         if (want && stats.recipients.includes(want)) {
           setFromAddress(want);
-        } else if (!fromAddress && stats.recipients.length > 0) {
-          setFromAddress(stats.recipients[0]);
+        } else if (stats.recipients.length > 0) {
+          setFromAddress((current) => current || stats.recipients[0]);
         }
       });
       // Apply any seeded values up front. Fields the caller didn't
@@ -208,7 +221,7 @@ export default function ComposeModal({
       (prefill.cc && prefill.cc.length > 0))
   );
   const { clear: clearDraft, status: draftStatus } = useDraftAutosave({
-    contextKey: "compose",
+    contextKey,
     enabled: open,
     isEmpty: composeIsEmpty,
     restore: open && !hasPrefill,
@@ -222,6 +235,18 @@ export default function ComposeModal({
       if (draft.fromAddress) setFromAddress(draft.fromAddress);
     },
   });
+
+  const sendContext = `send:${contextKey}`;
+  // Closing the window ends this message: the next one gets a new key. Only
+  // a close does: after a reload the window starts closed, and a retry from
+  // the restored draft must keep the key. A send held for Undo or in flight
+  // keeps its key through the close (the window closes as soon as Send is
+  // pressed); only its own success or Undo forgets it.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) forgetSendKey(sendContext);
+    wasOpen.current = open;
+  }, [open, sendContext]);
 
   function handleSend() {
     if (!to || bodyIsEmpty || sending) return;
@@ -255,18 +280,27 @@ export default function ComposeModal({
     };
     const failure =
       "Couldn't send. Your draft is saved; check the address and try again.";
+    // Pressing Send freezes the message and claims its key: every attempt
+    // of this message carries it, so a retry can't send it twice.
+    const context = sendContext;
+    const idempotencyKey = beginSend(context);
+    const draftKey = contextKey;
 
     if (!onReopen) {
       // No way to bring the composer back: send in place, as before.
       setSending(true);
-      sendEmail(payload)
+      sendEmail({ ...payload, idempotencyKey })
         .then(() => {
+          finishSend(context, idempotencyKey, "sent");
           dispatchEmailSent({ fromAddress, to, origin: "compose" });
           clearDraft();
           setFiles([]);
           onClose();
         })
-        .catch(() => setError(failure))
+        .catch((sendError) => {
+          finishSend(context, idempotencyKey, "failed");
+          setError(sendKeyProblem(sendError, context) ?? failure);
+        })
         .finally(() => setSending(false));
       return;
     }
@@ -277,15 +311,29 @@ export default function ComposeModal({
     sendWithUndo({
       seconds: undoSendSeconds,
       label: "Sending…",
-      send: () => sendEmail(payload).then(() => undefined),
-      onUndo: () => onReopen(snapshot),
-      onSent: () => {
-        dispatchEmailSent({ fromAddress, to, origin: "compose" });
-        // The message went out: drop its draft, unless a new message is
-        // being written right now (that one owns the draft slot).
-        if (!openRef.current) deleteDraft("compose").catch(() => {});
+      send: () =>
+        sendEmail({ ...payload, idempotencyKey }).then(() => undefined),
+      onUndo: () => {
+        finishSend(context, idempotencyKey, "undone");
+        onReopen(snapshot, draftKey);
       },
-      onError: () => onReopen({ ...snapshot, error: failure }),
+      onSent: () => {
+        finishSend(context, idempotencyKey, "sent");
+        dispatchEmailSent({ fromAddress, to, origin: "compose" });
+        // The message went out: drop its draft, unless the composer open
+        // right now is writing on that same slot (it owns the draft now).
+        if (!(openRef.current && contextKeyRef.current === draftKey))
+          deleteDraft(draftKey).catch(() => {});
+      },
+      onError: (sendError) => {
+        // The message comes back with the same key, so sending it again
+        // cannot send it twice.
+        finishSend(context, idempotencyKey, "failed");
+        onReopen(
+          { ...snapshot, error: sendKeyProblem(sendError, context) ?? failure },
+          draftKey,
+        );
+      },
     });
   }
 
@@ -462,6 +510,7 @@ export default function ComposeModal({
             </AttachmentPicker>
           </div>
 
+          <SendingPausedNotice className="border-t border-border bg-card px-4 pt-2 sm:px-5" />
           {/* Slim footer — single row, just send + cancel + hint. */}
           <div
             className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-4 pt-2.5 sm:px-5"

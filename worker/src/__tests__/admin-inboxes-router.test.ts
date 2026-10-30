@@ -70,6 +70,187 @@ describe("admin inboxes router", () => {
     expect(rows[0].displayName).toBe("Alpha");
   });
 
+  it("PATCH lets admins set and clear agent instructions, but rejects members", async () => {
+    const adminUser = await createTestUser({
+      id: "u-agent-admin",
+      role: "admin",
+      email: "agent-admin@x.com",
+    });
+    const member = await createTestUser({
+      id: "u-agent-member",
+      role: "member",
+      email: "agent-member@x.com",
+    });
+
+    const set = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey: adminUser.apiKey,
+        method: "PATCH",
+        body: JSON.stringify({
+          agentInstructions: "Keep replies concise and friendly.",
+        }),
+      },
+    );
+    expect(set.status).toBe(200);
+    expect((await set.json()).agentInstructions).toBe(
+      "Keep replies concise and friendly.",
+    );
+
+    const denied = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey: member.apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentInstructions: "Member override" }),
+      },
+    );
+    expect(denied.status).toBe(403);
+
+    const listed = await authFetch("/api/admin/inboxes", {
+      apiKey: adminUser.apiKey,
+    });
+    const row = (
+      (await listed.json()) as Array<{
+        email: string;
+        agentInstructions: string | null;
+      }>
+    ).find((item) => item.email === "a@x.com");
+    expect(row?.agentInstructions).toBe("Keep replies concise and friendly.");
+
+    const clear = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey: adminUser.apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentInstructions: "" }),
+      },
+    );
+    expect(clear.status).toBe(200);
+    expect((await clear.json()).agentInstructions).toBeNull();
+  });
+
+  it("PATCH persists agent autodraft and keeps the row until it returns to default", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+
+    const enabled = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentAutodraft: true }),
+      },
+    );
+    expect(enabled.status).toBe(200);
+    expect((await enabled.json()).agentAutodraft).toBe(true);
+
+    let rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].agentAutodraft).toBe(1);
+
+    const listed = await authFetch("/api/admin/inboxes", { apiKey });
+    const row = (
+      (await listed.json()) as Array<{
+        email: string;
+        agentAutodraft: boolean;
+      }>
+    ).find((item) => item.email === "a@x.com");
+    expect(row?.agentAutodraft).toBe(true);
+
+    const disabled = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentAutodraft: false }),
+      },
+    );
+    expect(disabled.status).toBe(200);
+    expect((await disabled.json()).agentAutodraft).toBe(false);
+
+    rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("PATCH rejects agent instructions over 4000 characters", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ agentInstructions: "x".repeat(4001) }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("PATCH persists and clears a 0..100 spam threshold", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+
+    const set = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ spamThreshold: 5 }),
+      },
+    );
+    expect(set.status).toBe(200);
+    expect((await set.json()).spamThreshold).toBe(5);
+
+    let rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows[0]?.spamThreshold).toBe(5);
+
+    const listed = await authFetch("/api/admin/inboxes", { apiKey });
+    const inbox = (
+      (await listed.json()) as Array<{
+        email: string;
+        spamThreshold: number | null;
+      }>
+    ).find((row) => row.email === "a@x.com");
+    expect(inbox?.spamThreshold).toBe(5);
+
+    const clear = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ spamThreshold: null }),
+      },
+    );
+    expect(clear.status).toBe(200);
+    expect((await clear.json()).spamThreshold).toBeNull();
+
+    rows = await getDb()
+      .select()
+      .from(senderIdentities)
+      .where(eq(senderIdentities.email, "a@x.com"));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("PATCH rejects a spam threshold outside 0..100", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent("a@x.com")}`,
+      {
+        apiKey,
+        method: "PATCH",
+        body: JSON.stringify({ spamThreshold: 100.1 }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("PATCH clears display name when null is provided", async () => {
     const { apiKey } = await createTestUser({ role: "admin" });
     const now = Math.floor(Date.now() / 1000);
@@ -377,6 +558,41 @@ describe("admin inboxes router", () => {
       .where(eq(inboxPermissions.email, "a@x.com"));
     const userIds = rows.map((r) => r.userId).sort();
     expect(userIds).toEqual(["u-m1", "u-m2"]);
+  });
+
+  it("PUT assignments canonicalizes a mixed-case inbox path before storage", async () => {
+    const { apiKey } = await createTestUser({
+      id: "u-admin-case",
+      role: "admin",
+      email: "admin-case@x.com",
+    });
+    await createTestUser({
+      id: "u-member-case",
+      role: "member",
+      email: "member-case@x.com",
+    });
+
+    const res = await authFetch(
+      `/api/admin/inboxes/${encodeURIComponent(" Support@X.COM ")}/assignments`,
+      {
+        apiKey,
+        method: "PUT",
+        body: JSON.stringify({ userIds: ["u-member-case"] }),
+      },
+    );
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      email: "support@x.com",
+      assignedUserIds: ["u-member-case"],
+    });
+
+    const rows = await getDb()
+      .select()
+      .from(inboxPermissions)
+      .where(eq(inboxPermissions.userId, "u-member-case"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].email).toBe("support@x.com");
   });
 
   it("PATCH persists forwardTo and surfaces it in GET", async () => {

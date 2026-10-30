@@ -1,6 +1,11 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useUnsavedGuard } from "@/hooks/useUnsavedGuard";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import {
+  useParams,
+  useNavigate,
+  Link,
+  useSearchParams,
+} from "react-router-dom";
 import {
   ArrowLeft,
   BookOpen,
@@ -9,8 +14,10 @@ import {
   Eye,
   Sparkles,
   Wand2,
+  Blocks,
 } from "lucide-react";
 import HtmlCodeEditor from "@/components/HtmlCodeEditor";
+import BlockEditor from "@/components/blocks/BlockEditor";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 import {
   CodeBlock,
@@ -20,6 +27,11 @@ import {
   SectionHeader,
 } from "@/components/PageForm";
 import { fetchTemplate, createTemplate, updateTemplate } from "@/lib/api";
+import { compile } from "@worker/lib/blocks/compile";
+import {
+  BlockDocumentSchema,
+  type BlockDocument,
+} from "@worker/lib/blocks/schema";
 import {
   analyzeTemplateClient,
   chipLabel,
@@ -68,6 +80,7 @@ type ViewMode = "split" | "code" | "preview";
 
 export default function TemplateEditorPage() {
   const { slug } = useParams<{ slug: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const isEdit = Boolean(slug);
 
@@ -75,38 +88,67 @@ export default function TemplateEditorPage() {
   const [slugValue, setSlugValue] = useState("");
   const [subject, setSubject] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");
+  // `format` is fixed for the life of a template except for the one-way
+  // block → html conversion; the server refuses the reverse.
+  const [format, setFormat] = useState<"html" | "block">(
+    searchParams.get("format") === "block" ? "block" : "html",
+  );
+  const [bodyJson, setBodyJson] = useState<BlockDocument | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(isEdit);
   const [viewMode, setViewMode] = useState<ViewMode>("split");
   // What was last loaded or saved, to tell when there are unsaved edits.
   const [saved, setSaved] = useState(() =>
-    JSON.stringify({ name: "", slugValue: "", subject: "", bodyHtml: "" }),
+    JSON.stringify({
+      name: "",
+      slugValue: "",
+      subject: "",
+      bodyHtml: "",
+      bodyJson: null,
+    }),
   );
   const dirty =
     !loading &&
-    JSON.stringify({ name, slugValue, subject, bodyHtml }) !== saved;
+    JSON.stringify({ name, slugValue, subject, bodyHtml, bodyJson }) !== saved;
   const { confirmLeave, release } = useUnsavedGuard(dirty);
+
+  /**
+   * For a block template the body is compiled here, by the same module the
+   * worker runs on save. That is the payoff for keeping the compiler pure and
+   * dependency-free: the preview is not an approximation of the email, it is
+   * the email. A document mid-edit can fail validation (an empty button href,
+   * say) — fall back to the last good HTML rather than blanking the preview.
+   */
+  const lastGoodHtml = useRef("");
+  const effectiveHtml = useMemo(() => {
+    if (format !== "block") return bodyHtml;
+    if (!bodyJson) return "";
+    const parsed = BlockDocumentSchema.safeParse(bodyJson);
+    if (!parsed.success) return lastGoodHtml.current;
+    lastGoodHtml.current = compile(parsed.data);
+    return lastGoodHtml.current;
+  }, [format, bodyHtml, bodyJson]);
 
   // A section left open mid-keystroke (e.g. typing "{{#items}}" before its
   // closing tag) is a normal, transient state, not a bug — fall back to an
   // empty analysis rather than crashing the page on every keystroke.
   const analysis = useMemo(() => {
     try {
-      return analyzeTemplateClient(subject, bodyHtml);
+      return analyzeTemplateClient(subject, effectiveHtml);
     } catch {
       return EMPTY_ANALYSIS;
     }
-  }, [subject, bodyHtml]);
+  }, [subject, effectiveHtml]);
 
   const previewHtml = useMemo(() => {
     try {
-      return renderPreview(bodyHtml, sampleValues(analysis));
+      return renderPreview(effectiveHtml, sampleValues(analysis));
     } catch {
       // Unbalanced sections mid-edit are normal — show the source instead.
-      return bodyHtml;
+      return effectiveHtml;
     }
-  }, [bodyHtml, analysis]);
+  }, [effectiveHtml, analysis]);
 
   useEffect(() => {
     if (!slug) return;
@@ -116,12 +158,15 @@ export default function TemplateEditorPage() {
         setSlugValue(t.slug);
         setSubject(t.subject);
         setBodyHtml(t.bodyHtml);
+        setFormat(t.format ?? "html");
+        setBodyJson(t.bodyJson ?? null);
         setSaved(
           JSON.stringify({
             name: t.name,
             slugValue: t.slug,
             subject: t.subject,
             bodyHtml: t.bodyHtml,
+            bodyJson: t.bodyJson ?? null,
           }),
         );
       })
@@ -134,10 +179,17 @@ export default function TemplateEditorPage() {
     setSaving(true);
     setError("");
     try {
+      // A block template never sends `bodyHtml` — the server compiles it, and
+      // the API refuses a client-supplied one precisely so the two cannot drift.
+      const body =
+        format === "block"
+          ? { format: "block" as const, bodyJson: bodyJson ?? undefined }
+          : { bodyHtml };
+
       if (isEdit) {
-        await updateTemplate(slug!, { name, subject, bodyHtml });
+        await updateTemplate(slug!, { name, subject, ...body });
       } else {
-        await createTemplate({ slug: slugValue, name, subject, bodyHtml });
+        await createTemplate({ slug: slugValue, name, subject, ...body });
       }
       release();
       navigate("/templates");
@@ -284,18 +336,31 @@ export default function TemplateEditorPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
             <div className="min-w-0">
               <h2 className="inline-flex items-center gap-2 text-[15px] font-semibold tracking-[-0.01em] text-text-primary">
-                <Code2 size={15} className="text-text-secondary" />
+                {format === "block" ? (
+                  <Blocks size={15} className="text-text-secondary" />
+                ) : (
+                  <Code2 size={15} className="text-text-secondary" />
+                )}
                 Body
               </h2>
               <p className="mt-0.5 text-[13px] text-text-secondary">
-                Author HTML on the left, see the rendered email on the right.
+                {format === "block"
+                  ? "Arrange blocks on the left, see the compiled email on the right."
+                  : "Author HTML on the left, see the rendered email on the right."}
               </p>
             </div>
             <div className="flex items-center gap-2">
               <ViewToggle mode={viewMode} onChange={setViewMode} />
+              {format === "block" && (
+                <span className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-violet/10 px-2.5 text-[11px] font-medium text-[#7c5cfc]">
+                  <Blocks size={11} />
+                  Blocks
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => setBodyHtml(formatHtml(bodyHtml))}
+                hidden={format === "block"}
                 disabled={!bodyHtml}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-card px-2.5 text-[13px] font-medium text-text-primary shadow-card ring-1 ring-inset ring-border-strong transition-colors hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -357,9 +422,15 @@ export default function TemplateEditorPage() {
                   viewMode === "code" && "md:col-span-2",
                 )}
               >
-                <PaneLabel>HTML source</PaneLabel>
-                <div className="min-h-0 flex-1">
-                  <HtmlCodeEditor value={bodyHtml} onChange={setBodyHtml} />
+                <PaneLabel>
+                  {format === "block" ? "Blocks" : "HTML source"}
+                </PaneLabel>
+                <div className="flex min-h-0 flex-1 flex-col">
+                  {format === "block" ? (
+                    <BlockEditor value={bodyJson} onChange={setBodyJson} />
+                  ) : (
+                    <HtmlCodeEditor value={bodyHtml} onChange={setBodyHtml} />
+                  )}
                 </div>
               </div>
             )}

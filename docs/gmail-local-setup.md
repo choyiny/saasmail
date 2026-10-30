@@ -6,7 +6,7 @@ How to get a Google Workspace mailbox syncing into a saasmail running on your
 own machine. [Gmail integration](gmail.md) explains what the feature does and
 why; this page is the sequence of steps that makes it work locally, including
 the two things that only matter locally — the redirect URI Google must accept,
-and how to fire the sync cron without waiting fifteen minutes.
+and how to fire the sync cron without waiting up to an hour.
 
 Everything here assumes a working local checkout: `yarn install`,
 `wrangler login`, `cp wrangler.jsonc.example wrangler.jsonc`,
@@ -122,7 +122,7 @@ to your machine.
 alone:
 
 ```jsonc
-"triggers": { "crons": ["*/15 * * * *"] }
+"triggers": { "crons": ["0 * * * *"] }
 ```
 
 Restart `yarn dev` after editing either file.
@@ -157,7 +157,7 @@ admin.
 
 There is no admin route, no button and no yarn script that syncs one mailbox.
 The worker's `scheduled` handler is the only thing that calls the Gmail sync,
-so without a manual trigger every test iteration costs up to fifteen minutes.
+so without a manual trigger every test iteration costs up to an hour.
 
 The Vite dev server forwards Miniflare's trigger endpoint, so a request to it
 runs the scheduled handler immediately:
@@ -171,7 +171,7 @@ local dev server was running when this page was written. Confirm it on your
 first run: a successful trigger answers with the body `ok` and a `200`, and
 the `yarn dev` terminal prints the sync's own log lines. A `404`, HTML, or the
 saasmail SPA coming back means the request did not reach the handler; in that
-case fall back to waiting for the real 15-minute tick. The endpoint also
+case fall back to waiting for the real hourly tick. The endpoint also
 accepts `?cron=…` and `?time=<unix-ms>` to set what the handler sees, and
 `?format=json` for a JSON outcome.
 
@@ -191,7 +191,7 @@ a local instance with seeded sequence data, expect those to run too.
 
 Success looks like a row in **Connected Google mailboxes** showing the
 address, a provenance line — "Added 3 days ago · last connected by Jane Ops" —
-and **"Not synced yet — the first sync runs within 15 minutes."**
+and **"Not synced yet — the first sync runs within the hour."**
 
 Failure banners:
 
@@ -230,7 +230,7 @@ completed), `503` (Gmail integration is not configured).
 ## Step 6 — Confirm it works
 
 1. Send a mail **into** the Gmail mailbox from an outside address.
-2. Fire the cron (step 3), or wait up to fifteen minutes.
+2. Fire the cron (step 3), or wait up to an hour.
 3. Check the account: `GET /api/admin/gmail` as an admin. `lastSyncedAt`
    should have moved and `lastError` should be null.
 4. The message should be on the customer's timeline under the mapped inbox.
@@ -277,11 +277,11 @@ deployed instance): `[gmail] OAuth callback failed:`, `Gmail sync for `,
 
 Things that look broken and are not:
 
-- **Sync polls every 15 minutes. There is no push.** A message can take that
+- **Sync polls every hour. There is no push.** A message can take that
   long to appear.
 - **Connecting never backfills.** The cursor is seeded at the mailbox's
   current position, so the timeline starts empty and fills forward only.
-- **50 messages per mailbox per run.** A backlog drains at roughly 200 an
+- **50 messages per mailbox per run.** A backlog drains at 50 an
   hour, over several ticks; the terminal logs "hit the 50-message cap;
   resuming after history record …". Not a stall.
 - **`DRAFT`, `TRASH` and `SPAM` messages are skipped**, and that skip wins

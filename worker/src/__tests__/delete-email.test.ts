@@ -11,6 +11,7 @@ import {
 import { attachments } from "../db/attachments.schema";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { suggestedReplies } from "../db/suggested-replies.schema";
 import { people } from "../db/people.schema";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -45,6 +46,38 @@ describe("DELETE /api/emails/:id", () => {
     const db = getDb();
     const rows = await db.select().from(emails).where(eq(emails.id, "e1"));
     expect(rows.length).toBe(0);
+  });
+
+  it("deletes suggested replies before hard-deleting a received email", async () => {
+    await createTestPerson({ id: "suggest-delete-person" });
+    await createTestEmail({
+      id: "suggest-delete-email",
+      personId: "suggest-delete-person",
+    });
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(suggestedReplies).values({
+      id: "suggest-delete-row",
+      emailId: "suggest-delete-email",
+      inbox: "support@example.com",
+      bodyText: "Draft",
+      model: "test",
+      status: "pending",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const res = await authFetch("/api/emails/suggest-delete-email", {
+      apiKey,
+      method: "DELETE",
+    });
+    expect(res.status).toBe(200);
+
+    expect(
+      await getDb()
+        .select()
+        .from(suggestedReplies)
+        .where(eq(suggestedReplies.emailId, "suggest-delete-email")),
+    ).toHaveLength(0);
   });
 
   it("deletes a received email and its attachment DB records", async () => {

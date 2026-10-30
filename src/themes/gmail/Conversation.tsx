@@ -48,8 +48,11 @@ import { useSession } from "@/lib/auth-client";
 import { showToast } from "@/lib/toast";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import { onEmailSent } from "@/lib/email-events";
+import { onInboxRefresh } from "@/lib/inbox-events";
 import { itemTitle } from "@/hooks/useMailList";
 import ReplyComposer from "@/components/ReplyComposer";
+import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
+import InjectionChip from "@/components/InjectionChip";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import ImageAttachments, {
   splitAttachments,
@@ -258,9 +261,22 @@ function MessageCard({
                     Failed to send
                   </span>
                 )}
+                {isSent && (email.deliveryProblems?.length ?? 0) > 0 && (
+                  <span className="ml-1">
+                    <DeliveryProblemBadge
+                      problems={email.deliveryProblems}
+                      recipientCount={1 + email.cc.length}
+                    />
+                  </span>
+                )}
                 {isSent && email.status === "retrying" && (
                   <span className="ml-1 rounded-[4px] bg-warning-bg px-1.5 text-xs text-warning">
                     Retrying
+                  </span>
+                )}
+                {!isSent && email.injectionVerdict === "flagged" && (
+                  <span className="ml-1">
+                    <InjectionChip verdict={email.injectionVerdict} />
                   </span>
                 )}
               </div>
@@ -553,6 +569,7 @@ export default function Conversation({
 
   // Replies sent elsewhere (or here) reload the thread.
   useEffect(() => onEmailSent(() => refetch()), [refetch]);
+  useEffect(() => onInboxRefresh(() => refetch()), [refetch]);
 
   const identities = stats?.senderIdentities ?? [];
   const internalDomains = useMemo(() => {

@@ -284,6 +284,21 @@ describe("buildForwardMessage — attachments", () => {
     expect(skippedAttachments).toEqual(["huge.zip"]);
   });
 
+  it("forwards at most 32 attachments, the provider's per-message count, and names the rest", () => {
+    const { message, skippedAttachments } = ok({
+      maxAttachmentBytes: 1_000_000,
+      attachments: Array.from({ length: 34 }, (_, i) => ({
+        filename: `f${i}.txt`,
+        contentType: "text/plain",
+        content: bytes(1),
+        contentId: null,
+        disposition: "attachment" as const,
+      })),
+    });
+    expect(message.attachments).toHaveLength(32);
+    expect(skippedAttachments).toEqual(["f32.txt", "f33.txt"]);
+  });
+
   it("tells the recipient in the body when attachments were withheld", () => {
     // Silently dropping them would leave the reader unaware anything is missing.
     const { message } = ok({
@@ -299,7 +314,7 @@ describe("buildForwardMessage — attachments", () => {
       ],
     });
     expect(message.html).toContain("huge.zip");
-    expect(message.html).toContain("too large to forward");
+    expect(message.html).toContain("could not be forwarded");
     expect(message.text).toContain("huge.zip");
   });
 

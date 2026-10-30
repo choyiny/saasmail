@@ -127,6 +127,7 @@ async function processOutlookMessage(
       return { ...SKIPPED, at };
     }
     const didMirror = await mirrorSentMessage(db, {
+      env,
       ids: { provider: "outlook", messageId },
       parsed,
       inbox,
@@ -169,20 +170,13 @@ async function processOutlookMessage(
     if (already.length > 0) continue;
 
     parsed.to = inbox;
-    const outcome = await ingestParsedEmail(
-      db,
-      parsed,
-      env,
-      ctx,
-      historical ? { historical: { receivedAt } } : {},
-    );
+    // Graph's id goes into the row's own insert, as Gmail's does.
+    const outcome = await ingestParsedEmail(db, parsed, env, ctx, {
+      ...(historical ? { historical: { receivedAt } } : {}),
+      outlookMessageId: messageId,
+    });
     if (outcome.status !== "stored") continue;
     stored++;
-    // Written back by primary key, for the reason given in Gmail's sync.
-    await db
-      .update(emails)
-      .set({ outlookMessageId: messageId })
-      .where(eq(emails.id, outcome.emailId));
   }
   return stored > 0
     ? { ingested: 1, mirrored: 0, skipped: 0, at }

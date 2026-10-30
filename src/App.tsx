@@ -15,6 +15,8 @@ import { useEffect, useState } from "react";
 import LoginPage from "@/pages/LoginPage";
 import ConsentPage from "@/pages/ConsentPage";
 import OnboardingPage from "@/pages/OnboardingPage";
+import MailPage from "@/pages/MailPage";
+import DefaultHomeRoute from "@/components/DefaultHomeRoute";
 import { ThemedInbox } from "@/themes";
 import TemplatesPage from "@/pages/TemplatesPage";
 import TemplateEditorPage from "@/pages/TemplateEditorPage";
@@ -36,6 +38,13 @@ import MessageLinkPage from "@/pages/MessageLinkPage";
 import UnsubscribePage from "@/pages/UnsubscribePage";
 import BlocklistPage from "@/pages/BlocklistPage";
 import OutboxPage from "@/pages/OutboxPage";
+import ListsPage from "@/pages/ListsPage";
+import ListDetailPage from "@/pages/ListDetailPage";
+import CampaignsPage from "@/pages/CampaignsPage";
+import CampaignDetailPage from "@/pages/CampaignDetailPage";
+import ContactPrivacyPage from "@/pages/ContactPrivacyPage";
+import AutomationsPage from "@/pages/AutomationsPage";
+import AdminAuditPage from "@/pages/AdminAuditPage";
 
 const queryClient = new QueryClient();
 
@@ -95,6 +104,24 @@ function AuthGuard() {
  * tab is already open. The SW focuses the tab and posts the target URL; we
  * complete the deep link by performing a client-side navigation here.
  */
+function AdminGuard() {
+  const { data: session, isPending } = useSession();
+
+  if (isPending) {
+    return (
+      <div className="flex flex-1 items-center justify-center text-sm text-text-tertiary">
+        Loading…
+      </div>
+    );
+  }
+
+  if (session?.user?.role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
+}
+
 function NotificationClickListener() {
   const navigate = useNavigate();
   useEffect(() => {
@@ -177,11 +204,33 @@ function App() {
                     path="/sequences/:id"
                     element={<SequenceDetailPage />}
                   />
+                  <Route
+                    path="/admin/contacts"
+                    element={<ContactPrivacyPage />}
+                  />
+                  <Route path="/lists" element={<ListsPage />} />
+                  <Route path="/lists/:id" element={<ListDetailPage />} />
+                  <Route path="/campaigns" element={<CampaignsPage />} />
+                  <Route
+                    path="/campaigns/:id"
+                    element={<CampaignDetailPage />}
+                  />
                   <Route path="/api-keys" element={<ApiKeysPage />} />
                   <Route path="/inboxes" element={<InboxesPage />} />
+                  <Route element={<AdminGuard />}>
+                    <Route path="/automations" element={<AutomationsPage />} />
+                    <Route path="/admin/audit" element={<AdminAuditPage />} />
+                  </Route>
                   <Route path="/settings" element={<SettingsPage />} />
                   <Route path="/blocklist" element={<BlocklistPage />} />
                   <Route path="/outbox" element={<OutboxPage />} />
+                  <Route path="/" element={<DefaultHomeRoute />} />
+                  <Route path="/mail" element={<MailPage />} />
+                  <Route
+                    path="/mail/:inbox/f/:mailboxId"
+                    element={<MailPage />}
+                  />
+                  <Route path="/mail/:inbox/:folder" element={<MailPage />} />
                   {/* Deep link from Web Push notifications — see
                     worker/src/do/notifications.ts where data.url is set. */}
                   <Route

@@ -33,8 +33,8 @@ function makeDeps(overrides: any = {}) {
       subject: "Hi",
     }),
     renderTemplate: vi.fn().mockReturnValue("<p>Hi Al</p>"),
-    invalidate: vi.fn(),
     refreshInbox: vi.fn(),
+    refreshMail: vi.fn(),
     showPlan: vi.fn(),
     ...overrides,
   };
@@ -86,12 +86,13 @@ describe("action tools", () => {
     expect(res.content[0].text.toLowerCase()).toContain("review");
   });
 
-  it("mark_read calls the api immediately and invalidates", async () => {
+  it("mark_read calls the api immediately and refreshes both mail surfaces", async () => {
     const deps = makeDeps();
     const tools = createActionTools(deps as any);
     await t(tools, "mark_read").execute({ emailId: "e1" }, sig);
     expect(deps.markEmailRead).toHaveBeenCalledWith("e1", true);
-    expect(deps.invalidate).toHaveBeenCalled();
+    expect(deps.refreshInbox).toHaveBeenCalled();
+    expect(deps.refreshMail).toHaveBeenCalled();
   });
 
   it("reply_email saves a draft and switches to the Drafts filter without sending", async () => {

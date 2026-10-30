@@ -12,4 +12,8 @@ export class NoopSender implements EmailSender {
   maxAttachmentBytes(): number {
     return 0;
   }
+
+  maxMessageBytes(): number {
+    return 0;
+  }
 }

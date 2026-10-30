@@ -9,6 +9,7 @@ import {
   type GroupedItem,
   type MailCategory,
   type MailFolder,
+  type MailStateUndoStep,
   type Stats,
 } from "@/lib/api";
 import { itemKey, itemRef } from "@/hooks/useMailList";
@@ -216,10 +217,17 @@ export function useOutlookList(query: OutlookListQuery, enabled = true) {
     [],
   );
 
-  /** Optimistic mail-state change; reloads on failure. */
+  /**
+   * Optimistic mail-state change; reloads on failure. Returns the server's
+   * undo steps, or null when nothing was sent or it failed.
+   */
   const applyState = useCallback(
-    async (targets: GroupedItem[], patch: StatePatch, remove: boolean) => {
-      if (targets.length === 0) return false;
+    async (
+      targets: GroupedItem[],
+      patch: StatePatch,
+      remove: boolean,
+    ): Promise<MailStateUndoStep[] | null> => {
+      if (targets.length === 0) return null;
       const local: Partial<GroupedItem> = {};
       if (patch.starred !== undefined) local.starred = patch.starred;
       if (patch.pinned !== undefined) local.pinned = patch.pinned;
@@ -233,15 +241,14 @@ export function useOutlookList(query: OutlookListQuery, enabled = true) {
         local.trashedAt = patch.trashed ? Math.floor(Date.now() / 1000) : null;
       patchLocal(targets, local, remove);
       try {
-        await updateMailState(targets.map(itemRef), patch);
-        return true;
+        return (await updateMailState(targets.map(itemRef), patch)).undo;
       } catch (e) {
         showToast({
           kind: "error",
           message: e instanceof Error ? e.message : "Could not update mail",
         });
         void load({ silent: true });
-        return false;
+        return null;
       }
     },
     [patchLocal, load],

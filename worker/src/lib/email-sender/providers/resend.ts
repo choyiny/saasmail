@@ -1,8 +1,8 @@
 import { Resend } from "resend";
 import type { EmailSender, SendEmailParams, SendEmailResult } from "../types";
-import { toBase64 } from "../shared";
-import { inlineDataImages } from "../inline-images";
+import { toBase64, withoutHeader } from "../shared";
 import { classifyErrorMessage } from "../classify";
+import { inlineDataImages } from "../inline-images";
 
 export class ResendSender implements EmailSender {
   readonly provider = "resend" as const;
@@ -13,25 +13,42 @@ export class ResendSender implements EmailSender {
   }
 
   async send(input: SendEmailParams): Promise<SendEmailResult> {
+    // Pasted images as inline cid: parts, which every client shows.
     const params = inlineDataImages(input);
-    const result = await this.client.emails.send({
-      from: params.from,
-      to: params.to,
-      ...(params.cc && params.cc.length > 0 ? { cc: params.cc } : {}),
-      subject: params.subject,
-      html: params.html,
-      text: params.text,
-      headers: params.headers,
-      ...(params.attachments && params.attachments.length > 0
-        ? {
-            attachments: params.attachments.map((a) => ({
-              filename: a.filename,
-              content: toBase64(a.content),
-              ...(a.contentId ? { contentId: a.contentId } : {}),
-            })),
-          }
-        : {}),
-    });
+    // With a key, a retry of an accepted send gets Resend's original answer
+    // instead of a second message; the same key with a different payload is a
+    // permanent error ("invalid_idempotent_request"), never a resend.
+    const result = await this.client.emails.send(
+      {
+        from: params.from,
+        to:
+          params.additionalTo && params.additionalTo.length > 0
+            ? [params.to, ...params.additionalTo]
+            : params.to,
+        ...(params.cc && params.cc.length > 0 ? { cc: params.cc } : {}),
+        ...(params.bcc && params.bcc.length > 0 ? { bcc: params.bcc } : {}),
+        subject: params.subject,
+        // A text-only message (a JMAP draft) has no HTML body to send.
+        ...(params.html ? { html: params.html } : {}),
+        text: params.text,
+        // Resend stamps Date itself; overriding it isn't documented.
+        headers: withoutHeader(params.headers, "Date"),
+        ...(params.attachments && params.attachments.length > 0
+          ? {
+              attachments: params.attachments.map((a) => ({
+                filename: a.filename,
+                content: toBase64(a.content),
+                contentType: a.contentType,
+                // The SDK sends a part with contentId as inline.
+                ...(a.contentId ? { contentId: a.contentId } : {}),
+              })),
+            }
+          : {}),
+      },
+      params.idempotencyKey
+        ? { idempotencyKey: params.idempotencyKey }
+        : undefined,
+    );
     if (result.error) {
       const message = result.error.message ?? "Resend send failed";
       return {
@@ -47,7 +64,17 @@ export class ResendSender implements EmailSender {
     return { id: result.data?.id ?? null, error: null };
   }
 
+  recipientSupport() {
+    return { multipleTo: true, bcc: true };
+  }
+
   maxAttachmentBytes(): number {
     return 25 * 1024 * 1024;
+  }
+
+  maxMessageBytes(): number {
+    // "max 40MB per email, after Base64 encoding of the attachments"
+    // (resend.com/docs/api-reference/emails/send-email).
+    return 40_000_000;
   }
 }

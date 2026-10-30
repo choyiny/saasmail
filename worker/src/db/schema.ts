@@ -5,6 +5,7 @@ import { emails } from "./emails.schema";
 import { sentEmails } from "./sent-emails.schema";
 import { attachments } from "./attachments.schema";
 import { emailTemplates } from "./email-templates.schema";
+import { newsletterAssets } from "./newsletter-assets.schema";
 import { apiKeys } from "./api-keys.schema";
 import { sequences } from "./sequences.schema";
 import { sequenceEnrollments } from "./sequence-enrollments.schema";
@@ -14,19 +15,48 @@ import { inboxPermissions } from "./inbox-permissions.schema";
 import { pushSubscriptions } from "./push-subscriptions.schema";
 import { appSettings } from "./app-settings.schema";
 import { suppressions } from "./suppressions.schema";
+import { deliveryEvents, deliveryMessageIds } from "./delivery-events.schema";
 import { blocklist } from "./blocklist.schema";
 import { outboxEmails } from "./outbox-emails.schema";
 import { drafts } from "./drafts.schema";
+import { asyncJobs } from "./async-jobs.schema";
+import { contacts } from "./contacts.schema";
+import { lists } from "./lists.schema";
+import { listMembers } from "./list-members.schema";
+import { campaigns } from "./campaigns.schema";
+import { campaignRecipients } from "./campaign-recipients.schema";
+import { campaignLinks } from "./campaign-links.schema";
+import { campaignEvents } from "./campaign-events.schema";
+import { campaignUnsubscribeAttributions } from "./campaign-unsubscribe-attributions.schema";
+import { messageUserState } from "./message-user-state.schema";
+import { mailboxMessageState } from "./mailbox-message-state.schema";
+import { mailboxes } from "./mailboxes.schema";
+import { messageMailboxes } from "./message-mailboxes.schema";
+import { inboxConversationState } from "./inbox-conversation-state.schema";
+import { agentSessions } from "./agent-sessions.schema";
+import { suggestedReplies } from "./suggested-replies.schema";
+import { rules } from "./rules.schema";
+import { autoReplyLog } from "./auto-reply-log.schema";
+import { customerPeople, customers } from "./customers.schema";
+import { jmapChanges } from "./jmap-changes.schema";
+import { auditEvents } from "./audit-events.schema";
+import { sendIdempotency } from "./send-idempotency.schema";
+import { webhookDeliveries } from "./webhook-deliveries.schema";
+import { sendCounters } from "./send-counters.schema";
+import { authRateLimits } from "./auth-rate-limits.schema";
+import { spamModels, spamTokens, spamTraining } from "./spam-filter.schema";
+import { backupRuns } from "./backup-runs.schema";
 import { gmailAccounts } from "./gmail-accounts.schema";
 import { outlookAccounts } from "./outlook-accounts.schema";
 import { installState } from "./install-state.schema";
 import { userPreferences } from "./user-preferences.schema";
-import { mailItemStates, categoryOverrides } from "./mail-item-states.schema";
+import { categoryOverrides } from "./mail-item-states.schema";
+import { userRowPins } from "./user-row-pins.schema";
 
 export const schema = {
   userPreferences,
-  mailItemStates,
   categoryOverrides,
+  userRowPins,
   ...authSchema,
   invitations,
   people,
@@ -43,9 +73,42 @@ export const schema = {
   pushSubscriptions,
   appSettings,
   suppressions,
+  deliveryEvents,
+  deliveryMessageIds,
   blocklist,
   outboxEmails,
   drafts,
+  asyncJobs,
+  contacts,
+  lists,
+  listMembers,
+  campaigns,
+  campaignRecipients,
+  campaignLinks,
+  campaignEvents,
+  campaignUnsubscribeAttributions,
+  newsletterAssets,
+  messageUserState,
+  mailboxMessageState,
+  mailboxes,
+  messageMailboxes,
+  inboxConversationState,
+  agentSessions,
+  suggestedReplies,
+  rules,
+  autoReplyLog,
+  customers,
+  customerPeople,
+  jmapChanges,
+  auditEvents,
+  sendIdempotency,
+  webhookDeliveries,
+  sendCounters,
+  authRateLimits,
+  spamModels,
+  spamTokens,
+  spamTraining,
+  backupRuns,
   gmailAccounts,
   outlookAccounts,
   installState,

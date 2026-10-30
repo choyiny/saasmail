@@ -295,6 +295,7 @@ export default function GmailInbox() {
           setFallback({
             ...EMPTY_MAIL_ROW_STATE,
             type: "person",
+            linkedCount: 0,
             id: p.id,
             email: p.email,
             name: p.name,

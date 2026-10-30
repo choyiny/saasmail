@@ -27,6 +27,15 @@ const BASE64_INFLATION = 4 / 3;
 export const GMAIL_MAX_ATTACHMENT_BYTES = Math.floor(
   GMAIL_MAX_MESSAGE_BYTES / (BASE64_INFLATION * BASE64_INFLATION),
 );
+/**
+ * The largest RFC 822 message `messages.send` takes here: Gmail sends at most
+ * 25 MB per message (https://support.google.com/mail/answer/6584), and this
+ * request carries the message base64url-encoded, so the raw MIME must fit in
+ * 25 MB / (4/3).
+ */
+export const GMAIL_MAX_RAW_MESSAGE_BYTES = Math.floor(
+  GMAIL_MAX_MESSAGE_BYTES / BASE64_INFLATION,
+);
 
 /**
  * Forces a token refresh and returns the fresh token — see
@@ -121,12 +130,25 @@ export class GmailSender implements EmailSender {
   }
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
+    // Whether a request went out: an error after that may hide a send.
+    let requested = false;
     try {
       const raw = buildMimeMessage(params);
+      const rawBytes = new TextEncoder().encode(raw);
+      // Measured before the request, so a refusal is certain: nothing sent.
+      if (rawBytes.byteLength > this.maxMessageBytes()) {
+        return {
+          id: null,
+          error: {
+            message: `The message is ${rawBytes.byteLength} bytes; Gmail accepts ${this.maxMessageBytes()}.`,
+            transient: false,
+          },
+        };
+      }
 
       const accessToken = await this.resolveToken();
       const body: Record<string, unknown> = {
-        raw: toBase64Url(new TextEncoder().encode(raw)),
+        raw: toBase64Url(rawBytes),
       };
       // Threading a reply onto an existing Gmail conversation instead of
       // starting a new one is purely a matter of sending this alongside
@@ -135,6 +157,7 @@ export class GmailSender implements EmailSender {
         body.threadId = params.threadId;
       }
 
+      requested = true;
       let res = await this.post(body, accessToken);
 
       // A 401 means the access token is dead. The commonest cause is a grant
@@ -213,6 +236,7 @@ export class GmailSender implements EmailSender {
           error: {
             message: extractGmailError(res, data),
             transient: transientFromStatus(res.status),
+            uncertain: res.status >= 500,
           },
         };
       }
@@ -265,12 +289,25 @@ export class GmailSender implements EmailSender {
       // fail again.
       return {
         id: null,
-        error: { message, transient: classifyErrorMessage(message) },
+        error: {
+          message,
+          transient: classifyErrorMessage(message),
+          uncertain: requested,
+        },
       };
     }
   }
 
   maxAttachmentBytes(): number {
     return GMAIL_MAX_ATTACHMENT_BYTES;
+  }
+
+  maxMessageBytes(): number {
+    return GMAIL_MAX_RAW_MESSAGE_BYTES;
+  }
+
+  recipientSupport() {
+    // The raw message carries every To and the Bcc header (see buildMimeMessage).
+    return { multipleTo: true, bcc: true };
   }
 }

@@ -1,3 +1,4 @@
+import { auditSequenceCancelled } from "../lib/audit/crm-events";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { eq, and, inArray } from "drizzle-orm";
 import { inboxFilter } from "../lib/inbox-permissions";
@@ -495,6 +496,12 @@ sequencesRouter.openapi(cancelEnrollmentRoute, async (c) => {
         inArray(sequenceEmails.status, ["pending", "queued"]),
       ),
     );
+  await auditSequenceCancelled(db, {
+    enrollmentId,
+    sequenceId: rows[0].sequenceId,
+    personId: rows[0].personId,
+    count: 1,
+  });
 
   return c.json({ success: true }, 200);
 });

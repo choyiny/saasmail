@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
+  Bot,
   FileText,
   LayoutGrid,
   ListOrdered,
@@ -26,6 +27,8 @@ import { emptyTrash, markFolderRead } from "./folderOps";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "./Menu";
 import { Avatar, IconButton } from "./ui";
 import Tooltips from "./Tooltips";
+import { AgentToggleButton } from "@/agent/AgentPanelToggle";
+import { FORK_PAGE_TITLES } from "@/components/shell/fork-nav";
 import "./outlook.css";
 
 export function isInboxPath(pathname: string): boolean {
@@ -323,6 +326,7 @@ const PAGE_TITLES: Array<[string, string]> = [
   ["/admin/suppressions", "Suppressions"],
   ["/blocklist", "Blocklist"],
   ["/settings", "Settings"],
+  ...FORK_PAGE_TITLES,
 ];
 
 function MobilePageHeader() {
@@ -344,7 +348,9 @@ function MobilePageHeader() {
         <Avatar name={userName} seed={userName} size={32} />
       </button>
       <h1 className="ol-m-title">{title}</h1>
-      <span className="w-10" />
+      <AgentToggleButton className="ol-icon-btn">
+        <Bot size={20} />
+      </AgentToggleButton>
     </header>
   );
 }

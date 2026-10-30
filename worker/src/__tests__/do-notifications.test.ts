@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { env } from "cloudflare:workers";
 import { applyMigrations, cleanDb, createTestUser } from "./helpers";
-import { drizzle } from "drizzle-orm/d1";
-import { schema } from "../db/schema";
+import { createDb } from "../db/client";
 import { pushSubscriptions } from "../db/push-subscriptions.schema";
 
 const DELIVER_PAYLOAD = {
@@ -41,7 +40,7 @@ describe("NotificationsHub /deliver", () => {
 
   it("attempts push even when a WS is connected", async () => {
     const { userId } = await createTestUser({ role: "member" });
-    const db = drizzle(env.DB, { schema });
+    const db = createDb(env);
     await db.insert(pushSubscriptions).values({
       id: crypto.randomUUID(),
       userId,
@@ -88,7 +87,7 @@ describe("NotificationsHub /deliver", () => {
 
   it("returns {via:'push', sent:N} and prunes 404s", async () => {
     const { userId } = await createTestUser({ role: "member" });
-    const db = drizzle(env.DB, { schema });
+    const db = createDb(env);
     await db.insert(pushSubscriptions).values({
       id: crypto.randomUUID(),
       userId,

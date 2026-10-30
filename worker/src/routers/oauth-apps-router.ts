@@ -1,3 +1,5 @@
+import { AUDIT_ACTIONS } from "../lib/audit/events";
+import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { desc, eq, sql } from "drizzle-orm";
 import {
@@ -115,7 +117,7 @@ oauthAppsRouter.openapi(revokeRoute, async (c) => {
   const { clientId } = c.req.valid("param");
 
   const existing = await db
-    .select({ clientId: oauthClients.clientId })
+    .select({ clientId: oauthClients.clientId, name: oauthClients.name })
     .from(oauthClients)
     .where(eq(oauthClients.clientId, clientId))
     .limit(1);
@@ -144,6 +146,17 @@ oauthAppsRouter.openapi(revokeRoute, async (c) => {
     .where(eq(oauthRefreshTokens.clientId, clientId));
   await db.delete(oauthConsents).where(eq(oauthConsents.clientId, clientId));
   await db.delete(oauthClients).where(eq(oauthClients.clientId, clientId));
+  await recordAudit(db, {
+    action: AUDIT_ACTIONS.oauthConsentRevoked,
+    targetType: "oauth_client",
+    targetId: clientId,
+    summary: `Revoked the OAuth client ${existing[0].name || clientId} and its access`,
+    details: {
+      name: existing[0].name ?? null,
+      accessTokens: access.length,
+      refreshTokens: refresh.length,
+    },
+  });
 
   return c.json(
     {

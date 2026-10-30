@@ -76,6 +76,7 @@ If the run fails, the message names the failed step and prints `npx saasmail ins
 2. Complete passkey enrollment on the prompt. saasmail enforces passkey auth for `/api/*` in production; without it, you'll be locked out of admin actions.
 3. **Inbound test**: send an email from an external account (e.g. Gmail) to any address at each inbound domain. It should appear in the UI within seconds. If not, see Common Issues.
 4. **Outbound test**: reply to that email from the UI using a send-from address on a verified domain. If it never arrives, the send-from domain is almost certainly not verified yet (DNS records pending).
+5. **Bounce events** (Cloudflare Email Sending only): give the user the command that subscribes the queue `<name>-sequence-emails` to each send-from domain's events, to run in their terminal: `npx wrangler queues subscription create <name>-sequence-emails --source email.sending --zone-id <zone id> --domain <send-from domain> --events message.bounced,message.complained,message.failed,message.rejected`. Without it saasmail never learns of a bounce or a spam complaint (`docs/email-providers.md`, "Bounces and complaints").
 
 ## Completion Summary
 
@@ -85,8 +86,10 @@ Show the user what was set up, substituting their real values (the installer's o
 - Inbound: Cloudflare Email Routing catch-all → worker, on `<inbound domain(s)>`
 - Outbound: `<Cloudflare Email Sending | Resend | Bavimail | Postmark>`, from `<send-from domain(s)>` (and any DNS records still to add)
 - D1 database `<name>-db`, R2 bucket `<name>-attachments`, Queue `<name>-sequence-emails`
+- Durable Objects `NotificationsHub` (realtime and push) and `MailAgent` (native mail agent)
+- Workers AI binding `AI` (the agent's fallback provider)
 - Generated secrets: `BETTER_AUTH_SECRET`, `UNSUBSCRIBE_SECRET`, `TOKEN_ENCRYPTION_KEY` (Gmail), and the VAPID keys for push
-- Cron every 15 minutes for sequence and outbox delivery (and connected-mailbox sync)
+- Hourly cron for sequence emails, the outbox, backups and pruning (and connected-mailbox sync)
 - Later: add domains or credentials with `npx saasmail install --resume --name <name> ...`; update with `/update-saasmail` (`npx saasmail@latest upgrade`)
 
 ## Common Issues

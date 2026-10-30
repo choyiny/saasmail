@@ -46,7 +46,123 @@ git rebase upstream/main -X ours
 
 The `-X ours` flag tells rebase to prefer upstream for conflicting hunks (during a rebase, "ours" is the branch being rebased onto). Your local commits are still replayed on top. `/update-saasmail` does this for you.
 
-After rebasing, apply any new migrations:
+After every update and deploy, run `yarn doctor --config wrangler.jsonc --url <your URL>`: it shows which commit the deployment runs and finds a migration not applied, a missing secret or binding, or a dev flag left on ([Doctor](doctor.md)).
+
+## Upstream migrations
+
+This fork numbers its D1 migrations on its own, so upstream's
+`migrations/*.sql` files reuse numbers the fork already has under other names.
+Git adds them without a conflict, and wrangler would run any that survive at
+the next `yarn db:migrate:prod`, because it applies every file whose name is
+not yet in `d1_migrations`.
+
+When you merge upstream:
+
+1. Delete every upstream `migrations/*.sql` the merge adds, and keep the
+   fork's side of `migrations/meta/_journal.json` and of every
+   `migrations/meta/*_snapshot.json` exactly.
+2. Re-express the schema change with `yarn db:generate --name=<slug>` under
+   the fork's next number, check that the new file holds only upstream's
+   statements, and update `applyMigrations()` in
+   `worker/src/__tests__/helpers.ts` in the same commit.
+3. Add a row to the table below.
+
+| Upstream file                              | Fork file                            | Note                                                                                        |
+| ------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------- |
+| `0035_overjoyed_rocket_racer.sql`          | `0085_upstream_gmail_accounts.sql`   | same statements                                                                             |
+| `0036_futuristic_gunslinger.sql`           | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0037_careful_gwen_stacy.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0038_thick_blonde_phantom.sql`            | `0086_upstream_gmail_outlook.sql`    | dropped: index already in fork 0067                                                         |
+| `0039_amazing_moondragon.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0040_needy_nocturne.sql`                  | `0086_upstream_gmail_outlook.sql`    | dropped: index replaced by 0041                                                             |
+| `0041_old_nighthawk.sql`                   | `0086_upstream_gmail_outlook.sql`    | unique index only                                                                           |
+| `0042_gmail_backfill.sql`                  | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0043_gmail_backfill_one_year.sql`         | `0086_upstream_gmail_outlook.sql`    | column only; dropped: data step on an empty table                                           |
+| `0044_gmail_backfill_job.sql`              | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0045_gmail_backfill_progress.sql`         | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0046_careless_silhouette.sql`             | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0047_outlook_mailboxes.sql`               | `0086_upstream_gmail_outlook.sql`    | same statements                                                                             |
+| `0048_user_prefs_mail_states.sql`          | `0087_upstream_user_preferences.sql` | `user_preferences` only; dropped: `mail_item_states` (the fork keeps its own state model)   |
+| `0049_user_prefs_palette.sql`              | `0087_upstream_user_preferences.sql` | column in the `CREATE TABLE`                                                                |
+| `0050_trash_overrides_layout_settings.sql` | `0087_upstream_user_preferences.sql` | `category_overrides`, columns in the `CREATE TABLE`; dropped: `mail_item_states.trashed_at` |
+| `0051_better_auth_1_7.sql`                 | `0088_upstream_better_auth_1_7.sql`  | same statements                                                                             |
+
+Upstream's `mail_item_states` table is never created here. The inbox list's
+star, archive, snooze and Trash live in the fork's per-message state, and pins
+in `user_row_pins` (fork migration `0089`), as
+[Mailbox state](mailbox-state.md#rows-in-the-inbox-list) describes. An upstream
+migration that touches `mail_item_states` is dropped when it is ported.
+
+Keep the fork's hourly cron (`0 * * * *` in `wrangler.jsonc.example` and
+`wrangler.jsonc.ci`) and `MAX_OUTBOX_ATTEMPTS` (24) when upstream changes
+them: upstream polls every 15 minutes. Gmail and Outlook mail therefore syncs
+hourly here ([Configuration](configuration.md)).
+
+`yarn typecheck` runs `scripts/check-migrations.mjs`, which fails while two
+migration files share a number, so an upstream file that survives a merge
+fails CI.
+
+## Temporary AI SDK approval-continuation patch
+
+This release carries `scripts/patch-ai-resume.mjs`, run by `postinstall`. AI SDK
+7.0.61 changed `resumeStream()` so it starts from an empty assistant message
+([vercel/ai#18462](https://github.com/vercel/ai/pull/18462)), while released
+`agents@0.24.0` / `@cloudflare/ai-chat@0.12.0` still use that API for tool
+approval continuations and strip the continuation start chunk's `messageId`.
+
+The install-time script patches two files:
+
+- `node_modules/ai/dist/index.js` (pinned `ai@7.0.109`): restores the
+  previous-message seed only while Cloudflare's `WebSocketChatTransport` has
+  marked a tool continuation.
+- `node_modules/@ai-sdk/react/dist/index.js` (pinned `@ai-sdk/react@4.0.112`):
+  `useChat` wraps the transport in a proxy, so the proxy forwards the
+  `_expectToolContinuation` flag. Without this, the seed check never sees it.
+
+Ordinary page-load resume keeps AI SDK 7.0.109 behavior. The script is
+idempotent, clears Vite's `node_modules/.vite` pre-bundle cache when it changes
+a file, and fails installation if either version or any exact patch anchor
+changes. Do not bump `ai` or `@ai-sdk/react` until this section and the
+compatibility patch have been re-validated;
+`src/agent/useAgentChat.approval-continuation.test.tsx` must fail without the
+patch and pass with it.
+
+Remove the script and `postinstall` hook once a released Cloudflare Agents /
+AI Chat pair explicitly supports AI SDK >= 7.0.61 approval continuations
+without this compatibility shim. The server-side approval ledger
+(`agent_approval_ledger`, see [Native mail agent](agent.md)) remains necessary: the released Cloudflare message builder still does not
+retain the tool-approval `signature` field when rebuilding the persisted tool
+part.
+
+## Check your `wrangler.jsonc`
+
+After every update, compare your gitignored local configuration with the tracked example:
+
+```bash
+diff -u wrangler.jsonc.example wrangler.jsonc
+```
+
+Review the diff and add any new bindings, migrations, or variables that apply to your deployment. In particular, the mailbox/agent/JMAP release adds:
+
+- the `enable_request_signal` compatibility flag, which [JMAP](jmap.md) push
+  streams need to notice a disconnected client;
+- the Workers AI binding: `"ai": { "binding": "AI" }`;
+- the `MAIL_AGENT` Durable Object binding for class `MailAgent`;
+- the Durable Object migration `{ "tag": "v2", "new_sqlite_classes": ["MailAgent"] }`;
+- the optional `AGENT_APPROVAL_SECRET` secret, and the optional
+  `DB_LOG_QUERIES`, `MCP_SEND_ENABLED` and `PROVIDER_DAILY_SEND_LIMIT` variables;
+- an optional `BACKUPS` R2 bucket for [database backups](data.md#backups)
+  (without it they go to the attachments bucket under `backups/`), and the
+  optional `BACKUP_ENCRYPTION_KEY` secret. Scheduled backups stay off until an
+  admin turns them on.
+
+Also check that `UNSUBSCRIBE_SECRET` is set (`wrangler secret list`): newsletter campaigns refuse to start without it.
+
+The worker fails at runtime without the `MailAgent` binding and its `v2` Durable Object migration. Do not replace a customized `wrangler.jsonc` wholesale; merge the missing entries intentionally.
+
+> **Workers AI billing:** enabling the `AI` binding turns on paid Workers AI usage as the native agent's fallback provider when neither `ANTHROPIC_API_KEY` nor `OPENAI_API_KEY` is configured.
+
+After checking `wrangler.jsonc`, apply any new migrations:
 
 ```bash
 yarn db:migrate:prod

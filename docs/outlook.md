@@ -60,7 +60,7 @@ maps. Several inboxes can share one mailbox, routed by `To:`/`Cc:` exactly as
 
 ## What syncs
 
-- **Live mail** is read on the same 15-minute cron as Gmail, 50 messages per
+- **Live mail** is read on the same hourly cron as Gmail, 50 messages per
   mailbox per tick, from two folders: **Inbox** (onto timelines) and **Sent
   Items** (mirrored as sent mail, so replies typed in Outlook appear too).
   Each folder has its own Graph delta cursor, saved after every page and
@@ -95,6 +95,13 @@ Items, and threads in Outlook by its `In-Reply-To`. Like Gmail replies it is
 sent directly and never queued for the configured provider: a failure is
 reported and the draft kept, and a mailbox whose grant is dead refuses the
 reply rather than rerouting it.
+
+The same send controls apply as for Gmail: the daily cap, a `409`
+`MAILBOX_SEND_NOT_HELD` refusal while sending is paused, and a `502` whose
+answer is kept for its `Idempotency-Key` when Graph may have sent the reply
+(see [Send controls and idempotency](gmail.md#send-controls-and-idempotency)).
+New mail composed from an Outlook-mapped inbox, template sends and sequence
+steps use the configured provider, as for Gmail.
 
 Graph returns no id for a sent message. saasmail recognises its own reply when
 the Sent Items copy comes back through the sync by the `Message-ID` it wrote,

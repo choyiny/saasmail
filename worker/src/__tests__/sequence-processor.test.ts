@@ -194,6 +194,7 @@ describe("sequence processor - processSequenceEmail suppression", () => {
       const fakeSender: EmailSender = {
         provider: "none",
         maxAttachmentBytes: () => 25_000_000,
+        maxMessageBytes: () => 25_000_000,
         send: vi.fn(async (_params: SendEmailParams) => ({
           id: "should-not-be-called",
           error: null,
@@ -273,6 +274,7 @@ describe("sequence processor - processSequenceEmail suppression", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "fake-resend-id",
         error: null,
@@ -299,6 +301,8 @@ describe("sequence processor - processSequenceEmail suppression", () => {
     const sentRows = await db.select().from(sentEmails);
     expect(sentRows).toHaveLength(1);
     expect(sentRows[0].toAddress).toBe("ok@test.com");
+    expect(sentRows[0].sequenceId).toBe("seq-1");
+    expect(sentRows[0].sequenceEnrollmentId).toBe("enr-1");
   });
 });
 
@@ -353,6 +357,7 @@ describe("sequence processor - processSequenceEmail outbox", () => {
         };
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
 
     // Must resolve without throwing — the queue consumer ACKs on return.
@@ -372,6 +377,8 @@ describe("sequence processor - processSequenceEmail outbox", () => {
     const sent = await db.select().from(sentEmails);
     expect(sent).toHaveLength(1);
     expect(sent[0].status).toBe("retrying");
+    expect(sent[0].sequenceId).toBe("seq-1");
+    expect(sent[0].sequenceEnrollmentId).toBe("enr-1");
 
     const outbox = await db.select().from(outboxEmails);
     expect(outbox).toHaveLength(1);
@@ -428,6 +435,7 @@ describe("sequence processor - processSequenceEmail outbox", () => {
         };
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
 
     await processSequenceEmail(
@@ -446,6 +454,8 @@ describe("sequence processor - processSequenceEmail outbox", () => {
     const sent = await db.select().from(sentEmails);
     expect(sent).toHaveLength(1);
     expect(sent[0].status).toBe("failed");
+    expect(sent[0].sequenceId).toBe("seq-perm");
+    expect(sent[0].sequenceEnrollmentId).toBe("enr-perm");
 
     const enr = await db
       .select()
@@ -526,6 +536,7 @@ describe("sequence processor - crash-redelivery idempotency", () => {
         throw new Error("should not be called");
       },
       maxAttachmentBytes: () => 25 * 1024 * 1024,
+      maxMessageBytes: () => 25 * 1024 * 1024,
     };
 
     // Must not throw — the redelivery guard intercepts and repairs.
@@ -550,6 +561,8 @@ describe("sequence processor - crash-redelivery idempotency", () => {
       .where(eq(sentEmails.id, "sent-repair-1"));
     expect(sent).toHaveLength(1);
     expect(sent[0].status).toBe("retrying");
+    expect(sent[0].sequenceId).toBe("seq-1");
+    expect(sent[0].sequenceEnrollmentId).toBe("enr-1");
 
     // Outbox row should still exist (owned by the outbox processor)
     const outbox = await db.select().from(outboxEmails);
@@ -619,6 +632,7 @@ describe("sequence processor - template rendering", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "fake-id",
         error: null,
@@ -652,6 +666,7 @@ describe("sequence processor - template rendering", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "should-not-be-called",
         error: null,
@@ -702,6 +717,7 @@ describe("sequence processor - template rendering", () => {
     const fakeSender: EmailSender = {
       provider: "none",
       maxAttachmentBytes: () => 25_000_000,
+      maxMessageBytes: () => 25_000_000,
       send: vi.fn(async (_params: SendEmailParams) => ({
         id: "fake-id",
         error: null,

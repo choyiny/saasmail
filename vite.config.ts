@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import tailwindcss from "@tailwindcss/vite";
 import { cloudflare } from "@cloudflare/vite-plugin";
+import { buildStampPlugin } from "./scripts/build-stamp.mjs";
 
 export default defineConfig({
   server: {
@@ -15,6 +16,8 @@ export default defineConfig({
     cloudflare({ configPath: process.env.SAASMAIL_BUILD_CONFIG }),
     react(),
     tailwindcss(),
+    // The Worker's build stamp (docs/doctor.md); the web app never gets it.
+    buildStampPlugin(__dirname),
   ],
   resolve: {
     alias: {

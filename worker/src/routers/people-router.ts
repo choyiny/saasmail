@@ -1,16 +1,14 @@
+import { auditMailDeleted } from "../lib/audit/mail-events";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
-import { desc, like, or, eq, sql, and, inArray } from "drizzle-orm";
+import { desc, like, or, eq, sql, and, inArray, isNotNull } from "drizzle-orm";
 import { people } from "../db/people.schema";
 import { emails } from "../db/emails.schema";
 import { attachments } from "../db/attachments.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { drafts } from "../db/drafts.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
-import {
-  mailItemStates,
-  categoryOverrides,
-} from "../db/mail-item-states.schema";
+import { categoryOverrides } from "../db/mail-item-states.schema";
 import { userPreferences } from "../db/user-preferences.schema";
 import { json200Response, escapeLike, escapeFts } from "../lib/helpers";
 import {
@@ -19,7 +17,24 @@ import {
   peopleScopeClause,
 } from "../lib/queries/people";
 import type { Variables } from "../variables";
-import { isInboxAllowed } from "../lib/inbox-permissions";
+import {
+  inboxScopeSql,
+  isInboxAllowed,
+  jsonList,
+} from "../lib/inbox-permissions";
+import { deleteMessageState, deletePersonRowPins } from "../lib/messages/state";
+import { buildMessageQuerySql } from "../lib/messages/query";
+import {
+  markSeenForViewer,
+  rowKey,
+  rowMailState,
+} from "../lib/messages/row-state";
+import { cancelScheduledSendsFor } from "../lib/scheduled-sends";
+import {
+  collectPersonGroupConversations,
+  deletePersonConversationState,
+} from "../lib/messages/conversation-state";
+import { cleanupCustomerForPersonDeletion } from "../lib/customers";
 
 export const peopleRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -49,9 +64,11 @@ const GroupedPersonSchema = z.object({
   recipientCount: z.number(),
   recipients: z.array(z.string()),
   hasAttachment: z.number(),
-  // Per-user mail state (see mail_item_states) plus what the Gmail and
-  // Outlook layouts need to draw a row: last subject, a snippet and whether
-  // we have ever written to this thread.
+  linkedCount: z.number(),
+  // The row's mail state (star and pin are the caller's own; archive, snooze
+  // and trash are shared per inbox, docs/mailbox-state.md) plus what the
+  // Gmail and Outlook layouts need to draw a row: last subject, a snippet and
+  // whether we have ever written to this thread.
   starred: z.boolean(),
   pinned: z.boolean(),
   archivedAt: z.number().nullable(),
@@ -90,9 +107,10 @@ const GroupedConversationSchema = z.object({
   unreadCount: z.number(),
   totalCount: z.number(),
   hasAttachment: z.number(),
-  // Per-user mail state (see mail_item_states) plus what the Gmail and
-  // Outlook layouts need to draw a row: last subject, a snippet and whether
-  // we have ever written to this thread.
+  // The row's mail state (star and pin are the caller's own; archive, snooze
+  // and trash are shared per inbox, docs/mailbox-state.md) plus what the
+  // Gmail and Outlook layouts need to draw a row: last subject, a snippet and
+  // whether we have ever written to this thread.
   starred: z.boolean(),
   pinned: z.boolean(),
   archivedAt: z.number().nullable(),
@@ -233,7 +251,7 @@ export const GroupedQuerySchema = z.object({
     .default("all")
     .openapi({
       description:
-        "Mail folder, from the signed-in user's star/archive/snooze/trash state. `all` (default) ignores that state; `inbox` hides archived, snoozed and trashed rows and puts pinned rows first; `sent` keeps rows we have written to; every folder except `trash` (including `all`) hides the caller's trashed rows.",
+        "Mail folder, from the rows' message state (docs/mailbox-state.md § Rows in the inbox list). `all` (default) keeps rows with untrashed mail; `inbox` keeps rows with mail in the Inbox that is not snoozed and puts the caller's pinned rows first; `snoozed` orders by wake time; `sent` keeps rows we have written to; every folder except `trash` hides trashed rows. Spam never puts a row in a folder.",
     }),
   sort: z
     .enum(["recency", "unread", "inbox", "attachments"])
@@ -357,12 +375,7 @@ export async function computeGroupedRows(
   const personConditions: any[] = [];
   if (recipient) {
     personConditions.push(
-      sql`s.id IN (SELECT person_id FROM emails WHERE recipient = ${recipient} AND conversation_id IS NULL)`,
-    );
-  }
-  if (unread) {
-    personConditions.push(
-      sql`s.id IN (SELECT person_id FROM emails WHERE is_read = 0 AND conversation_id IS NULL)`,
+      sql`s.id IN (SELECT person_id FROM emails WHERE recipient = ${recipient} AND conversation_id IS NULL ${inboxScopeSql(allowed, sql`recipient`)})`,
     );
   }
   if (sequenced) {
@@ -377,6 +390,7 @@ export async function computeGroupedRows(
         JOIN ${drafts} d ON e.id = ${draftTargetEmailId}
         WHERE d.user_id = ${draftsUserId}
           AND e.conversation_id IS NULL
+          ${inboxScopeSql(allowed, sql`e.recipient`)}
       )`,
     );
   }
@@ -387,7 +401,7 @@ export async function computeGroupedRows(
       ? sql``
       : allowed.inboxes.length === 0
         ? sql`AND 0`
-        : sql`AND emails.recipient IN ${allowed.inboxes}`;
+        : sql`AND emails.recipient IN ${jsonList(allowed.inboxes)}`;
     personConditions.push(
       sql`(s.email LIKE ${pattern} ESCAPE '\\' OR s.name LIKE ${pattern} ESCAPE '\\'
         OR s.id IN (
@@ -418,17 +432,32 @@ export async function computeGroupedRows(
       ? sql`AND ${sql.join(personConditions, sql` AND `)}`
       : sql``;
   const personWhereClause = sql`WHERE 1=1 ${personExtraConditions} ${scopeClause}`;
+  const linkedPeopleScope = allowed.isAdmin
+    ? sql``
+    : allowed.inboxes.length === 0
+      ? sql`AND 0`
+      : sql`AND cp2.person_id IN (
+          SELECT person_id FROM ${emails} WHERE recipient IN ${jsonList(allowed.inboxes)}
+          UNION
+          SELECT person_id FROM ${sentEmails}
+          WHERE from_address IN ${jsonList(allowed.inboxes)} AND person_id IS NOT NULL
+        )`;
 
   // Aggregate over both received and sent emails so people we've composed to
   // appear in the list, not just senders who have emailed us. We exclude
   // any rows with a non-null conversation_id — those belong under group rows.
+  // Both arms are scoped to the caller's inboxes: `peopleScopeClause` decides
+  // which people are listed, this decides which of their mail is counted, so
+  // a sender who also wrote to a private inbox shows none of that inbox's
+  // address, counts or recency.
   const activity = sql`(
     SELECT person_id, recipient AS inbox, received_at AS at, is_read, conversation_id, 0 AS is_sent
     FROM ${emails}
+    WHERE 1=1 ${inboxScopeSql(allowed, sql`recipient`)}
     UNION ALL
     SELECT person_id, from_address AS inbox, sent_at AS at, 1 AS is_read, conversation_id, 1 AS is_sent
     FROM ${sentEmails}
-    WHERE person_id IS NOT NULL
+    WHERE person_id IS NOT NULL ${inboxScopeSql(allowed, sql`from_address`)}
   )`;
 
   const personRowsRaw = await db.all<{
@@ -441,6 +470,7 @@ export async function computeGroupedRows(
     recipientCount: number;
     recipientsCsv: string | null;
     hasAttachment: number;
+    linkedCount: number;
     hasSent: number;
   }>(sql`
     SELECT
@@ -459,7 +489,22 @@ export async function computeGroupedRows(
         WHERE e2.person_id = s.id
         AND a.content_id IS NULL
         AND e2.conversation_id IS NULL
-      ) AS hasAttachment
+        ${inboxScopeSql(allowed, sql`e2.recipient`)}
+      ) AS hasAttachment,
+      MAX(
+        0,
+        (
+          SELECT COUNT(*)
+          FROM customer_people cp2
+          WHERE cp2.customer_id = (
+            SELECT cp.customer_id
+            FROM customer_people cp
+            WHERE cp.person_id = s.id
+            LIMIT 1
+          )
+          ${linkedPeopleScope}
+        ) - 1
+      ) AS linkedCount
     FROM ${activity} e
     JOIN ${people} s ON s.id = e.person_id
     ${personWhereClause}
@@ -478,6 +523,7 @@ export async function computeGroupedRows(
     recipientCount: r.recipientCount,
     recipients: r.recipientsCsv ? r.recipientsCsv.split(",") : [],
     hasAttachment: r.hasAttachment,
+    linkedCount: r.linkedCount,
     ...EMPTY_ROW_STATE,
     hasSent: r.hasSent === 1,
   }));
@@ -491,14 +537,11 @@ export async function computeGroupedRows(
     ? sql``
     : allowed.inboxes.length === 0
       ? sql`AND 0`
-      : sql`AND inbox IN ${allowed.inboxes}`;
+      : sql`AND inbox IN ${jsonList(allowed.inboxes)}`;
 
   const groupConditions: any[] = [];
   if (recipient) {
     groupConditions.push(sql`g.inbox = ${recipient}`);
-  }
-  if (unread) {
-    groupConditions.push(sql`g.unreadCount > 0`);
   }
   if (sequenced) {
     // Only individual contacts are enrolled in sequences — never group
@@ -512,6 +555,7 @@ export async function computeGroupedRows(
         JOIN ${drafts} d ON e.id = ${draftTargetEmailId}
         WHERE d.user_id = ${draftsUserId}
           AND e.conversation_id IS NOT NULL
+          ${inboxScopeSql(allowed, sql`e.recipient`)}
       )`,
     );
   }
@@ -524,13 +568,14 @@ export async function computeGroupedRows(
       ? sql``
       : allowed.inboxes.length === 0
         ? sql`AND 0`
-        : sql`AND emails.recipient IN ${allowed.inboxes}`;
+        : sql`AND emails.recipient IN ${jsonList(allowed.inboxes)}`;
     groupConditions.push(sql`(
       g.conversation_id IN (
         SELECT DISTINCT e.conversation_id FROM ${emails} e
         JOIN ${people} p ON p.id = e.person_id
         WHERE e.conversation_id IS NOT NULL
         AND (p.email LIKE ${pattern} ESCAPE '\\' OR p.name LIKE ${pattern} ESCAPE '\\')
+        ${inboxScopeSql(allowed, sql`e.recipient`)}
       )
       OR g.conversation_id IN (
         SELECT emails.conversation_id FROM emails
@@ -540,6 +585,7 @@ export async function computeGroupedRows(
       OR g.conversation_id IN (
         SELECT conversation_id FROM ${sentEmails}
         WHERE conversation_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
+        ${inboxScopeSql(allowed, sql`from_address`)}
       )
     )`);
   }
@@ -550,6 +596,7 @@ export async function computeGroupedRows(
       JOIN ${people} p ON p.id = e.person_id
       WHERE e.conversation_id IS NOT NULL
       AND (p.email LIKE ${pattern} ESCAPE '\\' OR p.name LIKE ${pattern} ESCAPE '\\')
+      ${inboxScopeSql(allowed, sql`e.recipient`)}
     )`);
   }
   const groupExtraConditions =
@@ -587,6 +634,7 @@ export async function computeGroupedRows(
           JOIN ${emails} e2 ON e2.id = a.email_id
           WHERE e2.conversation_id = act.conversation_id
           AND a.content_id IS NULL
+          ${inboxScopeSql(allowed, sql`e2.recipient`)}
         ) AS hasAttachment
       FROM (
         SELECT conversation_id, recipient AS inbox, received_at AS at, is_read, 0 AS is_sent
@@ -633,33 +681,24 @@ export async function computeGroupedRows(
     r.type === "person" ? (r.recipients[0] ?? "") : r.inbox;
   let merged: Row[] = [...personRows, ...groupRows];
 
-  // Apply the caller's star / pin / archive / snooze state, then the folder.
-  const stateRows = await db
-    .select()
-    .from(mailItemStates)
-    .where(eq(mailItemStates.userId, user?.id ?? ""));
-  const stateByKey = new Map(
-    stateRows.map((s) => [`${s.itemType}:${s.itemId}`, s]),
+  // Star, pin, archive, snooze, trash and unread come from the per-message
+  // state (docs/mailbox-state.md § Rows in the inbox list). A row with no
+  // eligible (non-spam) message is in no folder.
+  const rowState = await rowMailState(
+    db,
+    { userId: user?.id ?? "" },
+    allowed,
+    Math.floor(Date.now() / 1000),
   );
-  const nowSec = Math.floor(Date.now() / 1000);
+  merged = merged.filter((r) => rowState.has(rowKey(r)));
   for (const r of merged) {
-    const st = stateByKey.get(`${r.type}:${r.id}`);
-    if (!st) continue;
-    r.starred = st.starred === 1;
-    r.pinned = st.pinned === 1;
-    // New mail after the archive brings the row back, like Gmail.
-    r.archivedAt =
-      st.archivedAt !== null && st.archivedAt >= r.lastEmailAt
-        ? st.archivedAt
-        : null;
-    r.snoozedUntil =
-      st.snoozedUntil !== null && st.snoozedUntil > nowSec
-        ? st.snoozedUntil
-        : null;
-    r.trashedAt =
-      st.trashedAt !== null && st.trashedAt >= r.lastEmailAt
-        ? st.trashedAt
-        : null;
+    const st = rowState.get(rowKey(r))!;
+    r.starred = st.starred;
+    r.pinned = st.pinned;
+    r.archivedAt = st.archivedAt;
+    r.snoozedUntil = st.snoozedUntil;
+    r.trashedAt = st.trashedAt;
+    r.unreadCount = folder === "inbox" ? st.inboxUnreadCount : st.unreadCount;
   }
   // Categories: one query per row kind for "has bulk-mail headers", then
   // sender heuristics in categorize().
@@ -669,6 +708,7 @@ export async function computeGroupedRows(
         await db.all<{ k: string }>(sql`
         SELECT DISTINCT person_id AS k FROM ${emails}
         WHERE conversation_id IS NULL AND lower(raw_headers) LIKE '%list-unsubscribe%'
+        ${inboxScopeSql(allowed, sql`recipient`)}
       `)
       ).map((r) => r.k),
     );
@@ -677,6 +717,7 @@ export async function computeGroupedRows(
         await db.all<{ k: string }>(sql`
         SELECT DISTINCT conversation_id AS k FROM ${emails}
         WHERE conversation_id IS NOT NULL AND lower(raw_headers) LIKE '%list-unsubscribe%'
+        ${inboxScopeSql(allowed, sql`recipient`)}
       `)
       ).map((r) => r.k),
     );
@@ -728,8 +769,8 @@ export async function computeGroupedRows(
       updates: { unread: 0, new: 0 },
     };
     for (const r of merged) {
-      if (r.archivedAt || r.snoozedUntil || r.trashedAt) continue;
-      if (r.unreadCount <= 0) continue;
+      const st = rowState.get(rowKey(r))!;
+      if (!st.inInbox || st.inboxUnreadCount <= 0) continue;
       const t = tabCounts[r.category];
       t.unread++;
       if (r.lastEmailAt > (seen[r.category] ?? 0)) t.new++;
@@ -744,40 +785,38 @@ export async function computeGroupedRows(
     merged = merged.filter((r) => r.lastEmailAt >= after);
   if (before !== undefined)
     merged = merged.filter((r) => r.lastEmailAt < before);
-  if (subject) {
-    const pattern = `%${escapeLike(subject)}%`;
-    const personHits = new Set(
-      (
-        await db.all<{ k: string }>(sql`
-          SELECT DISTINCT person_id AS k FROM ${emails}
-          WHERE conversation_id IS NULL AND subject LIKE ${pattern} ESCAPE '\\'
-          UNION
-          SELECT DISTINCT person_id AS k FROM ${sentEmails}
-          WHERE conversation_id IS NULL AND person_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
-        `)
-      ).map((r) => r.k),
-    );
-    const convHits = new Set(
-      (
-        await db.all<{ k: string }>(sql`
-          SELECT DISTINCT conversation_id AS k FROM ${emails}
-          WHERE conversation_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
-          UNION
-          SELECT DISTINCT conversation_id AS k FROM ${sentEmails}
-          WHERE conversation_id IS NOT NULL AND subject LIKE ${pattern} ESCAPE '\\'
-        `)
-      ).map((r) => r.k),
-    );
+  const subjectSearch = subject?.trim();
+  if (subjectSearch) {
+    // Subject hits come from the shared message query (AGENTS.md § Message
+    // reads), scoped to the caller's inboxes like the rows themselves.
+    const built = buildMessageQuerySql(allowed, {
+      search: subjectSearch,
+      searchMode: "subject",
+      limit: null,
+    });
+    const hits = built
+      ? await db.all<{
+          person_id: string | null;
+          conversation_id: string | null;
+        }>(
+          sql`SELECT DISTINCT person_id, conversation_id FROM (${built.statement})`,
+        )
+      : [];
+    const personHits = new Set<string>();
+    const convHits = new Set<string>();
+    for (const h of hits) {
+      if (h.conversation_id) convHits.add(h.conversation_id);
+      else if (h.person_id) personHits.add(h.person_id);
+    }
     merged = merged.filter((r) =>
       r.type === "person" ? personHits.has(r.id) : convHits.has(r.id),
     );
   }
   // Trash hides a row everywhere except the Trash folder.
   if (folder !== "trash") merged = merged.filter((r) => !r.trashedAt);
-
   switch (folder) {
     case "inbox":
-      merged = merged.filter((r) => !r.archivedAt && !r.snoozedUntil);
+      merged = merged.filter((r) => rowState.get(rowKey(r))!.inInbox);
       break;
     case "starred":
       merged = merged.filter((r) => r.starred);
@@ -795,6 +834,7 @@ export async function computeGroupedRows(
       merged = merged.filter((r) => r.trashedAt);
       break;
   }
+  if (unread) merged = merged.filter((r) => r.unreadCount > 0);
 
   const sign = effectiveDirection === "asc" ? -1 : 1;
   switch (sort) {
@@ -836,6 +876,7 @@ export async function computeGroupedRows(
 
 peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
   const db = c.get("db");
+  const allowed = c.get("allowedInboxes")!;
   const query = c.req.valid("query");
   const { page, limit } = query;
   const offset = (page - 1) * limit;
@@ -876,16 +917,19 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
     const keyCol = sql.raw(column);
     const onlyOneToOne =
       column === "person_id" ? sql`AND conversation_id IS NULL` : sql``;
-    for (const [table, atCol] of [
-      [emails, sql.raw("received_at")],
-      [sentEmails, sql.raw("sent_at")],
+    // Only messages in the caller's inboxes: a row they may see can also
+    // have mail in an inbox they may not.
+    for (const [table, atCol, inboxCol] of [
+      [emails, sql.raw("received_at"), sql.raw("recipient")],
+      [sentEmails, sql.raw("sent_at"), sql.raw("from_address")],
     ] as const) {
       const rows = await db.all<Latest & { k: string }>(sql`
         SELECT k, subject, body, at FROM (
           SELECT ${keyCol} AS k, subject, substr(body_text, 1, 400) AS body,
             ${atCol} AS at,
             ROW_NUMBER() OVER (PARTITION BY ${keyCol} ORDER BY ${atCol} DESC) AS rn
-          FROM ${table} WHERE ${keyCol} IN ${ids} ${onlyOneToOne}
+          FROM ${table} WHERE ${keyCol} IN ${jsonList(ids)} ${onlyOneToOne}
+            ${inboxScopeSql(allowed, inboxCol)}
         ) WHERE rn = 1
       `);
       for (const r of rows) {
@@ -925,7 +969,8 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       SELECT DISTINCT e.conversation_id, s.id, s.email, s.name
       FROM ${emails} e
       JOIN ${people} s ON s.id = e.person_id
-      WHERE e.conversation_id IN ${pageGroupIds}
+      WHERE e.conversation_id IN ${jsonList(pageGroupIds)}
+        ${inboxScopeSql(allowed, sql`e.recipient`)}
     `);
     const fromSentParticipants = await db.all<{
       conversation_id: string;
@@ -936,7 +981,8 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       SELECT DISTINCT se.conversation_id, s.id, s.email, s.name
       FROM ${sentEmails} se
       JOIN ${people} s ON s.id = se.person_id
-      WHERE se.conversation_id IN ${pageGroupIds} AND se.person_id IS NOT NULL
+      WHERE se.conversation_id IN ${jsonList(pageGroupIds)} AND se.person_id IS NOT NULL
+        ${inboxScopeSql(allowed, sql`se.from_address`)}
     `);
     const participantsByConv = new Map<
       string,
@@ -955,14 +1001,16 @@ peopleRouter.openapi(listGroupedPeopleRoute, async (c) => {
       cc: string | null;
     }>(sql`
       SELECT conversation_id, cc FROM ${emails}
-      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+      WHERE conversation_id IN ${jsonList(pageGroupIds)} AND cc IS NOT NULL
+        ${inboxScopeSql(allowed, sql`recipient`)}
     `);
     const fromSentCc = await db.all<{
       conversation_id: string;
       cc: string | null;
     }>(sql`
       SELECT conversation_id, cc FROM ${sentEmails}
-      WHERE conversation_id IN ${pageGroupIds} AND cc IS NOT NULL
+      WHERE conversation_id IN ${jsonList(pageGroupIds)} AND cc IS NOT NULL
+        ${inboxScopeSql(allowed, sql`from_address`)}
     `);
     const ccByConv = new Map<
       string,
@@ -1033,7 +1081,7 @@ const groupedIdsRoute = createRoute({
   path: "/grouped/ids",
   tags: ["People"],
   description:
-    "Every row matching the same filters as /grouped, as `{type, id, unread}` refs (capped at 5000). Lets a client act on a whole folder — mark all read, archive all — without paging through it.",
+    "Every row matching the same filters as /grouped, as `{type, id, unread, pinned}` refs (capped at 5000). Lets a client act on a whole folder — mark all read, archive all — without paging through it; `pinned` lets it undo a pin-all exactly.",
   request: { query: GroupedQuerySchema },
   responses: {
     ...json200Response(
@@ -1043,6 +1091,7 @@ const groupedIdsRoute = createRoute({
             type: z.enum(["person", "group"]),
             id: z.string(),
             unread: z.boolean(),
+            pinned: z.boolean(),
           }),
         ),
         total: z.number(),
@@ -1062,6 +1111,7 @@ peopleRouter.openapi(groupedIdsRoute, async (c) => {
         type: r.type,
         id: r.id,
         unread: r.unreadCount > 0,
+        pinned: r.pinned,
       })),
       total: merged.length,
       truncated: merged.length > CAP,
@@ -1101,14 +1151,14 @@ peopleRouter.openapi(categoryOverrideRoute, async (c) => {
   const { senders, category } = c.req.valid("json");
   const keys = [...new Set(senders.map((s) => s.toLowerCase()))];
   if (category === null) {
-    await db
-      .delete(categoryOverrides)
-      .where(
-        and(
-          eq(categoryOverrides.userId, user.id),
-          inArray(categoryOverrides.senderEmail, keys),
-        ),
-      );
+    await db.delete(categoryOverrides).where(
+      and(
+        eq(categoryOverrides.userId, user.id),
+        // One bound JSON array, not one parameter per key (D1 caps a
+        // statement at 100 bound parameters).
+        sql`${categoryOverrides.senderEmail} IN ${jsonList(keys)}`,
+      ),
+    );
   } else {
     const now = Math.floor(Date.now() / 1000);
     await db.batch(
@@ -1232,7 +1282,7 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
   }
 
   const person = await db
-    .select({ id: people.id })
+    .select({ id: people.id, email: people.email })
     .from(people)
     .where(eq(people.id, id))
     .limit(1);
@@ -1240,6 +1290,26 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
   if (person.length === 0) {
     return c.json({ error: "Person not found" }, 404);
   }
+
+  const groupConversations = await collectPersonGroupConversations(db, id);
+
+  const received = await db
+    .select({ id: emails.id, inbox: emails.recipient })
+    .from(emails)
+    .where(eq(emails.personId, id));
+  const sent = await db
+    .select({ id: sentEmails.id, inbox: sentEmails.fromAddress })
+    .from(sentEmails)
+    .where(eq(sentEmails.personId, id));
+
+  await deleteMessageState(db, [
+    ...received.map((message) => ({
+      kind: "received" as const,
+      id: message.id,
+    })),
+    ...sent.map((message) => ({ kind: "sent" as const, id: message.id })),
+  ]);
+  await deletePersonRowPins(db, id);
 
   // Delete R2 attachments for all received emails belonging to this person
   const atts = await db
@@ -1250,6 +1320,14 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
 
   for (const att of atts) {
     await r2.delete(att.r2Key);
+  }
+  // And each received message's raw copy (JMAP blobId).
+  const raws = await db
+    .select({ r2Key: emails.rawR2Key })
+    .from(emails)
+    .where(and(eq(emails.personId, id), isNotNull(emails.rawR2Key)));
+  for (const raw of raws) {
+    await r2.delete(raw.r2Key!);
   }
 
   await db
@@ -1264,8 +1342,30 @@ peopleRouter.openapi(deletePersonRoute, async (c) => {
       ),
     );
   await db.delete(emails).where(eq(emails.personId, id));
+  await cancelScheduledSendsFor(db, sql`person_id = ${id}`);
   await db.delete(sentEmails).where(eq(sentEmails.personId, id));
+  await cleanupCustomerForPersonDeletion(db, id);
+  await deletePersonConversationState(db, id, groupConversations);
   await db.delete(people).where(eq(people.id, id));
+
+  // One row per inbox, so a search of an inbox's log finds what left it.
+  await auditMailDeleted(
+    db,
+    [
+      ...received.map((message) => ({
+        ref: { kind: "received" as const, id: message.id },
+        inbox: message.inbox,
+      })),
+      ...sent.map((message) => ({
+        ref: { kind: "sent" as const, id: message.id },
+        inbox: message.inbox,
+      })),
+    ],
+    {
+      with: `the contact ${person[0].email}`,
+      details: { personId: id, person: person[0].email },
+    },
+  );
 
   return c.json({ success: true }, 200);
 });
@@ -1316,9 +1416,9 @@ peopleRouter.openapi(bulkMarkReadRoute, async (c) => {
   // inboxes; explicit `recipient` narrows further).
   const recipientScope = (() => {
     if (recipient) {
-      if (!isInboxAllowed(allowed, recipient)) {
-        return null; // not permitted
-      }
+      // A recipient the caller can't access matches nothing (never "no
+      // scope", which would reach every inbox).
+      if (!isInboxAllowed(allowed, recipient)) return [];
       return [recipient];
     }
     if (allowed.isAdmin) return null; // no scope needed
@@ -1333,11 +1433,11 @@ peopleRouter.openapi(bulkMarkReadRoute, async (c) => {
   // Update emails. We compute the affected count via a SELECT first so we
   // can return a useful number to the UI.
   const conditions = [
-    inArray(emails.personId, personIds),
+    sql`${emails.personId} IN ${jsonList(personIds)}`,
     eq(emails.isRead, 0),
   ];
   if (recipientScope) {
-    conditions.push(inArray(emails.recipient, recipientScope));
+    conditions.push(sql`${emails.recipient} IN ${jsonList(recipientScope)}`);
   }
   const where = and(...conditions)!;
 
@@ -1364,6 +1464,14 @@ peopleRouter.openapi(bulkMarkReadRoute, async (c) => {
         .set({ unreadCount: row?.count ?? 0 })
         .where(eq(people.id, pid));
     }
+  }
+  // The inbox list reads the caller's own seen state (docs/mailbox-state.md).
+  const user = c.get("user");
+  if (user) {
+    await markSeenForViewer(db, user.id, allowed, {
+      personIds,
+      ...(recipientScope ? { inboxes: recipientScope } : {}),
+    });
   }
 
   return c.json({ success: true, affected }, 200);

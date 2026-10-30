@@ -49,6 +49,7 @@ export function inlineDataImages(params: SendEmailParams): SendEmailParams {
           contentType: type,
           content,
           contentId: cid,
+          disposition: "inline",
         });
       }
       return `${prefix}${quote}cid:${cid}${quote}`;

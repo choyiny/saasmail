@@ -5,16 +5,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Copy, Check, Key, RefreshCw, Trash2 } from "lucide-react";
+import { Copy, Check, Key, PauseCircle, RefreshCw, Trash2 } from "lucide-react";
 import {
   fetchApiKeyInfo,
   generateApiKey,
   revokeApiKey,
+  enableWebhook,
   fetchWebhookConfig,
+  fetchWebhookDeliveries,
   saveWebhookConfig,
   testWebhook,
+  WEBHOOK_EVENTS,
 } from "@/lib/api";
-import type { ApiKeyInfo } from "@/lib/api";
+import type {
+  ApiKeyInfo,
+  WebhookConfigInfo,
+  WebhookDeliveryInfo,
+  WebhookEvent,
+} from "@/lib/api";
 import { useSession } from "@/lib/auth-client";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -238,11 +246,33 @@ The code should:
 3. Compare "sha256=" + that hex to the header value using a constant-time comparison.
 4. Reject the request (401) if they don't match.
 
+Events about sent mail (message.sent, message.bounced, message.complained, message.failed) are retried and can arrive more than once: they also carry an X-SaaSMail-Delivery header, the same on every retry. Store it and ignore a request whose value was already handled.
+
 My stack: <your language/framework, e.g. Node/Express, Python/FastAPI, Cloudflare Workers>`;
+
+const EVENT_LABELS: Record<WebhookEvent, string> = {
+  "message.received": "A new inbound message",
+  "message.sent": "The provider accepted a message sent from here",
+  "message.bounced": "A sent message bounced",
+  "message.complained": "A recipient marked a sent message as spam",
+  "message.failed": "A sent message failed for good",
+};
+
+function deliveryResult(delivery: WebhookDeliveryInfo): string {
+  if (delivery.lastStatus !== null) return `HTTP ${delivery.lastStatus}`;
+  return delivery.lastError ?? "—";
+}
 
 function WebhookSection() {
   const [url, setUrl] = useState("");
   const [hasSecret, setHasSecret] = useState(false);
+  const [events, setEvents] = useState<WebhookEvent[]>(["message.received"]);
+  const [paused, setPaused] = useState<{
+    at: number;
+    reason: string | null;
+  } | null>(null);
+  const [deliveries, setDeliveries] = useState<WebhookDeliveryInfo[]>([]);
+  const [testEvent, setTestEvent] = useState<WebhookEvent>("message.received");
   const [secret, setSecret] = useState(""); // blank = unchanged on save
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -256,14 +286,50 @@ function WebhookSection() {
     setTimeout(() => setPromptCopied(false), 1500);
   }
 
+  function applyConfig(cfg: WebhookConfigInfo) {
+    setUrl(cfg.url);
+    setHasSecret(cfg.hasSecret);
+    setEvents(cfg.events);
+    setPaused(
+      cfg.disabledAt !== null
+        ? { at: cfg.disabledAt, reason: cfg.disabledReason }
+        : null,
+    );
+  }
+
+  function loadDeliveries() {
+    fetchWebhookDeliveries(20)
+      .then((res) => setDeliveries(res.deliveries))
+      .catch(() => {});
+  }
+
   useEffect(() => {
     fetchWebhookConfig()
-      .then((cfg) => {
-        setUrl(cfg.url);
-        setHasSecret(cfg.hasSecret);
-      })
+      .then(applyConfig)
       .catch(() => {});
+    loadDeliveries();
   }, []);
+
+  function toggleEvent(event: WebhookEvent, on: boolean) {
+    setEvents((current) =>
+      WEBHOOK_EVENTS.filter((e) => (e === event ? on : current.includes(e))),
+    );
+  }
+
+  async function onEnable() {
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      applyConfig(await enableWebhook());
+      setSuccess("Delivery events re-enabled.");
+      loadDeliveries();
+    } catch {
+      setError("Failed to re-enable the delivery events.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onSave() {
     setBusy(true);
@@ -273,11 +339,13 @@ function WebhookSection() {
     try {
       // Omit `secret` when the field is left blank so we don't clobber an
       // existing secret; send it only when the admin typed something.
-      const body: { url: string; secret?: string } = { url: url.trim() };
+      const body: { url: string; secret?: string; events: WebhookEvent[] } = {
+        url: url.trim(),
+        events,
+      };
       if (secret.length > 0) body.secret = secret;
       const cfg = await saveWebhookConfig(body);
-      setUrl(cfg.url);
-      setHasSecret(cfg.hasSecret);
+      applyConfig(cfg);
       setSecret("");
       setSuccess(cfg.url ? "Webhook saved." : "Webhook disabled.");
     } catch {
@@ -307,7 +375,7 @@ function WebhookSection() {
     setBusy(true);
     setTestResult(null);
     try {
-      const res = await testWebhook();
+      const res = await testWebhook(testEvent);
       setTestResult(
         res.ok
           ? `Test delivered (HTTP ${res.status}).`
@@ -325,20 +393,41 @@ function WebhookSection() {
       <div className="pt-card-head">
         <div>
           <h2>Webhook</h2>
-          <p>POST new inbound messages to an external automation.</p>
+          <p>
+            POST new inbound messages and delivery events to an external
+            automation.
+          </p>
         </div>
       </div>
       <div className="p-5">
         <p className="text-[13px] text-text-secondary">
           Fire an HTTP <code className="font-code">POST</code> to n8n, Make or
           similar whenever a new inbound message is received. Global, single
-          best-effort attempt, disabled by default. With a signing secret set,
-          requests carry an{" "}
+          best-effort attempt, disabled by default. Events about sent mail are
+          opt-in and retried. With a signing secret set, requests carry an{" "}
           <code className="font-code">
             X-SaaSMail-Signature: sha256=&lt;hmac&gt;
           </code>{" "}
           header over the raw body.
         </p>
+
+        {paused && (
+          <div
+            role="status"
+            data-testid="webhook-paused-banner"
+            className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[8px] border border-warning-border bg-warning-bg px-4 py-2.5 text-xs text-warning-text"
+          >
+            <PauseCircle size={14} aria-hidden className="shrink-0" />
+            <span className="min-w-0 flex-1">
+              Delivery events paused after 20 failed deliveries
+              {paused.reason ? `: ${paused.reason}` : ""}. New inbound messages
+              are still sent.
+            </span>
+            <Button size="sm" onClick={onEnable} disabled={busy}>
+              Re-enable
+            </Button>
+          </div>
+        )}
 
         <div className="mt-5 space-y-1.5">
           <label
@@ -357,6 +446,29 @@ function WebhookSection() {
             className="font-code"
           />
         </div>
+
+        <fieldset className="mt-4">
+          <legend className="text-[13px] font-medium text-text-primary">
+            Events
+          </legend>
+          <div className="mt-1.5 space-y-1.5">
+            {WEBHOOK_EVENTS.map((event) => (
+              <label
+                key={event}
+                className="flex items-center gap-2 text-xs text-text-secondary"
+              >
+                <input
+                  type="checkbox"
+                  checked={events.includes(event)}
+                  disabled={busy}
+                  onChange={(e) => toggleEvent(event, e.target.checked)}
+                />
+                <code className="font-code text-text-primary">{event}</code>
+                <span>{EVENT_LABELS[event]}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
         <div className="mt-4 space-y-1.5">
           <label
@@ -420,10 +532,26 @@ function WebhookSection() {
           <p className="mt-3 text-[13px] text-text-secondary">{testResult}</p>
         )}
 
-        <div className="mt-5 flex items-center gap-2">
+        <div className="mt-5 flex flex-wrap items-center gap-2">
           <Button onClick={onSave} disabled={busy}>
             {busy ? "Saving…" : "Save"}
           </Button>
+          <label htmlFor="webhook-test-event" className="sr-only">
+            Test event
+          </label>
+          <select
+            id="webhook-test-event"
+            value={testEvent}
+            onChange={(e) => setTestEvent(e.target.value as WebhookEvent)}
+            disabled={busy}
+            className="font-code h-8 rounded-md border border-border bg-card px-2 text-xs text-text-primary"
+          >
+            {WEBHOOK_EVENTS.map((event) => (
+              <option key={event} value={event}>
+                {event}
+              </option>
+            ))}
+          </select>
           <Button
             variant="outline"
             onClick={onTest}
@@ -431,6 +559,47 @@ function WebhookSection() {
           >
             Send test
           </Button>
+        </div>
+
+        <div className="mt-6">
+          <p className="text-[13px] font-medium text-text-primary">
+            Recent deliveries
+          </p>
+          {deliveries.length === 0 ? (
+            <p className="mt-1 text-xs text-text-tertiary">
+              No delivery events yet. Inbound messages are not listed.
+            </p>
+          ) : (
+            <div className="mt-2 overflow-x-auto">
+              <table
+                className="w-full text-left text-xs"
+                data-testid="webhook-deliveries"
+              >
+                <thead className="text-text-tertiary">
+                  <tr>
+                    <th className="py-1 pr-3 font-medium">Event</th>
+                    <th className="py-1 pr-3 font-medium">Time</th>
+                    <th className="py-1 pr-3 font-medium">Status</th>
+                    <th className="py-1 pr-3 font-medium">Result</th>
+                    <th className="py-1 font-medium">Attempts</th>
+                  </tr>
+                </thead>
+                <tbody className="text-text-secondary">
+                  {deliveries.map((delivery) => (
+                    <tr key={delivery.id} className="border-t border-border">
+                      <td className="font-code py-1 pr-3">{delivery.event}</td>
+                      <td className="py-1 pr-3">
+                        {new Date(delivery.createdAt * 1000).toLocaleString()}
+                      </td>
+                      <td className="py-1 pr-3">{delivery.status}</td>
+                      <td className="py-1 pr-3">{deliveryResult(delivery)}</td>
+                      <td className="py-1">{delivery.attempts}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </section>

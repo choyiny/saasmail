@@ -2,6 +2,7 @@ import { Send, Inbox as InboxIcon, AlertTriangle, Clock } from "lucide-react";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import type { Email } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import DeliveryBadge from "@/components/mail/DeliveryBadge";
 
 interface ThreadMessageProps {
   email: Email;
@@ -26,6 +27,9 @@ export default function ThreadMessage({
   const isSent = email.type === "sent";
   const failedToSend = isSent && email.status === "failed";
   const retrying = isSent && email.status === "retrying";
+  // A delayed send that hasn't gone out: no "Sent" chip, a scheduled badge.
+  const notSentYet =
+    isSent && (email.status === "scheduled" || email.status === "canceled");
   const sender = isSent
     ? `you (${email.fromAddress ?? "—"})`
     : (email.fromAddress ?? "Unknown");
@@ -64,6 +68,11 @@ export default function ThreadMessage({
               <Clock size={11} />
               Retrying
             </>
+          ) : notSentYet ? (
+            <>
+              <Clock size={9} />
+              Not sent
+            </>
           ) : isSent ? (
             <>
               <Send size={11} />
@@ -76,11 +85,23 @@ export default function ThreadMessage({
             </>
           )}
         </span>
+        {notSentYet && (
+          <DeliveryBadge status={email.status} sendAt={email.timestamp} />
+        )}
         <span className="truncate text-[13px] font-semibold text-text-primary">
           {sender}
         </span>
         {recipient && (
           <span className="truncate text-text-tertiary">→ {recipient}</span>
+        )}
+        {!isSent && (email.replyRecipients?.length ?? 0) > 0 && (
+          <span
+            className="truncate text-text-tertiary"
+            data-testid="thread-message-reply-to"
+          >
+            reply-to{" "}
+            {email.replyRecipients!.map((entry) => entry.email).join(", ")}
+          </span>
         )}
         <span className="tabular ml-auto shrink-0 text-text-tertiary">
           {fullStamp}

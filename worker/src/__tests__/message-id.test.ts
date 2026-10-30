@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateMessageId } from "../lib/message-id";
+import { deliveredMessageId, generateMessageId } from "../lib/message-id";
 
 describe("generateMessageId", () => {
   it("wraps a nanoid and domain in angle brackets", () => {
@@ -20,5 +20,44 @@ describe("generateMessageId", () => {
 
   it("throws if the address has no @", () => {
     expect(() => generateMessageId("not-an-address")).toThrow(/from address/i);
+  });
+});
+
+describe("deliveredMessageId", () => {
+  it("is the submitted id when the provider reports none", () => {
+    expect(deliveredMessageId("<ours@x.com>", { id: "p-1", error: null })).toBe(
+      "<ours@x.com>",
+    );
+    expect(deliveredMessageId("<ours@x.com>", null)).toBe("<ours@x.com>");
+  });
+
+  it("is the provider's Message-ID when it assigned its own", () => {
+    expect(
+      deliveredMessageId("<ours@x.com>", {
+        id: "<cf@x.com>",
+        deliveredMessageId: "<cf@x.com>",
+        error: null,
+      }),
+    ).toBe("<cf@x.com>");
+  });
+
+  it("brackets a bare provider Message-ID", () => {
+    expect(
+      deliveredMessageId("<ours@x.com>", {
+        id: null,
+        deliveredMessageId: "cf@x.com",
+        error: null,
+      }),
+    ).toBe("<cf@x.com>");
+  });
+
+  it("ignores a blank provider Message-ID", () => {
+    expect(
+      deliveredMessageId("<ours@x.com>", {
+        id: null,
+        deliveredMessageId: "  ",
+        error: null,
+      }),
+    ).toBe("<ours@x.com>");
   });
 });

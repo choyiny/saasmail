@@ -73,7 +73,7 @@ export function folderQuery(id: OlFolderId): {
     case "unread":
       return { folder: "all", unread: true };
     case "deleted":
-      // Per-user Trash.
+      // Trash, shared by the inbox's members.
       return { folder: "trash" };
   }
 }

@@ -58,7 +58,7 @@ Full docs live in **[docs/](docs/README.md)**.
 
 **Deploy and operate:** [Setup](docs/setup.md) · [Email providers](docs/email-providers.md) · [Configuration](docs/configuration.md) · [Updating](docs/updating.md) · [Architecture](docs/architecture.md) · [Local development](docs/development.md)
 
-**Features:** [Inboxes and timelines](docs/inboxes.md) · [Gmail integration](docs/gmail.md) · [Email templates](docs/templates.md) · [Sequences](docs/sequences.md) · [Suppressions and unsubscribe](docs/suppressions.md) · [Users and API keys](docs/users-and-api-keys.md) · [MCP server](docs/mcp.md) · [WebMCP](docs/webmcp.md) · [Webhooks](docs/webhooks.md)
+**Features:** [Inboxes and timelines](docs/inboxes.md) · [Gmail integration](docs/gmail.md) · [Customers](docs/customers.md) · [Mailbox state](docs/mailbox-state.md) · [JMAP](docs/jmap.md) · [Automations](docs/automations.md) · [Email templates](docs/templates.md) · [Sequences](docs/sequences.md) · [Newsletters](docs/newsletters.md) · [Suppressions and unsubscribe](docs/suppressions.md) · [Users and API keys](docs/users-and-api-keys.md) · [Audit log](docs/audit-log.md) · [Export, import and backups](docs/data.md) · [Sending controls](docs/sending.md) · [Native mail agent](docs/agent.md) · [MCP server](docs/mcp.md) · [WebMCP](docs/webmcp.md) · [Webhooks](docs/webhooks.md)
 
 ## Architecture at a glance
 
@@ -76,7 +76,9 @@ GiveFeedback.dev uses AI to turn client screen recordings into actionable tasks 
 
 ## Demo Video
 
-https://github.com/user-attachments/assets/100196d0-a4d7-4d11-848c-ebf0ffebbff4
+One person's mail across four inboxes in a single timeline, the table overview, the mailbox view with folders, automations, a newsletter campaign in the block editor, and a browser agent working through unread mail over WebMCP.
+
+https://github.com/user-attachments/assets/937d45e9-744e-461f-83fd-71e90a4c38b0
 
 ## Screenshots
 
@@ -90,25 +92,51 @@ https://github.com/user-attachments/assets/100196d0-a4d7-4d11-848c-ebf0ffebbff4
 
 ![Outlook-style layout](docs/screenshots/outlook-layout.jpg)
 
-**Templates & sequences** — reusable `{{variable}}` email templates and multi-step drip campaigns you enroll contacts into.
+**Templates & sequences** — reusable `{{variable}}` email templates, written as raw HTML or arranged in a visual block editor, and multi-step drip campaigns you enroll contacts into.
 
 ![Email templates](docs/screenshots/templates.jpg)
 
 ![Drip sequences](docs/screenshots/sequences.jpg)
+
+**Mailbox view** — the same mail as a conventional three-pane client: folders, stars, snooze, labels, and a reading pane with archive, spam, assign and `.eml` download.
+
+![Mailbox view with folders and reading pane](docs/screenshots/mailbox-view.jpg)
+
+**Automations** — ordered inbound rules: file into folders, file with AI, assign, auto-reply, or reject mail before it is stored.
+
+![Automations](docs/screenshots/automations.jpg)
+
+**Newsletters** — campaigns to subscriber lists, written in the block editor; the preview is compiled by the same code that renders the send.
+
+![Newsletter campaign preview](docs/screenshots/newsletter-editor.jpg)
+
+**Audit log** — who did what, across people, API keys, MCP and JMAP clients, rules and the agent, with filters and CSV export.
+
+![Audit log](docs/screenshots/audit-log.jpg)
 
 ## Features
 
 - <a id="one-timeline-per-customer"></a>**[One timeline per customer](docs/inboxes.md#one-timeline-per-customer)** — marketing, transactional, and support mail from a person, collapsed into one conversation.
 - <a id="multi-inbox-with-team-permissions"></a>**[Multi-inbox with team permissions](docs/inboxes.md#multi-inbox-with-team-permissions)** — many inbound addresses on one deployment; members see only the inboxes they're assigned.
 - <a id="thread-or-chat-per-inbox"></a>**[Thread or chat, per inbox](docs/inboxes.md#thread-or-chat-per-inbox)** — formal threading for `marketing@`, iMessage-style bubbles for `support@`.
+- <a id="conversations-per-inbox"></a>**[Conversations by customer or by thread](docs/inboxes.md#conversations-by-customer-or-by-thread)** — one conversation per customer, or threads by `In-Reply-To`/`References` like a mail client, per inbox.
 - <a id="per-inbox-forwarding"></a>**[Per-inbox forwarding](docs/inboxes.md#per-inbox-forwarding)** — re-send inbound mail to any address through your own provider, sidestepping the IP blocks that break Email Routing forwards.
 - <a id="gmail-integration"></a>**[Gmail integration](docs/gmail.md)** — put a Google Workspace mailbox on a saasmail timeline without moving its MX records: mail syncs in over the Gmail API, replies go back out as that mailbox, and anything typed in Gmail shows up too. [Local setup guide](docs/gmail-local-setup.md).
-- <a id="email-templates"></a><a id="template-syntax"></a><a id="upgrading-escaping-is-now-the-default"></a>**[Email templates](docs/templates.md)** — reusable HTML with `{{variable}}` interpolation, sections, and a validated send contract.
+- **[Customers and linked addresses](docs/customers.md)** — link several addresses to one customer without merging the people or widening anyone's inbox access.
+- **[Mailbox view](docs/mailbox-state.md#conventional-mailbox-ui)** — a conventional three-pane mail client at `/mail` over the same mail: Inbox, Starred, Snoozed, Sent, Drafts, Archive, Junk, Trash and custom folders, bulk actions, keyboard shortcuts, and a spam filter that learns from the team's marks.
+- **[JMAP](docs/jmap.md)** — RFC 8620/8621 access for standard mail clients: read, search, drafts, attachments, live push and sending, under the same permissions as the web app.
+- **[Automations](docs/automations.md)** — inbound rules that assign conversations, file into folders (by condition or by AI against folder descriptions), send auto-replies, or reject mail before it is stored.
+- **[Native mail agent](docs/agent.md)** — an in-app agent panel that reads, searches, files and drafts mail with the signed-in user's permissions; CRM actions wait for the user's approval, and it has no tool that sends mail.
+- <a id="email-templates"></a><a id="template-syntax"></a><a id="upgrading-escaping-is-now-the-default"></a>**[Email templates](docs/templates.md)** — reusable HTML with `{{variable}}` interpolation, sections, and a validated send contract; or a visual block editor whose preview is compiled by the same code that renders the send.
 - <a id="email-sequencing"></a>**[Sequences](docs/sequences.md)** — multi-step drip campaigns with delay overrides and auto-cancel on reply.
+- **[Newsletters](docs/newsletters.md)** — subscriber lists with consent records, and campaigns that carry their own content, edited in the block editor with hosted images, with per-list unsubscribe and open/click tracking.
 - <a id="suppressions-and-unsubscribe"></a>**[Suppressions and unsubscribe](docs/suppressions.md)** — RFC 8058 one-click unsubscribe, a suppression list enforced on every send path, and a `transactional` bypass.
-- <a id="user-management"></a><a id="api-keys"></a>**[Users and API keys](docs/users-and-api-keys.md)** — invite-only onboarding, passkeys, and scoped `sk_…` keys.
+- <a id="user-management"></a><a id="api-keys"></a>**[Users and API keys](docs/users-and-api-keys.md)** — invite-only onboarding, passkeys, sign-in rate limits, per-user `sk_…` keys, and idempotency keys for safe send retries.
+- **[Audit log](docs/audit-log.md)** — who did what, whether a person, an API key, an MCP or JMAP client, a rule or the agent; admins only.
+- **[Export, import and backups](docs/data.md)** — export an inbox as mbox or a message as `.eml`, import mbox and `.eml`, and daily database backups to R2 with a restore script.
+- **[Sending controls](docs/sending.md)** — pause all outbound mail, switch off sending over MCP at deploy time, and cap each person's daily sends per channel.
 - <a id="mcp-server-ai-assistant-access"></a><a id="connecting-a-client"></a><a id="naming-the-connection"></a><a id="scopes"></a>**[MCP server](docs/mcp.md)** — connect Claude or any MCP client to your inbox over OAuth 2.1, scoped to that user's inboxes.
-- <a id="webmcp-support-in-page-ai-agent-access"></a>**[WebMCP](docs/webmcp.md)** — 20 in-page tools so a browser AI agent can work the inbox as the signed-in user. Reads and drafts; never sends or deletes.
+- <a id="webmcp-support-in-page-ai-agent-access"></a>**[WebMCP](docs/webmcp.md)** — 26 in-page tools so a browser AI agent can work the inbox as the signed-in user. Reads and drafts; never sends or deletes.
 - <a id="webhooks"></a>**[Webhooks](docs/webhooks.md)** — HMAC-signed `message.received` callbacks for help-desk automation.
 
 ## Provider Matrix

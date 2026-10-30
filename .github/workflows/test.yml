@@ -23,11 +23,12 @@ jobs:
       - name: Create empty assets dir (referenced by wrangler.jsonc)
         run: mkdir -p dist/client
       - name: Type check
-        run: yarn tsc -b
+        run: yarn typecheck
       - name: Type check the installer CLI
         run: yarn typecheck:cli
       - run: yarn test
-      - run: yarn test:web
+      - name: Web tests
+        run: yarn test:web
 
   # The npm package: pack it, prove the shipped build deploys from a generated config, then install
   # the tarball like a user would (npm/npx on purpose) and run it on the package's Node floor.

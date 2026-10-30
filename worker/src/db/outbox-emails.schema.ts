@@ -19,11 +19,27 @@ export const outboxEmails = sqliteTable(
     sentEmailId: text("sent_email_id").notNull(),
     /** Set for sequence-step sends so retries can resolve the step too. */
     sequenceEmailId: text("sequence_email_id"),
+    /**
+     * Set for campaign sends so a crash between provider success and the
+     * campaign's own bookkeeping can be reconciled rather than re-sent.
+     * Mirrors `sequenceEmailId`; null for sequence and transactional mail.
+     */
+    campaignRecipientId: text("campaign_recipient_id"),
+    /**
+     * Who must finish bookkeeping before a provider-accepted row may be
+     * deleted: 'campaign' | 'jmap' | null. Legacy campaign rows have this null
+     * and are recognised by `campaign_recipient_id` (see bookkeepingOwnerOf).
+     */
+    bookkeepingOwner: text("bookkeeping_owner"),
     /** Bare lowercase inbox address — the inbox-scoping key. */
     fromAddress: text("from_address").notNull(),
     toAddress: text("to_address").notNull(),
     /** JSON [{email,name}] — same shape as sent_emails.cc. NULL = no CC. */
     cc: text("cc"),
+    /** JSON [{email,name}]: To recipients after `to_address` (JMAP). */
+    additionalTo: text("additional_to"),
+    /** JSON [{email,name}]: blind recipients (JMAP). Never in any header. */
+    bcc: text("bcc"),
     subject: text("subject").notNull(),
     /**
      * Pre-render input, not the wire payload: retries re-run
@@ -35,10 +51,25 @@ export const outboxEmails = sqliteTable(
     /** JSON object. Includes the original Message-ID so every retry reuses it. */
     headers: text("headers"),
     transactional: integer("transactional").notNull().default(0),
-    /** pending (awaiting retry) | failed (terminal, kept for the tab). */
+    /**
+     * pending (awaiting retry) | failed (terminal, kept for the tab) |
+     * bookkeeping_pending (owned rows only: the provider ACCEPTED the message
+     * and the row is being held until the owner's own bookkeeping completes).
+     *
+     * A `bookkeeping_pending` row must never be re-sent — the message is
+     * already delivered. The retry processor resolves it by re-running only the
+     * bookkeeping, which is why the status exists at all.
+     */
     status: text("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
+    /**
+     * The Message-ID the provider delivered an accepted message with, when it
+     * replaced ours (Cloudflare does). Kept on a `bookkeeping_pending` row so
+     * the owner's bookkeeping, possibly finished later by recovery or the
+     * campaign sweep, records the id recipients actually got.
+     */
+    deliveredMessageId: text("delivered_message_id"),
     /** Unix seconds; the processor picks up pending rows with next_retry_at <= now. */
     nextRetryAt: integer("next_retry_at"),
     createdAt: integer("created_at").notNull(),

@@ -15,16 +15,18 @@ export function buildMimeMessage(input: SendEmailParams): string {
   const { name, address } = parseFrom(params.from);
   const msg = createMimeMessage();
   msg.setSender(name ? { name, addr: address } : { addr: address });
-  msg.setRecipient(params.to);
+  if (params.additionalTo && params.additionalTo.length > 0) {
+    msg.setRecipient([params.to, ...params.additionalTo].map(mailbox));
+  } else {
+    msg.setRecipient(params.to);
+  }
   if (params.cc && params.cc.length > 0) {
-    msg.setCc(
-      params.cc.map((c) => {
-        const parsed = parseFrom(c);
-        return parsed.name
-          ? { name: parsed.name, addr: parsed.address }
-          : { addr: parsed.address };
-      }),
-    );
+    msg.setCc(params.cc.map(mailbox));
+  }
+  // Gmail and Microsoft deliver to a Bcc header's addresses and remove it
+  // from the copy the other recipients get.
+  if (params.bcc && params.bcc.length > 0) {
+    msg.setBcc(params.bcc.map(mailbox));
   }
   msg.setSubject(params.subject);
   if (params.text) {
@@ -55,4 +57,12 @@ export function buildMimeMessage(input: SendEmailParams): string {
     }
   }
   return msg.asRaw();
+}
+
+/** "Name <addr>" or a bare address, as mimetext's mailbox object. */
+function mailbox(value: string): { name?: string; addr: string } {
+  const parsed = parseFrom(value);
+  return parsed.name
+    ? { name: parsed.name, addr: parsed.address }
+    : { addr: parsed.address };
 }

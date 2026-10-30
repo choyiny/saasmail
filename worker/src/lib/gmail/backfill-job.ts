@@ -16,7 +16,7 @@ import {
 } from "./sync";
 
 /**
- * The one-year import as its own job, separate from the 15-minute sync.
+ * The one-year import as its own job, separate from the hourly sync.
  *
  * The cron sync keeps its 50-message budget for live mail. The import runs
  * here instead, as a Cloudflare Workflow that pages through the mailbox

@@ -1,16 +1,14 @@
 import { and, eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
-import { nanoid } from "nanoid";
 import { schema } from "../../db/schema";
 import { gmailAccounts } from "../../db/gmail-accounts.schema";
 import { senderIdentities } from "../../db/sender-identities.schema";
 import { emails } from "../../db/emails.schema";
-import { people } from "../../db/people.schema";
 import { sentEmails } from "../../db/sent-emails.schema";
 import { addressParser } from "postal-mime";
 import { parseRaw, type ParsedEmail } from "../email-parser";
 import { cancelSequencesForPerson } from "../cancel-sequence";
-import { computeConversationId, externalsOnly } from "../conversation-id";
+import { storeSentMessage } from "../inbound/store-sent";
 import { fetchInternalDomains } from "../internal-domains";
 import { ingestParsedEmail } from "../../email-handler";
 import { getAccessToken, type GmailAuthConfig } from "./token";
@@ -406,6 +404,8 @@ function parseDateHeader(raw: string | undefined): number | null {
 export async function mirrorSentMessage(
   db: DrizzleD1Database<typeof schema>,
   opts: {
+    /** For the attachments, which go to R2 with the row. */
+    env: CloudflareBindings;
     /**
      * The provider's ids for the message. Gmail's message id is the echo key;
      * Outlook's sendMail returns no id, so for Outlook the RFC Message-ID
@@ -529,64 +529,33 @@ export async function mirrorSentMessage(
   // mail is not, and `sent_emails.person_id` is nullable precisely so a row
   // can be stored without one. A message to an address we have never heard
   // from is therefore recorded, not dropped and not a failure.
-  const personRow = await db
-    .select({ id: people.id })
-    .from(people)
-    .where(eq(people.email, toAddress))
-    .limit(1);
-
-  // Same grouping the outbound send path computes, so a mirrored reply lands
-  // in the same group thread as the messages it answers rather than forking
-  // one of its own.
-  const externals = externalsOnly(
-    [toAddress, ...parsed.cc.map((c) => c.email)],
-    internalDomains,
-  );
-  const conversationId = await computeConversationId(inbox, externals);
-
   const now = nowSeconds();
   // When the message was actually sent, not when we got around to pulling it.
   const sentAt = parseDateHeader(header(parsed.headers, "date")) ?? now;
 
-  // `onConflictDoNothing` + `returning` is what makes this mirror actually
-  // idempotent: the unique index refuses a second row for this (Gmail id,
-  // inbox) pair, and an empty `returning` is how we learn it did. So a tick
-  // that raced the send path — or another tick — writes nothing and reports a
-  // skip, instead of putting the same reply on the timeline twice forever.
+  // Stored the way every sent message is (`storeSentMessage`): its To, Cc and
+  // Bcc, its attachments, the conversation id and thread key the send path
+  // computes, so a mirrored reply lands in the thread it answers.
   //
-  // Not a failure: a row that is already there is the outcome this function
-  // wanted. Throwing would stall the account on a message that needs nothing
-  // doing.
-  const inserted = await db
-    .insert(sentEmails)
-    .values({
-      id: nanoid(),
-      personId: personRow[0]?.id ?? null,
-      // The mapped inbox, not the Gmail account's own address: the timeline
-      // groups sent mail by `from_address`, and the inbox is what the rest of
-      // the thread is filed under.
-      fromAddress: inbox,
-      toAddress,
-      subject: parsed.subject,
-      bodyHtml: parsed.bodyHtml,
-      bodyText: parsed.bodyText,
-      inReplyTo: header(parsed.headers, "in-reply-to") ?? null,
-      messageId: parsed.messageId,
-      status: "sent",
-      cc: parsed.cc.length > 0 ? JSON.stringify(parsed.cc) : null,
-      conversationId,
-      ...(ids.provider === "gmail"
-        ? { gmailMessageId: ids.messageId, gmailThreadId: ids.threadId || null }
-        : { outlookMessageId: ids.messageId }),
-      // `sentAt` orders the timeline, so it is the message's own time.
-      // `createdAt` is when this row appeared here, which is now.
-      sentAt,
-      createdAt: now,
-    })
-    .onConflictDoNothing()
-    .returning({ id: sentEmails.id });
+  // The unique index on (provider id, inbox) is what makes this mirror
+  // idempotent: a tick that raced the send path, or another tick, writes
+  // nothing (its attachment files are discarded) and reports a skip, instead
+  // of putting the same reply on the timeline twice forever. Not a failure: a
+  // row that is already there is the outcome this function wanted.
+  const stored = await storeSentMessage(db, opts.env, {
+    parsed,
+    inbox,
+    sentAt,
+    now,
+    ourDomains: internalDomains,
+    counterparty: toAddress,
+    createPerson: false,
+    ...(ids.provider === "gmail"
+      ? { gmailMessageId: ids.messageId, gmailThreadId: ids.threadId || null }
+      : { outlookMessageId: ids.messageId }),
+  });
 
-  if (inserted.length === 0) {
+  if (!stored || !stored.inserted) {
     console.log(
       `${label} sync for ${inbox}: sent message ${gmailMessageId} is already on the timeline; not mirrored again.`,
     );
@@ -615,7 +584,7 @@ export async function mirrorSentMessage(
   //
   // Not for an import: a reply sent weeks ago says nothing about a sequence
   // the person may have been enrolled in since.
-  const personId = personRow[0]?.id;
+  const personId = stored.personId;
   if (personId && !opts.historical) {
     try {
       await cancelSequencesForPerson(db, personId);
@@ -752,6 +721,7 @@ async function processMessage(
       return { ...SKIPPED, at };
     }
     const didMirror = await mirrorSentMessage(db, {
+      env,
       ids: { provider: "gmail", messageId, threadId: message.threadId },
       parsed,
       inbox,
@@ -793,31 +763,18 @@ async function processMessage(
     if (already.length > 0) continue;
 
     parsed.to = inbox;
-    const outcome = await ingestParsedEmail(
-      db,
-      parsed,
-      env,
-      ctx,
-      historical ? { historical: { receivedAt } } : {},
-    );
+    // Gmail's ids go into the row's own insert: a later UPDATE of `emails`
+    // would write a JMAP change and re-index the message for search.
+    const outcome = await ingestParsedEmail(db, parsed, env, ctx, {
+      ...(historical ? { historical: { receivedAt } } : {}),
+      gmailMessageId: messageId,
+      gmailThreadId: message.threadId || null,
+    });
 
     // Count what happened, not what was attempted: a blocked sender or a
     // duplicate is a skip, never an ingest — and neither stalls the run.
     if (outcome.status !== "stored") continue;
     stored++;
-
-    // `gmailMessageId` / `gmailThreadId` are not ParsedEmail fields, so they
-    // are written back afterwards — by PRIMARY KEY, using the id the ingest
-    // just handed back. Matching on `emails.message_id` instead would let a
-    // stranger who reuses a Message-ID we hold get this mailbox's Gmail ids
-    // stamped onto a row created by a different source.
-    await db
-      .update(emails)
-      .set({
-        gmailMessageId: messageId,
-        gmailThreadId: message.threadId || null,
-      })
-      .where(eq(emails.id, outcome.emailId));
   }
   return stored > 0
     ? { ingested: 1, mirrored: 0, skipped: 0, at }
@@ -1308,7 +1265,7 @@ export async function syncAllGmailAccounts(
       // And on the row, or the failure exists only in cron output. `lastError`
       // is the one field the admin UI reads for trouble, and nothing there has
       // a staleness threshold — so without this a mailbox that has failed
-      // every 15 minutes for a week renders as "Synced 7 days ago" with no
+      // every hour for a week renders as "Synced 7 days ago" with no
       // Reconnect offered, and the only symptom is mail not arriving.
       await recordSyncFailure(
         db,

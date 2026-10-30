@@ -1,1 +1,0 @@
-ALTER TABLE `gmail_accounts` ADD `last_gap_at` integer;

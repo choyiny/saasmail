@@ -21,9 +21,9 @@ all done on `/inboxes` in the admin UI. The HTTP endpoints behind those
 controls are unchanged and still usable directly — see
 [Doing it over HTTP instead](#doing-it-over-http-instead).
 
-- **Mail syncs on a 15-minute poll.** A cron tick reads each connected
-  mailbox's history and ingests anything new. A message can take up to 15
-  minutes to appear after it lands in Gmail — there is no push path in this
+- **Mail syncs on an hourly poll.** A cron tick reads each connected
+  mailbox's history and ingests anything new. A message can take up to an
+  hour to appear after it lands in Gmail — there is no push path in this
   release.
 - **The last year is imported once.** Connecting a mailbox seeds the live
   sync at the mailbox's current position, then a separate background job
@@ -39,7 +39,7 @@ controls are unchanged and still usable directly — see
   saasmail to a Gmail-mapped inbox sends through that mailbox's real Gmail
   account instead of the configured provider — landing in its own Sent
   folder, threaded. A reply typed directly in Gmail appears on the customer
-  timeline within the next poll (up to 15 minutes), mirrored from that
+  timeline within the next poll (up to an hour), mirrored from that
   mailbox's Sent folder. See
   [Sending through Gmail](#sending-through-gmail) below. Read state is still
   not written back to Gmail in either direction — that remains a later
@@ -172,7 +172,7 @@ Google then returns you to `/inboxes` with the result in the URL, and the page
 shows a banner for it:
 
 - `?gmail=connected` — the mailbox is in the list below; the first sync runs
-  within 15 minutes, and only mail arriving from now on is pulled in.
+  within the hour, and only mail arriving from now on is pulled in.
 - `?gmail=error` — nothing was added, try again. The banner deliberately does
   not print the reason; it is in the Worker log, because the underlying error
   can carry the access token.
@@ -262,7 +262,7 @@ Every newly connected mailbox, and every reconnected one, imports its last
 365 days once. The import:
 
 - **runs as its own job**, a Cloudflare Workflow (`GMAIL_BACKFILL`) separate
-  from the 15-minute sync, which keeps its 50-message budget for live mail.
+  from the hourly sync, which keeps its 50-message budget for live mail.
   The job imports 25 messages per step, back to back, and after 250 hands
   the mailbox to a fresh instance of itself, so no single run grows with the
   mailbox. It starts when an inbox is first mapped to the mailbox; each cron
@@ -303,8 +303,8 @@ Every newly connected mailbox, and every reconnected one, imports its last
 The `workflows` block in `wrangler.jsonc.example` declares the job, and
 deploying creates it — there is nothing to provision. A `wrangler.jsonc` from
 before it was added still works: without the binding, the cron sync imports in
-whatever budget live mail leaves each tick (at most 4,800 messages a day on the
-15-minute cron, 1,200 on an hourly one), still one mailbox at a time, which
+whatever budget live mail leaves each tick (at most 1,200 messages a day on the
+hourly cron), still one mailbox at a time, which
 takes days for a busy mailbox.
 Add the block to get the job.
 
@@ -503,7 +503,7 @@ below for why.
 
 This is the consolidation the whole feature exists for. A reply someone types
 directly in Gmail — from their own inbox, in their own client — is picked up
-by the mailbox's Sent-folder mirror on the next 15-minute poll and appears on
+by the mailbox's Sent-folder mirror on the next hourly poll and appears on
 the same customer timeline as everything else, threaded next to the messages
 it answers. There is no separate mechanism for this: it is the same sync
 described above, watching for the mailbox's own `SENT`-labeled mail alongside
@@ -549,6 +549,32 @@ see this error, the reply was not sent and is not in flight: send it again —
 unless the error asks you to reconnect the mailbox, which means the Google
 grant is dead and resending cannot work until you do (see below).
 
+### Send controls and idempotency
+
+A Gmail reply goes through the same [send controls](sending.md) as any other
+reply: the daily cap for its channel (a `429` once it is reached) and the
+`Idempotency-Key` header. Two rules follow from the reply never being queued:
+
+- **While sending is paused, the reply is refused** with `409` and code
+  `MAILBOX_SEND_NOT_HELD`. Other mail is held in the outbox while paused, but
+  a held Gmail reply would later leave through the configured provider, so
+  nothing is sent, stored or queued. Send it again once sending resumes.
+- **When the outcome is unknown, a retry does not send it again.** If Gmail
+  answers with a `5xx`, or the connection drops after the request went out,
+  the reply may have been sent. saasmail answers `502` with `SEND_FAILED` and
+  a message to check the mailbox's Sent folder, and keeps that answer for the
+  request's `Idempotency-Key`: a retry with the same key gets the same `502`
+  and sends nothing, and the attempt still counts towards the daily cap. If
+  the Sent folder does not have it, send it again from a new draft (a new
+  key). A `4xx` from Gmail, or a refusal before the request (such as a
+  message over Gmail's size limit), means nothing was sent: the key is
+  released and a retry with it sends.
+- **When Gmail accepted the reply but saasmail could not finish recording
+  it**, the answer is also a kept `502` `SEND_FAILED`, with a message that
+  the reply was sent and must not be sent again (and, when the Sent row could
+  not be written, that it is missing from Sent). The key and the daily-cap
+  slot are kept, as above.
+
 ### A broken grant refuses the reply; it does not reroute it
 
 **This behaviour was reversed.** A Gmail-mapped inbox whose token cannot be
@@ -562,8 +588,7 @@ is no configured provider, so the outbox marked the row failed while the API
 answered `201` and the composer cleared the draft — nothing sent, and the user
 told it was. On an install that does have Resend or Postmark it is worse: the
 reply leaves from a real Workspace address through a service that domain's
-SPF/DKIM does not authorise, fails DMARC, and is retried every fifteen
-minutes.
+SPF/DKIM does not authorise, fails DMARC, and is retried every hour.
 
 The line is drawn on the mapping, not on the error. An inbox that is **not**
 Gmail-mapped still uses the configured provider with no fuss, because that
@@ -609,8 +634,8 @@ appear twice on the timeline.
 None of these are configurable, and each of them has been reported as a bug
 at least once.
 
-- **50 messages per mailbox per cron run.** A backlog drains at 50 every 15
-  minutes — roughly 200 an hour — rather than all at once, so a large first
+- **50 messages per mailbox per cron run.** A backlog drains at 50 an hour
+  rather than all at once, so a large first
   day looks stalled when it is only queued. The Worker log says so:
   `hit the 50-message cap; resuming after history record …`. Nothing is lost;
   the cursor stops at the last record processed in full and the next run

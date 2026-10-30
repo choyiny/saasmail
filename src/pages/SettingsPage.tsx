@@ -13,6 +13,15 @@ import { useCommonSettings } from "@/lib/default-layout-settings";
 import { UNDO_SEND_CHOICES } from "@/lib/undo-send";
 import { useSession } from "@/lib/auth-client";
 import { useBranding } from "@/lib/branding";
+import {
+  readDefaultView,
+  writeDefaultView,
+  type DefaultView,
+} from "@/lib/default-view";
+import SendingSettings from "@/components/SendingSettings";
+import InjectionGuardSettings from "@/components/InjectionGuardSettings";
+import DataExports from "@/components/DataExports";
+import SystemSettings from "@/components/SystemSettings";
 
 interface Subscription {
   id: string;
@@ -37,7 +46,7 @@ export default function SettingsPage() {
     <PageContainer>
       <PageHeader
         title="Settings"
-        subtitle="Appearance, sending, notifications and display preferences follow your account to every device. Admins also set the app branding."
+        subtitle="Appearance, sending, notifications and display preferences follow your account to every device. Mailbox exports live here too; admins also set mail imports, backups, sending controls and the app branding."
       />
 
       <div className="max-w-3xl space-y-8">
@@ -45,7 +54,11 @@ export default function SettingsPage() {
         <SendingSection />
         <NotificationsSection />
         <DisplayPreferencesSection />
+        <DataExports showImports={isAdmin} />
+        {isAdmin && <SendingSettings />}
+        {isAdmin && <InjectionGuardSettings />}
         {isAdmin && <AppBrandingSection />}
+        {isAdmin && <SystemSettings />}
       </div>
     </PageContainer>
   );
@@ -271,9 +284,17 @@ function NotificationsSection() {
 function DisplayPreferencesSection() {
   // Saved to the account (layoutSettings.common), so it follows the user.
   const [{ hideSignatures }, setCommon] = useCommonSettings();
+  const [defaultView, setDefaultView] = useState<DefaultView>(() =>
+    readDefaultView(),
+  );
 
   function toggle() {
     setCommon({ hideSignatures: !hideSignatures });
+  }
+
+  function changeDefaultView(value: DefaultView) {
+    setDefaultView(value);
+    writeDefaultView(value);
   }
 
   return (
@@ -283,6 +304,32 @@ function DisplayPreferencesSection() {
       </h2>
 
       <div className="rounded-2xl bg-card p-5 border border-border shadow-card">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-text-primary">
+              Default home view
+            </h3>
+            <p className="mt-1 text-xs font-light text-text-secondary">
+              Choose what opens when you visit the app root. Deep links are
+              never redirected.
+            </p>
+          </div>
+          <select
+            aria-label="Default home view"
+            data-testid="default-view-select"
+            value={defaultView}
+            onChange={(event) =>
+              changeDefaultView(event.target.value as DefaultView)
+            }
+            className="h-9 shrink-0 rounded-[6px] border border-border bg-bg-subtle px-2 text-xs text-text-primary"
+          >
+            <option value="customers">Customers</option>
+            <option value="mailbox">Mailbox</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="rounded-[8px] bg-card p-5 ring-1 ring-border">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="text-sm font-medium text-text-primary">

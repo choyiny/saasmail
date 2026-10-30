@@ -7,30 +7,40 @@ Everything that used to live in one very long README. Start at
 
 ## Deploying and operating
 
-| Page                                  | What's in it                                                                   |
-| ------------------------------------- | ------------------------------------------------------------------------------ |
-| [Setup](setup.md)                     | `yarn saasmail install`, its Claude Code skill, or the manual steps            |
-| [Email providers](email-providers.md) | Cloudflare Email Sending, Resend, Bavimail, Postmark — and which one wins      |
-| [Configuration](configuration.md)     | Every key in `wrangler.jsonc` and `.dev.vars`, and where secrets go in prod    |
-| [Updating](updating.md)               | Rebasing a fork on upstream, by skill or by hand                               |
-| [Architecture](architecture.md)       | The stack table, the Mermaid diagram, and what the Durable Object and queue do |
-| [Local development](development.md)   | `yarn dev`, seeding, the OpenAPI explorer, and the Playwright E2E suite        |
+| Page                                  | What's in it                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| [Setup](setup.md)                     | `yarn saasmail install`, its Claude Code skill, or the manual steps, and backups |
+| [Email providers](email-providers.md) | Cloudflare Email Sending, Resend, Bavimail, Postmark — and which one wins        |
+| [Configuration](configuration.md)     | Every key in `wrangler.jsonc` and `.dev.vars`, and where secrets go in prod      |
+| [Updating](updating.md)               | Rebasing a fork on upstream, by skill or by hand                                 |
+| [Doctor](doctor.md)                   | The build stamp, the admin runtime checks and `yarn doctor` after a deploy       |
+| [Architecture](architecture.md)       | The stack table, the Mermaid diagram, and what Durable Objects and a queue do    |
+| [Local development](development.md)   | `yarn dev`, seeding, the OpenAPI explorer, and the Playwright E2E suite          |
 
 ## Features
 
 | Page                                              | What's in it                                                                                           |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| [Inboxes and timelines](inboxes.md)               | One timeline per customer, team permissions, thread-vs-chat mode, forwarding                           |
+| [Inboxes and timelines](inboxes.md)               | Timelines, team permissions, thread/chat view, threads by headers, forwarding                          |
 | [Appearance and mail layouts](appearance.md)      | Default, Gmail-style and Outlook-style layouts, dark mode, star, pin, archive and snooze               |
 | [Gmail integration](gmail.md)                     | Reading and replying from a Google Workspace mailbox over the Gmail API, and mirroring its Sent folder |
 | [Gmail on a local instance](gmail-local-setup.md) | Google Cloud, the local redirect URI and secrets, and how to fire the sync cron by hand                |
 | [Outlook integration](outlook.md)                 | The same for Microsoft 365 and outlook.com mailboxes, over Microsoft Graph                             |
+| [Customers and linked addresses](customers.md)    | Link multiple email addresses to one customer without widening permissions                             |
+| [Mailbox state](mailbox-state.md)                 | Seen/starred state, archive/junk/trash, custom folders, APIs, and agent tools                          |
+| [JMAP](jmap.md)                                   | RFC 8620/8621 mail access, drafts and sending for standard clients and integrations                    |
+| [Automations](automations.md)                     | Inbound routing rules, assignment, conditions, actions, APIs, and MCP                                  |
 | [Email templates](templates.md)                   | The `{{variable}}` grammar, sections, escaping, and the send contract                                  |
 | [Sequences](sequences.md)                         | Multi-step drip campaigns and how they're scheduled                                                    |
+| [Newsletters](newsletters.md)                     | Lists, campaigns, tracking, and retention                                                              |
 | [Suppressions and unsubscribe](suppressions.md)   | The suppression list, RFC 8058 one-click, and the `transactional` flag                                 |
 | [Users and API keys](users-and-api-keys.md)       | Invites, roles, passkeys, and `sk_…` keys                                                              |
+| [Audit log](audit-log.md)                         | Who did what: what is recorded, what is not, retention, and the admin API                              |
+| [Export, import and backups](data.md)             | mbox and `.eml` export and import; daily database backups and the restore script                       |
+| [Sending controls](sending.md)                    | Pause outbound sending, the agent kill switch, and daily send limits per channel                       |
+| [Native mail agent](agent.md)                     | In-app agent backend, providers, sessions, auth, tools, and safety boundary                            |
 | [MCP server](mcp.md)                              | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation                             |
-| [WebMCP](webmcp.md)                               | In-page agent access, the safety model, and the 20 tools                                               |
+| [WebMCP](webmcp.md)                               | In-page agent access, the safety model, and the 26 tools                                               |
 | [Webhooks](webhooks.md)                           | `message.received`, the payload, and signature verification                                            |
 
 ## Elsewhere in the repo

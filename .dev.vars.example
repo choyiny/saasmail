@@ -25,13 +25,27 @@ DEMO_MODE=1
 #   wrangler secret put UNSUBSCRIBE_SECRET
 UNSUBSCRIBE_SECRET=replace-with-output-of-openssl-rand-hex-32
 
+# Optional: 64 hex characters (openssl rand -hex 32). Encrypts database
+# backups (AES-256-GCM); the restore script then needs it (--key). Set in
+# prod via: wrangler secret put BACKUP_ENCRYPTION_KEY
+# BACKUP_ENCRYPTION_KEY=
+
+# Optional: a model provider for the native mail agent, suggested replies and
+# AI filing. Anthropic wins over OpenAI; with neither, the AI binding (Workers
+# AI) is used. Set in prod via: wrangler secret put ANTHROPIC_API_KEY
+# ANTHROPIC_API_KEY=
+# OPENAI_API_KEY=
+
 # Gmail integration (docs/gmail.md). Optional: the OAuth client is normally
 # entered on the Inboxes page (Google settings) and stored encrypted. These
 # are only read when nothing is saved there.
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 
-# Encrypts stored Gmail refresh tokens and signs the OAuth state parameter.
+# Optional: needed only to connect Gmail or Outlook mailboxes. Encrypts the
+# stored OAuth client secrets and refresh tokens, and signs the OAuth state
+# parameter. Microsoft (docs/outlook.md) has no variables of its own: its app
+# registration is entered on the Inboxes page (Microsoft settings).
 # Exactly 32 random bytes, base64-encoded. Generate with:
 #   openssl rand -base64 32
 # Never rotate this without reconnecting every mailbox — stored tokens
@@ -42,3 +56,9 @@ TOKEN_ENCRYPTION_KEY=
 # install`). While set, the first admin can only be created with the code.
 # Leave blank for local dev. Hash: strip dashes/whitespace, upper-case, lowercase SHA-256 hex.
 SETUP_CODE_HASH=
+
+# Optional: normally written into wrangler.jsonc's vars by `yarn saasmail
+# install`; GET /.well-known/saasmail reports them. Leave unset when deploying
+# by hand.
+# SAASMAIL_INSTALLATION=
+# SAASMAIL_VERSION=

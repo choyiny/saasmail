@@ -16,7 +16,24 @@ import { attachments } from "../db/attachments.schema";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { blocklist } from "../db/blocklist.schema";
 import { setWebhookConfig } from "../lib/webhook-config";
-import { getDb, applyMigrations, cleanDb } from "./helpers";
+import { eq } from "drizzle-orm";
+import { rules } from "../db/rules.schema";
+import { sequences } from "../db/sequences.schema";
+import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
+import { sequenceEmails } from "../db/sequence-emails.schema";
+import {
+  UNKNOWN_RECIPIENT_REASON,
+  setRejectUnknownRecipients,
+} from "../lib/inbound-rejection";
+import {
+  getDb,
+  applyMigrations,
+  cleanDb,
+  createTestUser,
+  createTestPerson,
+  createTestTemplate,
+  authFetch,
+} from "./helpers";
 
 /**
  * Characterization tests: these pin the CURRENT behaviour of the inbound
@@ -526,6 +543,468 @@ describe("parseRaw + ingestParsedEmail — direct seam usage", () => {
   });
 });
 
+/**
+ * The fork's pipeline behind `ingestParsedEmail` (docs/updating.md): every
+ * outcome it returns, the message it stores read back the way /mail reads it,
+ * and the live handler's SMTP refusals and envelope routing on top of it.
+ */
+describe("ingestParsedEmail — outcomes", () => {
+  const HEADERS_INBOX = "threads@acme.dev";
+  const CUSTOMER_INBOX = "support@acme.dev";
+
+  beforeEach(async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(senderIdentities)
+      .values([
+        {
+          email: HEADERS_INBOX,
+          displayName: "Threads",
+          threadingMode: "headers",
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          email: CUSTOMER_INBOX,
+          displayName: "Support",
+          threadingMode: "relationship",
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+  });
+
+  async function parsedFor(opts: Parameters<typeof buildRawEmail>[0]) {
+    const bytes = await new Response(buildRawEmail(opts)).arrayBuffer();
+    return parseRaw(bytes, { from: opts.from, to: opts.to });
+  }
+
+  async function ingest(opts: Parameters<typeof buildRawEmail>[0]) {
+    const calls: Promise<unknown>[] = [];
+    const outcome = await ingestParsedEmail(
+      getDb(),
+      await parsedFor(opts),
+      env as unknown as CloudflareBindings,
+      fakeCtx(calls),
+    );
+    // Every background step was registered before the outcome came back.
+    const registered = calls.length;
+    await Promise.allSettled(calls);
+    return { outcome, registered };
+  }
+
+  async function addRule(id: string, inbox: string, actions: unknown[]) {
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(rules)
+      .values({
+        id,
+        name: `Rule ${id}`,
+        inbox,
+        trigger: "message.received",
+        conditions: [],
+        actions: actions as never,
+        position: 0,
+        stopProcessing: 0,
+        enabled: 1,
+        matchCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+  }
+
+  it("stores a message that /mail lists like live mail, after its rules ran", async () => {
+    const { apiKey, userId } = await createTestUser({ role: "admin" });
+    await addRule("assign-1", HEADERS_INBOX, [{ type: "assign", userId }]);
+
+    const { outcome, registered } = await ingest({
+      from: "Jane Customer <jane@example.com>",
+      to: HEADERS_INBOX,
+      subject: "Synced from a mailbox",
+      messageId: "<ingest-1@example.com>",
+    });
+
+    expect(outcome.status).toBe("stored");
+    const emailId = (outcome as { emailId: string }).emailId;
+    expect(registered).toBeGreaterThan(0);
+
+    const [row] = await getDb()
+      .select()
+      .from(emails)
+      .where(eq(emails.id, emailId));
+    expect(row.rawR2Key).toBeTruthy();
+    expect(await env.R2.get(row.rawR2Key!)).not.toBeNull();
+    expect(row.threadKey).toBeTruthy();
+
+    const res = await authFetch(
+      `/api/messages?folder=inbox&inbox=${encodeURIComponent(HEADERS_INBOX)}`,
+      { apiKey },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      messages: Array<{
+        ref: string;
+        subject: string;
+        from: { email: string; name: string | null };
+        isRead: boolean;
+        state: { seen: boolean; assignedUserId: string | null };
+      }>;
+    };
+    const listed = body.messages.find((m) => m.ref === `received:${emailId}`);
+    expect(listed).toMatchObject({
+      subject: "Synced from a mailbox",
+      from: { email: "jane@example.com", name: "Jane Customer" },
+      isRead: false,
+      state: { seen: false, assignedUserId: userId },
+    });
+  });
+
+  it("leaves thread_key null in a relationship-mode inbox", async () => {
+    const { outcome } = await ingest({
+      from: "jane@example.com",
+      to: CUSTOMER_INBOX,
+      messageId: "<ingest-rel@example.com>",
+    });
+    expect(outcome.status).toBe("stored");
+    const [row] = await getDb().select().from(emails);
+    expect(row.rawR2Key).toBeTruthy();
+    expect(row.threadKey).toBeNull();
+  });
+
+  it("returns duplicate for the same Message-ID in the same inbox", async () => {
+    const opts = {
+      from: "jane@example.com",
+      to: CUSTOMER_INBOX,
+      messageId: "<ingest-dupe@example.com>",
+    };
+    const first = await ingest(opts);
+    const second = await ingest(opts);
+
+    expect(first.outcome.status).toBe("stored");
+    expect(second.outcome).toEqual({
+      status: "duplicate",
+      emailId: (first.outcome as { emailId: string }).emailId,
+    });
+    expect(second.registered).toBe(0);
+    expect(await getDb().select().from(emails)).toHaveLength(1);
+  });
+
+  it("returns blocked for a blocked sender and stores nothing", async () => {
+    await getDb().insert(blocklist).values({
+      id: "b1",
+      type: "email",
+      value: "spammer@bad.test",
+      createdAt: 1,
+    });
+    const { outcome } = await ingest({
+      from: "spammer@bad.test",
+      to: CUSTOMER_INBOX,
+      messageId: "<ingest-blocked@bad.test>",
+    });
+    expect(outcome).toEqual({ status: "blocked" });
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+  });
+
+  it("returns rejected for an unknown recipient and stores nothing", async () => {
+    await setRejectUnknownRecipients(getDb(), true);
+    const { outcome } = await ingest({
+      from: "jane@example.com",
+      to: "nobody@acme.dev",
+      messageId: "<ingest-unknown@example.com>",
+    });
+    expect(outcome).toEqual({
+      status: "rejected",
+      reason: UNKNOWN_RECIPIENT_REASON,
+    });
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+    expect(await getDb().select().from(people)).toHaveLength(0);
+  });
+
+  it("returns rejected with a reject rule's reason and stores nothing", async () => {
+    await addRule("reject-1", CUSTOMER_INBOX, [
+      { type: "reject", reason: "We do not accept this mail" },
+    ]);
+    const { outcome, registered } = await ingest({
+      from: "jane@example.com",
+      to: CUSTOMER_INBOX,
+      messageId: "<ingest-rule@example.com>",
+    });
+    expect(outcome).toEqual({
+      status: "rejected",
+      reason: "We do not accept this mail",
+    });
+    expect(registered).toBe(0);
+    expect(await getDb().select().from(emails)).toHaveLength(0);
+  });
+});
+
+describe("handleEmail — on top of ingestParsedEmail", () => {
+  const INBOX = "support@acme.dev";
+
+  beforeEach(async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await getDb().insert(senderIdentities).values({
+      email: INBOX,
+      displayName: "Support",
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
+
+  async function deliverTo(envelopeTo: string, mimeTo: string, id: string) {
+    const raw = buildRawEmail({
+      from: "jane@example.com",
+      to: mimeTo,
+      messageId: `<${id}@example.com>`,
+    });
+    const message = fakeMessage(raw, "jane@example.com", envelopeTo);
+    const setReject = vi.fn();
+    (message as unknown as { setReject: typeof setReject }).setReject =
+      setReject;
+    const calls: Promise<unknown>[] = [];
+    await handleEmail(
+      message,
+      env as unknown as CloudflareBindings,
+      fakeCtx(calls),
+    );
+    await Promise.allSettled(calls);
+    return setReject;
+  }
+
+  it("refuses an unknown recipient with the same SMTP reason", async () => {
+    await setRejectUnknownRecipients(getDb(), true);
+    const setReject = await deliverTo(
+      "nobody@acme.dev",
+      "nobody@acme.dev",
+      "h-unknown",
+    );
+    expect(setReject).toHaveBeenCalledTimes(1);
+    expect(setReject).toHaveBeenCalledWith("No such mailbox");
+  });
+
+  it("refuses with a reject rule's reason", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await getDb()
+      .insert(rules)
+      .values({
+        id: "reject-h",
+        name: "Reject",
+        inbox: INBOX,
+        trigger: "message.received",
+        conditions: [],
+        actions: [{ type: "reject" }],
+        position: 0,
+        stopProcessing: 0,
+        enabled: 1,
+        matchCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      });
+    const setReject = await deliverTo(INBOX, INBOX, "h-rule");
+    expect(setReject).toHaveBeenCalledTimes(1);
+    expect(setReject).toHaveBeenCalledWith("Rejected by mailbox policy");
+  });
+
+  it("does not refuse stored or duplicate mail", async () => {
+    expect(await deliverTo(INBOX, INBOX, "h-ok")).not.toHaveBeenCalled();
+    expect(await deliverTo(INBOX, INBOX, "h-ok")).not.toHaveBeenCalled();
+  });
+
+  it("stores a Bcc delivery in the envelope recipient's inbox, not the MIME To", async () => {
+    const setReject = await deliverTo(INBOX, "someone@elsewhere.test", "h-bcc");
+    expect(setReject).not.toHaveBeenCalled();
+    const rows = await getDb().select().from(emails);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].recipient).toBe(INBOX);
+  });
+});
+
+/**
+ * The steps after storage run on a stored message only, and before
+ * `ingestParsedEmail` resolves: an enrolled sender's sequence is cancelled,
+ * a suggested reply is queued for an autodraft inbox, and the inbox's users
+ * get a real-time push. A rejected, blocked or duplicate message gets none of
+ * them (the early returns the live handler always had).
+ */
+describe("ingestParsedEmail — steps after storage", () => {
+  const INBOX = "agent@acme.dev";
+  const SENDER = "jane@example.com";
+
+  it("runs them before `stored` resolves, and never for a message it does not store", async () => {
+    const db = getDb();
+    const now = Math.floor(Date.now() / 1000);
+    await db.insert(senderIdentities).values({
+      email: INBOX,
+      displayName: "Agent",
+      agentAutodraft: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const { userId: adminId } = await createTestUser({ role: "admin" });
+    await createTestPerson({ id: "p-jane", email: SENDER });
+    await createTestTemplate({ slug: "welcome" });
+    await db.insert(sequences).values({
+      id: "seq-1",
+      name: "Onboarding",
+      steps: JSON.stringify([
+        { order: 1, templateSlug: "welcome", delayHours: 24 },
+      ]),
+      createdAt: now,
+      updatedAt: now,
+    });
+    async function enroll(id: string) {
+      await db.insert(sequenceEnrollments).values({
+        id,
+        sequenceId: "seq-1",
+        personId: "p-jane",
+        status: "active",
+        variables: "{}",
+        fromAddress: INBOX,
+        enrolledAt: now,
+      });
+      await db.insert(sequenceEmails).values({
+        id: `${id}-step-1`,
+        enrollmentId: id,
+        stepOrder: 1,
+        templateSlug: "welcome",
+        scheduledAt: now + 86_400,
+        status: "pending",
+      });
+    }
+    async function statusOf(id: string) {
+      const [enrollment] = await db
+        .select({ status: sequenceEnrollments.status })
+        .from(sequenceEnrollments)
+        .where(eq(sequenceEnrollments.id, id));
+      const [step] = await db
+        .select({ status: sequenceEmails.status })
+        .from(sequenceEmails)
+        .where(eq(sequenceEmails.enrollmentId, id));
+      return [enrollment.status, step.status];
+    }
+    await enroll("enr-1");
+    await db.insert(rules).values({
+      id: "refuse",
+      name: "Refuse",
+      inbox: INBOX,
+      trigger: "message.received",
+      conditions: [{ field: "subject", operator: "contains", value: "refuse" }],
+      actions: [{ type: "reject", reason: "Refused here" }],
+      position: 0,
+      stopProcessing: 0,
+      enabled: 1,
+      matchCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    const mutableEnv = env as unknown as Record<string, unknown>;
+    const saved = {
+      queue: mutableEnv.EMAIL_QUEUE,
+      hub: mutableEnv.NOTIFICATIONS_HUB,
+      anthropic: mutableEnv.ANTHROPIC_API_KEY,
+    };
+    const queued: unknown[] = [];
+    const pushedTo: string[] = [];
+    mutableEnv.EMAIL_QUEUE = {
+      send: async (message: unknown) => void queued.push(message),
+    };
+    mutableEnv.NOTIFICATIONS_HUB = {
+      idFromName: (name: string) => name,
+      get: (id: string) => ({
+        fetch: async () => {
+          pushedTo.push(id);
+          return new Response("ok");
+        },
+      }),
+    };
+    // A configured model, so an autodraft inbox queues a suggested reply.
+    mutableEnv.ANTHROPIC_API_KEY = "sk-ant-test";
+
+    async function ingest(subject: string, messageId: string, to = INBOX) {
+      const bytes = await new Response(
+        buildRawEmail({ from: SENDER, to, subject, messageId }),
+      ).arrayBuffer();
+      const calls: Promise<unknown>[] = [];
+      const outcome = await ingestParsedEmail(
+        db,
+        await parseRaw(bytes, { from: SENDER, to }),
+        env as unknown as CloudflareBindings,
+        fakeCtx(calls),
+      );
+      // Read before any background work settles: what `stored` promises.
+      const atResolve = {
+        registered: calls.length,
+        enr1: await statusOf("enr-1"),
+      };
+      await Promise.allSettled(calls);
+      return { outcome, ...atResolve };
+    }
+
+    try {
+      // Refused by a rule, by the unknown-recipient setting, and blocked.
+      const refused = await ingest("please refuse", "<refused@example.com>");
+      expect(refused.outcome).toEqual({
+        status: "rejected",
+        reason: "Refused here",
+      });
+
+      await setRejectUnknownRecipients(db, true);
+      const unknown = await ingest(
+        "hello",
+        "<unknown@example.com>",
+        "nobody@acme.dev",
+      );
+      expect(unknown.outcome).toEqual({
+        status: "rejected",
+        reason: UNKNOWN_RECIPIENT_REASON,
+      });
+
+      await db.insert(blocklist).values({
+        id: "b-jane",
+        type: "email",
+        value: SENDER,
+        createdAt: now,
+      });
+      const blocked = await ingest("hello", "<blocked@example.com>");
+      expect(blocked.outcome).toEqual({ status: "blocked" });
+      await db.delete(blocklist).where(eq(blocklist.id, "b-jane"));
+
+      for (const notStored of [refused, unknown, blocked]) {
+        expect(notStored.registered).toBe(0);
+        expect(notStored.enr1).toEqual(["active", "pending"]);
+      }
+      expect(queued).toEqual([]);
+      expect(pushedTo).toEqual([]);
+      expect(await db.select().from(emails)).toHaveLength(0);
+
+      // Stored: the sequence is already cancelled when the outcome arrives.
+      const stored = await ingest("hello", "<stored@example.com>");
+      expect(stored.outcome.status).toBe("stored");
+      const emailId = (stored.outcome as { emailId: string }).emailId;
+      expect(stored.enr1).toEqual(["cancelled", "cancelled"]);
+      expect(stored.registered).toBeGreaterThan(0);
+      expect(queued).toEqual([{ type: "suggest_reply", emailId }]);
+      expect(pushedTo).toEqual([adminId]);
+
+      // A redelivery is a duplicate: a sequence enrolled since stays active,
+      // nothing is queued or pushed.
+      await enroll("enr-2");
+      const duplicate = await ingest("hello", "<stored@example.com>");
+      expect(duplicate.outcome).toEqual({ status: "duplicate", emailId });
+      expect(duplicate.registered).toBe(0);
+      expect(await statusOf("enr-2")).toEqual(["active", "pending"]);
+      expect(queued).toHaveLength(1);
+      expect(pushedTo).toHaveLength(1);
+      expect(await db.select().from(emails)).toHaveLength(1);
+    } finally {
+      mutableEnv.EMAIL_QUEUE = saved.queue;
+      mutableEnv.NOTIFICATIONS_HUB = saved.hub;
+      mutableEnv.ANTHROPIC_API_KEY = saved.anthropic;
+    }
+  });
+});
+
 describe("ingestParsedEmail — a failure part-way through", () => {
   /**
    * Appended, not edited: every characterization test above still describes
@@ -576,10 +1055,11 @@ describe("ingestParsedEmail — a failure part-way through", () => {
       put.mockRestore();
     }
 
-    // The message itself is on the timeline...
+    // This fork writes the files before the row (so a JMAP Email never gains
+    // a blobId after a client has seen it): the message is not stored, the
+    // sender's retry delivers it, and nothing dangles.
     const emailRows = await getDb().select().from(emails);
-    expect(emailRows).toHaveLength(1);
-    // ...and nothing dangles.
+    expect(emailRows).toHaveLength(0);
     expect(await getDb().select().from(attachments)).toHaveLength(0);
   });
 
@@ -625,21 +1105,22 @@ describe("ingestParsedEmail — a failure part-way through", () => {
       put.mockRestore();
     }
 
+    // Nothing was stored, so nothing was counted.
     const first = await getDb().select().from(people);
-    expect(first[0].totalCount).toBe(1);
-    expect(first[0].unreadCount).toBe(1);
+    expect(first[0].totalCount).toBe(0);
+    expect(first[0].unreadCount).toBe(0);
 
-    // The retry now finds the row this inbox already holds.
+    // The retry stores it, and counts it once.
     const outcome = await ingest({
       ...withAttachment,
       messageId: "<retry@example.com>",
     });
-    expect(outcome.status).toBe("duplicate");
+    expect(outcome.status).toBe("stored");
 
     const after = await getDb().select().from(people);
     expect(after[0].totalCount).toBe(1);
     expect(after[0].unreadCount).toBe(1);
     expect(await getDb().select().from(emails)).toHaveLength(1);
-    expect(await getDb().select().from(attachments)).toHaveLength(0);
+    expect(await getDb().select().from(attachments)).toHaveLength(1);
   });
 });

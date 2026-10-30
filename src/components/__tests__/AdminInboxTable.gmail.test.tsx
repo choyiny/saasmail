@@ -6,6 +6,7 @@ import {
   fireEvent,
   within,
 } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import AdminInboxTable from "@/components/AdminInboxTable";
 import {
   fetchAdminInboxes,
@@ -23,11 +24,16 @@ vi.mock("@/lib/api", () => ({
   fetchGmailAccounts: vi.fn(),
   // No Outlook mailboxes in these tests; the Outlook ones live below.
   fetchOutlookAccounts: vi.fn(() => Promise.resolve([])),
+  // The fork's table also lists each inbox's rules.
+  fetchRules: vi.fn(() => Promise.resolve([])),
   updateInboxSettings: vi.fn(),
   updateInboxAssignments: vi.fn(),
   createInbox: vi.fn(),
   deleteInbox: vi.fn(),
 }));
+
+// The fork's table links to the Automations page, so it renders in a router
+// (`wrapper: MemoryRouter` below).
 
 // The signature editor pulls in Tiptap/ProseMirror, which has nothing to do
 // with the Source control and is slow to boot in jsdom.
@@ -40,7 +46,18 @@ const mUsers = vi.mocked(fetchAdminUsers);
 const mAccounts = vi.mocked(fetchGmailAccounts);
 const mUpdate = vi.mocked(updateInboxSettings);
 
+// The fork's per-inbox settings, at their defaults.
+const forkInboxDefaults = {
+  threadingMode: "relationship" as const,
+  threadBackfill: null,
+  spamThreshold: null,
+  agentInstructions: null,
+  agentAutodraft: false,
+};
+
 const inbox = (over: Partial<AdminInbox> & { email: string }): AdminInbox => ({
+  ...forkInboxDefaults,
+  spamFilter: { enabled: false, spamMessages: 0, hamMessages: 0, ready: false },
   displayName: null,
   displayMode: "chat",
   signatureHtml: null,
@@ -131,7 +148,7 @@ beforeEach(() => {
 describe("AdminInboxTable — Gmail source mapping", () => {
   it("shows Cloudflare for an inbox that isn't mapped to a mailbox", async () => {
     seed();
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SUPPORT);
     expect(select.value).toBe("cloudflare");
@@ -140,7 +157,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
 
   it("shows the mapped mailbox's address, not its id", async () => {
     seed();
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SALES);
     expect(selectedLabel(select)).toBe(ACCT_DESK.emailAddress);
@@ -154,6 +171,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
   it("maps the chosen inbox to the chosen mailbox", async () => {
     seed();
     mUpdate.mockResolvedValue({
+      ...forkInboxDefaults,
       email: SUPPORT,
       displayName: null,
       displayMode: "chat",
@@ -163,7 +181,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
       gmailAccountId: ACCT_DESK.id,
       outlookAccountId: null,
     });
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     // Second row, second account: a control hard-wired to either "the first
     // one" would pass with a single-row fixture and fails here.
@@ -186,6 +204,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
   it("clears the mailbox id when switching back to Cloudflare", async () => {
     seed();
     mUpdate.mockResolvedValue({
+      ...forkInboxDefaults,
       email: SALES,
       displayName: null,
       displayMode: "chat",
@@ -195,7 +214,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
       gmailAccountId: null,
       outlookAccountId: null,
     });
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SALES);
     fireEvent.change(select, { target: { value: "cloudflare" } });
@@ -219,7 +238,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
       'ops@gmail.test cannot send as support@acme.dev. Add it under Gmail’s "Send mail as", then map this inbox again.';
     seed();
     mUpdate.mockRejectedValue(new Error(serverMessage));
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SUPPORT);
     fireEvent.change(select, { target: { value: ACCT_OPS.id } });
@@ -243,7 +262,7 @@ describe("AdminInboxTable — Gmail source mapping", () => {
 
   it("offers no mailbox when none is connected, and says to connect one", async () => {
     seed({ accounts: [] });
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SUPPORT);
     const labels = Array.from(select.options).map((o) => o.textContent?.trim());
@@ -262,7 +281,9 @@ describe("AdminInboxTable — re-reading after a mailbox changed", () => {
     // unmaps the inboxes that read from it. Without the re-read the operator
     // keeps being offered a mailbox that no longer exists.
     seed();
-    const { rerender } = render(<AdminInboxTable gmailVersion={0} />);
+    const { rerender } = render(<AdminInboxTable gmailVersion={0} />, {
+      wrapper: MemoryRouter,
+    });
     await sourceSelectFor(SALES);
     expect(mAccounts).toHaveBeenCalledTimes(1);
     expect(mInboxes).toHaveBeenCalledTimes(1);
@@ -293,7 +314,7 @@ describe("AdminInboxTable — re-reading after a mailbox changed", () => {
     // The initial load already fetched them; a second round trip on every
     // mount is the cost this signal exists to avoid.
     seed();
-    render(<AdminInboxTable gmailVersion={0} />);
+    render(<AdminInboxTable gmailVersion={0} />, { wrapper: MemoryRouter });
     await sourceSelectFor(SALES);
     expect(mInboxes).toHaveBeenCalledTimes(1);
   });
@@ -310,7 +331,7 @@ describe("AdminInboxTable — a mapping we could not verify", () => {
       inbox({ email: SALES, source: "gmail", gmailAccountId: ACCT_DESK.id }),
     ]);
     mAccounts.mockRejectedValue(new Error("API error: 500"));
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SALES);
     // The visible label — the only text on a closed select — must not assert
@@ -328,7 +349,7 @@ describe("AdminInboxTable — a mapping we could not verify", () => {
       inbox({ email: SALES, source: "gmail", gmailAccountId: "acct_gone" }),
     ]);
     mAccounts.mockResolvedValue([ACCT_OPS]);
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SALES);
     expect(selectedLabel(select)).toMatch(/no longer connected/i);
@@ -343,7 +364,7 @@ describe("AdminInboxTable — a mapping we could not verify", () => {
     // silently offering an empty list.
     mInboxes.mockResolvedValue([inbox({ email: BILLING })]);
     mAccounts.mockRejectedValue(new Error("API error: 500"));
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(BILLING);
     expect(selectedLabel(select)).toBe("Cloudflare");
@@ -362,7 +383,9 @@ describe("AdminInboxTable — a mapping we could not verify", () => {
    */
   it("keeps naming the mailbox, and locks the row, when a re-fetch fails", async () => {
     seed();
-    const { rerender } = render(<AdminInboxTable gmailVersion={0} />);
+    const { rerender } = render(<AdminInboxTable gmailVersion={0} />, {
+      wrapper: MemoryRouter,
+    });
 
     const before = await sourceSelectFor(SALES);
     expect(selectedLabel(before)).toBe(ACCT_DESK.emailAddress);
@@ -407,6 +430,7 @@ describe("AdminInboxTable — Outlook mailboxes", () => {
     seed();
     mOutlook.mockResolvedValue([OUTLOOK]);
     mUpdate.mockResolvedValue({
+      ...forkInboxDefaults,
       email: SUPPORT,
       displayName: null,
       displayMode: "chat",
@@ -416,7 +440,7 @@ describe("AdminInboxTable — Outlook mailboxes", () => {
       gmailAccountId: null,
       outlookAccountId: OUTLOOK.id,
     });
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     const select = await sourceSelectFor(SUPPORT);
     await waitFor(() =>
@@ -450,7 +474,7 @@ describe("AdminInboxTable — Outlook mailboxes", () => {
       ],
     });
     mOutlook.mockResolvedValue([OUTLOOK]);
-    render(<AdminInboxTable />);
+    render(<AdminInboxTable />, { wrapper: MemoryRouter });
 
     await waitFor(async () =>
       expect(selectedLabel(await sourceSelectFor(SUPPORT))).toBe(

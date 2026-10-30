@@ -1,8 +1,12 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { suppressions } from "../db/suppressions.schema";
-import { verifyToken } from "../lib/unsubscribe-token";
+import {
+  applyListUnsubscribe,
+  undoListUnsubscribe,
+} from "../lib/list-unsubscribe";
+import { verifyUnsubscribeToken } from "../lib/unsubscribe-token";
 import { json200Response } from "../lib/helpers";
 import type { Variables } from "../variables";
 
@@ -16,24 +20,30 @@ export const unsubscribeRouter = new OpenAPIHono<{
 const UnsubscribeResponseSchema = z.object({
   email: z.string(),
   status: z.enum(["suppressed", "subscribed"]),
+  /**
+   * Which unsubscribe happened. `global` is a suppression covering every
+   * future send; `list` removes one list membership and leaves the address
+   * otherwise mailable. v1 tokens are always global, v2 always list-scoped.
+   */
+  scope: z.enum(["global", "list"]),
+  listId: z.string().nullable(),
 });
 
 const ErrorSchema = z.object({ error: z.string() });
 
 // --- POST /api/unsubscribe ---
 //
-// Public, token-authenticated endpoint. Records a suppression row for the
-// email encoded in the HMAC token. Used for both List-Unsubscribe one-click
-// POSTs (RFC 8058) and user-driven links in transactional/marketing emails.
-// Idempotent: replaying with the same token does not duplicate the row or
-// overwrite the original `source`.
+// Public, token-authenticated endpoint. Used for both List-Unsubscribe
+// one-click POSTs (RFC 8058) and user-driven links in email bodies.
+// Idempotent in both scopes: replaying a token neither duplicates rows nor
+// overwrites the original `source`.
 
 const unsubscribeRoute = createRoute({
   method: "post",
   path: "/",
   tags: ["Unsubscribe"],
   description:
-    "Record a suppression from a signed unsubscribe token. Idempotent.",
+    "Record an unsubscribe from a signed token — a global suppression (v1 token) or a single list membership (v2 token). Idempotent.",
   request: {
     query: z.object({
       token: z.string(),
@@ -43,7 +53,7 @@ const unsubscribeRoute = createRoute({
   responses: {
     ...json200Response(
       UnsubscribeResponseSchema,
-      "Suppression recorded (or already present)",
+      "Unsubscribe recorded (or already present)",
     ),
     401: {
       description: "Invalid or tampered token",
@@ -55,13 +65,36 @@ const unsubscribeRoute = createRoute({
 unsubscribeRouter.openapi(unsubscribeRoute, async (c) => {
   const { token, source } = c.req.valid("query");
 
-  const result = await verifyToken(token, c.env.UNSUBSCRIBE_SECRET);
+  const result = await verifyUnsubscribeToken(token, c.env.UNSUBSCRIBE_SECRET);
   if (!result) {
     return c.json({ error: "Invalid token" }, 401);
   }
 
-  const email = result.email.toLowerCase();
   const db = c.get("db");
+
+  if (result.version === 2) {
+    const outcome = await applyListUnsubscribe(db, result, {
+      reason: source ?? "one-click",
+    });
+    // A token whose campaign no longer matches its list, or whose membership
+    // is gone, is answered exactly like a forged one — the caller is a mail
+    // client or a stranger with a forwarded link, and neither should be able
+    // to probe which lists or campaigns exist.
+    if (outcome.error !== null) {
+      return c.json({ error: "Invalid token" }, 401);
+    }
+    return c.json(
+      {
+        email: outcome.email!,
+        status: "suppressed" as const,
+        scope: "list" as const,
+        listId: outcome.listId!,
+      },
+      200,
+    );
+  }
+
+  const email = result.email.toLowerCase();
 
   const existing = await db
     .select()
@@ -71,7 +104,15 @@ unsubscribeRouter.openapi(unsubscribeRoute, async (c) => {
 
   if (existing.length > 0) {
     // Idempotent — do not overwrite the original source/note.
-    return c.json({ email, status: "suppressed" as const }, 200);
+    return c.json(
+      {
+        email,
+        status: "suppressed" as const,
+        scope: "global" as const,
+        listId: null,
+      },
+      200,
+    );
   }
 
   await db
@@ -86,20 +127,32 @@ unsubscribeRouter.openapi(unsubscribeRoute, async (c) => {
     })
     .onConflictDoNothing({ target: suppressions.email });
 
-  return c.json({ email, status: "suppressed" as const }, 200);
+  return c.json(
+    {
+      email,
+      status: "suppressed" as const,
+      scope: "global" as const,
+      listId: null,
+    },
+    200,
+  );
 });
 
 // --- POST /api/unsubscribe/undo ---
 //
-// Public, token-authenticated endpoint. Removes the suppression row for the
-// email encoded in the HMAC token. Idempotent — deleting an already-absent
-// row succeeds.
+// Public, token-authenticated endpoint. Reverses the unsubscribe the same
+// token performed. Idempotent — undoing something already undone succeeds.
+//
+// v2 undo is time-boxed (see RESUBSCRIBE_UNDO_WINDOW_SECONDS): past the
+// window this answers 410, and only a member of the team can add the address
+// back.
 
 const undoRoute = createRoute({
   method: "post",
   path: "/undo",
   tags: ["Unsubscribe"],
-  description: "Remove a suppression via signed token. Idempotent.",
+  description:
+    "Reverse an unsubscribe via signed token — removes the global suppression (v1) or restores the list membership within the undo window (v2). Idempotent.",
   request: {
     query: z.object({
       token: z.string(),
@@ -108,10 +161,15 @@ const undoRoute = createRoute({
   responses: {
     ...json200Response(
       UnsubscribeResponseSchema,
-      "Suppression removed (or already absent)",
+      "Unsubscribe reversed (or already reversed)",
     ),
     401: {
       description: "Invalid or tampered token",
+      content: { "application/json": { schema: ErrorSchema } },
+    },
+    410: {
+      description:
+        "The re-subscribe window has closed, or the address was suppressed or removed for a bounce, a spam complaint or by an admin; opt in again instead",
       content: { "application/json": { schema: ErrorSchema } },
     },
   },
@@ -120,15 +178,58 @@ const undoRoute = createRoute({
 unsubscribeRouter.openapi(undoRoute, async (c) => {
   const { token } = c.req.valid("query");
 
-  const result = await verifyToken(token, c.env.UNSUBSCRIBE_SECRET);
+  const result = await verifyUnsubscribeToken(token, c.env.UNSUBSCRIBE_SECRET);
   if (!result) {
     return c.json({ error: "Invalid token" }, 401);
   }
 
-  const email = result.email.toLowerCase();
   const db = c.get("db");
 
-  await db.delete(suppressions).where(eq(suppressions.email, email));
+  if (result.version === 2) {
+    const outcome = await undoListUnsubscribe(db, result);
+    if (outcome.error !== null) {
+      return outcome.error === "window_closed"
+        ? c.json({ error: "Re-subscribe window has closed" }, 410)
+        : c.json({ error: "Invalid token" }, 401);
+    }
+    return c.json(
+      {
+        email: outcome.email!,
+        status: "subscribed" as const,
+        scope: "list" as const,
+        listId: outcome.listId!,
+      },
+      200,
+    );
+  }
 
-  return c.json({ email, status: "subscribed" as const }, 200);
+  const email = result.email.toLowerCase();
+  // Only the unsubscribe a link made: a bounce, a complaint or an admin's
+  // suppression stays (docs/suppressions.md), and the link says so.
+  await db
+    .delete(suppressions)
+    .where(
+      and(
+        eq(suppressions.email, email),
+        eq(suppressions.reason, "unsubscribe"),
+      ),
+    );
+  const [kept] = await db
+    .select({ id: suppressions.id })
+    .from(suppressions)
+    .where(eq(suppressions.email, email))
+    .limit(1);
+  if (kept) {
+    return c.json({ error: "This address cannot be re-subscribed" }, 410);
+  }
+
+  return c.json(
+    {
+      email,
+      status: "subscribed" as const,
+      scope: "global" as const,
+      listId: null,
+    },
+    200,
+  );
 });

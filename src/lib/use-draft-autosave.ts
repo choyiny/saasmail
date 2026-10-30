@@ -6,9 +6,16 @@ import {
   fetchDraft,
   saveDraft,
   deleteDraft,
+  publishDraft,
   type Draft,
   type CcEntry,
 } from "@/lib/api";
+
+/**
+ * Shared drafts: after this long without an edit, the saved draft is published
+ * to JMAP (a new immutable revision), besides the publish on close.
+ */
+export const PUBLISH_IDLE_MS = 60_000;
 
 export interface DraftValues {
   fromAddress?: string;
@@ -44,6 +51,8 @@ interface UseDraftAutosaveOptions {
   restore: boolean;
   /** Debounce before writing, in ms. */
   debounceMs?: number;
+  /** Idle time before publishing to JMAP, in ms. */
+  publishIdleMs?: number;
 }
 
 /**
@@ -59,8 +68,10 @@ export function useDraftAutosave({
   onRestore,
   restore,
   debounceMs = 1500,
+  publishIdleMs = PUBLISH_IDLE_MS,
 }: UseDraftAutosaveOptions) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const publishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<DraftStatus>("idle");
   // Latest render values/flags, read inside async + cleanup callbacks so they
   // never operate on stale closure state.
@@ -102,6 +113,8 @@ export function useDraftAutosave({
   useEffect(() => {
     if (!enabled) return;
     if (timer.current) clearTimeout(timer.current);
+    // Still editing: the idle publish waits for the next save.
+    if (publishTimer.current) clearTimeout(publishTimer.current);
     timer.current = setTimeout(() => {
       if (clearedRef.current) return;
       if (isEmptyRef.current) {
@@ -116,7 +129,15 @@ export function useDraftAutosave({
       savedRef.current = true;
       setStatus("saving");
       saveDraft({ contextKey, ...valuesRef.current })
-        .then(() => !clearedRef.current && setStatus("saved"))
+        .then(() => {
+          if (!clearedRef.current) setStatus("saved");
+          // Publish once the user has stopped editing for a while.
+          if (publishTimer.current) clearTimeout(publishTimer.current);
+          publishTimer.current = setTimeout(() => {
+            if (clearedRef.current || !savedRef.current) return;
+            publishDraft(contextKey).catch(() => {});
+          }, publishIdleMs);
+        })
         .catch(() => setStatus("error"));
     }, debounceMs);
     return () => {
@@ -143,10 +164,14 @@ export function useDraftAutosave({
     if (!enabled) return;
     return () => {
       if (timer.current) clearTimeout(timer.current);
+      if (publishTimer.current) clearTimeout(publishTimer.current);
       if (clearedRef.current) return;
       if (!isEmptyRef.current) {
         savedRef.current = true;
-        saveDraft({ contextKey, ...valuesRef.current }).catch(() => {});
+        // Save the last edits, then publish them to JMAP.
+        saveDraft({ contextKey, ...valuesRef.current })
+          .then(() => publishDraft(contextKey))
+          .catch(() => {});
       } else if (savedRef.current) {
         savedRef.current = false;
         deleteDraft(contextKey).catch(() => {});
@@ -158,6 +183,7 @@ export function useDraftAutosave({
   /** Delete the draft and suppress the close-flush. Call after a send. */
   function clear() {
     if (timer.current) clearTimeout(timer.current);
+    if (publishTimer.current) clearTimeout(publishTimer.current);
     clearedRef.current = true;
     if (savedRef.current) {
       savedRef.current = false;

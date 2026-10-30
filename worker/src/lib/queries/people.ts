@@ -2,8 +2,13 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { people } from "../../db/people.schema";
 import { emails } from "../../db/emails.schema";
+import { sentEmails } from "../../db/sent-emails.schema";
 import { escapeLike } from "../helpers";
-import { inboxScopeSql, type AllowedInboxes } from "../inbox-permissions";
+import {
+  inboxScopeSql,
+  jsonList,
+  type AllowedInboxes,
+} from "../inbox-permissions";
 
 export type PersonRow = typeof people.$inferSelect;
 
@@ -44,10 +49,13 @@ export function peopleScopeClause(allowed: AllowedInboxes) {
     return sql`AND s.id IN (SELECT NULL WHERE 0)`;
   // A person is in scope if they emailed one of our allowed inboxes OR if we
   // sent them mail from one of our allowed inboxes.
+  // The grant is bound once, as JSON, and shared by both arms (D1 takes at
+  // most 100 bound parameters per statement).
   return sql`AND s.id IN (
-    SELECT person_id FROM emails WHERE recipient IN ${allowed.inboxes}
+    WITH scope_inboxes(value) AS (SELECT value FROM json_each(${JSON.stringify(allowed.inboxes)}))
+    SELECT person_id FROM emails WHERE recipient IN (SELECT value FROM scope_inboxes)
     UNION
-    SELECT person_id FROM sent_emails WHERE from_address IN ${allowed.inboxes} AND person_id IS NOT NULL
+    SELECT person_id FROM sent_emails WHERE from_address IN (SELECT value FROM scope_inboxes) AND person_id IS NOT NULL
   )`;
 }
 
@@ -151,19 +159,43 @@ export async function getPersonScoped(
     if (allowed.inboxes.length === 0) {
       return null;
     }
-    const match = await db
-      .select({ id: emails.id })
-      .from(emails)
-      .where(
-        and(
-          eq(emails.personId, id),
-          inArray(emails.recipient, allowed.inboxes),
-        ),
-      )
-      .limit(1);
-    if (match.length === 0) {
+    // The row's counters and timestamps span every inbox; a member gets them
+    // recomputed over the mail in their own inboxes (received and sent, as
+    // the grouped list counts them), so a sender who also wrote to a private
+    // inbox shows none of that mail's counts or recency.
+    const inboxes = jsonList(allowed.inboxes);
+    const [scoped] = await db.all<{
+      total: number;
+      unread: number;
+      first: number | null;
+      last: number | null;
+    }>(sql`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END), 0) AS unread,
+             MIN(at) AS first,
+             MAX(at) AS last
+        FROM (
+          SELECT received_at AS at, is_read FROM ${emails}
+           WHERE person_id = ${id} AND recipient IN ${inboxes}
+          UNION ALL
+          SELECT sent_at AS at, 1 AS is_read FROM ${sentEmails}
+           WHERE person_id = ${id} AND from_address IN ${inboxes}
+        )
+    `);
+    if (!scoped || Number(scoped.total) === 0) {
       return null;
     }
+    const person = rows[0];
+    return {
+      id: person.id,
+      email: person.email,
+      name: person.name,
+      lastEmailAt: Number(scoped.last),
+      unreadCount: Number(scoped.unread),
+      totalCount: Number(scoped.total),
+      createdAt: Number(scoped.first),
+      updatedAt: Number(scoped.last),
+    } as PersonRow;
   }
 
   return rows[0];

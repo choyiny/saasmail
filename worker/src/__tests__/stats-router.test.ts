@@ -9,7 +9,6 @@ import {
   getDb,
 } from "./helpers";
 import { senderIdentities } from "../db/sender-identities.schema";
-import { mailItemStates } from "../db/mail-item-states.schema";
 
 describe("stats router", () => {
   let apiKey: string;
@@ -142,24 +141,6 @@ describe("stats router", () => {
   });
 
   describe("GET /api/stats — unread counts follow the Inbox folder", () => {
-    const now = () => Math.floor(Date.now() / 1000);
-    const setState = (
-      itemType: "person" | "group",
-      itemId: string,
-      st: { archivedAt?: number; snoozedUntil?: number; trashedAt?: number },
-    ) =>
-      getDb()
-        .insert(mailItemStates)
-        .values({
-          userId: "test-user-1",
-          itemType,
-          itemId,
-          archivedAt: st.archivedAt ?? null,
-          snoozedUntil: st.snoozedUntil ?? null,
-          trashedAt: st.trashedAt ?? null,
-          updatedAt: now(),
-        });
-
     beforeEach(async () => {
       // p-a: two unread messages (one row); p-b, p-c, p-d: one unread each;
       // p-read: read; conv1: a group thread with one unread message.
@@ -212,43 +193,6 @@ describe("stats router", () => {
         "team@saasmail.test": 1,
       });
       expect(data.unreadCount).toBe((await inboxUnreadIds()).length);
-    });
-
-    it("leaves out rows the caller archived, snoozed or trashed", async () => {
-      const t = now();
-      await setState("person", "p-a", { archivedAt: t + 60 });
-      await setState("person", "p-b", { snoozedUntil: t + 3600 });
-      await setState("person", "p-c", { trashedAt: t + 60 });
-      await setState("group", "conv1", { archivedAt: t + 60 });
-      const data = await stats();
-      expect(data.unreadCount).toBe(1);
-      expect(data.inboxUnread).toEqual({ "inbox@saasmail.test": 1 });
-      expect(await inboxUnreadIds()).toEqual(["p-d"]);
-    });
-
-    it("counts rows woken by new mail or an expired snooze", async () => {
-      const t = now();
-      // Archived / trashed before the latest mail, snooze already over.
-      await setState("person", "p-a", { archivedAt: t - 3600 });
-      await setState("person", "p-b", { snoozedUntil: t - 5 });
-      await setState("person", "p-c", { trashedAt: t - 3600 });
-      const data = await stats();
-      expect(data.unreadCount).toBe(5);
-      expect(data.unreadCount).toBe((await inboxUnreadIds()).length);
-    });
-
-    it("does not let another user's archive hide a row", async () => {
-      await createTestUser({ id: "other-user", email: "other@test.com" });
-      await getDb()
-        .insert(mailItemStates)
-        .values({
-          userId: "other-user",
-          itemType: "person",
-          itemId: "p-a",
-          archivedAt: now() + 60,
-          updatedAt: now(),
-        });
-      expect((await stats()).unreadCount).toBe(5);
     });
 
     it("narrows unreadCount to ?recipient=", async () => {

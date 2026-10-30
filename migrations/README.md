@@ -70,7 +70,7 @@ snapshots with migrations 0021–0024"): the `0020` snapshot id was
 made distinct and snapshots were backfilled for the hand-authored
 migrations. **The generator has worked since** — the normal
 `yarn db:generate` workflow above is the one to use. (`0030` is the
-only migration still missing a snapshot; it sits behind the latest
-snapshot `0031`, so it doesn't affect forward generation. If you want
+only migration still missing a snapshot; it sits behind the later
+snapshots, so it doesn't affect forward generation. If you want
 it fully clean, regenerate that one snapshot — it's not required for
 day-to-day work.)

@@ -14,6 +14,7 @@ import { senderIdentities } from "../db/sender-identities.schema";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
 import { people } from "../db/people.schema";
+import { attachments } from "../db/attachments.schema";
 import { sequences } from "../db/sequences.schema";
 import { sequenceEnrollments } from "../db/sequence-enrollments.schema";
 import { sequenceEmails } from "../db/sequence-emails.schema";
@@ -617,6 +618,68 @@ describe("syncAccount — mirroring the Sent folder", () => {
     expect(a.mirrored + b.mirrored).toBe(1);
     expect(a.skipped + b.skipped).toBe(1);
     expect(a.failed + b.failed).toBe(0);
+  });
+
+  it("mirrors an attachment once, leaving no orphan file, when two ticks overlap", async () => {
+    // The loser of the race wrote its attachment row and R2 object before its
+    // insert found the row already there; both must be discarded.
+    await seedAccount();
+    await seedInbox();
+    const raw = [
+      `From: Support <collector@acme.dev>`,
+      `To: jane@example.com`,
+      `Message-ID: <s-race-att@acme.dev>`,
+      `Subject: Re: the file`,
+      `MIME-Version: 1.0`,
+      `Content-Type: multipart/mixed; boundary="b1"`,
+      ``,
+      `--b1`,
+      `Content-Type: text/plain; charset=utf-8`,
+      ``,
+      `see attached`,
+      `--b1`,
+      `Content-Type: text/plain; name="notes.txt"`,
+      `Content-Disposition: attachment; filename="notes.txt"`,
+      `Content-Transfer-Encoding: base64`,
+      ``,
+      btoa("attached notes"),
+      `--b1--`,
+      ``,
+    ].join("\r\n");
+    stubGmail({
+      historyIds: ["m1"],
+      messages: { m1: { labelIds: ["SENT"], raw } },
+    });
+    const bucket = (env as unknown as CloudflareBindings).R2;
+    const before = new Set((await bucket.list()).objects.map((o) => o.key));
+
+    const row = await account();
+    await Promise.all([
+      syncAccount(
+        getDb(),
+        row,
+        env as unknown as CloudflareBindings,
+        fakeCtx(),
+        CFG,
+      ),
+      syncAccount(
+        getDb(),
+        row,
+        env as unknown as CloudflareBindings,
+        fakeCtx(),
+        CFG,
+      ),
+    ]);
+
+    const rows = await getDb().select().from(sentEmails);
+    expect(rows).toHaveLength(1);
+    const files = await getDb().select().from(attachments);
+    expect(files).toHaveLength(1);
+    expect(files[0].emailId).toBe(rows[0].id);
+    const added = (await bucket.list()).objects
+      .map((o) => o.key)
+      .filter((key) => !before.has(key));
+    expect(added).toEqual([files[0].r2Key]);
   });
 
   it("stores a row with no personId when the recipient is unknown", async () => {

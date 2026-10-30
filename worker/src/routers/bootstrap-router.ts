@@ -4,6 +4,7 @@ import { appSettings } from "../db/app-settings.schema";
 import { resolveBrandName } from "../lib/brand-name";
 import { json200Response } from "../lib/helpers";
 import { isDevEnvironment } from "../lib/is-dev";
+import { OUTBOUND_PAUSED_KEY } from "../lib/sending-controls";
 import type { Variables } from "../variables";
 
 export const bootstrapRouter = new OpenAPIHono<{
@@ -42,6 +43,10 @@ const ConfigSchema = z.object({
     description:
       "Whether the web UI registers WebMCP tools for in-page AI agents. Defaults to true; set app_settings key 'webmcp_enabled' to 'false' to disable.",
   }),
+  outboundPaused: z.boolean().openapi({
+    description:
+      "Whether an administrator paused outbound sending: sends are recorded and held until it resumes.",
+  }),
 });
 
 const configRoute = createRoute({
@@ -57,12 +62,18 @@ const configRoute = createRoute({
 
 bootstrapRouter.openapi(configRoute, async (c) => {
   const db = c.get("db");
-  // One round-trip for both settings this unauthenticated route reads on
+  // One round-trip for the settings this unauthenticated route reads on
   // every app load.
   const rows = await db
     .select({ key: appSettings.key, value: appSettings.value })
     .from(appSettings)
-    .where(inArray(appSettings.key, ["brand_name", "webmcp_enabled"]));
+    .where(
+      inArray(appSettings.key, [
+        "brand_name",
+        "webmcp_enabled",
+        OUTBOUND_PAUSED_KEY,
+      ]),
+    );
   const brandName = resolveBrandName(
     rows.find((r) => r.key === "brand_name")?.value,
   );
@@ -72,5 +83,9 @@ bootstrapRouter.openapi(configRoute, async (c) => {
     passkeyRequired: !isDevEnvironment(c.env),
     brandName,
     webmcpEnabled,
+    // Only whether: who paused and when is for admins (GET /api/admin/settings).
+    outboundPaused: rows.some(
+      (r) => r.key === OUTBOUND_PAUSED_KEY && r.value !== null,
+    ),
   });
 });

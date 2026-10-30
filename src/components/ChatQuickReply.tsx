@@ -1,3 +1,4 @@
+import { beginSend, finishSend, sendKeyProblem } from "@/lib/send-key";
 import { useState, useRef, useEffect } from "react";
 import { Maximize2 } from "lucide-react";
 import {
@@ -14,7 +15,9 @@ import { showToast } from "@/lib/toast";
 import { dispatchEmailSent } from "@/lib/email-events";
 import { serverErrorMessage } from "@/lib/error-message";
 import AttachmentPicker from "@/components/AttachmentPicker";
+import SendingPausedNotice from "@/components/SendingPausedNotice";
 import AttachmentChips from "@/components/AttachmentChips";
+import ReplyToHint from "@/components/ReplyToHint";
 
 const ATTACHMENT_CAP_BYTES = 25 * 1024 * 1024;
 
@@ -29,6 +32,12 @@ interface ChatQuickReplyProps {
    * section's own inbox address. Ignored when there's no reply target.
    */
   replyCc?: CcEntry[];
+  /**
+   * Every address a reply to the target reaches when it follows its Reply-To
+   * (the first is To, the others are copied); empty when replies simply go to
+   * the sender. The reply follows it unless the user chooses the sender.
+   */
+  replyRecipients?: CcEntry[];
   onSent: () => void; // Refetch + scroll
   /**
    * Optional handoff to the global compose drawer. When provided, the
@@ -72,10 +81,16 @@ export default function ChatQuickReply({
   latestReceivedEmailId,
   personEmail,
   replyCc,
+  replyRecipients = [],
   onSent,
   onOpenCompose,
 }: ChatQuickReplyProps) {
   const [text, setText] = useState("");
+  const [replyToSender, setReplyToSender] = useState(false);
+  // The choice belongs to one reply target; a new message starts over.
+  useEffect(() => {
+    setReplyToSender(false);
+  }, [latestReceivedEmailId]);
   const [error, setError] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const ref = useRef<HTMLTextAreaElement | null>(null);
@@ -130,6 +145,14 @@ export default function ChatQuickReply({
   // The box clears as soon as a message is sent, so a new one can be
   // written (and sent) while the last is still in its undo window.
   const canSend = text.trim().length > 0 && !overCap;
+  const followsReplyTo = replyRecipients.length > 0 && !replyToSender;
+
+  // One key per message typed here: every attempt sends it, a sent message
+  // forgets it. A reply shares its key with the full reply composer for the
+  // same message, so retrying there after a lost answer is still recognised.
+  const sendContext = latestReceivedEmailId
+    ? `send:reply:${latestReceivedEmailId}`
+    : `send:quick:${inboxAddress}:${personEmail}`;
 
   function handleSend() {
     if (!canSend) return;
@@ -141,6 +164,11 @@ export default function ChatQuickReply({
       sentFiles.length > 0
         ? { files: sentFiles.map((file) => ({ file })) }
         : {};
+    // Pressing Send freezes the message and claims its key; the pending
+    // send owns the key until it goes out or is undone.
+    const context = sendContext;
+    const idempotencyKey = beginSend(context);
+    const recipient = followsReplyTo ? "reply_to" : "sender";
     const send = async () => {
       if (replyId) {
         // Default to reply-all semantics for the chat bubble: carry the
@@ -153,6 +181,10 @@ export default function ChatQuickReply({
           fromAddress: inboxAddress,
           ...(replyCc && replyCc.length > 0 ? { cc: replyCc } : {}),
           ...filesPayload,
+          // Always the target this box showed: with no hint on screen the
+          // reply goes to the sender, never to a Reply-To the user didn't see.
+          recipient,
+          idempotencyKey,
         });
       } else {
         await sendEmail({
@@ -162,6 +194,7 @@ export default function ChatQuickReply({
           bodyHtml: plainTextToHtml(sentText),
           bodyText: sentText,
           ...filesPayload,
+          idempotencyKey,
         });
       }
     };
@@ -180,6 +213,7 @@ export default function ChatQuickReply({
       label: "Sending…",
       send,
       onUndo: () => {
+        finishSend(context, idempotencyKey, "undone");
         if (mountedRef.current) {
           restore();
           requestAnimationFrame(() => ref.current?.focus());
@@ -203,6 +237,7 @@ export default function ChatQuickReply({
         }
       },
       onSent: () => {
+        finishSend(context, idempotencyKey, "sent");
         // The reply went out — discard any saved draft for it so it doesn't
         // reappear in this box (or the Drafts filter) next time.
         if (replyId) {
@@ -218,12 +253,18 @@ export default function ChatQuickReply({
         onSent();
       },
       onError: (e) => {
+        // The message goes back to the box with the same key, so sending it
+        // again cannot send it twice.
+        finishSend(context, idempotencyKey, "failed");
+        const keyProblem = sendKeyProblem(e, context);
         console.error(e);
         if (!mountedRef.current) return;
         restore();
         // Prefer what the server said — a Gmail reply it refused was *not*
         // queued and has to be sent again, which the generic string hides.
-        setError(serverErrorMessage(e) ?? "Failed to send message");
+        setError(
+          keyProblem ?? serverErrorMessage(e) ?? "Failed to send message",
+        );
       },
     });
   }
@@ -241,6 +282,15 @@ export default function ChatQuickReply({
       className="border-t border-border bg-card px-3 pt-3 sm:px-5"
       style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
     >
+      {latestReceivedEmailId && replyRecipients.length > 0 && (
+        <ReplyToHint
+          recipients={replyRecipients}
+          toSender={replyToSender}
+          onToggle={setReplyToSender}
+          className="mb-2"
+        />
+      )}
+      <SendingPausedNotice className="mb-2" />
       {files.length > 0 && (
         <div className="mb-2">
           <AttachmentChips

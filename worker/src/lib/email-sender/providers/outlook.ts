@@ -16,6 +16,14 @@ const GRAPH_MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 export const OUTLOOK_MAX_ATTACHMENT_BYTES = Math.floor(
   GRAPH_MAX_REQUEST_BYTES / ((4 / 3) * (4 / 3)),
 );
+/**
+ * The largest MIME message `sendMail` takes here: Graph limits the request to
+ * 4 MB (https://learn.microsoft.com/en-us/graph/api/user-sendmail), and the
+ * message travels base64-encoded in it, so the raw MIME must fit in 4 MB / (4/3).
+ */
+export const OUTLOOK_MAX_RAW_MESSAGE_BYTES = Math.floor(
+  GRAPH_MAX_REQUEST_BYTES / (4 / 3),
+);
 
 /** Re-authorize after a 401: refresh the token and hand back the new one. */
 export type OutlookReauthorize = () => Promise<string>;
@@ -65,6 +73,15 @@ export class OutlookSender implements EmailSender {
     return OUTLOOK_MAX_ATTACHMENT_BYTES;
   }
 
+  maxMessageBytes(): number {
+    return OUTLOOK_MAX_RAW_MESSAGE_BYTES;
+  }
+
+  recipientSupport() {
+    // The MIME carries every To and the Bcc header (see buildMimeMessage).
+    return { multipleTo: true, bcc: true };
+  }
+
   private async resolveToken(): Promise<string> {
     return typeof this.tokenSource === "function"
       ? this.tokenSource()
@@ -72,11 +89,26 @@ export class OutlookSender implements EmailSender {
   }
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
+    // Whether a request went out: an error after that may hide a send.
+    let requested = false;
     try {
       const raw = buildMimeMessage(params);
-      const body = toBase64(new TextEncoder().encode(raw));
+      const rawBytes = new TextEncoder().encode(raw);
+      // Measured before the request, so a refusal is certain: nothing sent.
+      if (rawBytes.byteLength > this.maxMessageBytes()) {
+        return {
+          id: null,
+          error: {
+            message: `The message is ${rawBytes.byteLength} bytes; Outlook accepts ${this.maxMessageBytes()}.`,
+            transient: false,
+          },
+        };
+      }
+      const body = toBase64(rawBytes);
+      const token = await this.resolveToken();
+      requested = true;
 
-      let res = await sendMime(await this.resolveToken(), body, this.fetchFn);
+      let res = await sendMime(token, body, this.fetchFn);
 
       // A cached token Microsoft has stopped honouring: refresh once.
       if (res.status === UNAUTHORIZED && this.reauthorize) {
@@ -127,13 +159,18 @@ export class OutlookSender implements EmailSender {
         error: {
           message: graphErrorMessage(res, data),
           transient: transientFromStatus(res.status),
+          uncertain: res.status >= 500,
         },
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
         id: null,
-        error: { message, transient: classifyErrorMessage(message) },
+        error: {
+          message,
+          transient: classifyErrorMessage(message),
+          uncertain: requested,
+        },
       };
     }
   }

@@ -6,7 +6,9 @@
   "main": "worker/src/index.ts",
   "account_id": "<your-cloudflare-account-id>",
   "compatibility_date": "2026-04-14",
-  "compatibility_flags": ["nodejs_compat"],
+  // enable_request_signal: request.signal aborts when the client disconnects,
+  // which is how a JMAP push stream (/jmap/eventsource/) learns to stop.
+  "compatibility_flags": ["nodejs_compat", "enable_request_signal"],
   // Uncomment and configure if using a custom domain:
   // "routes": [
   //   {
@@ -21,11 +23,18 @@
       "database_id": "<your-d1-database-id>"
     }
   ],
+  "ai": { "binding": "AI" },
   "r2_buckets": [
     {
       "binding": "R2",
       "bucket_name": "saasmail-attachments"
     }
+    // Optional: a dedicated bucket for database backups (Settings → Data →
+    // Backups). Without it backups go to the R2 bucket above, under backups/.
+    // ,{
+    //   "binding": "BACKUPS",
+    //   "bucket_name": "saasmail-backups"
+    // }
   ],
   // Optional: enable Cloudflare Email Sending as the outbound provider.
   // If Bavimail (BAVIMAIL_API_KEY + BAVIMAIL_ALIAS_ID), POSTMARK_API_KEY, or
@@ -43,6 +52,9 @@
   "observability": {
     "enabled": true
   },
+  // EMAIL_QUEUE also receives Cloudflare Email Sending events (bounces,
+  // complaints) once the queue is subscribed to the sending domain's events:
+  // see docs/email-providers.md, "Bounces and complaints".
   "queues": {
     "producers": [
       {
@@ -74,6 +86,10 @@
       {
         "name": "NOTIFICATIONS_HUB",
         "class_name": "NotificationsHub"
+      },
+      {
+        "name": "MAIL_AGENT",
+        "class_name": "MailAgent"
       }
     ]
   },
@@ -81,10 +97,14 @@
     {
       "tag": "v1",
       "new_classes": ["NotificationsHub"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["MailAgent"]
     }
   ],
   "triggers": {
-    "crons": ["*/15 * * * *"]
+    "crons": ["0 * * * *"]
   },
   // Outbound email provider selection (runtime, no explicit toggle):
   //   - Set BOTH BAVIMAIL_API_KEY and BAVIMAIL_ALIAS_ID (via `wrangler secret put`)
@@ -102,12 +122,30 @@
     // public/saasmail-logo.png to rebrand the favicon and in-app logo.
     "COOKIE_PREFIX": "saasmail",
 
+    // Drizzle SQL logging is disabled by default. Enabling it logs bound
+    // parameters, which can include email addresses, subjects, and secrets.
+    "DB_LOG_QUERIES": "false",
+
     /* push notifications */
     // VAPID_PRIVATE_KEY is a secret — set it with `wrangler secret put VAPID_PRIVATE_KEY`.
     // VAPID_PUBLIC_KEY and VAPID_SUBJECT are public config (safe to commit here).
     // Generate all three with `yarn vapid:generate`. Leave blank to disable push.
     "VAPID_PUBLIC_KEY": "",
     "VAPID_SUBJECT": "mailto:admin@<your-domain>",
+
+    /* newsletters */
+    // Refuses to start a campaign that would push the sending identity past
+    // this many messages in 24 hours. Unset by default: the check is skipped
+    // entirely, so nobody is committed to configuring it. Set it to your
+    // provider's actual daily quota and a blast that would blow through the
+    // limit is refused up front rather than half-delivered.
+    "PROVIDER_DAILY_SEND_LIMIT": "",
+
+    /* agents */
+    // Set to "false" to stop every connected MCP agent from sending: the
+    // send_email, reply_email, send_template and enroll_sequence tools stay
+    // listed but refuse with MCP_SEND_DISABLED. On when unset.
+    "MCP_SEND_ENABLED": "true",
 
     /* installer */
     // Written by `yarn saasmail install` so `/.well-known/saasmail` can report

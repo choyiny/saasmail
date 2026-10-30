@@ -61,6 +61,8 @@ Enabling Email Routing adds Cloudflare's MX and an SPF TXT record to the zone. A
 
 With `--provider cloudflare`, each `--send-domain` is onboarded as an Email Sending subdomain. The installer **reports the DNS records it needs and whether the zone has them, and never writes DNS**: add any it lists as missing yourself. DNS propagation (5 to 15 minutes) shows as pending and is normal, not a failure; sending from that domain works once the records resolve. With Resend, Postmark or Bavimail you verify the sending domain in that provider's dashboard as before.
 
+After the first deploy, subscribe the instance's queue to each sending domain's events, so bounces and complaints reach saasmail: one `npx wrangler queues subscription create` per domain ([Email providers](email-providers.md#bounces-and-complaints)). The installer does not create it.
+
 Email Routing and Email Sending are independent: a domain can do either, both or neither.
 
 ### Resume, status, and adding domains
@@ -111,7 +113,7 @@ yarn saasmail install
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18+
+- [Node.js](https://nodejs.org/) v22 (the version in `.nvmrc`)
 - [Yarn](https://yarnpkg.com/)
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) (`npm install -g wrangler`)
 - A [Cloudflare](https://dash.cloudflare.com/) account with Email Routing available for your domain
@@ -159,6 +161,8 @@ Edit `wrangler.jsonc`:
 - Set `BASE_URL` to your deployed URL
 - Set `TRUSTED_ORIGINS` to include your deployed URL (and set `VAPID_PUBLIC_KEY`/`VAPID_SUBJECT` if you want push notifications: `yarn vapid:generate`)
 - If using Cloudflare Email Sending, uncomment the `send_email` binding
+- Keep the `AI` binding if the [native mail agent](agent.md) should fall back to
+  Workers AI when no Anthropic or OpenAI key is set
 
 Every key is described in [Configuration](configuration.md#wranglerjsonc).
 
@@ -177,6 +181,7 @@ Edit `.dev.vars`:
 - `RESEND_API_KEY` — your Resend API key (omit if using Cloudflare Email Sending, Bavimail, or Postmark)
 - `BETTER_AUTH_SECRET` — **required**; generate a random string (`openssl rand -hex 32`). Signs sessions and protects the OAuth signing keys used by the MCP endpoint. Set this before deploying: without it the auth library silently falls back to a publicly known default value.
 - `UNSUBSCRIBE_SECRET` — generate a random string (`openssl rand -hex 32`); used to sign one-click unsubscribe tokens
+- Optional: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for the [native mail agent](agent.md#provider-selection), and `VAPID_PRIVATE_KEY` for push notifications (`yarn vapid:generate`)
 - `TOKEN_ENCRYPTION_KEY` — only for the [Gmail integration](gmail.md). It encrypts the OAuth client secret and mailbox tokens; the client ID and secret themselves are entered on the Inboxes page after deploying, not here
 
 For production, set these as Cloudflare secrets:
@@ -219,6 +224,35 @@ yarn deploy
 ```
 
 Visit your deployed URL to create your first admin account. Once signed in, go to **Inboxes** to name your inbound addresses and **Users** to invite additional team members.
+
+With Cloudflare Email Sending, subscribe the queue to each sending domain's events so bounces and complaints reach saasmail ([Email providers](email-providers.md#bounces-and-complaints)).
+
+### 9. Turn on backups (optional, recommended)
+
+Create a bucket for backups and bind it as `BACKUPS` in `wrangler.jsonc` (see
+the commented example), optionally set `BACKUP_ENCRYPTION_KEY`, deploy, then
+turn on **Settings → Data → Backups**. A daily dump of the database goes to
+the bucket and can be loaded into a new instance with
+`scripts/restore-backup.mjs`. See [Export, import and backups](data.md#backups).
+
+```bash
+wrangler r2 bucket create saasmail-backups
+openssl rand -hex 32 | wrangler secret put BACKUP_ENCRYPTION_KEY   # optional
+```
+
+### 10. Check the deployment
+
+Create an API key for your admin user on the **API keys** page (see
+[API keys](users-and-api-keys.md#api-keys)), then run the
+doctor: it checks migrations, secrets, bindings, the provider, the cron and,
+with a Cloudflare token, Email Routing, Email Sending and its event
+subscriptions. See [Doctor](doctor.md).
+
+```bash
+SAASMAIL_ADMIN_KEY=sk_… yarn doctor --config wrangler.jsonc --url https://mail.example.com
+```
+
+The cron check fails until the first hourly tick after the first deploy.
 
 ---
 

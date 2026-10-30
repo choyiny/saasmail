@@ -15,6 +15,9 @@ permissions:
 
 jobs:
   build:
+    # Only the upstream repository publishes the package; a fork's releases
+    # never do.
+    if: github.repository == 'choyiny/saasmail'
     runs-on: ubuntu-latest
     permissions:
       contents: read

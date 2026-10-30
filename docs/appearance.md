@@ -55,15 +55,28 @@ their headers and inbox and can't be corrected.
 All three show the same mail and the same pages (templates, sequences, settings,
 admin); only the layout and look change. Every layout has a light and a dark mode.
 
+Each layout links the same pages: **Mail** (the [mailbox](mailbox-state.md#conventional-mailbox-ui)
+at `/mail`), **Lists** and **Campaigns**
+([Newsletters](newsletters.md)), and for admins **Automations**
+([Automations](automations.md)), **Audit log** ([Audit log](audit-log.md)) and
+**Contact data** (subject-access requests and erasure, see
+[Privacy and retention](newsletters.md#privacy-and-retention)). The default layout lists them in the navigation rail, the
+Gmail layout in its apps grid, the Outlook layout in its app launcher. The
+robot button in each layout's header opens the [mail agent](agent.md#in-app-panel)
+(⌘J / Ctrl+J), and admins see the sending-paused banner above every layout.
+
 ## Star, pin, archive and snooze
 
-These work in every layout and are **per user**: archiving a conversation hides it
-from your inbox, not your teammates'.
+These work in every layout and use the same state as the
+[mailbox at `/mail`](mailbox-state.md#rows-in-the-inbox-list), JMAP and the MCP
+tools. **Star and pin are yours**; **archive, snooze and Trash are shared** by
+everyone who can see the inbox: archiving a conversation moves it out of the
+inbox for your teammates too, and out of `/mail`'s Inbox.
 
 | Action  | Gmail name | Outlook name | What it does                                                     |
 | ------- | ---------- | ------------ | ---------------------------------------------------------------- |
 | Star    | Star       | Flag         | Marks the conversation; it shows under **Starred** / **Flagged** |
-| Pin     | Pin        | Pin          | Keeps the conversation at the top of the inbox                   |
+| Pin     | Pin        | Pin          | Keeps the conversation at the top of your inbox                  |
 | Archive | Archive    | Archive      | Moves it out of the inbox. **New mail brings it back**           |
 | Snooze  | Snooze     | Snooze       | Hides it until the chosen time, then it returns to the inbox     |
 
@@ -74,18 +87,21 @@ a folder in the Outlook layout).
 
 ## Trash
 
-**Delete** moves a conversation to your Trash, with an **Undo** button. Like
-archive, Trash is per user: the conversation disappears from all your other
-folders but not from your teammates', and new mail from that conversation brings it
-back to your inbox.
+**Delete** moves a conversation to Trash, with an **Undo** button. Like archive,
+Trash is shared by the inbox's members: the conversation disappears from their
+other folders too (and from `/mail`'s), and new mail in that conversation brings
+it back to the inbox.
+
+**Undo** puts back exactly what the action changed, message by message, and
+nothing else ([how](mailbox-state.md#changing-a-row)).
 
 Inside Trash:
 
 - **Restore** puts the conversation back where it was.
 - **Delete forever** (admins only) removes the person and **all of their mail, for
   everyone** on the workspace. It asks first and can't be undone.
-- **Empty Trash** (admins only) does Delete forever for every person in your
-  Trash, after asking.
+- **Empty Trash** (admins only) does Delete forever for every person in Trash,
+  after asking.
 - Group conversations (several outside participants) can't be deleted forever.
   They can only be restored, or left in Trash; Empty Trash leaves them there and
   says how many it skipped.
@@ -102,6 +118,12 @@ Choose the delay under **Settings → Sending** (default layout), in the Gmail
 layout's quick settings, or in the Outlook layout's settings: Off, 5, 10, 20 or 30
 seconds (5 by default). The message waits in your browser, so keep the tab open
 until it has gone; closing the tab during the delay asks first.
+
+Sending again after a failed send never sends a second copy: in every layout a
+message keeps one [idempotency key](users-and-api-keys.md#retrying-a-send-safely)
+across its attempts, and a Gmail-layout forward one per recipient, so its retry
+skips the recipients it already reached. Gmail and Outlook layout replies go to
+the sender they show ([Replying](inboxes.md#replying)).
 
 ## Settings follow your account
 
@@ -128,13 +150,16 @@ the preview.
 | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `GET /api/user/preferences`                                      | `{ uiTheme, colorMode, density }` for the signed-in user                                                                                                                                                                             |
 | `PATCH /api/user/preferences`                                    | Change any of them                                                                                                                                                                                                                   |
-| `PATCH /api/mail-state`                                          | Star, pin, archive, snooze or trash up to 100 rows: `{ items: [{ type: "person" \| "group", id }], starred?, pinned?, archived?, snoozedUntil?, trashed? }` (unix seconds; `null` wakes)                                             |
-| `GET /api/people/grouped?folder=&category=&from=&hasAttachment=` | `all` (default, ignores the state above), `inbox`, `starred`, `snoozed`, `archive`, `sent`, `trash`. Rows carry `starred`, `pinned`, `archivedAt`, `snoozedUntil`, `trashedAt`, `hasSent`, `latestSubject`, `snippet` and `category` |
+| `PATCH /api/mail-state`                                          | Star, pin, archive, snooze or trash up to 100 rows: `{ items: [{ type: "person" \| "group", id }], starred?, pinned?, archived?, snoozedUntil?, trashed? }` (unix seconds; `null` wakes). Answers `{ data, undo }`                   |
+| `GET /api/people/grouped?folder=&category=&from=&hasAttachment=` | `all` (default, everything not in Trash), `inbox`, `starred`, `snoozed`, `archive`, `sent`, `trash`. Rows carry `starred`, `pinned`, `archivedAt`, `snoozedUntil`, `trashedAt`, `hasSent`, `latestSubject`, `snippet` and `category` |
 | `GET /api/people/grouped/ids`                                    | Every row matching the same filters (up to 5000), for whole-folder actions such as Mark all as read, Select all N and Empty Trash                                                                                                    |
 | `PUT /api/people/category`                                       | `{ senders: [email], category }` moves senders to a tab for the signed-in user; `category: null` removes the correction                                                                                                              |
 
-The state lives in two tables, `user_preferences` and `mail_item_states`
-(migration `0048`).
+Preferences live in `user_preferences` and tab corrections in
+`category_overrides` (migration `0087`). Row state is the fork's per-message
+state, plus `user_row_pins` for pins (migration `0089`); see
+[Rows in the inbox list](mailbox-state.md#rows-in-the-inbox-list). Upstream's
+`mail_item_states` table is not used.
 
 ## For contributors
 

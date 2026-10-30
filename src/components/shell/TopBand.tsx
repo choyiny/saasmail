@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { useBranding } from "@/lib/branding";
 import { WebMcpStatusBadge } from "@/webmcp/WebMcpStatusBadge";
 import { WEBMCP_TOOL_COUNT } from "@/webmcp/registerTools";
+import { AgentToggleButton } from "@/agent/AgentPanelToggle";
 import { crumbsFor } from "./nav";
 import { shellStore } from "./shellStore";
 import { useMailCounts } from "./useMailCounts";
@@ -97,6 +98,7 @@ export default function TopBand({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <AgentToggleButton className="icb" />
       <button
         type="button"
         className="icb"

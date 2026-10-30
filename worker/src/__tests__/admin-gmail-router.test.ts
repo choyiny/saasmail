@@ -870,3 +870,72 @@ describe("DELETE /api/admin/gmail/{id}", () => {
     expect(await getDb().select().from(gmailAccounts)).toHaveLength(1);
   });
 });
+
+describe("with the Gmail variables unset", () => {
+  it("connect answers 503 and the list is empty, without token fields", async () => {
+    const { apiKey } = await createTestUser({ role: "admin" });
+    // miniflare's env is mutable inside a test isolate.
+    const gmailEnv = env as unknown as Record<string, string | undefined>;
+    const saved = {
+      clientId: gmailEnv.GOOGLE_OAUTH_CLIENT_ID,
+      key: gmailEnv.TOKEN_ENCRYPTION_KEY,
+    };
+    delete gmailEnv.GOOGLE_OAUTH_CLIENT_ID;
+    delete gmailEnv.TOKEN_ENCRYPTION_KEY;
+    try {
+      const connect = await authFetch("/api/admin/gmail/connect", { apiKey });
+      expect(connect.status).toBe(503);
+      expect(await connect.json()).toEqual({
+        error:
+          "Google is not set up yet. Add its OAuth client ID and secret under Inboxes → Connected mailboxes → Google settings.",
+      });
+
+      const list = await authFetch("/api/admin/gmail", { apiKey });
+      expect(list.status).toBe(200);
+      const text = await list.text();
+      expect(text).not.toMatch(/token/i);
+      expect(JSON.parse(text)).toEqual({ accounts: [] });
+    } finally {
+      gmailEnv.GOOGLE_OAUTH_CLIENT_ID = saved.clientId;
+      gmailEnv.TOKEN_ENCRYPTION_KEY = saved.key;
+    }
+  });
+});
+
+describe("GET /api/admin/gmail/callback — a failed upsert", () => {
+  it("never logs the token material the database error carries", async () => {
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    stubGoogle({
+      access_token: "at-leak-canary",
+      refresh_token: "rt-leak-canary",
+      expires_in: 3599,
+    });
+    // Drizzle puts a failed query's bound parameters (here the access token)
+    // in the error message.
+    await env.DB.exec(
+      "CREATE TRIGGER gmail_accounts_fail BEFORE INSERT ON gmail_accounts BEGIN SELECT RAISE(ABORT, 'forced failure'); END",
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const state = await signState(userId, KEY);
+      const res = await authFetch(
+        `/api/admin/gmail/callback?code=abc&state=${encodeURIComponent(state)}`,
+        { apiKey, redirect: "manual" },
+      );
+      expect(res.headers.get("location")).toContain("gmail=error");
+      expect(logged).toHaveBeenCalled();
+      const text = logged.mock.calls
+        .flat()
+        .map((arg) =>
+          arg instanceof Error
+            ? `${arg.message} ${String(arg.stack)}`
+            : String(arg),
+        )
+        .join("\n");
+      expect(text).not.toContain("leak-canary");
+    } finally {
+      logged.mockRestore();
+      await env.DB.exec("DROP TRIGGER IF EXISTS gmail_accounts_fail");
+    }
+  });
+});

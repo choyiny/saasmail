@@ -443,6 +443,14 @@ export default function PeopleTable({
                             <span className="truncate">
                               {person.name || person.email}
                             </span>
+                            {person.linkedCount > 0 && (
+                              <span
+                                data-testid="linked-count-badge"
+                                className="shrink-0 rounded-full bg-bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-text-secondary"
+                              >
+                                +{person.linkedCount}
+                              </span>
+                            )}
                           </p>
                           {person.name && (
                             <p className="truncate text-xs text-text-tertiary">

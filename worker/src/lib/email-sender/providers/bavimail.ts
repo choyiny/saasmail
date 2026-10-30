@@ -4,7 +4,7 @@ import type {
   SendEmailParams,
   SendEmailResult,
 } from "../types";
-import { parseFrom } from "../shared";
+import { parseFrom, textAsHtml } from "../shared";
 import { transientFromStatus } from "../classify";
 
 async function extractBavimailError(res: Response): Promise<string> {
@@ -33,6 +33,17 @@ export class BavimailSender implements EmailSender {
   ) {}
 
   async send(params: SendEmailParams): Promise<SendEmailResult> {
+    if (params.additionalTo?.length || params.bcc?.length) {
+      // Its API takes one to_email and a cc list. Dropping recipients silently
+      // would be worse than refusing; callers check recipientSupport() first.
+      return {
+        id: null,
+        error: {
+          message: "Bavimail can't send to several To addresses or to Bcc",
+          transient: false,
+        },
+      };
+    }
     try {
       let attachmentIds: string[] = [];
       if (params.attachments && params.attachments.length > 0) {
@@ -50,7 +61,9 @@ export class BavimailSender implements EmailSender {
         alias_id: this.aliasId,
         to_email: toAddress,
         subject: params.subject,
-        body: params.html,
+        // Its API has only an HTML `body`, so a text-only message still needs
+        // something to send.
+        body: params.html || textAsHtml(params.text),
       };
       if (ccAddresses.length > 0) {
         payload.cc_emails = ccAddresses;
@@ -64,9 +77,10 @@ export class BavimailSender implements EmailSender {
         payload.reply_to = replyTo;
       }
       if (attachmentIds.length > 0) {
-        payload.attachments = attachmentIds.map((id) => ({
+        payload.attachments = attachmentIds.map((id, index) => ({
           attachment_id: id,
-          is_inline: false,
+          // Bavimail has no Content-ID field; inline parts are flagged only.
+          is_inline: params.attachments?.[index]?.disposition === "inline",
         }));
       }
 
@@ -148,7 +162,17 @@ export class BavimailSender implements EmailSender {
     return { ids, error: null };
   }
 
+  recipientSupport() {
+    return { multipleTo: false, bcc: false };
+  }
+
   maxAttachmentBytes(): number {
+    return 25 * 1024 * 1024;
+  }
+
+  maxMessageBytes(): number {
+    // Bavimail documents no whole-message cap; use the attachment ceiling
+    // this sender already assumes.
     return 25 * 1024 * 1024;
   }
 }

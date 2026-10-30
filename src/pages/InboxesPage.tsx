@@ -3,6 +3,7 @@ import { useSession } from "@/lib/auth-client";
 import { Navigate } from "react-router-dom";
 import AdminInboxTable from "@/components/AdminInboxTable";
 import ConnectedMailboxes from "@/components/ConnectedMailboxes";
+import UnknownRecipientsSetting from "@/components/UnknownRecipientsSetting";
 import PageHeader, { PageContainer } from "@/components/PageHeader";
 
 export default function InboxesPage() {
@@ -32,6 +33,7 @@ export default function InboxesPage() {
         onMailboxesChanged={() => setGmailVersion((v) => v + 1)}
       />
       <AdminInboxTable gmailVersion={gmailVersion} />
+      <UnknownRecipientsSetting />
     </PageContainer>
   );
 }

@@ -5,7 +5,16 @@ export const suppressions = sqliteTable(
   {
     id: text("id").primaryKey(),
     email: text("email").notNull().unique(),
-    reason: text("reason", { enum: ["unsubscribe", "manual"] }).notNull(),
+    reason: text("reason", {
+      enum: [
+        "unsubscribe",
+        "manual",
+        "hard_bounce",
+        "soft_bounce",
+        "complaint",
+        "provider",
+      ],
+    }).notNull(),
     source: text("source"),
     note: text("note"),
     createdAt: integer("created_at").notNull(),

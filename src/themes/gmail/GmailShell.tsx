@@ -9,6 +9,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   Ban,
+  Bot,
   CircleHelp,
   FileText,
   Grid3x3,
@@ -41,6 +42,12 @@ import { onInboxRefresh } from "@/lib/inbox-events";
 import { useBranding } from "@/lib/branding";
 import { signOut, useSession } from "@/lib/auth-client";
 import { usePreferences } from "@/lib/preferences";
+import { AgentToggleButton } from "@/agent/AgentPanelToggle";
+import {
+  FORK_ADMIN_LINKS,
+  FORK_PAGE_TITLES,
+  FORK_WORKSPACE_LINKS,
+} from "@/components/shell/fork-nav";
 import { cn } from "@/lib/utils";
 import "./gmail.css";
 import { GmailNavList, isInboxPath, labelsFrom, NavRow } from "./Nav";
@@ -109,11 +116,13 @@ function useAppItems() {
     { to: "/sequences", label: "Sequences", icon: ListOrdered },
     { to: "/outbox", label: "Outbox", icon: Send },
     { to: "/api-keys", label: "API keys", icon: Key },
+    ...FORK_WORKSPACE_LINKS.map((l) => ({ ...l, to: l.path })),
     ...(isAdmin
       ? [
           { to: "/inboxes", label: "Inboxes", icon: InboxIcon },
           { to: "/admin/users", label: "Users", icon: Users },
           { to: "/admin/suppressions", label: "Suppressions", icon: Ban },
+          ...FORK_ADMIN_LINKS.map((l) => ({ ...l, to: l.path })),
         ]
       : []),
     { to: "/blocklist", label: "Blocklist", icon: ShieldBan },
@@ -439,6 +448,7 @@ const PAGE_TITLES: Array<[string, string]> = [
   ["/admin/suppressions", "Suppressions"],
   ["/blocklist", "Blocklist"],
   ["/settings", "Settings"],
+  ...FORK_PAGE_TITLES,
 ];
 
 export default function GmailShell({ children, onCompose }: ThemeShellProps) {
@@ -619,6 +629,9 @@ export default function GmailShell({ children, onCompose }: ThemeShellProps) {
               >
                 <Settings size={22} />
               </button>
+              <AgentToggleButton className="gm-icon-btn">
+                <Bot size={22} />
+              </AgentToggleButton>
               <AppsMenu />
               <AccountMenu />
             </div>
@@ -639,6 +652,9 @@ export default function GmailShell({ children, onCompose }: ThemeShellProps) {
             <h1 className="min-w-0 flex-1 truncate text-[20px]">
               {pageTitle || brandName}
             </h1>
+            <AgentToggleButton className="gm-icon-btn">
+              <Bot size={22} />
+            </AgentToggleButton>
             <button
               type="button"
               className="gm-icon-btn"

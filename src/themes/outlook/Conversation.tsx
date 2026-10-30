@@ -26,6 +26,8 @@ import ImageAttachments, {
   splitAttachments,
 } from "@/components/ImageAttachments";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
+import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
+import InjectionChip from "@/components/InjectionChip";
 import { deleteEmail, type Email, type GroupedItem } from "@/lib/api";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import {
@@ -443,6 +445,19 @@ function MessageCard({
             >
               {failed ? <AlertTriangle size={12} /> : <Clock size={12} />}
               {failed ? "Not delivered" : "Retrying delivery"}
+            </div>
+          )}
+          {sent && (email.deliveryProblems?.length ?? 0) > 0 && (
+            <div className="mt-1">
+              <DeliveryProblemBadge
+                problems={email.deliveryProblems}
+                recipientCount={1 + email.cc.length}
+              />
+            </div>
+          )}
+          {!sent && email.injectionVerdict === "flagged" && (
+            <div className="mt-1">
+              <InjectionChip verdict={email.injectionVerdict} />
             </div>
           )}
         </div>

@@ -1,3 +1,9 @@
+import {
+  beginSend,
+  finishSend,
+  forgetSendKey,
+  sendKeyProblem,
+} from "@/lib/send-key";
 import { useState, useEffect, useMemo, useRef } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
@@ -13,7 +19,9 @@ import TiptapEditor from "@/components/TiptapEditor";
 import CcInput from "@/components/CcInput";
 import ThreadMessage from "@/components/ThreadMessage";
 import AttachmentPicker from "@/components/AttachmentPicker";
+import SendingPausedNotice from "@/components/SendingPausedNotice";
 import AttachmentChips from "@/components/AttachmentChips";
+import ReplyToHint from "@/components/ReplyToHint";
 import {
   TrayMaximizeButton,
   TrayMetaRow,
@@ -159,6 +167,21 @@ export default function ReplyComposer({
   // clicking Reply on our own outgoing message rendered an empty
   // composer with no warning.
   const [contextError, setContextError] = useState(false);
+  // The message asked for replies at other addresses (Reply-To): the first
+  // becomes To and the rest are copied, unless the user ticks "Reply to the
+  // sender instead". Known only once the original has loaded.
+  const replyRecipients =
+    originalEmail?.type === "received"
+      ? (originalEmail.replyRecipients ?? [])
+      : [];
+  const [replyToSender, setReplyToSender] = useState(false);
+  const followsReplyTo = replyRecipients.length > 0 && !replyToSender;
+  // Always say which target was on screen. Left to its default the server
+  // follows Reply-To, which this composer may never have shown (the original
+  // can fail to load, or the user can send before it has).
+  const recipientPayload = {
+    recipient: followsReplyTo ? ("reply_to" as const) : ("sender" as const),
+  };
 
   // Template state
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
@@ -267,6 +290,13 @@ export default function ReplyComposer({
       .finally(() => setTemplatesLoading(false));
   }, [tab, templates.length]);
 
+  // One key per reply: every attempt sends it; sending it or closing the
+  // composer forgets it. (A reload closes nothing, so a retry keeps it.) A
+  // send held for Undo or in flight keeps its key even if the composer
+  // closes: only its own success or Undo forgets it.
+  const sendContext = `send:reply:${emailId}`;
+  useEffect(() => () => forgetSendKey(sendContext), [sendContext]);
+
   function handleSend() {
     if (sending || held) return;
     if (tab === "template" && !selectedSlug) {
@@ -291,6 +321,7 @@ export default function ReplyComposer({
             fromAddress,
             ...(ccPayload ? { cc: ccPayload } : {}),
             ...filesPayload,
+            ...recipientPayload,
           }
         : {
             templateSlug: selectedSlug,
@@ -298,16 +329,24 @@ export default function ReplyComposer({
             fromAddress,
             ...(ccPayload ? { cc: ccPayload } : {}),
             ...filesPayload,
+            ...recipientPayload,
           };
     const from = fromAddress;
+    // Pressing Send freezes the reply and claims its key.
+    const context = sendContext;
+    const idempotencyKey = beginSend(context);
 
     setHeld(true);
     setSending(true);
     sendWithUndo({
       seconds: undoSendSeconds,
       label: "Sending reply…",
-      send: () => replyToEmail(emailId, payload).then(() => undefined),
+      send: () =>
+        replyToEmail(emailId, { ...payload, idempotencyKey }).then(
+          () => undefined,
+        ),
       onUndo: () => {
+        finishSend(context, idempotencyKey, "undone");
         if (mountedRef.current) {
           setUndoneOnce(true);
           setSending(false);
@@ -323,6 +362,7 @@ export default function ReplyComposer({
         }
       },
       onSent: () => {
+        finishSend(context, idempotencyKey, "sent");
         // The reply went out — discard its draft so it doesn't reappear.
         clearDraft();
         // Notify the rest of the app — PersonDetail uses this to
@@ -340,13 +380,17 @@ export default function ReplyComposer({
         onClose();
       },
       onError: (e) => {
+        // The reply stays in the composer with the same key, so sending it
+        // again cannot send it twice.
+        finishSend(context, idempotencyKey, "failed");
+        const keyProblem = sendKeyProblem(e, context);
         if (!mountedRef.current) return;
         setSending(false);
         setHeld(false);
         // The server's own words when it has any: a Gmail reply it refused
         // was *not* queued, so the user has to send it again — a generic
         // "failed" would leave them waiting for a retry that isn't coming.
-        setError(serverErrorMessage(e) ?? "Failed to send reply");
+        setError(keyProblem ?? serverErrorMessage(e) ?? "Failed to send reply");
       },
     });
   }
@@ -361,6 +405,16 @@ export default function ReplyComposer({
   const recipientLabel = personName
     ? `${personName} <${personEmail}>`
     : personEmail;
+  // A reply to one of our own sent messages goes to that message's recipient,
+  // which is not always this timeline's person: it may have followed a
+  // Reply-To.
+  const sentTo =
+    originalEmail?.type === "sent" ? originalEmail.toAddress : null;
+  const toLabel = followsReplyTo
+    ? replyRecipients[0].email
+    : sentTo && sentTo.toLowerCase() !== personEmail.toLowerCase()
+      ? sentTo
+      : recipientLabel;
 
   // Held for Undo Send: hidden, but kept mounted with all its content.
   if (held) return null;
@@ -426,10 +480,21 @@ export default function ReplyComposer({
               </select>
             </TrayMetaRow>
             <TrayMetaRow label="To">
-              <span className="block truncate py-2.5 pr-3 text-sm text-text-primary">
-                {recipientLabel}
+              <span
+                data-testid="reply-to-address"
+                className="block truncate py-2.5 pr-3 text-sm text-text-primary"
+              >
+                {toLabel}
               </span>
             </TrayMetaRow>
+            {replyRecipients.length > 0 && (
+              <ReplyToHint
+                recipients={replyRecipients}
+                toSender={replyToSender}
+                onToggle={setReplyToSender}
+                className="px-4 py-2 sm:px-5"
+              />
+            )}
             <TrayMetaRow label="Cc">
               <CcInput
                 value={cc}
@@ -595,6 +660,7 @@ export default function ReplyComposer({
             )}
           </div>
 
+          <SendingPausedNotice className="border-t border-border bg-card px-4 pt-2 sm:px-5" />
           {/* Slim footer — single row, send + cancel + hint. */}
           <div
             className="flex shrink-0 items-center justify-between gap-3 border-t border-border bg-card px-4 pt-2.5 sm:px-5"

@@ -1,4 +1,5 @@
-import { inArray } from "drizzle-orm";
+import { sql } from "drizzle-orm";
+import { jsonList } from "../inbox-permissions";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { schema } from "../../db/schema";
 import { emails } from "../../db/emails.schema";
@@ -34,14 +35,16 @@ export async function clearGmailThreadIds(
   inboxes: string[],
 ): Promise<void> {
   if (inboxes.length === 0) return;
+  // Bound as one JSON list: the list is not capped, and D1 takes at most 100
+  // bound parameters per statement.
   await db.batch([
     db
       .update(emails)
       .set({ gmailThreadId: null })
-      .where(inArray(emails.recipient, inboxes)),
+      .where(sql`${emails.recipient} IN ${jsonList(inboxes)}`),
     db
       .update(sentEmails)
       .set({ gmailThreadId: null })
-      .where(inArray(sentEmails.fromAddress, inboxes)),
+      .where(sql`${sentEmails.fromAddress} IN ${jsonList(inboxes)}`),
   ]);
 }

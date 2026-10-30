@@ -72,10 +72,15 @@ test.describe.serial("mail layouts", () => {
     await page.goto("/?ui=outlook");
     await expect(page.getByRole("toolbar", { name: "Ribbon" })).toBeVisible();
     await expect(page.getByTestId("ol-new-mail")).toBeVisible();
-    // Alice was archived in the previous test; Bob is still in the inbox.
     await expect(
       page.getByTestId("ol-row").filter({ hasText: "Bob Brown" }),
     ).toBeVisible();
+  });
+
+  test("Outlook layout leaves out the person archived in the Gmail layout", async ({
+    page,
+  }) => {
+    await page.goto("/?ui=outlook");
     await expect(
       page.getByTestId("ol-row").filter({ hasText: "Alice Anderson" }),
     ).toHaveCount(0);

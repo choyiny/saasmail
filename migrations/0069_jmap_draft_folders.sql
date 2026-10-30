@@ -1,0 +1,1 @@
+ALTER TABLE `jmap_drafts` ADD `folder_ids` text DEFAULT '[]' NOT NULL;

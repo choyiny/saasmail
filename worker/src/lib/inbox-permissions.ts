@@ -1,4 +1,4 @@
-import { eq, inArray, sql, SQL } from "drizzle-orm";
+import { eq, sql, SQL } from "drizzle-orm";
 import { HTTPException } from "hono/http-exception";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { AnyColumn } from "drizzle-orm";
@@ -29,13 +29,22 @@ export async function resolveAllowedInboxes(
   };
 }
 
+/**
+ * A list bound as one JSON parameter, for `IN (SELECT value FROM json_each(?))`.
+ * D1 takes at most 100 bound parameters per statement, so a list whose length
+ * the caller controls (a grant, a set of ids) is never bound value by value.
+ */
+export function jsonList(values: readonly string[]): SQL {
+  return sql`(SELECT value FROM json_each(${JSON.stringify(values)}))`;
+}
+
 export function inboxFilter(
   allowed: AllowedInboxes,
   column: AnyColumn,
 ): SQL | undefined {
   if (allowed.isAdmin) return undefined;
   if (allowed.inboxes.length === 0) return sql`0`;
-  return inArray(column, allowed.inboxes);
+  return sql`${column} IN ${jsonList(allowed.inboxes)}`;
 }
 
 /**
@@ -70,12 +79,14 @@ export function assertInboxAllowed(
  *
  * `inboxFilter` covers Drizzle query builders; this covers the hand-written
  * `sql` templates. Both must agree, and in particular both must express the
- * empty-grant case as a false predicate — an empty list renders `IN ()`, which
- * SQLite rejects outright, so forgetting that branch fails loudly at best and
- * scopes nothing at worst.
+ * empty-grant case as a false predicate — a member with no inboxes sees
+ * nothing, and says so explicitly rather than through an empty JSON list.
+ * The grant is bound once, as JSON: a member of 150 inboxes costs one bound
+ * parameter per clause, not 150.
  */
 export function inboxScopeSql(allowed: AllowedInboxes, column: SQL): SQL {
   if (allowed.isAdmin) return sql``;
   if (allowed.inboxes.length === 0) return sql`AND 0`;
-  return sql`AND ${column} IN ${allowed.inboxes}`;
+  // One parameter whatever the grant size (see `jsonList`).
+  return sql`AND ${column} IN ${jsonList(allowed.inboxes)}`;
 }

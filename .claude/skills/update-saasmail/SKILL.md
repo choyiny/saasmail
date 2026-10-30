@@ -97,6 +97,19 @@ Never run `git rebase --skip` without asking — that silently drops one of the 
 
 `wrangler.jsonc` is gitignored, so the rebase never touches it: bindings, crons and vars that upstream added to `wrangler.jsonc.example` are missing until they are copied over. Compare the two files and show the user each top-level block or `vars` key present in the example but absent from their config (for example `workflows`, `durable_objects` and its `migrations`, or a changed `triggers.crons`). Add the ones they accept, keeping their own values and IDs; never overwrite a value they already set.
 
+For the mailbox/agent/JMAP release, explicitly check for:
+
+- `"enable_request_signal"` in `compatibility_flags` (JMAP push streams need it);
+- `"ai": { "binding": "AI" }`;
+- the `MAIL_AGENT` Durable Object binding with `class_name: "MailAgent"`;
+- the Durable Object migration `{ "tag": "v2", "new_sqlite_classes": ["MailAgent"] }`;
+- the optional `AGENT_APPROVAL_SECRET` secret, and the optional `DB_LOG_QUERIES`, `MCP_SEND_ENABLED` and `PROVIDER_DAILY_SEND_LIMIT` variables;
+- an optional `BACKUPS` R2 bucket and `BACKUP_ENCRYPTION_KEY` secret for database backups (without the bucket, backups go to the attachments bucket under `backups/`).
+
+Also run `wrangler secret list` and check that `UNSUBSCRIBE_SECRET` is set; if it is missing, tell the user to set it (`openssl rand -hex 32`, then `wrangler secret put UNSUBSCRIBE_SECRET`), since newsletter campaigns refuse to start without it.
+
+Tell the user that the worker fails at runtime without the `MailAgent` binding and migration. Also warn that enabling the `AI` binding enables paid Workers AI fallback usage when neither `ANTHROPIC_API_KEY` nor `OPENAI_API_KEY` is configured.
+
 Then check push notifications:
 
 ```bash

@@ -20,10 +20,12 @@ there and link it from the index rather than growing `README.md`.
 ## Tooling
 
 - Use **yarn**, not npm (`yarn install --frozen-lockfile` in CI).
+- **Lockfile integrity:** after dependency changes, run `yarn install --update-checksums`; CI rejects any `yarn.lock` resolved entry without an integrity hash.
 - **Format:** `yarn format` before push. Husky runs `lint-staged` → Prettier on staged `*.{js,jsx,ts,tsx,json,css,md,html}` at commit; CI runs full-tree `yarn format:check` (so husky alone is not enough if you skip staging a dirty file).
-- **Typecheck:** `yarn tsc -b`. The root `tsconfig.json` has `"files": []` and only references `tsconfig.app.json`, so `yarn tsc --noEmit` checks no files and always passes. CI runs `yarn tsc -b`, and `main` has zero errors.
+- **Typecheck:** `yarn typecheck` — the frontend must have zero TypeScript errors; the worker uses the committed per-file ratchet documented in [`docs/development.md`](./docs/development.md#type-checking).
 - **Installer:** `yarn saasmail install` / `status` (`scripts/saasmail/`, [`docs/setup.md`](./docs/setup.md)); its tests run in `yarn test` (own Node vitest config) and `yarn typecheck:cli` type-checks it.
 - **Unit tests:** `yarn test` (runs the installer's tests, then `vitest run --config vitest.config.test.ts` — bare `vitest run` hits the wrong pool config and fails to start).
+- **Web tests:** `yarn test:web` (frontend tests under jsdom, `vitest.config.web.ts`).
 - **E2E:** `yarn test:e2e` (Playwright; **wipes local D1** — re-seed with `yarn db:seed:dev` afterward). Needs `DEMO_MODE=1` + `DISABLE_PASSKEY_GATE=true` in `.dev.vars`, and `http://localhost:8788` in `TRUSTED_ORIGINS` (in `wrangler.jsonc`, or `.dev.vars` when the installer generated it) (see `.dev.vars.example` / `wrangler.jsonc.example` and [`docs/development.md`](./docs/development.md#end-to-end-tests)).
 
 ### Local `yarn test` prerequisites
@@ -33,7 +35,7 @@ Vitest uses `@cloudflare/vitest-pool-workers`, which requires a present `wrangle
 ```bash
 cp wrangler.jsonc.ci wrangler.jsonc
 mkdir -p dist/client
-yarn tsc -b
+yarn typecheck
 yarn test
 ```
 
@@ -44,7 +46,7 @@ Prefer `wrangler.jsonc.ci` for unit tests (placeholders tuned for the pool). Use
 | Workflow / check name                               | Merge impact                                                                                                                                                                                                                                           |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Format → `prettier`                                 | Fails if `yarn format:check` fails                                                                                                                                                                                                                     |
-| Test → `vitest` (+ typecheck step in that workflow) | Fails on `yarn test` or `yarn test:web` or on any `yarn tsc -b` error                                                                                                                                                                                  |
+| Test → `vitest` (+ typecheck step in that workflow) | Fails on `yarn typecheck` (frontend zero-error gate + worker per-file ratchet), `yarn test` or `yarn test:web`                                                                                                                                         |
 | e2e → `playwright`                                  | Fails on `yarn test:e2e`                                                                                                                                                                                                                               |
 | Check PR labels → job named `test`                  | Fails unless the PR has **at least one** of `major` / `minor` / `patch`; also fails if `hold` is present (`disable-reviews: true`, so this is a failing check — not a review). Note the job is named `test`, distinct from the Test/`vitest` workflow. |
 | CodeQL → `Analyze (javascript-typescript)`          | Runs on PRs to `main`. A new alert is posted as a review comment and fails a separate `CodeQL` check even when `Analyze` passes — test code included. Fix the flagged code rather than treating the red check as noise                                 |
@@ -57,7 +59,7 @@ Semver labels drive [release-drafter](./.github/release-drafter.yml). Dependabot
 From [`CONTRIBUTING.md`](./CONTRIBUTING.md) + the PR template:
 
 1. Focused change; branch off `main`.
-2. `yarn format` / `yarn tsc -b` / `yarn test` / `yarn test:web` (and `yarn test:e2e` if UI or HTTP surface changed).
+2. `yarn format` / `yarn typecheck` / `yarn test` / `yarn test:web` (and `yarn test:e2e` if UI or HTTP surface changed).
 3. User-visible change → entry under `## [Unreleased]` in `CHANGELOG.md`.
 4. Schema or data migration → see below; include the generated files.
 5. Behavior/setup change → update the relevant page under [`docs/`](./docs/README.md) (and `README.md` if the overview or feature index changes).
@@ -74,9 +76,11 @@ Do **not** hand-author `migrations/*.sql` or edit `migrations/meta/_journal.json
 | Auth tables (better-auth)             | change config → `yarn auth:generate` → then `yarn db:generate`               |
 | Data-only backfill (no schema change) | `yarn db:generate --custom --name=<slug>` then paste SQL into the empty file |
 
-(`yarn db:generate` is `drizzle-kit generate`; `--custom` / `--name` are drizzle-kit flags. Plain generate emits nothing for data-only work: "No schema changes, nothing to migrate". `--custom` creates a journaled empty migration **and** the matching `meta/NNNN_snapshot.json`.)
+(`yarn db:generate` is `drizzle-kit generate`; `--custom` / `--name` are drizzle-kit flags. Plain generate emits nothing for data-only work: "No schema changes, nothing to migrate". In this repo, `drizzle-kit --custom` emits the SQL file and journal entry but not a usable chained snapshot, so add the matching `meta/NNNN_snapshot.json` explicitly with its `prevId` chained to the prior snapshot.)
 
 `yarn db:generate` needs a local D1 under `.wrangler/` (run `yarn dev` once, or e2e setup, if it says `D1 directory not found`).
+
+The test database schema in `worker/src/__tests__/helpers.ts` is hand-maintained. Every schema migration must update `applyMigrations()` there in the same change.
 
 Details: [`migrations/README.md`](./migrations/README.md). Apply with `yarn db:migrate:dev` / `yarn db:migrate:prod`.
 
@@ -84,6 +88,45 @@ Details: [`migrations/README.md`](./migrations/README.md). Apply with `yarn db:m
 
 Backend routes are Hono + Zod OpenAPI under `worker/src/routers/`. Spec is served at `/doc` (JSON) and `/swagger-ui` (not `/openapi.json` / `/api/doc`). When changing request/response shapes, update the zod-openapi schemas so `/doc` stays accurate.
 
+### Message reads
+
+Use `worker/src/lib/messages/query.ts` / `queryMessages()` for any
+cross-direction mail list, search, timeline, or agent read. Do not add another
+direct `emails ∪ sent_emails` merge in a router or tool.
+
+Message state mutations go through `worker/src/lib/messages/state.ts`. Every
+hard-delete path for received or sent messages must call `deleteMessageState()`
+before deleting the message rows so personal state, shared state, folder
+memberships, suggested replies and learning-filter training rows
+(`spam_training`) cannot become orphans.
+
+Inbound storage lives in `worker/src/lib/inbound/`: the live handler
+(`email-handler.ts`) and the mail importer both call `storeReceivedMessage()`,
+and the importer stores mail the inbox sent with `storeSentMessage()`. Change
+how a received message is stored there, not in either caller.
+
+Database backups dump every table exported from `worker/src/db/index.ts`. A
+new table is backed up automatically; one that must not be (sessions, tokens,
+counters that mean nothing in another instance) goes in `EXCLUDED_TABLES` in
+`worker/src/lib/backup/tables.ts`. `backups.test.ts` fails until every table is
+one or the other.
+
+## Native agent runtime dependencies
+
+The native agent stack is intentionally **exact-pinned** in `package.json`:
+`agents`, `@cloudflare/ai-chat`, AI SDK/provider packages, and the MCP peer
+packages required by the Agents SDK. These APIs are pre-1.0 or otherwise
+fast-moving. Do not loosen those pins or upgrade them opportunistically while
+working on another feature. Upgrade the agent dependency set together in a
+dedicated PR, regenerate `yarn.lock`, and rerun the full worker/web/e2e suite.
+
 ## WebMCP tools
 
 WebMCP tools live in `src/webmcp/` (runtime + hook + `tools/`), registered in `DashboardLayout` via `WebMcpTools`. Read tools call `src/lib/api.ts`; action tools drive the UI through the bridge (`src/webmcp/bridge.tsx`). Add a tool by extending `createReadTools`/`createActionTools` in `src/webmcp/tools/`.
+
+## Patterns we do not use
+
+- A second mailbox-state table (upstream's `mail_item_states`): write row actions through `worker/src/lib/messages/state.ts`, so `/mail`, JMAP and the grouped inbox agree.
+- Holding Gmail/Outlook sends in the outbox: refuse them instead, because outbox rows store no transport and a later drain could send through another provider.
+- Gating the native agent's reads or suggested-reply history on the prompt-injection check: show the stored verdict and the untrusted-mail notice, and let the check block only unattended work (AI filing, the current message of a suggested reply), because the agent has no send tool, a person reviews every draft, and screening history costs one model call per old message.
+- Writing a webhook or other side-effect row in the same D1 write as a send's own bookkeeping: record it after the send's writes, in a call that never throws, because a failed shared write would leave the outbox row in place and send the mail again.

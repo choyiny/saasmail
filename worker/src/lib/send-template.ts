@@ -1,3 +1,5 @@
+import { threadKeyForNewMessage } from "./messages/thread-key";
+import { auditMailSent } from "./audit/mail-events";
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
@@ -8,7 +10,7 @@ import { createEmailSender } from "./email-sender";
 import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
-import { generateMessageId } from "./message-id";
+import { deliveredMessageId, generateMessageId } from "./message-id";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
 
 export type SendTemplateParams = {
@@ -28,6 +30,8 @@ export type SendTemplateSuccess = {
   status: OutboxOutcome;
   delivered: string[];
   suppressed: string[];
+  /** Held in the outbox because outbound sending is paused. */
+  paused?: true;
 };
 
 export type SendTemplateFailure =
@@ -147,6 +151,7 @@ export async function sendTemplate(
 
   // Store sent email
   const now = Math.floor(Date.now() / 1000);
+  const storedMessageId = deliveredMessageId(messageId, result);
   await db.insert(sentEmails).values({
     id,
     personId,
@@ -158,11 +163,24 @@ export async function sendTemplate(
     // template render.
     bodyHtml: sendResult.renderedHtml ?? renderedHtml,
     bodyText: sendResult.renderedText ?? null,
-    messageId,
+    messageId: storedMessageId,
+    // Its own thread in a headers-mode inbox.
+    threadKey: await threadKeyForNewMessage(db, {
+      inbox: fromAddress,
+      messageId: storedMessageId,
+    }),
     resendId: result.id,
     status: outcome,
     sentAt: now,
     createdAt: now,
+  });
+  await auditMailSent(db, {
+    id,
+    from: fromAddress,
+    to,
+    subject: renderedSubject,
+    status: outcome,
+    templateSlug: slug,
   });
 
   return {
@@ -172,5 +190,6 @@ export async function sendTemplate(
     status: outcome,
     delivered: sendResult.delivered,
     suppressed: sendResult.suppressed,
+    ...(result.error?.paused ? { paused: true as const } : {}),
   };
 }

@@ -355,6 +355,15 @@ export default function PersonList({
                               </span>
                             )}
                           </span>
+                          {person.linkedCount > 0 && (
+                            <span
+                              data-testid="linked-count-badge"
+                              className="ml-1.5 shrink-0 rounded-full bg-bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-text-secondary"
+                              title={`${person.linkedCount} linked address${person.linkedCount === 1 ? "" : "es"}`}
+                            >
+                              +{person.linkedCount}
+                            </span>
+                          )}
                           <span
                             className={cn(
                               "flex shrink-0 items-center gap-1.5 text-xs transition-opacity",

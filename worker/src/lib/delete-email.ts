@@ -1,3 +1,4 @@
+import { auditMailDeleted } from "./audit/mail-events";
 import { eq, sql } from "drizzle-orm";
 import { emails } from "../db/emails.schema";
 import { sentEmails } from "../db/sent-emails.schema";
@@ -5,6 +6,8 @@ import { attachments } from "../db/attachments.schema";
 import { people } from "../db/people.schema";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { isInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
+import { deleteMessageState } from "./messages/state";
+import { cancelScheduledSendsFor } from "./scheduled-sends";
 
 /** Grants deletion of any email. For system callers (e.g. blocklist purge). */
 export const SYSTEM_INBOX_ACCESS: AllowedInboxes = { isAdmin: true };
@@ -33,6 +36,8 @@ export async function deleteEmailWithAttachments(
       personId: emails.personId,
       isRead: emails.isRead,
       recipient: emails.recipient,
+      rawR2Key: emails.rawR2Key,
+      subject: emails.subject,
     })
     .from(emails)
     .where(eq(emails.id, emailId))
@@ -51,9 +56,12 @@ export async function deleteEmailWithAttachments(
     for (const att of atts) {
       await r2.delete(att.r2Key);
     }
+    if (email.rawR2Key) await r2.delete(email.rawR2Key);
 
     // Delete attachment DB records
     await db.delete(attachments).where(eq(attachments.emailId, emailId));
+
+    await deleteMessageState(db, [{ kind: "received", id: emailId }]);
 
     // Delete the email
     await db.delete(emails).where(eq(emails.id, emailId));
@@ -70,12 +78,23 @@ export async function deleteEmailWithAttachments(
       })
       .where(eq(people.id, email.personId));
 
+    await auditMailDeleted(db, [
+      {
+        ref: { kind: "received", id: emailId },
+        inbox: email.recipient,
+        subject: email.subject,
+      },
+    ]);
     return { success: true, attachmentsDeleted: atts.length };
   }
 
   // Try sent email
   const sent = await db
-    .select({ id: sentEmails.id, fromAddress: sentEmails.fromAddress })
+    .select({
+      id: sentEmails.id,
+      fromAddress: sentEmails.fromAddress,
+      subject: sentEmails.subject,
+    })
     .from(sentEmails)
     .where(eq(sentEmails.id, emailId))
     .limit(1);
@@ -96,8 +115,17 @@ export async function deleteEmailWithAttachments(
       await r2.delete(att.r2Key);
     }
     await db.delete(attachments).where(eq(attachments.emailId, emailId));
+    await deleteMessageState(db, [{ kind: "sent", id: emailId }]);
+    await cancelScheduledSendsFor(db, sql`id = ${emailId}`);
     await db.delete(sentEmails).where(eq(sentEmails.id, emailId));
 
+    await auditMailDeleted(db, [
+      {
+        ref: { kind: "sent", id: emailId },
+        inbox: sent[0].fromAddress,
+        subject: sent[0].subject,
+      },
+    ]);
     return { success: true, attachmentsDeleted: atts.length };
   }
 
