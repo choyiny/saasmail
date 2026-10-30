@@ -19,6 +19,7 @@ import { searchEmails } from "../lib/queries/search";
 import { citedIdsOf, threadKeyForNewMessage } from "../lib/messages/thread-key";
 import { setUserState } from "../lib/messages/state";
 import type { Variables } from "../variables";
+import { deliveryProblemsField } from "../lib/delivery/openapi";
 
 export const emailsRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -80,6 +81,7 @@ export const EmailSchema = z.object({
     description:
       "Number of attachments on this message. Set on list endpoints; may be omitted on GET /api/emails/{id}.",
   }),
+  deliveryProblems: deliveryProblemsField,
   attachments: z.array(AttachmentSchema).optional().openapi({
     description:
       "Attachment metadata. Included on GET /api/emails/by-person/{personId}, GET /api/emails/{id}, and GET /api/conversations/{id}/emails. Download bytes via GET /api/attachments/{id}.",
@@ -191,7 +193,7 @@ emailsRouter.openapi(listPersonEmailsRoute, async (c) => {
   const result = await listPersonEmails(
     db,
     personId,
-    { q, recipient, page, limit, customerId },
+    { q, recipient, page, limit, customerId, withDelivery: true },
     allowed,
   );
 

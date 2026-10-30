@@ -62,6 +62,7 @@ import {
 import { cancelScheduledSubmission, enqueueRelease } from "./release";
 import { reserveDailySend } from "../lib/sending-controls";
 import { buildJmapSentRow } from "./sent-row";
+import { hardBouncedAmong } from "../lib/suppressions";
 import { currentJmapState, parseJmapState } from "./state";
 import {
   checkAttachmentCount,
@@ -609,6 +610,15 @@ async function createSubmission(
   // Steps 3–4: at least one To, sendable, To + Cc + Bcc at most 50 in all.
   const recipientError = checkContentRecipients(content);
   if (recipientError) return rejected(recipientError);
+  // A hard-bounced address refuses even this mail (docs/suppressions.md).
+  const hardBounced = await hardBouncedAmong(db, submissionRecipients(content));
+  if (hardBounced.length > 0) {
+    return rejected({
+      type: "invalidRecipients",
+      invalidRecipients: hardBounced,
+      description: "These recipients hard-bounced and cannot receive mail",
+    });
+  }
 
   // Step 5: the envelope.
   const envelope = resolveEnvelope(

@@ -52,6 +52,9 @@
   "observability": {
     "enabled": true
   },
+  // EMAIL_QUEUE also receives Cloudflare Email Sending events (bounces,
+  // complaints) once the queue is subscribed to the sending domain's events:
+  // see docs/email-providers.md, "Bounces and complaints".
   "queues": {
     "producers": [
       {

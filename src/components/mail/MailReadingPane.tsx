@@ -40,6 +40,7 @@ import {
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { showToast } from "@/lib/toast";
 import DeliveryBadge from "./DeliveryBadge";
+import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
 
 function addressLabel(
   address: { email: string; name?: string | null } | null,
@@ -511,6 +512,15 @@ export default function MailReadingPane({
                         status={selectedMessage.delivery?.status}
                         sendAt={selectedMessage.occurredAt}
                         size="md"
+                      />
+                      <DeliveryProblemBadge
+                        problems={selectedMessage.deliveryProblems}
+                        recipientCount={
+                          1 +
+                          (selectedMessage.additionalTo?.length ?? 0) +
+                          selectedMessage.cc.length +
+                          (selectedMessage.bcc?.length ?? 0)
+                        }
                       />
                       {selectedMessage.source.campaignId && (
                         <span className="rounded bg-bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-secondary">

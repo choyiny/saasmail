@@ -29,6 +29,21 @@ At runtime: **Bavimail** (when both env vars are set) > **Postmark** (when `POST
 Setting more than one provider's variables is not an error — the highest one in
 that order wins, and the others are ignored.
 
+## Bounces and complaints
+
+**Cloudflare**: Email Sending publishes what happens to a message after it accepted it as events on a Queue. Subscribe the instance's existing queue (the `EMAIL_QUEUE` producer in `wrangler.jsonc`, `<name>-sequence-emails` from the installer) to each sending domain's events, once, after the first deploy:
+
+```bash
+npx wrangler queues subscription create <queue> --source email.sending \
+  --zone-id <zone id> --domain <sending domain> \
+  --events message.bounced,message.complained,message.failed,message.rejected
+npx wrangler queues subscription list <queue>   # check
+```
+
+Or in the dashboard: **Queues** → the queue → **Subscriptions** → **Subscribe to events** → **Email Sending**. `--events` takes the short names; the messages arrive typed `cf.email.sending.message.bounced` and so on, and the Worker's queue consumer records them ([Suppressions](suppressions.md#bounces-and-complaints)). Leave out `message.delivered` and `message.deferred`: nothing uses them, and delivered would cost a queue message per recipient per send. Each event costs about 3 queue operations, which the Workers Paid allowance covers. With a Cloudflare token, `yarn doctor` warns when a sending domain has no subscription for bounced and complained ([Doctor](doctor.md)).
+
+**Resend, Postmark and Bavimail**: not yet. saasmail learns nothing after they accept a message.
+
 ## Retries and duplicates
 
 Every outbound message goes through the outbox, which retries temporary failures hourly. On **Resend**, each message carries an idempotency key that stays the same across its retries, so a retry after an attempt that was accepted without saasmail learning so (a Worker crash) doesn't send the message twice; Resend keeps keys for 24 hours. Cloudflare, Postmark and Bavimail have no idempotency key, so that rare crash window can still produce a duplicate there.

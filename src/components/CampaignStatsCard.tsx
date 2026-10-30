@@ -61,13 +61,13 @@ export function CampaignStatsGrid({ stats }: { stats: CampaignStats }) {
       />
       <Tile
         label="Bounces"
-        value="—"
-        hint="Requires bounce webhooks, which this version does not have."
+        value={String(stats.bounces)}
+        sub={pct(stats.bounces, stats.delivered)}
       />
       <Tile
         label="Complaints"
-        value="—"
-        hint="Requires complaint webhooks, which this version does not have."
+        value={String(stats.complaints)}
+        sub={pct(stats.complaints, stats.delivered)}
       />
     </div>
   );

@@ -18,6 +18,7 @@ import {
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
 import { sentEmails } from "../db/sent-emails.schema";
+import { deliveryEvents } from "../db/delivery-events.schema";
 import { json200Response, json201Response } from "../lib/helpers";
 import {
   assertInboxAllowed,
@@ -84,6 +85,9 @@ const StatsSchema = z.object({
    */
   uniqueOpeners: z.number(),
   uniqueClicks: z.number(),
+  /** Provider events (docs/suppressions.md): `bounced` and `complained` rows. */
+  bounces: z.number(),
+  complaints: z.number(),
 });
 
 const CampaignDetailSchema = CampaignSchema.extend({ stats: StatsSchema });
@@ -199,6 +203,14 @@ async function liveStats(
   const events = (t: string) =>
     Number(byType.find((r) => r.eventType === t)?.n ?? 0);
 
+  const byKind = await db
+    .select({ kind: deliveryEvents.kind, n: sql<number>`count(*)` })
+    .from(deliveryEvents)
+    .where(eq(deliveryEvents.campaignId, campaign.id))
+    .groupBy(deliveryEvents.kind);
+  const reported = (k: string) =>
+    Number(byKind.find((r) => r.kind === k)?.n ?? 0);
+
   return {
     targeted: campaign.statsTargeted,
     delivered: count("sent"),
@@ -208,6 +220,8 @@ async function liveStats(
     unsubscribes: Number(unsub[0]?.n ?? 0),
     uniqueOpeners: events("open"),
     uniqueClicks: events("click"),
+    bounces: reported("bounced"),
+    complaints: reported("complained"),
   };
 }
 

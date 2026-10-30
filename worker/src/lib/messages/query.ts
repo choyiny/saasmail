@@ -18,6 +18,7 @@ import {
 import { decodeCursor, encodeCursor } from "./cursor";
 import type { MessageCursorV1 } from "./cursor";
 import { jmapHiddenSentSql } from "./jmap-visibility";
+import { enrichDeliveryProblems } from "../delivery/reads";
 import type {
   AttachmentRow,
   MessageKind,
@@ -101,6 +102,8 @@ export interface MessageQuery {
    * list the select has to look the header up in `raw_headers`.
    */
   withReplyTo?: boolean;
+  /** Set `delivery.problems` on sent messages (bounces, complaints). */
+  withDelivery?: boolean;
   /** Unix seconds used for snooze evaluation. Defaults to the current time. */
   now?: number;
 }
@@ -1358,6 +1361,9 @@ export async function queryMessages(
   );
   if (query.withState) {
     await enrichMailboxState(db, messages);
+  }
+  if (query.withDelivery) {
+    await enrichDeliveryProblems(db, messages);
   }
 
   const last =

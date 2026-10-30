@@ -34,6 +34,7 @@ import { triageModel, type AiFileMessage } from "../lib/triage/ai-file";
 import { describedFolders } from "../lib/triage/folders";
 import { renderMessageBytes } from "../lib/export/render-message";
 import type { Variables } from "../variables";
+import { deliveryProblemsField } from "../lib/delivery/openapi";
 
 export const messagesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -106,6 +107,7 @@ const MessageSchema = z.object({
     sequenceEnrollmentId: z.string().nullable(),
   }),
   delivery: z.object({ status: z.string() }).nullable(),
+  deliveryProblems: deliveryProblemsField,
   attachmentCount: z.number().optional(),
   state: MessageStateSchema.optional(),
 });
@@ -255,6 +257,7 @@ messagesRouter.openapi(listMessagesRoute, async (c) => {
       withAttachmentCounts: true,
       // The reading pane renders rows of this list; it has no detail read.
       withReplyTo: true,
+      withDelivery: true,
       excludeCampaignSends,
       assignedTo: input.assignedTo === "me" ? user.id : input.assignedTo,
     });
@@ -262,9 +265,13 @@ messagesRouter.openapi(listMessagesRoute, async (c) => {
 
     return c.json(
       {
-        messages: page.messages.map((message) => ({
+        messages: page.messages.map(({ delivery, ...message }) => ({
           ...message,
           ref: serializeMessageRef(message.ref),
+          delivery: delivery ? { status: delivery.status } : null,
+          ...(delivery?.problems
+            ? { deliveryProblems: delivery.problems }
+            : {}),
         })),
         nextCursor: page.nextCursor,
       },

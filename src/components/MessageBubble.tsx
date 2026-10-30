@@ -17,6 +17,7 @@ import ImageAttachments, {
 import { messageEmlUrl, type Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import DeliveryBadge from "@/components/mail/DeliveryBadge";
+import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
 
 interface MessageBubbleProps {
   email: Email;
@@ -169,6 +170,12 @@ export default function MessageBubble({
         )}
         {isSent && (
           <DeliveryBadge status={email.status} sendAt={email.timestamp} />
+        )}
+        {isSent && (
+          <DeliveryProblemBadge
+            problems={email.deliveryProblems}
+            recipientCount={1 + email.cc.length}
+          />
         )}
         {isSent && email.campaignId && (
           <span

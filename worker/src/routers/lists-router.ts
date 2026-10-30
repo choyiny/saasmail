@@ -92,6 +92,10 @@ const MemberSchema = z.object({
   consentAt: z.number().nullable(),
   subscribedAt: z.number().nullable(),
   unsubscribedAt: z.number().nullable(),
+  unsubscribeReason: z.string().nullable().optional().openapi({
+    description:
+      "Why an unsubscribed member left, when known: `hard_bounce` or `complaint` from the provider's delivery events, else the unsubscribe link's reason.",
+  }),
   createdAt: z.number(),
 });
 
@@ -534,6 +538,7 @@ listsRouter.openapi(listMembersRoute, async (c) => {
       consentAt: m.consentAt,
       subscribedAt: m.subscribedAt,
       unsubscribedAt: m.unsubscribedAt,
+      unsubscribeReason: m.unsubscribeReason ?? null,
       createdAt: m.createdAt,
     })),
     nextCursor: rows.length > limit ? page[page.length - 1]!.member.id : null,
@@ -640,6 +645,7 @@ listsRouter.openapi(addMemberRoute, async (c) => {
         consentAt: m.consentAt,
         subscribedAt: m.subscribedAt,
         unsubscribedAt: m.unsubscribedAt,
+        unsubscribeReason: m.unsubscribeReason ?? null,
         createdAt: m.createdAt,
       },
       201,
@@ -689,6 +695,7 @@ listsRouter.openapi(addMemberRoute, async (c) => {
       consentAt: member.consentAt,
       subscribedAt: member.subscribedAt,
       unsubscribedAt: member.unsubscribedAt,
+      unsubscribeReason: member.unsubscribeReason,
       createdAt: member.createdAt,
     },
     201,
@@ -764,6 +771,7 @@ listsRouter.openapi(removeMemberRoute, async (c) => {
     consentAt: m.consentAt,
     subscribedAt: m.subscribedAt,
     unsubscribedAt: m.unsubscribedAt,
+    unsubscribeReason: m.unsubscribeReason ?? null,
     createdAt: m.createdAt,
   });
 });

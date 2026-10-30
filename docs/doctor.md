@@ -67,6 +67,7 @@ It runs, in order, one line per result (`✓` pass, `!` warning, `✗` failure, 
 6. **Cloudflare API** (with `DOCTOR_CLOUDFLARE_API_TOKEN`, else `CLOUDFLARE_API_TOKEN`; otherwise one `i` line). Keep a read-only token in `DOCTOR_CLOUDFLARE_API_TOKEN`: Wrangler also signs in with `CLOUDFLARE_API_TOKEN`, so a read-only token there makes steps 2 and 3 fail.
    - For each inbox whose source is Cloudflare: its address has an enabled Email Routing rule whose action is this Worker, or, for an address on the zone's apex domain only, the catch-all does, else **fail**. An address on a subdomain needs its own rule. Gmail- and Outlook-sourced inboxes are not applicable.
    - When the outbound provider is Cloudflare Email Sending: sending is enabled for each inbox domain, else **fail**. With Resend, Postmark or Bavimail the line says not applicable.
+   - With Cloudflare Email Sending, the event subscriptions of the config's `EMAIL_QUEUE` queue: each inbox domain has an enabled Email Sending subscription with `message.bounced` and `message.complained`, else **warn** (create it as [Email providers](email-providers.md#bounces-and-complaints) says).
    - A failing API call: **warn**.
 
 Wrangler calls time out after 60 seconds, HTTP calls after 15. The exit code is 1 on any failure, and on any warning with `--strict`.

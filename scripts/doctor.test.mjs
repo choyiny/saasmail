@@ -182,6 +182,7 @@ describe("parseWranglerConfig", () => {
       ].sort(),
     );
     expect(c.vars.has("UNSUBSCRIBE_SECRET")).toBe(true);
+    expect(c.emailQueue).toBe("q");
   });
   it("throws on a syntax error", () => {
     expect(() => parseWranglerConfig('{ "name": }')).toThrow(/invalid JSONC/);
@@ -594,6 +595,109 @@ describe("Email Routing rules", () => {
     ).toBe("info");
     expect(world.calls.some((c) => c.includes("name=gmail.com"))).toBe(false);
     expect(code).toBe(1);
+  });
+});
+
+describe("Email Sending event subscriptions", () => {
+  const CLOUDFLARE_OUTBOUND = [
+    {
+      id: "provider.outbound",
+      group: "provider",
+      status: "pass",
+      summary:
+        "Outbound provider: Cloudflare Email Sending (CloudflareSender).",
+    },
+  ];
+
+  /** A Cloudflare-sending world whose queue `q` has `subscriptions`. */
+  function world(subscriptions) {
+    return deps({
+      env: { DOCTOR_CLOUDFLARE_API_TOKEN: "cf-read" },
+      fetch: async (url) => {
+        const u = new URL(url);
+        if (u.pathname.endsWith("/api/admin/doctor")) {
+          return json(runtimeReport({ checks: CLOUDFLARE_OUTBOUND }));
+        }
+        if (u.pathname.endsWith("/zones")) {
+          return json({
+            success: true,
+            result:
+              u.searchParams.get("name") === "example.com"
+                ? [{ id: "z1", name: "example.com", account: { id: "acc1" } }]
+                : [],
+          });
+        }
+        if (u.pathname.endsWith("/email/routing/rules/catch_all")) {
+          return json({ success: true, result: { enabled: false } });
+        }
+        if (u.pathname.endsWith("/email/routing/rules")) {
+          return json({ success: true, result: [] });
+        }
+        if (u.pathname.endsWith("/email/sending/subdomains")) {
+          return json({
+            success: true,
+            result: [{ name: "example.com", enabled: true }],
+          });
+        }
+        if (u.pathname === "/client/v4/accounts/acc1/queues") {
+          expect(u.searchParams.get("name")).toBe("q");
+          return json({
+            success: true,
+            result: [{ queue_id: "qid", queue_name: "q" }],
+          });
+        }
+        if (
+          u.pathname ===
+          "/client/v4/accounts/acc1/event_subscriptions/subscriptions"
+        ) {
+          expect(u.searchParams.get("queue_id")).toBe("qid");
+          return json({ success: true, result: subscriptions });
+        }
+        return null;
+      },
+    });
+  }
+
+  const sub = (events, domain = "example.com") => ({
+    id: "s1",
+    enabled: true,
+    source: { type: "email.sending", zone_id: "z1", domain },
+    destination: { type: "queues.queue", queue_id: "qid" },
+    events,
+  });
+  const eventsLine = (lines) =>
+    lines.find((l) => l.label.startsWith("Email Sending events"));
+
+  it("warns when the sending domain has no subscription for bounced and complained", async () => {
+    for (const subscriptions of [
+      [],
+      [sub(["message.bounced"])],
+      [sub(["message.bounced", "message.complained"], "other.com")],
+    ]) {
+      const { lines } = await main(ARGS, world(subscriptions).deps);
+      const line = eventsLine(lines);
+      expect(line.status).toBe("warn");
+      expect(line.hint).toContain("docs/email-providers.md");
+    }
+  });
+
+  it("passes with a subscription for bounced and complained", async () => {
+    const { lines } = await main(
+      ARGS,
+      world([
+        sub([
+          "message.bounced",
+          "message.complained",
+          "message.failed",
+          "message.rejected",
+        ]),
+      ]).deps,
+    );
+    expect(eventsLine(lines)).toMatchObject({
+      status: "pass",
+      label:
+        "Email Sending events: example.com reports bounces and complaints to q.",
+    });
   });
 });
 

@@ -36,6 +36,8 @@ import {
 import { MAX_DELAYED_SEND } from "./constants";
 import { listUsableIdentities } from "./mailboxes";
 import { withInlineAttachmentUrls } from "./sent-row";
+import { hardBouncedAmong } from "../lib/suppressions";
+import { submissionRecipients } from "./submission-rules";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Db = DrizzleD1Database<any>;
@@ -251,6 +253,11 @@ export async function releaseScheduledSubmission(
     )
   ) {
     await failRelease(db, row, "its identity is no longer usable");
+    return "failed";
+  }
+  // A recipient that hard-bounced while the message waited: nothing is sent.
+  if ((await hardBouncedAmong(db, submissionRecipients(content))).length > 0) {
+    await failRelease(db, row, "hard bounce");
     return "failed";
   }
 

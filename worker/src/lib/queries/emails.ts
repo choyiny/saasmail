@@ -7,6 +7,7 @@ import { attachments } from "../../db/attachments.schema";
 import { people } from "../../db/people.schema";
 import { parseCc, replyToOf } from "../messages/adapters";
 import { queryMessages } from "../messages/query";
+import type { DeliveryProblem } from "../delivery/reads";
 import {
   applyReplyGuard,
   ownInboxAddresses,
@@ -50,6 +51,8 @@ export type PersonEmailRow = {
   campaignId?: string | null;
   attachmentCount: number;
   attachments: AttachmentRow[];
+  /** Sent messages, with `withDelivery`: the provider's bounces and complaints. */
+  deliveryProblems?: DeliveryProblem[];
 };
 
 export type ListPersonEmailsOptions = {
@@ -58,6 +61,8 @@ export type ListPersonEmailsOptions = {
   customerId?: string;
   page: number;
   limit: number;
+  /** Attach `deliveryProblems` to sent messages (the web timeline). */
+  withDelivery?: boolean;
 };
 
 export type ListPersonEmailsResult = {
@@ -122,6 +127,7 @@ export async function listPersonEmails(
     withAttachmentCounts: true,
     withAttachments: true,
     withReplyTo: true,
+    withDelivery: opts.withDelivery === true,
     includeTrashed: false,
     includeSpam: false,
   });
@@ -149,6 +155,9 @@ export async function listPersonEmails(
     campaignId: message.source.campaignId,
     attachmentCount: message.attachmentCount ?? 0,
     attachments: message.attachments ?? [],
+    ...(message.delivery?.problems
+      ? { deliveryProblems: message.delivery.problems }
+      : {}),
   }));
 
   const inboxAddrs = [

@@ -76,6 +76,7 @@ If the run fails, the message names the failed step and prints `npx saasmail ins
 2. Complete passkey enrollment on the prompt. saasmail enforces passkey auth for `/api/*` in production; without it, you'll be locked out of admin actions.
 3. **Inbound test**: send an email from an external account (e.g. Gmail) to any address at each inbound domain. It should appear in the UI within seconds. If not, see Common Issues.
 4. **Outbound test**: reply to that email from the UI using a send-from address on a verified domain. If it never arrives, the send-from domain is almost certainly not verified yet (DNS records pending).
+5. **Bounce events** (Cloudflare Email Sending only): give the user the command that subscribes the queue `<name>-sequence-emails` to each send-from domain's events, to run in their terminal: `npx wrangler queues subscription create <name>-sequence-emails --source email.sending --zone-id <zone id> --domain <send-from domain> --events message.bounced,message.complained,message.failed,message.rejected`. Without it saasmail never learns of a bounce or a spam complaint (`docs/email-providers.md`, "Bounces and complaints").
 
 ## Completion Summary
 

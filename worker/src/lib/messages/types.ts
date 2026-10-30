@@ -1,4 +1,5 @@
 import type { attachments } from "../../db/attachments.schema";
+import type { DeliveryProblem } from "../delivery/reads";
 
 export type MessageKind = "received" | "sent";
 
@@ -75,6 +76,8 @@ export interface UnifiedMessage {
   };
   delivery: {
     status: string;
+    /** What the provider reported after accepting it (`withDelivery`). */
+    problems?: DeliveryProblem[];
   } | null;
   attachmentCount?: number;
   attachments?: AttachmentRow[];

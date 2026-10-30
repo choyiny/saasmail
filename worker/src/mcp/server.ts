@@ -775,8 +775,8 @@ export function buildMcpServer(ctx: McpContext): McpServer {
       return sendOnce(
         input.idempotencyKey,
         { kind: "send", ...sendRequestFields(payload) },
-        async () => ({
-          result: await sendEmail({
+        async () => {
+          const result = await sendEmail({
             db,
             env: ctx.env,
             // Attachments would mean base64 in the tool payload; omitted until
@@ -784,8 +784,12 @@ export function buildMcpServer(ctx: McpContext): McpServer {
             files: [],
             payload,
             allowed,
-          }),
-        }),
+          });
+          // A hard-bounced recipient: the message names it and the fix.
+          if (!result.ok)
+            return { error: (result as { message: string }).message };
+          return { result };
+        },
       );
     }),
   );

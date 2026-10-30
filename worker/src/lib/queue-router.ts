@@ -41,6 +41,8 @@ import {
   runMailExportSlice,
   type MailExportMessage,
 } from "./export/mail-export";
+import { handleDeliveryEventMessage } from "./delivery/queue";
+import { CLOUDFLARE_EVENT_PREFIX } from "./delivery/cloudflare";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -57,6 +59,9 @@ export type SuggestReplyMessage = {
   emailId: string;
 };
 
+/** A Cloudflare Email Sending event (`cf.email.sending.message.*`). */
+export type DeliveryEventMessage = { type: string; payload?: unknown };
+
 export type QueueMessageBody =
   | SequenceEmailMessage
   | ListImportMessage
@@ -69,7 +74,8 @@ export type QueueMessageBody =
   | MailExportMessage
   | MailImportMessage
   | BackupStepMessage
-  | ThreadBackfillMessage;
+  | ThreadBackfillMessage
+  | DeliveryEventMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
@@ -89,6 +95,7 @@ export type QueueMessageKind =
   | "mail_import"
   | "backup_step"
   | "thread_backfill"
+  | "delivery_event"
   | "unknown";
 
 /**
@@ -154,6 +161,12 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
     return typeof b.jobId === "string" && typeof b.slice === "number"
       ? b.type
       : "unknown";
+  }
+  if (
+    typeof b.type === "string" &&
+    b.type.startsWith(CLOUDFLARE_EVENT_PREFIX)
+  ) {
+    return "delivery_event";
   }
   return "unknown";
 }
@@ -277,6 +290,10 @@ export async function handleQueueBatch(
             sender,
           );
         }
+      } else if (kind === "delivery_event") {
+        // Acks, or retries once when the sent row may not exist yet.
+        await handleDeliveryEventMessage(db, msg);
+        continue;
       } else {
         const body = msg.body as SuggestReplyMessage;
         await suggestedReplyRunner(db, env, body.emailId);

@@ -303,6 +303,7 @@ describe("list API without subscribe forms", () => {
       "source",
       "status",
       "subscribedAt",
+      "unsubscribeReason",
       "unsubscribedAt",
     ];
     expect(Object.keys(member).sort()).toEqual(memberKeys);

@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { nanoid } from "nanoid";
 import { campaigns } from "../db/campaigns.schema";
@@ -163,13 +163,17 @@ export async function undoListUnsubscribe(
     return { error: "window_closed" };
   }
 
-  await db.batch([
+  // A membership the provider's bounce or complaint removed is never
+  // restored by a link (docs/suppressions.md): both statements check it.
+  const notProviderRemoved = sql`NOT EXISTS (SELECT 1 FROM list_members WHERE id = ${member.id} AND unsubscribe_reason IN ('hard_bounce', 'complaint'))`;
+  const [, restored] = await db.batch([
     db
       .delete(campaignUnsubscribeAttributions)
       .where(
         and(
           eq(campaignUnsubscribeAttributions.campaignId, token.campaignId),
           eq(campaignUnsubscribeAttributions.listMemberId, member.id),
+          notProviderRemoved,
         ),
       ),
     db
@@ -180,8 +184,13 @@ export async function undoListUnsubscribe(
         unsubscribeReason: null,
         subscribedAt: member.subscribedAt ?? now,
       })
-      .where(eq(listMembers.id, member.id)),
+      .where(and(eq(listMembers.id, member.id), notProviderRemoved)),
   ]);
+  if (
+    Number((restored as { meta?: { changes?: number } }).meta?.changes) === 0
+  ) {
+    return { error: "window_closed" };
+  }
 
   return { error: null, email: member.email, listId: token.listId };
 }

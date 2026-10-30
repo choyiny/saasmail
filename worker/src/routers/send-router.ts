@@ -10,6 +10,10 @@ import type { IdempotentResponse } from "../lib/send-idempotency";
 import { bearerSecurity } from "../lib/openapi-auth";
 import { MAX_CC_ENTRIES } from "../lib/send-limits";
 import { respondIdempotently } from "../lib/idempotent-send-route";
+import {
+  RECIPIENT_HARD_BOUNCED,
+  type HardBouncedRefusal,
+} from "../lib/delivery/refusal";
 import { sendRequestFields } from "../lib/send-idempotency";
 import {
   dailySendLimitResponses,
@@ -44,6 +48,18 @@ function mailboxFailure(
     status: 502,
     body: { error: message, code: "SEND_FAILED" },
     ...(keepIdempotencyKey ? { remember: true } : {}),
+  };
+}
+
+/** 422 for a send to a hard-bounced address (docs/suppressions.md). */
+function hardBouncedResponse(refusal: HardBouncedRefusal): IdempotentResponse {
+  return {
+    status: 422,
+    body: {
+      error: refusal.message,
+      code: RECIPIENT_HARD_BOUNCED,
+      addresses: refusal.addresses,
+    },
   };
 }
 
@@ -224,6 +240,10 @@ sendRouter.openapi(sendEmailRoute, async (c) => {
         files,
         allowed: c.get("allowedInboxes")!,
       });
+      // Answered, not remembered: once the address is cleared a retry sends.
+      if (!result.ok) {
+        return hardBouncedResponse(result as HardBouncedRefusal);
+      }
       return {
         status: 201,
         body: {
@@ -400,6 +420,9 @@ sendRouter.openapi(replyEmailRoute, async (c) => {
 
       // Refusals are answered, not remembered: a corrected retry may run.
       if (!result.ok) {
+        if ((result as { code: string }).code === RECIPIENT_HARD_BOUNCED) {
+          return hardBouncedResponse(result as HardBouncedRefusal);
+        }
         if (result.code === "MISSING_VARIABLES") {
           return {
             status: 400,

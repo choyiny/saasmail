@@ -1,5 +1,5 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { suppressions } from "../db/suppressions.schema";
 import {
@@ -168,7 +168,8 @@ const undoRoute = createRoute({
       content: { "application/json": { schema: ErrorSchema } },
     },
     410: {
-      description: "The re-subscribe window has closed; opt in again instead",
+      description:
+        "The re-subscribe window has closed, or the address was suppressed or removed for a bounce, a spam complaint or by an admin; opt in again instead",
       content: { "application/json": { schema: ErrorSchema } },
     },
   },
@@ -203,7 +204,24 @@ unsubscribeRouter.openapi(undoRoute, async (c) => {
   }
 
   const email = result.email.toLowerCase();
-  await db.delete(suppressions).where(eq(suppressions.email, email));
+  // Only the unsubscribe a link made: a bounce, a complaint or an admin's
+  // suppression stays (docs/suppressions.md), and the link says so.
+  await db
+    .delete(suppressions)
+    .where(
+      and(
+        eq(suppressions.email, email),
+        eq(suppressions.reason, "unsubscribe"),
+      ),
+    );
+  const [kept] = await db
+    .select({ id: suppressions.id })
+    .from(suppressions)
+    .where(eq(suppressions.email, email))
+    .limit(1);
+  if (kept) {
+    return c.json({ error: "This address cannot be re-subscribed" }, 410);
+  }
 
   return c.json(
     {

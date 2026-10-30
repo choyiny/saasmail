@@ -104,6 +104,16 @@ export interface CcEntry {
   name?: string | null;
 }
 
+/** What the provider reported after accepting a sent message (docs/suppressions.md). */
+export interface DeliveryProblem {
+  kind: "bounced" | "complained" | "failed" | "rejected";
+  bounceType: "hard" | "soft" | null;
+  recipient: string;
+  smtpStatus: string | null;
+  detail: string | null;
+  occurredAt: number;
+}
+
 export interface Email {
   id: string;
   type: "received" | "sent";
@@ -138,6 +148,8 @@ export interface Email {
   replyRecipients?: CcEntry[];
   /** Set when this was a campaign send rather than mail someone wrote. */
   campaignId?: string | null;
+  /** Sent messages: bounces and complaints the provider reported. */
+  deliveryProblems?: DeliveryProblem[];
 }
 
 export type InboxDisplayMode = "thread" | "chat";
@@ -787,6 +799,8 @@ export interface MailMessage {
     sequenceEnrollmentId: string | null;
   };
   delivery: { status: string } | null;
+  /** Sent messages: bounces and complaints the provider reported. */
+  deliveryProblems?: DeliveryProblem[];
   attachmentCount?: number;
   state: MailMessageState;
 }
@@ -2128,7 +2142,13 @@ export async function startOutlookConnect(
 export interface Suppression {
   id: string;
   email: string;
-  reason: "unsubscribe" | "manual";
+  reason:
+    | "unsubscribe"
+    | "manual"
+    | "hard_bounce"
+    | "soft_bounce"
+    | "complaint"
+    | "provider";
   source: string | null;
   note: string | null;
   createdAt: number;
@@ -2377,6 +2397,8 @@ export interface ListMember {
   consentAt: number | null;
   subscribedAt: number | null;
   unsubscribedAt: number | null;
+  /** `hard_bounce` or `complaint` when the provider reported it. */
+  unsubscribeReason?: string | null;
   createdAt: number;
 }
 
@@ -2431,6 +2453,9 @@ export interface CampaignStats {
   uniqueOpeners: number;
   /** Approximate, and identical to "unique clickers" by schema construction. */
   uniqueClicks: number;
+  /** Bounces and spam complaints the provider reported for this campaign. */
+  bounces: number;
+  complaints: number;
 }
 
 export type CampaignDetail = Campaign & { stats: CampaignStats };

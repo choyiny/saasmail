@@ -35,6 +35,7 @@ import { formatFromAddress } from "./format-from-address";
 import { assertInboxAllowed, type AllowedInboxes } from "./inbox-permissions";
 import { renderTemplate, type TemplateVariables } from "./interpolate";
 import { deliveredMessageId, generateMessageId } from "./message-id";
+import { refuseHardBounced, type HardBouncedRefusal } from "./delivery/refusal";
 import { replyToOf } from "./messages/adapters";
 import type { MailAddress } from "./messages/types";
 import type { ParsedFile } from "./multipart-send";
@@ -94,11 +95,16 @@ export type SendEmailSuccess = {
   paused?: true;
 };
 
-// The compose path has no recoverable failure mode of its own: multipart
-// parse errors are handled before this runs, and a disallowed inbox throws
-// (HTTPException). Kept as a discriminated union so callers branch on `ok`
-// the same way they do for replies.
-export type SendEmailResult = SendEmailSuccess;
+// The compose path's one recoverable failure is a hard-bounced recipient:
+// multipart parse errors are handled before this runs, and a disallowed inbox
+// throws (HTTPException).
+// The success fields are optional `never` on the refusal: the worker build has
+// no strict mode, so `ok` does not narrow and callers read them directly.
+export type SendEmailResult =
+  | SendEmailSuccess
+  | (HardBouncedRefusal & {
+      [K in Exclude<keyof SendEmailSuccess, "ok">]?: never;
+    });
 
 export type ReplyEmailPayload = {
   fromAddress: string;
@@ -180,7 +186,10 @@ export type ReplyEmailFailure =
       requiredVariables: string[];
     };
 
-export type ReplyEmailResult = ReplyEmailSuccess | ReplyEmailFailure;
+export type ReplyEmailResult =
+  | ReplyEmailSuccess
+  | ReplyEmailFailure
+  | HardBouncedRefusal;
 
 /**
  * The sender for mail from `fromAddress`: its Gmail or Outlook mailbox when
@@ -373,6 +382,16 @@ export async function sendEmail(
   const replyTo = raw.replyTo?.trim().toLowerCase();
   assertInboxAllowed(allowed, fromAddress);
   const now = Math.floor(Date.now() / 1000);
+  // Only a transactional send skips the suppression list; any other send
+  // already drops a hard-bounced address there and goes to the rest.
+  const hardBounced =
+    transactional === true
+      ? await refuseHardBounced(db, [
+          to,
+          ...(cc ?? []).map((entry) => entry.email),
+        ])
+      : null;
+  if (hardBounced) return hardBounced;
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);
@@ -721,6 +740,12 @@ export async function replyToEmail(
   if (params.subjectOverride !== undefined) {
     finalSubject = params.subjectOverride.replace(/[\r\n]+/g, " ");
   }
+
+  const hardBounced = await refuseHardBounced(db, [
+    toAddress,
+    ...(cc ?? []).map((entry) => entry.email),
+  ]);
+  if (hardBounced) return hardBounced;
 
   const messageId = generateMessageId(fromAddress);
   const formattedFrom = await formatFromAddress(db, fromAddress);

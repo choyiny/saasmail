@@ -42,7 +42,20 @@ const REASON_META: Record<
 > = {
   unsubscribe: { label: "Unsubscribed", chip: "accent" },
   manual: { label: "Manual", chip: "" },
+  hard_bounce: { label: "Hard bounce", chip: "bad" },
+  soft_bounce: { label: "Soft bounces", chip: "warn" },
+  complaint: { label: "Marked as spam", chip: "bad" },
+  provider: { label: "Provider list", chip: "warn" },
 };
+
+/** Cloudflare keeps these on its own list too (docs/suppressions.md). */
+const PROVIDER_LISTED: Suppression["reason"][] = [
+  "hard_bounce",
+  "complaint",
+  "provider",
+];
+const PROVIDER_NOTE =
+  "Cloudflare keeps its own suppression list. Removing the address here does not remove it there: remove it in the Cloudflare dashboard too.";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -228,7 +241,14 @@ export default function SuppressionsPage() {
                             {item.email}
                           </td>
                           <td>
-                            <span className={cn("pt-chip", meta.chip)}>
+                            <span
+                              className={cn("pt-chip", meta.chip)}
+                              title={
+                                PROVIDER_LISTED.includes(item.reason)
+                                  ? PROVIDER_NOTE
+                                  : undefined
+                              }
+                            >
                               {meta.label}
                             </span>
                           </td>
@@ -361,6 +381,14 @@ export default function SuppressionsPage() {
             will receive marketing and sequence sends again. You can re-add the
             suppression later.
           </p>
+          {confirmDelete && PROVIDER_LISTED.includes(confirmDelete.reason) && (
+            <p
+              className="text-sm text-text-secondary"
+              data-testid="suppression-provider-note"
+            >
+              {PROVIDER_NOTE}
+            </p>
+          )}
 
           {deleteError && (
             <p className="text-xs font-medium text-destructive">

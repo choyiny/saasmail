@@ -114,9 +114,13 @@ export function parseWranglerConfig(text) {
     ? (config.d1_databases.find((d) => d?.binding === "DB") ??
       config.d1_databases[0])
     : null;
+  const emailQueue = Array.isArray(config.queues?.producers)
+    ? config.queues.producers.find((q) => q?.binding === "EMAIL_QUEUE")
+    : null;
   return {
     name: typeof config.name === "string" ? config.name : null,
     database: db?.database_name ?? null,
+    emailQueue: typeof emailQueue?.queue === "string" ? emailQueue.queue : null,
     bindings,
     vars: new Set(Object.keys(config.vars ?? {})),
   };
@@ -327,7 +331,110 @@ const routesToWorker = (rule, worker) =>
       a.value.includes(worker),
   );
 
-async function cloudflareLines({ fetchImpl, token, worker, inboxes, runtime }) {
+/** The events a sending domain's subscription must carry (docs/email-providers.md). */
+export const REQUIRED_SENDING_EVENTS = [
+  "message.bounced",
+  "message.complained",
+];
+
+/**
+ * Bounces and complaints reach the Worker through an Email Sending event
+ * subscription on its EMAIL_QUEUE queue: one line per sending domain.
+ */
+async function eventSubscriptionLines({
+  fetchImpl,
+  token,
+  queueName,
+  domains,
+  zoneFor,
+}) {
+  const hint =
+    "create the Email Sending event subscription (docs/email-providers.md)";
+  if (!queueName) {
+    return [
+      {
+        status: "warn",
+        label:
+          "Email Sending events: the Wrangler config has no EMAIL_QUEUE producer.",
+      },
+    ];
+  }
+  try {
+    let accountId = null;
+    for (const domain of domains) {
+      accountId = (await zoneFor(domain))?.account?.id ?? null;
+      if (accountId) break;
+    }
+    if (!accountId) {
+      throw new Error("no zone names the account");
+    }
+    const queues = await cfGet(
+      fetchImpl,
+      token,
+      `/accounts/${accountId}/queues`,
+      {
+        name: queueName,
+      },
+    );
+    const queue = (queues ?? []).find((q) => q?.queue_name === queueName);
+    if (!queue?.queue_id) {
+      return [
+        {
+          status: "warn",
+          label: `Email Sending events: the queue ${queueName} was not found.`,
+        },
+      ];
+    }
+    const subs = await cfGet(
+      fetchImpl,
+      token,
+      `/accounts/${accountId}/event_subscriptions/subscriptions`,
+      { queue_id: queue.queue_id },
+    );
+    return domains.map((domain) => {
+      const events = new Set(
+        (subs ?? [])
+          .filter(
+            (sub) =>
+              sub?.enabled !== false &&
+              sub?.source?.type === "email.sending" &&
+              String(sub?.source?.domain).toLowerCase() === domain &&
+              (sub?.destination?.queue_id ?? queue.queue_id) === queue.queue_id,
+          )
+          .flatMap((sub) => (Array.isArray(sub.events) ? sub.events : []))
+          // Stored short (`message.bounced`); accept the long form too.
+          .map((name) => String(name).replace(/^cf\.email\.sending\./, "")),
+      );
+      const missing = REQUIRED_SENDING_EVENTS.filter((e) => !events.has(e));
+      return missing.length === 0
+        ? {
+            status: "pass",
+            label: `Email Sending events: ${domain} reports bounces and complaints to ${queueName}.`,
+          }
+        : {
+            status: "warn",
+            label: `Email Sending events: ${domain} has no subscription for ${missing.join(", ")} on ${queueName}.`,
+            hint,
+          };
+    });
+  } catch (e) {
+    return [
+      {
+        status: "warn",
+        label: `Email Sending events could not be checked: ${e.message}`,
+      },
+    ];
+  }
+}
+
+async function cloudflareLines({
+  fetchImpl,
+  token,
+  worker,
+  inboxes,
+  runtime,
+  queueName,
+}) {
   const lines = [];
   const domainOf = (address) => address.split("@")[1]?.toLowerCase();
   const zones = new Map();
@@ -458,6 +565,15 @@ async function cloudflareLines({ fetchImpl, token, worker, inboxes, runtime }) {
       });
     }
   }
+  lines.push(
+    ...(await eventSubscriptionLines({
+      fetchImpl,
+      token,
+      queueName,
+      domains: sendingDomains,
+      zoneFor,
+    })),
+  );
   return lines;
 }
 
@@ -708,6 +824,7 @@ export async function main(argv, deps = {}) {
         worker: config.name,
         inboxes: r.body.filter((i) => typeof i?.email === "string"),
         runtime,
+        queueName: config.emailQueue,
       });
       for (const line of cfLines) emit(line);
     }

@@ -402,6 +402,7 @@ describe("Stage 1A parity fixtures", () => {
             "bodyHtml": "<p>Second</p>",
             "bodyText": "Second",
             "cc": [],
+            "deliveryProblems": [],
             "fromAddress": "support@saasmail.test",
             "id": "conv-sent",
             "isRead": null,

@@ -63,6 +63,7 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     withAttachmentCounts: true,
     withAttachments: true,
     withReplyTo: true,
+    withDelivery: true,
   });
   await applyReplyGuard(db, page.messages);
   const messages = page.messages;
@@ -112,6 +113,9 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     timestamp: message.occurredAt,
     attachmentCount: message.attachmentCount ?? 0,
     attachments: message.attachments ?? [],
+    ...(message.delivery?.problems
+      ? { deliveryProblems: message.delivery.problems }
+      : {}),
   }));
 
   return c.json(

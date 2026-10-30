@@ -18,6 +18,8 @@ import {
 import { formatFromAddress } from "./format-from-address";
 import { loadFrozenJmapSend } from "./jmap-frozen-send";
 import { bracketedMessageId } from "./message-id";
+import { hardBouncedAmong } from "./suppressions";
+import { recordCopyMessageIds } from "./delivery/message-ids";
 import { isDemoMode } from "./is-dev";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
 
@@ -244,6 +246,7 @@ export async function sendViaOutbox(
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
     throw err;
   }
+  await recordCopyMessageIds(db, sentEmailId, send);
 
   const after = Math.floor(Date.now() / 1000);
 
@@ -463,7 +466,7 @@ export async function attemptOutboxRow(
     ? frozen.attachments
     : await loadOutboxAttachments(db, env, row.sentEmailId);
 
-  const send = await sendWithSuppressionCheck({
+  const input: Parameters<typeof sendWithSuppressionCheck>[0] = {
     db,
     env,
     sender,
@@ -498,11 +501,25 @@ export async function attemptOutboxRow(
     attachments: storedAttachments.length > 0 ? storedAttachments : undefined,
     transactional: row.transactional === 1,
     idempotencyKey: outboxIdempotencyKey(row.id),
-  });
+  };
+  // Transactional mail skips the suppression list, but not a hard bounce:
+  // one in the whole envelope refuses the attempt (docs/suppressions.md).
+  const hardBounced =
+    input.transactional === true &&
+    (
+      await hardBouncedAmong(db, [
+        input.to,
+        ...[input.additionalTo, input.cc, input.bcc].flatMap((list) =>
+          (list ?? []).map((entry) => entry.email),
+        ),
+      ])
+    ).length > 0;
+  const send = hardBounced ? null : await sendWithSuppressionCheck(input);
+  if (send) await recordCopyMessageIds(db, row.sentEmailId, send);
 
   const after = Math.floor(Date.now() / 1000);
 
-  if (send.delivered.length === 0) {
+  if (send === null || send.delivered.length === 0) {
     // Mid-retry suppression: the recipient was added to the suppression list between
     // a previous attempt and this one. Terminal — delete the outbox row and don't retry.
     // sent_emails is set to "failed" (not "suppressed") because a transport was already

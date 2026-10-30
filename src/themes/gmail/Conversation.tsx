@@ -50,6 +50,7 @@ import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import { onEmailSent } from "@/lib/email-events";
 import { itemTitle } from "@/hooks/useMailList";
 import ReplyComposer from "@/components/ReplyComposer";
+import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import ImageAttachments, {
   splitAttachments,
@@ -256,6 +257,14 @@ function MessageCard({
                 {isSent && email.status === "failed" && (
                   <span className="ml-1 rounded-[4px] bg-destructive-subtle px-1.5 text-xs text-destructive">
                     Failed to send
+                  </span>
+                )}
+                {isSent && (email.deliveryProblems?.length ?? 0) > 0 && (
+                  <span className="ml-1">
+                    <DeliveryProblemBadge
+                      problems={email.deliveryProblems}
+                      recipientCount={1 + email.cc.length}
+                    />
                   </span>
                 )}
                 {isSent && email.status === "retrying" && (

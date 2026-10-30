@@ -66,6 +66,8 @@ export interface SendOutput {
   delivered: string[];
   suppressed: string[];
   result?: SendEmailResult;
+  /** A per-recipient send's answers after the first (`result`). */
+  copies?: SendEmailResult[];
   /**
    * For audit logging: the rendered html/text actually sent to the FIRST
    * delivered recipient. For multi-recipient marketing sends each recipient
@@ -200,6 +202,7 @@ export async function sendWithSuppressionCheck(
   }
 
   let lastResult: SendEmailResult | undefined;
+  let copies: SendEmailResult[] | undefined;
   let renderedHtml: string | undefined;
   let renderedText: string | undefined;
 
@@ -307,6 +310,7 @@ export async function sendWithSuppressionCheck(
     );
 
     lastResult = results[0].result;
+    copies = results.slice(1).map((r) => r.result);
     renderedHtml = results[0].recipientHtml;
     renderedText = results[0].recipientText;
   }
@@ -322,6 +326,7 @@ export async function sendWithSuppressionCheck(
     ],
     suppressed,
     result: lastResult,
+    ...(copies && copies.length > 0 ? { copies } : {}),
     ...(renderedHtml !== undefined ? { renderedHtml } : {}),
     ...(renderedText !== undefined ? { renderedText } : {}),
   };

@@ -183,6 +183,12 @@ export async function applyMigrations() {
     `CREATE INDEX IF NOT EXISTS push_subscriptions_user_idx ON push_subscriptions(user_id)`,
     `CREATE TABLE IF NOT EXISTS suppressions (id TEXT PRIMARY KEY, email TEXT NOT NULL, reason TEXT NOT NULL, source TEXT, note TEXT, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS suppressions_email_unique ON suppressions(email)`,
+    `CREATE TABLE IF NOT EXISTS delivery_events (id TEXT PRIMARY KEY NOT NULL, provider TEXT NOT NULL, kind TEXT NOT NULL, bounce_type TEXT, sent_email_id TEXT, campaign_id TEXT, message_id TEXT, recipient TEXT NOT NULL, sender TEXT, smtp_status TEXT, detail TEXT, occurred_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS delivery_events_recipient_idx ON delivery_events(recipient, occurred_at)`,
+    `CREATE INDEX IF NOT EXISTS delivery_events_sent_email_idx ON delivery_events(sent_email_id)`,
+    `CREATE INDEX IF NOT EXISTS delivery_events_campaign_kind_idx ON delivery_events(campaign_id, kind)`,
+    `CREATE TABLE IF NOT EXISTS delivery_message_ids (message_id TEXT PRIMARY KEY NOT NULL, sent_email_id TEXT NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE INDEX IF NOT EXISTS delivery_message_ids_sent_email_idx ON delivery_message_ids(sent_email_id)`,
     `CREATE TABLE IF NOT EXISTS blocklist (id TEXT PRIMARY KEY, type TEXT NOT NULL, value TEXT NOT NULL, note TEXT, created_by TEXT, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS blocklist_type_value_unique ON blocklist(type, value)`,
     `CREATE TABLE IF NOT EXISTS outbox_emails (id TEXT PRIMARY KEY, sent_email_id TEXT NOT NULL, sequence_email_id TEXT, campaign_recipient_id TEXT, bookkeeping_owner TEXT, from_address TEXT NOT NULL, to_address TEXT NOT NULL, cc TEXT, additional_to TEXT, bcc TEXT, subject TEXT NOT NULL, body_html TEXT, body_text TEXT, headers TEXT, transactional INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, delivered_message_id TEXT, next_retry_at INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
@@ -543,6 +549,8 @@ export async function cleanDb() {
     DELETE FROM outbox_emails;
     DELETE FROM blocklist;
     DELETE FROM suppressions;
+    DELETE FROM delivery_events;
+    DELETE FROM delivery_message_ids;
     DELETE FROM push_subscriptions;
     DELETE FROM inbox_permissions;
     DELETE FROM sender_identities;

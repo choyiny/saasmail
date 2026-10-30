@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { campaignEvents } from "../db/campaign-events.schema";
 import { campaignRecipients } from "../db/campaign-recipients.schema";
 import { contacts } from "../db/contacts.schema";
+import { deliveryEvents } from "../db/delivery-events.schema";
 import { listMembers } from "../db/list-members.schema";
 import { lists } from "../db/lists.schema";
 import { json200Response } from "../lib/helpers";
@@ -59,6 +60,10 @@ const exportRoute = createRoute({
         contact: z.any().nullable(),
         memberships: z.array(z.any()),
         events: z.array(z.any()),
+        deliveryEvents: z.array(z.any()).openapi({
+          description:
+            "Bounces, complaints, rejections and failures the email provider reported for this address.",
+        }),
       }),
       "Everything held for this address",
     ),
@@ -95,7 +100,17 @@ contactsRouter.openapi(exportRoute, async (c) => {
     .from(campaignEvents)
     .where(eq(sql`lower(${campaignEvents.email})`, email));
 
-  if (contactRows.length === 0 && memberships.length === 0) {
+  // Recipients are stored lowercased, so the index serves this.
+  const delivery = await db
+    .select()
+    .from(deliveryEvents)
+    .where(eq(deliveryEvents.recipient, email));
+
+  if (
+    contactRows.length === 0 &&
+    memberships.length === 0 &&
+    delivery.length === 0
+  ) {
     return c.json({ error: "No record of this address" }, 404);
   }
 
@@ -119,6 +134,7 @@ contactsRouter.openapi(exportRoute, async (c) => {
       listName: m.listName,
     })),
     events,
+    deliveryEvents: delivery,
   });
 });
 
@@ -140,6 +156,7 @@ const eraseRoute = createRoute({
         events: z.number(),
         recipients: z.number(),
         auditEvents: z.number(),
+        deliveryEvents: z.number(),
       }),
       "Rows rewritten",
     ),
@@ -177,6 +194,13 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     .set({ email: token })
     .where(eq(sql`lower(${campaignRecipients.email})`, email));
 
+  // A provider's report keeps its kind and time; the SMTP text often quotes
+  // the address, so it goes with the address.
+  const deliveryResult = await db
+    .update(deliveryEvents)
+    .set({ recipient: token, sender: null, detail: null, smtpStatus: null })
+    .where(eq(deliveryEvents.recipient, email));
+
   // Adding or removing a member, and a campaign test send, name the address in
   // the audit log.
   const auditCount = await eraseAddressFromNewsletterAudit(db, email, token);
@@ -194,5 +218,6 @@ contactsRouter.openapi(eraseRoute, async (c) => {
     events: changed(eventResult),
     recipients: changed(recipientResult),
     auditEvents: auditCount,
+    deliveryEvents: changed(deliveryResult),
   });
 });

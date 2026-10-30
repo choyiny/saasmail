@@ -18,7 +18,19 @@ const MAX_LIMIT = 100;
 const SuppressionSchema = z.object({
   id: z.string(),
   email: z.string(),
-  reason: z.enum(["unsubscribe", "manual"]),
+  reason: z
+    .enum([
+      "unsubscribe",
+      "manual",
+      "hard_bounce",
+      "soft_bounce",
+      "complaint",
+      "provider",
+    ])
+    .openapi({
+      description:
+        "`hard_bounce`, `soft_bounce` (3 in 30 days), `complaint` and `provider` (the provider's own list refused it) come from the provider's delivery events (source `cloudflare`).",
+    }),
   source: z.string().nullable(),
   note: z.string().nullable(),
   createdAt: z.number(),

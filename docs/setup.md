@@ -61,6 +61,8 @@ Enabling Email Routing adds Cloudflare's MX and an SPF TXT record to the zone. A
 
 With `--provider cloudflare`, each `--send-domain` is onboarded as an Email Sending subdomain. The installer **reports the DNS records it needs and whether the zone has them, and never writes DNS**: add any it lists as missing yourself. DNS propagation (5 to 15 minutes) shows as pending and is normal, not a failure; sending from that domain works once the records resolve. With Resend, Postmark or Bavimail you verify the sending domain in that provider's dashboard as before.
 
+After the first deploy, subscribe the instance's queue to each sending domain's events, so bounces and complaints reach saasmail: one `npx wrangler queues subscription create` per domain ([Email providers](email-providers.md#bounces-and-complaints)). The installer does not create it.
+
 Email Routing and Email Sending are independent: a domain can do either, both or neither.
 
 ### Resume, status, and adding domains
@@ -223,6 +225,8 @@ yarn deploy
 
 Visit your deployed URL to create your first admin account. Once signed in, go to **Inboxes** to name your inbound addresses and **Users** to invite additional team members.
 
+With Cloudflare Email Sending, subscribe the queue to each sending domain's events so bounces and complaints reach saasmail ([Email providers](email-providers.md#bounces-and-complaints)).
+
 ### 9. Turn on backups (optional, recommended)
 
 Create a bucket for backups and bind it as `BACKUPS` in `wrangler.jsonc` (see
@@ -241,7 +245,8 @@ openssl rand -hex 32 | wrangler secret put BACKUP_ENCRYPTION_KEY   # optional
 Create an API key for your admin user on the **API keys** page (see
 [API keys](users-and-api-keys.md#api-keys)), then run the
 doctor: it checks migrations, secrets, bindings, the provider, the cron and,
-with a Cloudflare token, Email Routing. See [Doctor](doctor.md).
+with a Cloudflare token, Email Routing, Email Sending and its event
+subscriptions. See [Doctor](doctor.md).
 
 ```bash
 SAASMAIL_ADMIN_KEY=sk_… yarn doctor --config wrangler.jsonc --url https://mail.example.com

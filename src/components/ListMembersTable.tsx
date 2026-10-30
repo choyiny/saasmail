@@ -18,6 +18,12 @@ const STATUS_STYLE: Record<MemberStatus, string> = {
   unsubscribed: "bg-bg-muted text-text-tertiary",
 };
 
+/** Reasons the provider's delivery events give (docs/suppressions.md). */
+const UNSUBSCRIBE_REASON_LABEL: Record<string, string> = {
+  hard_bounce: "hard bounce",
+  complaint: "marked as spam",
+};
+
 const FILTERS: Array<{ label: string; value: MemberStatus | "all" }> = [
   { label: "All", value: "all" },
   { label: "Subscribed", value: "subscribed" },
@@ -274,6 +280,13 @@ export default function ListMembersTable({ listId }: { listId: string }) {
                     >
                       {m.status}
                     </span>
+                    {m.status === "unsubscribed" &&
+                      m.unsubscribeReason &&
+                      UNSUBSCRIBE_REASON_LABEL[m.unsubscribeReason] && (
+                        <span className="ml-1.5 text-[10px] text-destructive">
+                          {UNSUBSCRIBE_REASON_LABEL[m.unsubscribeReason]}
+                        </span>
+                      )}
                   </td>
                   <td className="px-4 py-2.5 text-xs text-text-tertiary">
                     {m.consentSource}
