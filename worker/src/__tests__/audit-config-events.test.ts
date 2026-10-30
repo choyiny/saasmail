@@ -87,6 +87,7 @@ describe("audit events for configuration and people", () => {
       key: "webhook",
       url: "https://hooks.example.com/in",
       hasSecret: true,
+      events: ["message.received"],
     });
     expect(JSON.stringify(row)).not.toContain("whsec_do_not_log_me");
 

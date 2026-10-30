@@ -22,6 +22,7 @@ import { hardBouncedAmong } from "./suppressions";
 import { recordCopyMessageIds } from "./delivery/message-ids";
 import { isDemoMode } from "./is-dev";
 import { completeEnrollmentIfDone } from "./enrollment-completion";
+import { recordSendWebhook } from "./webhook-delivery";
 
 /**
  * Total provider attempts before a transient failure becomes terminal.
@@ -247,6 +248,22 @@ export async function sendViaOutbox(
     throw err;
   }
   await recordCopyMessageIds(db, sentEmailId, send);
+  // The delivery webhook, recorded after this send's own writes (Bcc is
+  // never listed; docs/webhooks.md).
+  const webhook = (event: "message.sent" | "message.failed", reason?: string) =>
+    recordSendWebhook(env, db, {
+      event,
+      sentEmailId,
+      messageId: send.result?.deliveredMessageId ?? headers?.["Message-ID"],
+      from: fromAddress,
+      to,
+      additionalTo,
+      cc,
+      except: send.suppressed,
+      subject,
+      reason,
+      provider: sender.provider,
+    });
 
   const after = Math.floor(Date.now() / 1000);
 
@@ -280,12 +297,14 @@ export async function sendViaOutbox(
     } else {
       await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
     }
+    await webhook("message.sent");
     return { outcome: "sent", send, outboxId };
   }
 
   // A one-shot send (an auto-reply) is still held by a pause: nothing failed.
   if (retryOnFailure === false && !result.error.paused) {
     await db.delete(outboxEmails).where(eq(outboxEmails.id, outboxId));
+    await webhook("message.failed", result.error.message);
     return { outcome: "failed", send, outboxId };
   }
 
@@ -320,6 +339,7 @@ export async function sendViaOutbox(
       updatedAt: after,
     })
     .where(eq(outboxEmails.id, outboxId));
+  await webhook("message.failed", result.error.message);
   return { outcome: "failed", send, outboxId };
 }
 
@@ -516,6 +536,21 @@ export async function attemptOutboxRow(
     ).length > 0;
   const send = hardBounced ? null : await sendWithSuppressionCheck(input);
   if (send) await recordCopyMessageIds(db, row.sentEmailId, send);
+  const webhook = (event: "message.sent" | "message.failed", reason?: string) =>
+    recordSendWebhook(env, db, {
+      event,
+      sentEmailId: row.sentEmailId,
+      messageId:
+        send?.result?.deliveredMessageId ?? input.headers?.["Message-ID"],
+      from: row.fromAddress,
+      to: input.to,
+      additionalTo: input.additionalTo,
+      cc: input.cc,
+      except: event === "message.sent" ? send?.suppressed : [],
+      subject: input.subject,
+      reason,
+      provider: sender.provider,
+    });
 
   const after = Math.floor(Date.now() / 1000);
 
@@ -534,6 +569,7 @@ export async function attemptOutboxRow(
     if (row.sequenceEmailId) {
       await resolveSequenceStep(db, row.sequenceEmailId, "suppressed", null);
     }
+    await webhook("message.failed", "suppressed");
     return "suppressed";
   }
 
@@ -576,6 +612,7 @@ export async function attemptOutboxRow(
     } else {
       await db.delete(outboxEmails).where(eq(outboxEmails.id, row.id));
     }
+    await webhook("message.sent");
     return "sent";
   }
 
@@ -629,6 +666,7 @@ export async function attemptOutboxRow(
   if (row.sequenceEmailId) {
     await resolveSequenceStep(db, row.sequenceEmailId, "failed", null);
   }
+  await webhook("message.failed", result.error.message);
   return "failed";
 }
 

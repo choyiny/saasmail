@@ -43,6 +43,10 @@ import {
 } from "./export/mail-export";
 import { handleDeliveryEventMessage } from "./delivery/queue";
 import { CLOUDFLARE_EVENT_PREFIX } from "./delivery/cloudflare";
+import {
+  runWebhookDelivery,
+  type WebhookDeliveryMessage,
+} from "./webhook-delivery";
 
 /**
  * Everything that can arrive on `EMAIL_QUEUE`.
@@ -75,7 +79,8 @@ export type QueueMessageBody =
   | MailImportMessage
   | BackupStepMessage
   | ThreadBackfillMessage
-  | DeliveryEventMessage;
+  | DeliveryEventMessage
+  | WebhookDeliveryMessage;
 
 export const SUGGEST_REPLY_MAX_ATTEMPTS = 3;
 const SUGGEST_REPLY_RETRY_DELAY_SECONDS = 30;
@@ -96,6 +101,7 @@ export type QueueMessageKind =
   | "backup_step"
   | "thread_backfill"
   | "delivery_event"
+  | "webhook_delivery"
   | "unknown";
 
 /**
@@ -167,6 +173,9 @@ export function classifyQueueMessage(body: unknown): QueueMessageKind {
     b.type.startsWith(CLOUDFLARE_EVENT_PREFIX)
   ) {
     return "delivery_event";
+  }
+  if (b.type === "webhook_delivery") {
+    return typeof b.deliveryId === "string" ? "webhook_delivery" : "unknown";
   }
   return "unknown";
 }
@@ -292,7 +301,11 @@ export async function handleQueueBatch(
         }
       } else if (kind === "delivery_event") {
         // Acks, or retries once when the sent row may not exist yet.
-        await handleDeliveryEventMessage(db, msg);
+        await handleDeliveryEventMessage(db, msg, env);
+        continue;
+      } else if (kind === "webhook_delivery") {
+        // Acks or retries itself, and never throws.
+        await runWebhookDelivery(db, env, msg);
         continue;
       } else {
         const body = msg.body as SuggestReplyMessage;

@@ -40,6 +40,7 @@ import { replyToOf } from "./messages/adapters";
 import type { MailAddress } from "./messages/types";
 import type { ParsedFile } from "./multipart-send";
 import { sendViaOutbox, type OutboxOutcome } from "./outbox";
+import { recordSendWebhook } from "./webhook-delivery";
 import { ownInboxAddresses, replyCandidates } from "./reply-recipients";
 import { MAX_CC_ENTRIES } from "./send-limits";
 import {
@@ -896,6 +897,20 @@ export async function replyToEmail(
       createdAt: now,
     });
     stored = true;
+    // An outbox send records its own; a direct one only once its row exists
+    // (docs/webhooks.md). Never throws.
+    if (direct) {
+      await recordSendWebhook(env, db, {
+        event: "message.sent",
+        sentEmailId: id,
+        messageId: storedReplyId,
+        from: fromAddress,
+        to: toAddress,
+        cc,
+        except: sendResult.suppressed,
+        subject: finalSubject,
+      });
+    }
 
     // Attachments were staged above, before the provider call.
     // Replies are transactional, so they are never suppressed; if a future change

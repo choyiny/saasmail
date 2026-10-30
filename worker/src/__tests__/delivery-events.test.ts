@@ -11,7 +11,7 @@ import {
   vi,
 } from "vitest";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   applyMigrations,
   authFetch,
@@ -58,6 +58,12 @@ import type { EmailSender, SendEmailParams } from "../lib/email-sender";
 import { attemptOutboxRow } from "../lib/outbox";
 import { classifyQueueMessage, handleQueueBatch } from "../lib/queue-router";
 import { releaseScheduledSubmission } from "../jmap/release";
+import { deliveryWebhook } from "../lib/delivery/queue";
+import {
+  captureQueue,
+  configureWebhook,
+  deliveryRows,
+} from "./webhook-fixtures";
 import { acct, idn } from "./jmap-ids";
 import {
   INBOX as JMAP_INBOX,
@@ -1221,5 +1227,139 @@ describe("a Cc copy of a non-transactional send", () => {
       ),
     );
     expect(outcome?.sentEmailId).toBe(result.id);
+  });
+});
+
+// docs/webhooks.md: the delivery webhook row commits in the event's batch.
+describe("delivery events raise webhooks", () => {
+  let queue: ReturnType<typeof captureQueue>;
+
+  beforeEach(async () => {
+    await cleanDb();
+    (env as any).DEMO_MODE = "0";
+    queue = captureQueue();
+    await configureWebhook(["message.bounced", "message.failed"]);
+  });
+  afterEach(() => queue.restore());
+
+  it("commits a correlated bounce's webhook row with the event, once", async () => {
+    await createTestSentEmail({
+      id: "se-1",
+      fromAddress: INBOX,
+      toAddress: DEAD,
+      subject: "Your invoice",
+      messageId: MESSAGE_ID,
+      cc: JSON.stringify([{ email: "cc@example.com", name: null }]),
+    });
+    await runQueue(queueMessage(bouncedEvent()));
+    const rows = await deliveryRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sourceKey: "delivery:cloudflare:0190d0c4-7ea1-7af2-8b88-c1d2e3f4a5b6",
+      event: "message.bounced",
+      messageId: "se-1",
+      frozen: 1,
+      status: "pending",
+    });
+    const payload = JSON.parse(rows[0].payload!);
+    expect(payload).toMatchObject({
+      event: "message.bounced",
+      deliveryId: rows[0].id,
+      occurredAt: EVENT_TIMESTAMP,
+      message: {
+        id: "se-1",
+        messageId: MESSAGE_ID,
+        from: INBOX,
+        recipients: [DEAD, "cc@example.com"],
+        subject: "Your invoice",
+      },
+      delivery: {
+        recipient: DEAD,
+        status: "bounced",
+        bounceType: "hard",
+        smtpStatus: "550",
+        enhancedStatus: "5.1.1",
+        reason: "550 5.1.1 User unknown",
+        provider: "cloudflare",
+      },
+    });
+    expect(queue.sent).toEqual([
+      { type: "webhook_delivery", deliveryId: rows[0].id },
+    ]);
+
+    // The same event again: no second row, no second pointer.
+    await runQueue(queueMessage(bouncedEvent()));
+    expect(await deliveryRows()).toHaveLength(1);
+    expect(queue.sent).toHaveLength(1);
+  });
+
+  it("leaves neither the event nor its webhook row when the batch fails", async () => {
+    await createTestSentEmail({ id: "se-1", messageId: MESSAGE_ID });
+    const event = parse(bouncedEvent());
+    const hook = await deliveryWebhook(
+      getDb(),
+      env as unknown as CloudflareBindings,
+      event,
+      "se-1",
+    );
+    expect(hook).not.toBeNull();
+    await expect(
+      recordDeliveryEvent(getDb(), event, {
+        extend: (context) => [
+          ...hook!.extend(context),
+          context.db.insert(contacts).values({
+            id: "c-bad",
+            email: null as unknown as string,
+            createdAt: ts(),
+            updatedAt: ts(),
+          }),
+        ],
+      }),
+    ).rejects.toThrow();
+    expect(await getDb().select().from(deliveryEvents)).toEqual([]);
+    expect(await deliveryRows()).toEqual([]);
+  });
+
+  it("never names a Bcc recipient, in delivery.recipient or the provider's text", async () => {
+    await createTestSentEmail({ id: "se-1", messageId: MESSAGE_ID });
+    await getDb().run(
+      sql`UPDATE sent_emails SET bcc = ${JSON.stringify([{ email: "Hidden@Example.com", name: null }])} WHERE id = 'se-1'`,
+    );
+    // SMTP bounce text usually quotes the address.
+    const quoted = "550 5.1.1 <hidden@example.com>: User unknown";
+    const event = bouncedEvent({ recipient: " hidden@example.com " });
+    event.payload.bounce!.reason = quoted;
+    event.payload.delivery.smtpResponse = quoted;
+    await runQueue(queueMessage(event));
+    const [row] = await deliveryRows();
+    const payload = JSON.parse(row.payload!);
+    expect(payload.delivery).toMatchObject({
+      recipient: null,
+      reason: null,
+      smtpStatus: "550",
+      enhancedStatus: "5.1.1",
+    });
+    expect(row.payload).not.toMatch(/hidden@example\.com/i);
+  });
+
+  it("raises none for an uncorrelated event or an unticked one", async () => {
+    // No sent row: recorded uncorrelated on the second attempt.
+    await runQueue(queueMessage(bouncedEvent(), 2));
+    expect(await getDb().select().from(deliveryEvents)).toHaveLength(1);
+    expect(await deliveryRows()).toEqual([]);
+
+    await createTestSentEmail({ id: "se-1", messageId: MESSAGE_ID });
+    await runQueue(queueMessage(complainedEvent()));
+    expect(await getDb().select().from(deliveryEvents)).toHaveLength(2);
+    expect(await deliveryRows()).toEqual([]);
+    expect(queue.sent).toEqual([]);
+  });
+
+  it("maps a rejection to message.failed", async () => {
+    await createTestSentEmail({ id: "se-1", messageId: MESSAGE_ID });
+    await runQueue(queueMessage(rejectedEvent()));
+    const [row] = await deliveryRows();
+    expect(row.event).toBe("message.failed");
+    expect(JSON.parse(row.payload!).delivery.status).toBe("rejected");
   });
 });

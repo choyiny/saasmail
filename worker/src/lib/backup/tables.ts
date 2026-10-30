@@ -20,6 +20,8 @@ export const EXCLUDED_TABLES: ReadonlySet<string> = new Set([
   "jmap_changes",
   "send_idempotency",
   "send_counters",
+  // Delivery attempts of this instance's webhook, pruned after 7 days.
+  "webhook_deliveries",
   // The backups' own history describes this instance's bucket.
   "backup_runs",
   // Gmail and Outlook refresh tokens are encrypted with this instance's

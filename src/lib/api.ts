@@ -1497,9 +1497,27 @@ export async function revokeApiKey(): Promise<{ success: boolean }> {
 
 // --- Webhook (admin, global instance config) ---
 
+export type WebhookEvent =
+  | "message.received"
+  | "message.sent"
+  | "message.bounced"
+  | "message.complained"
+  | "message.failed";
+
+export const WEBHOOK_EVENTS: WebhookEvent[] = [
+  "message.received",
+  "message.sent",
+  "message.bounced",
+  "message.complained",
+  "message.failed",
+];
+
 export interface WebhookConfigInfo {
   url: string;
   hasSecret: boolean;
+  events: WebhookEvent[];
+  disabledAt: number | null;
+  disabledReason: string | null;
 }
 
 export async function fetchWebhookConfig(): Promise<WebhookConfigInfo> {
@@ -1509,6 +1527,7 @@ export async function fetchWebhookConfig(): Promise<WebhookConfigInfo> {
 export async function saveWebhookConfig(body: {
   url: string;
   secret?: string | null;
+  events?: WebhookEvent[];
 }): Promise<WebhookConfigInfo> {
   return apiFetch("/api/webhook", {
     method: "PUT",
@@ -1517,12 +1536,45 @@ export async function saveWebhookConfig(body: {
   });
 }
 
-export async function testWebhook(): Promise<{
+export async function testWebhook(event?: WebhookEvent): Promise<{
   ok: boolean;
   status?: number;
   error?: string;
 }> {
+  if (event) {
+    return apiFetch("/api/webhook/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event }),
+    });
+  }
   return apiFetch("/api/webhook/test", { method: "POST" });
+}
+
+export async function enableWebhook(): Promise<WebhookConfigInfo> {
+  return apiFetch<WebhookConfigInfo>("/api/webhook/enable", {
+    method: "POST",
+  });
+}
+
+export interface WebhookDeliveryInfo {
+  id: string;
+  event: string;
+  messageId: string;
+  status: "pending" | "delivered" | "failed" | "cancelled";
+  attempts: number;
+  lastStatus: number | null;
+  lastError: string | null;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
+export async function fetchWebhookDeliveries(
+  limit = 20,
+): Promise<{ deliveries: WebhookDeliveryInfo[] }> {
+  return apiFetch<{ deliveries: WebhookDeliveryInfo[] }>(
+    `/api/webhook/deliveries?limit=${limit}`,
+  );
 }
 
 // --- Sequences ---

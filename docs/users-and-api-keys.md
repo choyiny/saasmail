@@ -94,6 +94,10 @@ curl -X POST "$SAASMAIL_URL/api/send" \
 Reuse the same value when you retry; `$(uuidgen)` above makes a new one each
 time it runs, so store it before the first attempt in real code.
 
+To learn whether a send went out, bounced or drew a complaint, tick the
+delivery events of the [webhook](webhooks.md#delivery-events): each carries the
+send's `id` as `message.id`.
+
 ---
 
 **See also:** [MCP server](mcp.md) for OAuth-based AI assistant access · [Webhooks](webhooks.md) · the `/use-saasmail` Claude Code skill

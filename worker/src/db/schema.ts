@@ -41,6 +41,7 @@ import { customerPeople, customers } from "./customers.schema";
 import { jmapChanges } from "./jmap-changes.schema";
 import { auditEvents } from "./audit-events.schema";
 import { sendIdempotency } from "./send-idempotency.schema";
+import { webhookDeliveries } from "./webhook-deliveries.schema";
 import { sendCounters } from "./send-counters.schema";
 import { authRateLimits } from "./auth-rate-limits.schema";
 import { spamModels, spamTokens, spamTraining } from "./spam-filter.schema";
@@ -101,6 +102,7 @@ export const schema = {
   jmapChanges,
   auditEvents,
   sendIdempotency,
+  webhookDeliveries,
   sendCounters,
   authRateLimits,
   spamModels,

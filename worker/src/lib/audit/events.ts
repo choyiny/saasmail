@@ -22,6 +22,9 @@ export const AUDIT_ACTIONS = {
   mailRejected: "mail.rejected",
   mailFailed: "mail.failed",
   settingsChanged: "settings.changed",
+  /** The webhook's delivery events paused after repeated failures. */
+  webhookAutoDisabled: "webhook.auto_disabled",
+  webhookEnabled: "webhook.enabled",
   inboxCreated: "inbox.created",
   inboxUpdated: "inbox.updated",
   inboxDeleted: "inbox.deleted",

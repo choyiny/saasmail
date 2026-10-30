@@ -116,6 +116,10 @@ const { id, resendId, status, attachmentIds } = await res.json();
 
 A successful response is `201` with `{ id, resendId, status, attachmentIds }`. `status` is `"sent"` on success, `"retrying"` if the provider failed transiently (saasmail retries every 15 minutes for about 24 hours; check GET /api/outbox or the Outbox tab for the outcome), `"failed"` if the provider rejected permanently, `"suppressed"` if every recipient was on the suppression list.
 
+### Learning what happened to it
+
+Store the `id` with your own record of the send. If an admin ticked the delivery events on the API keys page, the instance's webhook POSTs `message.sent`, `message.bounced`, `message.complained` and `message.failed` with `message.id` equal to that `id`: join on it (not on the idempotency key, which is forgotten after 24 hours). They retry and can arrive twice: dedupe on the `X-SaaSMail-Delivery` header. See `docs/webhooks.md` (Delivery events).
+
 ### Side effect to know about
 
 Sending to a recipient **cancels any active sequence enrollment** for that person. The product treats a manual touch as superseding the automated drip. If you're sending from a worker that also enrolls people into sequences, sequence the calls accordingly — enroll first, then send manual mail only when you actually want to interrupt the drip.

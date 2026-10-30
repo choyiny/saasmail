@@ -51,6 +51,7 @@ import { anonymousHttpActor, httpActor } from "./lib/audit/actors";
 import { runWithAudit, systemActor } from "./lib/audit/context";
 import { auditRetentionDays, pruneAuditEvents } from "./lib/audit/prune";
 import { pruneSendIdempotency } from "./lib/send-idempotency";
+import { sweepWebhookDeliveries } from "./lib/webhook-delivery";
 import { pruneSendCounters } from "./lib/sending-controls";
 import {
   d1RateLimitStorage,
@@ -560,6 +561,15 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
           Math.floor(Date.now() / 1000),
         ).catch((err) =>
           console.error("[cron] idempotency key pruning failed:", err),
+        ),
+      )
+      .then(() =>
+        sweepWebhookDeliveries(
+          env,
+          createDb(env),
+          Math.floor(Date.now() / 1000),
+        ).catch((err) =>
+          console.error("[cron] webhook delivery sweep failed:", err),
         ),
       )
       .then(() =>
