@@ -1,8 +1,5 @@
-import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { APICallError, generateText, type LanguageModel } from "ai";
-import { inboxPermissions } from "../../db/inbox-permissions.schema";
-import { users } from "../../db/auth.schema";
 import {
   selectModel,
   type AgentModelEnv,
@@ -14,7 +11,15 @@ import {
   setMailboxMembership,
   setMailboxState,
 } from "../messages/state";
-import { MAX_ADMIN_FANOUT, computeFanoutTargets } from "../notification-fanout";
+import { AUDIT_ACTIONS } from "../audit/events";
+import { recordAudit } from "../audit/record";
+import {
+  NO_REASONING_OPTIONS,
+  checkInbound,
+  isGuardEnabled,
+  type GuardModelEnv,
+} from "../injection-guard";
+import { notifyMailRefresh } from "../notify-mail-refresh";
 import { describedFolders } from "./folders";
 import { buildFilingPrompt, parseFilingAnswer } from "./prompt";
 
@@ -33,16 +38,6 @@ export type AiFileMessage = {
 
 const FILING_TIMEOUT_MS = 30_000;
 const FILING_OUTPUT_TOKENS = 200;
-
-/** As for suggested replies (D38): no reasoning, so the answer is the text. */
-const NO_REASONING_OPTIONS = {
-  reasoning: "none" as const,
-  providerOptions: {
-    "workers-ai": {
-      chat_template_kwargs: { enable_thinking: false },
-    },
-  },
-};
 
 /**
  * The model that files mail: the agent's provider, with `TRIAGE_MODEL`
@@ -63,15 +58,18 @@ export function triageModel(
  * picks from their descriptions, and archives it too when asked and it was
  * filed. Returns the folder ids added. A message that is gone, in Junk or
  * Trash, an inbox with no described folder or no model configured: nothing.
+ * With the prompt-injection check on, a message it flags or cannot check
+ * this time: nothing either.
  * A model error the provider may recover from throws (the queue retries,
  * after a delay); one it will not (an unknown model) and an answer that names
  * no known folder change nothing.
  */
 export async function fileWithAi(
   db: Db,
-  env: CloudflareBindings & AgentModelEnv & { TRIAGE_MODEL?: string },
+  env: CloudflareBindings & GuardModelEnv,
   job: AiFileMessage,
   modelOverride?: LanguageModel,
+  guardModelOverride?: LanguageModel,
 ): Promise<string[]> {
   const inbox = job.inbox.trim().toLowerCase();
   const allowed = { isAdmin: false as const, inboxes: [inbox] };
@@ -98,6 +96,32 @@ export async function fileWithAi(
     const selected = triageModel(env);
     if (!selected.ok) return [];
     model = selected.model;
+  }
+
+  // The prompt-injection check, on its own model. A flagged message is
+  // neither filed nor archived; one the check could not answer waits.
+  if (await isGuardEnabled(db)) {
+    const verdict = await checkInbound(db, env, job.emailId, {
+      model: guardModelOverride,
+    });
+    if (verdict === "flagged") {
+      await recordAudit(db, {
+        action: AUDIT_ACTIONS.mailInjectionFlagged,
+        targetType: "message",
+        targetId: `received:${job.emailId}`,
+        inbox,
+        summary: `Skipped AI filing of a message in ${inbox}: possible prompt injection`,
+        details: { consumer: "ai_file", ruleId: job.ruleId },
+      });
+    }
+    if (verdict !== "safe") {
+      if (verdict === "unchecked") {
+        console.warn(
+          `[ai-file] not filed: ${job.emailId} could not be checked for prompt injection`,
+        );
+      }
+      return [];
+    }
   }
 
   const { instructions, prompt } = buildFilingPrompt({
@@ -157,7 +181,8 @@ export async function fileWithAi(
     return [];
   }
 
-  // Routine filing, like a rule's: no user id, so no audit row. A folder
+  // Routine filing, like a rule's: no user id, so no audit row (only a
+  // flagged message above records one). A folder
   // deleted since it was offered ends the job; a retry would ask again.
   try {
     await setMailboxMembership(db, allowed, null, [ref], { add });
@@ -173,48 +198,4 @@ export async function fileWithAi(
   }
   await notifyMailRefresh(db, env, inbox);
   return add;
-}
-
-/**
- * Tells the open tabs of everyone who can see the inbox to reload its mail,
- * the way a new suggested reply is announced. Best-effort.
- */
-export async function notifyMailRefresh(
-  db: Db,
-  env: CloudflareBindings,
-  inbox: string,
-): Promise<void> {
-  try {
-    const [permRows, adminRows] = await Promise.all([
-      db
-        .select({ userId: inboxPermissions.userId })
-        .from(inboxPermissions)
-        .where(eq(inboxPermissions.email, inbox)),
-      db
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.role, "admin"))
-        .limit(MAX_ADMIN_FANOUT + 1),
-    ]);
-    const { userIds } = computeFanoutTargets({
-      permissionUserIds: permRows.map((row) => row.userId),
-      adminUserIds: adminRows.map((row) => row.id),
-    });
-    const payload = JSON.stringify({ type: "mail_refresh", inbox });
-    await Promise.allSettled(
-      userIds.map((userId) =>
-        env.NOTIFICATIONS_HUB.get(
-          env.NOTIFICATIONS_HUB.idFromName(userId),
-        ).fetch(
-          new Request("http://do/realtime", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: payload,
-          }),
-        ),
-      ),
-    );
-  } catch (error) {
-    console.warn("[ai-file] realtime refresh failed:", error);
-  }
 }

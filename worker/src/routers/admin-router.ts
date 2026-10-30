@@ -14,6 +14,7 @@ import {
   rejectsUnknownRecipients,
   setRejectUnknownRecipients,
 } from "../lib/inbound-rejection";
+import { isGuardEnabled, setInjectionGuard } from "../lib/injection-guard";
 import {
   SEND_CHANNELS,
   readDailySendLimits,
@@ -358,6 +359,10 @@ const UpdateSettingsSchema = z.object({
     description:
       "Refuse inbound mail to addresses that are not inboxes (no sender identity and no assigned members) at SMTP time, with a permanent error and `No such mailbox`. Off by default: the catch-all stores mail to any address under the routed domains.",
   }),
+  injectionGuard: z.boolean().optional().openapi({
+    description:
+      "Check inbound mail for prompt injection before AI filing and the agent read it (on by default). Suggested replies check whatever this says.",
+  }),
   dailySendLimits: z
     .object({
       web: z.number().int().min(0).max(1_000_000).nullable(),
@@ -391,6 +396,7 @@ const SettingsResponseSchema = z.object({
     .nullable(),
   dailySendLimits: DailySendLimitsSchema,
   rejectUnknownRecipients: z.boolean(),
+  injectionGuard: z.boolean(),
 });
 
 const updateSettingsRoute = createRoute({
@@ -440,6 +446,7 @@ async function readSettings(
       : null,
     dailySendLimits: await readDailySendLimits(db),
     rejectUnknownRecipients: await rejectsUnknownRecipients(db),
+    injectionGuard: await isGuardEnabled(db),
   };
 }
 
@@ -644,6 +651,10 @@ adminRouter.openapi(updateSettingsRoute, async (c) => {
 
   if (body.rejectUnknownRecipients !== undefined) {
     await setRejectUnknownRecipients(db, body.rejectUnknownRecipients);
+  }
+
+  if (body.injectionGuard !== undefined) {
+    await setInjectionGuard(db, body.injectionGuard);
   }
 
   if (body.outboundPaused !== undefined) {

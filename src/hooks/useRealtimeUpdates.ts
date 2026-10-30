@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { dispatchSuggestedReplyReady } from "@/lib/suggested-reply-events";
 import { dispatchExportReady, dispatchImportDone } from "@/lib/export-events";
+import { dispatchInboxRefresh } from "@/lib/inbox-events";
 import { showToast } from "@/lib/toast";
 
 const INITIAL_RECONNECT_MS = 1_000;
@@ -67,14 +68,16 @@ export function useRealtimeUpdates(
             });
             promptRef.current?.();
           } else if (data.type === "mail_refresh") {
-            // Mail changed out of band (the AI filed it): reload, as for new
-            // mail, without announcing anything, and once for a burst.
+            // Mail changed out of band (the AI filed or flagged it): reload,
+            // as for new mail, without announcing anything, and once for a
+            // burst. The inbox-refresh event reloads open conversations.
             const inbox =
               typeof data.inbox === "string" ? data.inbox : undefined;
             if (refreshTimer) clearTimeout(refreshTimer);
             refreshTimer = setTimeout(() => {
               refreshTimer = null;
               callbackRef.current({ inbox });
+              dispatchInboxRefresh();
             }, MAIL_REFRESH_DEBOUNCE_MS);
           } else if (
             data.type === "export_ready" &&

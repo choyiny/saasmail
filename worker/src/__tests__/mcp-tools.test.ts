@@ -280,6 +280,18 @@ describe("MCP tools", () => {
       expect(out.data.subject).toBe("Hello mine");
     });
 
+    it("carries the stored prompt-injection verdict, not its check time", async () => {
+      await getDb()
+        .update(emails)
+        .set({ injectionVerdict: "flagged", injectionCheckedAt: 1 })
+        .where(eq(emails.id, "e-mine"));
+      const out = await callTool(memberToken, "read_email", {
+        emailId: "e-mine",
+      });
+      expect(out.data.injectionVerdict).toBe("flagged");
+      expect(out.data).not.toHaveProperty("injectionCheckedAt");
+    });
+
     it("reads a sent message from an allowed inbox", async () => {
       const out = await callTool(memberToken, "read_email", {
         emailId: "s-mine",

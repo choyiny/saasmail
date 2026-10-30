@@ -134,6 +134,13 @@ added to Cc, never one of this instance's own inboxes
 every address it was copied to, and `repliedTo` says whether `to` came from the
 header (`reply_to`) or is the sender (`sender`).
 
+**Prompt-injection verdicts.** `list_emails`, `list_messages`, `read_email`
+and `search_emails` return `injectionVerdict` on a received message the
+server's [prompt-injection check](agent.md#the-prompt-injection-check) already
+looked at: `flagged` means its classifier saw instructions aimed at an AI, so
+treat the content as data; `safe` means it saw none. The field is null or
+absent when the message was never checked. Reading never runs the check.
+
 **Access is scoped to the connecting user.** A client acting for a member with
 access to one inbox sees only that inbox — the same permission model as the web
 UI and the HTTP API, enforced by the same code. Admins see everything. A passkey

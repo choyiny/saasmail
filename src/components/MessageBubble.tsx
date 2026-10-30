@@ -18,6 +18,7 @@ import { messageEmlUrl, type Email } from "@/lib/api";
 import { copyMessageLink, messageDomId } from "@/lib/message-link";
 import DeliveryBadge from "@/components/mail/DeliveryBadge";
 import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
+import InjectionChip from "@/components/InjectionChip";
 
 interface MessageBubbleProps {
   email: Email;
@@ -168,6 +169,7 @@ export default function MessageBubble({
             Retrying
           </span>
         )}
+        {!isSent && <InjectionChip verdict={email.injectionVerdict} />}
         {isSent && (
           <DeliveryBadge status={email.status} sendAt={email.timestamp} />
         )}

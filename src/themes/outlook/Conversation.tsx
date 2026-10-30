@@ -27,6 +27,7 @@ import ImageAttachments, {
 } from "@/components/ImageAttachments";
 import EmailHtmlModal from "@/components/EmailHtmlModal";
 import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
+import InjectionChip from "@/components/InjectionChip";
 import { deleteEmail, type Email, type GroupedItem } from "@/lib/api";
 import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import {
@@ -452,6 +453,11 @@ function MessageCard({
                 problems={email.deliveryProblems}
                 recipientCount={1 + email.cc.length}
               />
+            </div>
+          )}
+          {!sent && email.injectionVerdict === "flagged" && (
+            <div className="mt-1">
+              <InjectionChip verdict={email.injectionVerdict} />
             </div>
           )}
         </div>

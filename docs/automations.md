@@ -84,6 +84,13 @@ is archived.
   folders' names and descriptions. It may answer with ids from that list only
   (at most five); anything else is ignored. A hostile message can at worst land
   in the wrong folder, or, with `archiveWhenFiled`, skip the inbox.
+- A message the [prompt-injection check](agent.md#the-prompt-injection-check)
+  flags is neither filed nor archived; it stays where the rules left it. The
+  audit log records why (`mail.injection_flagged`), and the message shows a
+  **Possible prompt injection** chip. A message the check could not answer is
+  not filed either. The check costs one more model call per message (on
+  [`GUARD_MODEL`](agent.md#guard_model)), once: other AI features reuse its
+  answer.
 - Mail in Junk or Trash is not filed. A temporary model error is retried by
   the queue after 30 seconds; a request the provider will never accept (an
   unknown model, say) ends with a warning in the logs and changes nothing.
@@ -91,8 +98,8 @@ is archived.
   inbox); one it filed nowhere stays where it is.
 - It uses the agent's provider; `TRIAGE_MODEL` picks a different model for
   filing ([Native mail agent](agent.md#triage_model)). With no model
-  configured the action does nothing. Filing writes no audit row; the rule's
-  match count records it. A change to a folder's description is recorded
+  configured the action does nothing. Filing writes no audit row (only a
+  flagged message does); the rule's match count records it. A change to a folder's description is recorded
   (`folder.updated`).
 - Every matching message is one model call. Mail above the inbox spam
   threshold runs no rule actions; without a threshold, add a `spam_score`

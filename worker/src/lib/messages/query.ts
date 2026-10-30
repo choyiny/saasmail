@@ -125,6 +125,7 @@ type RawMessageRow = {
   references_header: string | null;
   raw_size: number | null;
   spam_probability: number | null;
+  injection_verdict: string | null;
   from_email: string | null;
   from_name: string | null;
   to_email: string;
@@ -728,6 +729,7 @@ function receivedArm(
       e.references_header AS references_header,
       e.raw_size AS raw_size,
       e.spam_probability AS spam_probability,
+      e.injection_verdict AS injection_verdict,
       p.email AS from_email,
       p.name AS from_name,
       e.recipient AS to_email,
@@ -839,6 +841,7 @@ function sentArm(
       NULL AS references_header,
       NULL AS raw_size,
       NULL AS spam_probability,
+      NULL AS injection_verdict,
       se.from_address AS from_email,
       -- The inbox identity's current display name: the sent row doesn't keep
       -- the name the message went out with.
@@ -1047,6 +1050,10 @@ function toUnified(
   if (row.kind === "received") {
     message.spamProbability =
       row.spam_probability === null ? null : Number(row.spam_probability);
+    message.injectionVerdict =
+      row.injection_verdict === "safe" || row.injection_verdict === "flagged"
+        ? row.injection_verdict
+        : null;
   }
 
   return message;

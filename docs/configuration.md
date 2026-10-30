@@ -65,6 +65,9 @@ Your Cloudflare Workers configuration. `yarn saasmail install` generates it from
 - `vars.AGENT_MODEL` / `vars.TRIAGE_MODEL` — optional model overrides for the
   [native mail agent](agent.md#agent_model) and
   [AI filing](agent.md#triage_model). Not secrets.
+- `vars.GUARD_MODEL` — optional model for the
+  [prompt-injection check](agent.md#guard_model), on the agent's provider.
+  Falls back to `TRIAGE_MODEL`, then `AGENT_MODEL`. Not a secret.
 
 To rebrand the UI, drop a replacement `public/saasmail-logo.png` — it's used as both the favicon and the in-app logo. Replace it before or after `yarn saasmail install`; the `/saasmail-onboarding` skill can do it for you.
 

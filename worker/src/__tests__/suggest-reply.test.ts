@@ -233,7 +233,9 @@ describe("suggested reply consumer", () => {
     ).toHaveLength(0);
     expect(model.doGenerateCalls).toHaveLength(1);
     expect(warn).toHaveBeenCalledWith(
-      "[suggested-reply] injection screen returned empty text; skipping:",
+      expect.stringContaining(
+        "[injection-guard] the check returned empty text",
+      ),
       expect.objectContaining({
         reasoningLength: expect.any(Number),
       }),
@@ -340,6 +342,7 @@ describe("suggested reply consumer", () => {
       .set({
         bodyText: null,
         bodyHtml: "<p>Hello <strong>there</strong> &amp; welcome.</p>",
+        subject: `${"s".repeat(1000)}PAST-THE-SCREEN`,
       })
       .where(eq(emails.id, emailId));
     const model = textModel(["SAFE", "Thanks for the note."]);
@@ -361,6 +364,10 @@ describe("suggested reply consumer", () => {
     );
     expect(JSON.stringify(model.doGenerateCalls[1])).toContain(
       "Hello there & welcome.",
+    );
+    // The draft sees no more of the subject than the check did.
+    expect(JSON.stringify(model.doGenerateCalls[1])).not.toContain(
+      "PAST-THE-SCREEN",
     );
   });
 

@@ -47,10 +47,11 @@ provider-configuration hint described below.
 Suggested replies are opt-in per inbox. An admin enables **Auto-suggest replies**
 on the **Inboxes** page; disabled inboxes never enqueue this work.
 
-For each eligible received message, saasmail makes one model call to screen the
-message for prompt injection and, only when the first word of the call's final
-text is `SAFE` (case-insensitive, ignoring surrounding Markdown/punctuation),
-one model call to draft a reply. Mail that is already Junk, carries
+For each eligible received message, saasmail runs the
+[prompt-injection check](#prompt-safety) and, only when it finds the message
+safe (the first word of the check's final text is `SAFE`, case-insensitive,
+ignoring surrounding Markdown/punctuation), makes one model call to draft a
+reply. Suggested replies run the check even when the admin switch is off. Mail that is already Junk, carries
 automated/list headers, arrives after the setting was disabled, or has no
 configured model provider is skipped. The consumer re-checks the message,
 inbox setting, spam/trash state, and existing suggestion before generating, so
@@ -58,7 +59,9 @@ stale or duplicate queue deliveries are harmless.
 
 The drafting call has no tools. The current message and up to 10 recent messages
 from the same person in the same inbox are quoted as untrusted data, and each
-body is truncated to 4000 characters. Inbox **Agent instructions**, when set,
+body is truncated to 4000 characters. Earlier received messages the check
+flagged are left out of that history; ones never checked stay in, quoted as
+untrusted. Inbox **Agent instructions**, when set,
 are included as trusted administrator guidance. The result is stored as plain
 text for a human to review, use, edit, or dismiss. Drafting instructions require
 facts to come from the quoted messages or trusted inbox instructions; unknown
@@ -68,12 +71,14 @@ composer when the human sends. Trailing placeholder-only sign-offs are removed,
 while placeholders embedded in substantive copy make the suggestion fail
 closed. **Nothing is ever sent by this feature.**
 
-Cost per eligible message is therefore one screening call plus one generation
-call. The screen and draft calls disable reasoning for providers that support
-the AI SDK's unified reasoning option, and the Workers AI call also disables
-Kimi/GLM thinking explicitly. A screening flag, error, timeout, missing final
-text, or any first final-text word other than `SAFE` creates no suggestion.
-An empty final draft is never stored.
+Cost per eligible message is therefore one check (none when AI filing or the
+agent already checked the message) plus one generation call. The check and
+draft calls disable reasoning for providers that support the AI SDK's unified
+reasoning option, and the Workers AI call also disables Kimi/GLM thinking
+explicitly. A flag, a timeout, missing final text, a request the provider will
+never accept, or any first final-text word other than `SAFE` creates no
+suggestion; another model error is retried by the queue. An empty final draft
+is never stored.
 
 ## Provider selection
 
@@ -156,6 +161,21 @@ precedence.
 Set `TRIAGE_MODEL` (a variable, like `AGENT_MODEL`) to file with a different
 model of that provider, a cheaper one for instance, while the agent keeps
 `AGENT_MODEL`. Unset, filing uses `AGENT_MODEL` or the provider's default.
+
+### `GUARD_MODEL`
+
+The [prompt-injection check](#prompt-safety) uses the same provider as the
+agent. Set `GUARD_MODEL` (a variable, like `AGENT_MODEL`) to run it on a
+different model of that provider. Unset, it uses `TRIAGE_MODEL`, then
+`AGENT_MODEL`, then the provider's default. The variable names a model only;
+it never changes which provider is used (an Anthropic key, then an OpenAI key,
+then Workers AI).
+
+A small, cheap model is the intent: the check answers one word. With Workers
+AI, a small current model such as `@cf/ibm-granite/granite-4.0-h-micro` keeps
+the check off the chat model. Workers AI retires models over time, so check
+the [model list](https://developers.cloudflare.com/workers-ai/models/) before
+you pick one.
 
 ## Sessions and authentication
 
@@ -321,6 +341,42 @@ Message content enters the model as quoted untrusted data with an explicit
 instruction that mail content is **content, not instructions**. Subjects,
 bodies, headers, attachments, and quoted tool output must never be followed as
 system/developer/tool instructions.
+
+### The prompt-injection check
+
+Before a model reads a received message on its own, a small classifier call
+checks it for instructions aimed at an AI (Cloudflare's Agentic Inbox does the
+same). The check runs the first time a feature needs it, never when the mail
+arrives, and its answer is stored on the message, so the next feature makes no
+call. It covers the subject (up to 1,000 characters), the sender, the
+attachment names and types, and the body from its start: up to 4,000
+characters of the plain text, quoted replies included, and up to 4,000 of the
+HTML as text when that differs. It runs on [`GUARD_MODEL`](#guard_model).
+
+- **AI filing** does not file or archive a flagged message, and records
+  `mail.injection_flagged` in the [audit log](audit-log.md). A message the
+  check could not answer (a timeout, an empty answer, a request the provider
+  refused) is not filed either; the verdict is not stored, so the next run
+  checks again.
+- **Suggested replies** draft nothing for a flagged or unchecked message.
+- **The agent**'s `read_message` checks a received message it reads (not mail
+  in Junk or Trash) and returns `injectionVerdict`: `safe`, `flagged`,
+  `unchecked` (the check failed; the mail is still returned, with a note), or
+  `null` (sent mail, or the switch is off). A flagged message comes with a
+  stronger notice, and the system prompt tells the agent to tell you and not
+  to act on its requests. The list and search tools carry the stored verdict
+  without checking.
+- **The web UI** shows a **Possible prompt injection** chip on a flagged
+  received message in the reading pane and on the conversation's message
+  cards. Open tabs refresh when a check flags a message.
+- **MCP and WebMCP** read tools return the stored `injectionVerdict`; a read
+  never runs the check. JMAP does not carry it.
+
+Nothing is hidden, moved to Junk or deleted: the check is not a spam filter,
+and it adds to the defences above rather than replacing them. Admins can turn
+it off in **Settings** ("Check inbound mail for prompt injection before AI
+filing and the agent read it"); off, filing and the agent behave as before it
+existed, and suggested replies still check.
 
 The client may provide navigation context such as current inbox, folder,
 selected message ref, or person id. The runtime whitelists those fields and

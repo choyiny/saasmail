@@ -19,6 +19,7 @@ import {
   type DefaultView,
 } from "@/lib/default-view";
 import SendingSettings from "@/components/SendingSettings";
+import InjectionGuardSettings from "@/components/InjectionGuardSettings";
 import DataExports from "@/components/DataExports";
 import SystemSettings from "@/components/SystemSettings";
 
@@ -55,6 +56,7 @@ export default function SettingsPage() {
         <DisplayPreferencesSection />
         <DataExports showImports={isAdmin} />
         {isAdmin && <SendingSettings />}
+        {isAdmin && <InjectionGuardSettings />}
         {isAdmin && <AppBrandingSection />}
         {isAdmin && <SystemSettings />}
       </div>

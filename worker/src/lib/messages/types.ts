@@ -44,6 +44,11 @@ export interface UnifiedMessage {
    * when it was not scored. Absent for sent mail.
    */
   spamProbability?: number | null;
+  /**
+   * Received mail's stored prompt-injection verdict, or null when it was
+   * never checked. Absent for sent mail. Reading never runs the check.
+   */
+  injectionVerdict?: "safe" | "flagged" | null;
   from: MailAddress | null;
   to: MailAddress;
   /**

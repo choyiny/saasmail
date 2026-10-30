@@ -150,6 +150,8 @@ export interface Email {
   campaignId?: string | null;
   /** Sent messages: bounces and complaints the provider reported. */
   deliveryProblems?: DeliveryProblem[];
+  /** Received messages that were checked: the prompt-injection verdict. */
+  injectionVerdict?: "safe" | "flagged" | null;
 }
 
 export type InboxDisplayMode = "thread" | "chat";
@@ -801,6 +803,8 @@ export interface MailMessage {
   delivery: { status: string } | null;
   /** Sent messages: bounces and complaints the provider reported. */
   deliveryProblems?: DeliveryProblem[];
+  /** Received messages that were checked: the prompt-injection verdict. */
+  injectionVerdict?: "safe" | "flagged" | null;
   attachmentCount?: number;
   state: MailMessageState;
 }
@@ -2272,6 +2276,8 @@ export interface AdminSettings {
   dailySendLimits: DailySendLimits;
   /** Inbound mail to an address that is not an inbox is refused. */
   rejectUnknownRecipients: boolean;
+  /** Inbound mail is checked for prompt injection before AI filing and the agent. */
+  injectionGuard: boolean;
 }
 
 export async function fetchAdminSettings(): Promise<AdminSettings> {
@@ -2282,6 +2288,7 @@ export async function updateAdminSettings(changes: {
   outboundPaused?: boolean;
   dailySendLimits?: Partial<DailySendLimits>;
   rejectUnknownRecipients?: boolean;
+  injectionGuard?: boolean;
 }): Promise<AdminSettings> {
   return apiFetch("/api/admin/settings", {
     method: "PATCH",

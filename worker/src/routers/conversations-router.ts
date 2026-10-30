@@ -116,6 +116,9 @@ conversationsRouter.openapi(listConversationEmailsRoute, async (c) => {
     ...(message.delivery?.problems
       ? { deliveryProblems: message.delivery.problems }
       : {}),
+    ...(message.injectionVerdict
+      ? { injectionVerdict: message.injectionVerdict }
+      : {}),
   }));
 
   return c.json(

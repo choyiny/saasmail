@@ -53,6 +53,8 @@ export type PersonEmailRow = {
   attachments: AttachmentRow[];
   /** Sent messages, with `withDelivery`: the provider's bounces and complaints. */
   deliveryProblems?: DeliveryProblem[];
+  /** Received messages that were checked: the prompt-injection verdict. */
+  injectionVerdict?: "safe" | "flagged";
 };
 
 export type ListPersonEmailsOptions = {
@@ -72,7 +74,7 @@ export type ListPersonEmailsResult = {
 
 export type ReceivedEmailDetail = Omit<
   typeof emails.$inferSelect,
-  "cc" | "replyTo"
+  "cc" | "replyTo" | "injectionCheckedAt"
 > & {
   type: "received";
   timestamp: number;
@@ -158,6 +160,9 @@ export async function listPersonEmails(
     ...(message.delivery?.problems
       ? { deliveryProblems: message.delivery.problems }
       : {}),
+    ...(message.injectionVerdict
+      ? { injectionVerdict: message.injectionVerdict }
+      : {}),
   }));
 
   const inboxAddrs = [
@@ -231,8 +236,10 @@ export async function getEmailById(
             row[0].recipient,
           )
         : [];
+    // When the check ran is internal; the verdict is returned.
+    const { injectionCheckedAt: _checkedAt, ...received } = row[0];
     return {
-      ...row[0],
+      ...received,
       type: "received",
       timestamp: row[0].receivedAt,
       fromAddress: senderRow[0]?.email ?? null,

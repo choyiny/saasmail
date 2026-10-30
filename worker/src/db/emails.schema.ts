@@ -60,6 +60,14 @@ export const emails = sqliteTable(
      * See migration 0022.
      */
     conversationId: text("conversation_id"),
+    /**
+     * The prompt-injection check's verdict, 'safe' or 'flagged'; NULL when
+     * the message was never checked. Set once, on first use by a model
+     * consumer; see docs/agent.md.
+     */
+    injectionVerdict: text("injection_verdict"),
+    /** When `injection_verdict` was stored, unix seconds. */
+    injectionCheckedAt: integer("injection_checked_at"),
     /** The mail import that stored this message; null for live mail. */
     importJobId: text("import_job_id"),
     /**

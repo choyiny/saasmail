@@ -41,6 +41,7 @@ import { sanitizeEmailHtml } from "@/lib/sanitize-html";
 import { showToast } from "@/lib/toast";
 import DeliveryBadge from "./DeliveryBadge";
 import DeliveryProblemBadge from "@/components/DeliveryProblemBadge";
+import InjectionChip from "@/components/InjectionChip";
 
 function addressLabel(
   address: { email: string; name?: string | null } | null,
@@ -508,6 +509,9 @@ export default function MailReadingPane({
                       </time>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-1">
+                      <InjectionChip
+                        verdict={selectedMessage.injectionVerdict}
+                      />
                       <DeliveryBadge
                         status={selectedMessage.delivery?.status}
                         sendAt={selectedMessage.occurredAt}

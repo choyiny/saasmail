@@ -18,7 +18,7 @@ import {
   stillClaimed,
   type SliceState,
 } from "../jobs/slices";
-import { notifyMailRefresh } from "../triage/ai-file";
+import { notifyMailRefresh } from "../notify-mail-refresh";
 import { queryMessages } from "./query";
 import {
   citedIdsOf,

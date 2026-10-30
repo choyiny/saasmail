@@ -31,6 +31,8 @@ export type SearchHit = {
   snippet: string | null;
   timestamp: number;
   isRead: number | null;
+  /** Received messages that were checked: the prompt-injection verdict. */
+  injectionVerdict?: "safe" | "flagged";
 };
 
 export type SearchEmailsResult = {
@@ -123,6 +125,9 @@ export async function searchEmails(
       snippet: excerpt(message.bodyText),
       timestamp: message.occurredAt,
       isRead: message.isRead === null ? null : message.isRead ? 1 : 0,
+      ...(message.injectionVerdict
+        ? { injectionVerdict: message.injectionVerdict }
+        : {}),
     };
   });
 

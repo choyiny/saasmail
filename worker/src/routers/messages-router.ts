@@ -34,7 +34,10 @@ import { triageModel, type AiFileMessage } from "../lib/triage/ai-file";
 import { describedFolders } from "../lib/triage/folders";
 import { renderMessageBytes } from "../lib/export/render-message";
 import type { Variables } from "../variables";
-import { deliveryProblemsField } from "../lib/delivery/openapi";
+import {
+  deliveryProblemsField,
+  injectionVerdictField,
+} from "../lib/delivery/openapi";
 
 export const messagesRouter = new OpenAPIHono<{
   Bindings: CloudflareBindings;
@@ -108,6 +111,7 @@ const MessageSchema = z.object({
   }),
   delivery: z.object({ status: z.string() }).nullable(),
   deliveryProblems: deliveryProblemsField,
+  injectionVerdict: injectionVerdictField,
   attachmentCount: z.number().optional(),
   state: MessageStateSchema.optional(),
 });

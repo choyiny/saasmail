@@ -218,6 +218,8 @@ describe("filing a message", () => {
       personId: "p1",
       recipient: INBOX,
       subject: "Invoice 42",
+      // Checked already: these tests are about filing, not the check.
+      injectionVerdict: "safe",
     });
   });
 

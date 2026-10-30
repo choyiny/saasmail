@@ -32,7 +32,7 @@ import {
 } from "../messages/state";
 import type { MessageRef } from "../messages/types";
 import { rethreadAfterImport } from "../messages/thread-backfill";
-import { notifyMailRefresh } from "../triage/ai-file";
+import { notifyMailRefresh } from "../notify-mail-refresh";
 import { mboxStart, readMessages } from "./mbox-reader";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

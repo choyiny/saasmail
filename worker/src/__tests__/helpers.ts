@@ -62,7 +62,7 @@ export async function applyMigrations() {
     `CREATE TABLE IF NOT EXISTS customers (id TEXT PRIMARY KEY, display_name TEXT, created_by TEXT REFERENCES users(id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
     `CREATE TABLE IF NOT EXISTS customer_people (customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE, person_id TEXT NOT NULL UNIQUE REFERENCES people(id) ON DELETE CASCADE, linked_by TEXT REFERENCES users(id) ON DELETE SET NULL, linked_at INTEGER NOT NULL)`,
     `CREATE INDEX IF NOT EXISTS customer_people_customer_idx ON customer_people(customer_id)`,
-    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT, in_reply_to TEXT, references_header TEXT, raw_r2_key TEXT, raw_size INTEGER, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, spam_probability REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, reply_to TEXT, conversation_id TEXT, import_job_id TEXT, thread_key TEXT, gmail_message_id TEXT, gmail_thread_id TEXT, outlook_message_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS emails (id TEXT PRIMARY KEY, person_id TEXT NOT NULL, recipient TEXT NOT NULL, subject TEXT, body_html TEXT, body_text TEXT, raw_headers TEXT, message_id TEXT, in_reply_to TEXT, references_header TEXT, raw_r2_key TEXT, raw_size INTEGER, spf TEXT, dkim TEXT, dmarc TEXT, spam_score REAL, spam_probability REAL, is_read INTEGER NOT NULL DEFAULT 0, cc TEXT, reply_to TEXT, conversation_id TEXT, injection_verdict TEXT, injection_checked_at INTEGER, import_job_id TEXT, thread_key TEXT, gmail_message_id TEXT, gmail_thread_id TEXT, outlook_message_id TEXT, received_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`,
     `CREATE UNIQUE INDEX IF NOT EXISTS emails_message_id_recipient_unique ON emails(message_id, recipient)`,
     `CREATE INDEX IF NOT EXISTS emails_person_received_idx ON emails(person_id, received_at)`,
     `CREATE INDEX IF NOT EXISTS emails_recipient_received_idx ON emails(recipient, received_at)`,
@@ -338,6 +338,7 @@ export async function createTestEmail(
     conversationId?: string | null;
     cc?: string | null;
     replyTo?: string | null;
+    injectionVerdict?: "safe" | "flagged" | null;
   } = {},
 ) {
   const db = getDb();
@@ -357,6 +358,7 @@ export async function createTestEmail(
     conversationId: opts.conversationId ?? null,
     cc: opts.cc ?? null,
     replyTo: opts.replyTo ?? null,
+    injectionVerdict: opts.injectionVerdict ?? null,
     receivedAt: now,
     createdAt: now,
   };
