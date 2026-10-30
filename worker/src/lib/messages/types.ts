@@ -49,6 +49,11 @@ export interface UnifiedMessage {
    * never checked. Absent for sent mail. Reading never runs the check.
    */
   injectionVerdict?: "safe" | "flagged" | null;
+  /**
+   * The `+detail` received mail to a test inbox was addressed to. Absent
+   * otherwise.
+   */
+  recipientDetail?: string;
   from: MailAddress | null;
   to: MailAddress;
   /**

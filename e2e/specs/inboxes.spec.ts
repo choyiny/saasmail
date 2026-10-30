@@ -119,6 +119,45 @@ test.describe.serial("inboxes CRUD", () => {
     ).toHaveAttribute("aria-checked", "true");
   });
 
+  test("test inbox switch persists, and is refused for an inbox with mail", async ({
+    page,
+  }) => {
+    execLocalSql(
+      "INSERT OR IGNORE INTO sender_identities (email, display_name, display_mode, created_at, updated_at) VALUES ('test-inbox-ui@e2e.test', 'Test Inbox UI', 'chat', CAST(strftime('%s','now') AS INTEGER), CAST(strftime('%s','now') AS INTEGER))",
+    );
+    await page.goto("/inboxes");
+
+    const rowOf = (email: string) =>
+      page.locator(
+        `[data-testid="${TEST_IDS.inboxRow}"][data-inbox-email="${email}"]`,
+      );
+    const toggle = rowOf("test-inbox-ui@e2e.test").getByTestId(
+      "inbox-test-toggle",
+    );
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await page.reload();
+    const reloaded = rowOf("test-inbox-ui@e2e.test");
+    await expect(reloaded.getByTestId("inbox-test-toggle")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await expect(reloaded.getByTestId("inbox-test-badge")).toBeVisible();
+
+    // support@e2e.test holds seeded mail: the server refuses and says why.
+    const support = rowOf("support@e2e.test");
+    await support.getByTestId("inbox-test-toggle").click();
+    await expect(support.getByTestId("inbox-test-error")).toContainText(
+      "already holds mail",
+    );
+    await expect(support.getByTestId("inbox-test-toggle")).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
+
   // ── 3. Toggle thread → chat mode persists after reload ───────────────────────
 
   test("toggle thread to chat mode persists after reload", async ({ page }) => {

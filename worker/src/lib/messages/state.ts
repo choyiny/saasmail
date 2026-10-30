@@ -923,3 +923,48 @@ export function deleteSentMessageStateStatements(
       ),
   ];
 }
+
+/**
+ * The statements of `deleteMessageState` for the received messages a subquery
+ * selects, for a caller that runs them in the same `db.batch` as the hard
+ * delete, ahead of it. The subquery is evaluated when the batch runs, so a
+ * guard in it (the test-mail prune's eligibility) holds for the state and the
+ * row alike.
+ */
+export function deleteReceivedMessageStateStatements(
+  db: DrizzleD1Database<any>,
+  receivedIds: SQL,
+) {
+  return [
+    db
+      .delete(messageUserState)
+      .where(
+        and(
+          eq(messageUserState.messageKind, "received"),
+          sql`${messageUserState.messageId} IN ${receivedIds}`,
+        ),
+      ),
+    db
+      .delete(mailboxMessageState)
+      .where(
+        and(
+          eq(mailboxMessageState.messageKind, "received"),
+          sql`${mailboxMessageState.messageId} IN ${receivedIds}`,
+        ),
+      ),
+    db
+      .delete(messageMailboxes)
+      .where(
+        and(
+          eq(messageMailboxes.messageKind, "received"),
+          sql`${messageMailboxes.messageId} IN ${receivedIds}`,
+        ),
+      ),
+    db
+      .delete(suggestedReplies)
+      .where(sql`${suggestedReplies.emailId} IN ${receivedIds}`),
+    db
+      .delete(spamTraining)
+      .where(sql`${spamTraining.emailId} IN ${receivedIds}`),
+  ];
+}

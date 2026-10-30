@@ -1744,7 +1744,13 @@ export interface AdminInbox {
   outlookAccountId: string | null;
   /** The inbox's learning spam filter. */
   spamFilter: SpamFilterStatus;
+  /** `test`: a test inbox (docs/inboxes.md, "Test inboxes"). */
+  purpose: InboxPurpose;
+  /** Days a test inbox keeps its mail; null = 3. */
+  testRetentionDays: number | null;
 }
+
+export type InboxPurpose = "mail" | "test";
 
 export interface SpamFilterStatus {
   enabled: boolean;
@@ -1816,6 +1822,8 @@ export async function updateInboxSettings(
     gmailAccountId?: string | null;
     /** Same, for an Outlook mailbox. */
     outlookAccountId?: string | null;
+    purpose?: InboxPurpose;
+    testRetentionDays?: number | null;
   },
 ): Promise<{
   email: string;
@@ -1831,6 +1839,8 @@ export async function updateInboxSettings(
   source: "cloudflare" | "gmail" | "outlook";
   gmailAccountId: string | null;
   outlookAccountId: string | null;
+  purpose: InboxPurpose;
+  testRetentionDays: number | null;
 }> {
   // The failure body is the whole point here: a rejected Gmail mapping answers
   // with the one sentence that tells the operator how to fix it ("add it under

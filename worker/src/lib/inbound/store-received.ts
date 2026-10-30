@@ -173,6 +173,8 @@ export interface StoreReceivedInput {
   gmailMessageId?: string | null;
   gmailThreadId?: string | null;
   outlookMessageId?: string | null;
+  /** The `+detail` of a test inbox's subaddress the mail was sent to. */
+  recipientDetail?: string | null;
 }
 
 export interface StoredReceived {
@@ -333,6 +335,7 @@ export async function storeReceivedMessage(
       gmailMessageId: input.gmailMessageId ?? null,
       gmailThreadId: input.gmailThreadId ?? null,
       outlookMessageId: input.outlookMessageId ?? null,
+      recipientDetail: input.recipientDetail ?? null,
       receivedAt,
       createdAt: now,
     };

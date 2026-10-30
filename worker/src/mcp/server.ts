@@ -48,6 +48,11 @@ import {
 } from "../lib/messages/types";
 import { snoozeConversations } from "../lib/messages/conversation-state";
 import {
+  DEFAULT_WAIT_SECONDS,
+  MAX_WAIT_SECONDS,
+  waitForTestMail,
+} from "../lib/test-mail";
+import {
   InvalidMessageStateError,
   MessageStateAccessError,
   getMailbox,
@@ -411,6 +416,73 @@ export function buildMcpServer(ctx: McpContext): McpServer {
         })),
         nextCursor: page.nextCursor,
       });
+    }),
+  );
+
+  server.registerTool(
+    "wait_for_test_mail",
+    {
+      description:
+        "Wait up to `timeout` seconds for the first message to a test inbox that matches, and return it with the links and numeric codes found in it. For testing a sign-up, magic-link or reset flow. Only a test inbox you may read; any other inbox is refused. `found: false` means nothing arrived in time.",
+      annotations: { readOnlyHint: true, title: "Wait for Test Mail" },
+      inputSchema: {
+        inbox: z
+          .string()
+          .email()
+          .describe("The test inbox's address (no +detail)."),
+        detail: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe("Only mail sent to the inbox's local+detail@ address."),
+        since: z
+          .number()
+          .int()
+          .min(0)
+          .describe("Epoch seconds: only mail received at or after it."),
+        subject: z
+          .string()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe(
+            "Substring of the subject, case-insensitive for ASCII letters only (an accented letter matches in the case the mail uses).",
+          ),
+        from: z.string().email().optional().describe("Exact sender address."),
+        timeout: z
+          .number()
+          .int()
+          .min(1)
+          .max(MAX_WAIT_SECONDS)
+          .optional()
+          .describe(
+            `Seconds, 1–${MAX_WAIT_SECONDS}. Default ${DEFAULT_WAIT_SECONDS}.`,
+          ),
+      },
+    },
+    guard(ctx, SCOPE_READ, async (input, extra) => {
+      const result = await waitForTestMail(
+        db,
+        allowed,
+        {
+          inbox: input.inbox,
+          detail: input.detail,
+          since: input.since,
+          subject: input.subject,
+          from: input.from,
+          timeout: input.timeout ?? DEFAULT_WAIT_SECONDS,
+        },
+        { signal: extra?.signal },
+      );
+      if (result.error) {
+        return fail("Not a test inbox you may read.");
+      }
+      return ok(
+        result.message
+          ? { found: true, message: result.message }
+          : { found: false },
+      );
     }),
   );
 

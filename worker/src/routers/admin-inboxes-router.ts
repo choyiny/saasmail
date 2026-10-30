@@ -1,7 +1,7 @@
 import { AUDIT_ACTIONS } from "../lib/audit/events";
 import { recordAudit } from "../lib/audit/record";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql, type SQL } from "drizzle-orm";
 import { senderIdentities } from "../db/sender-identities.schema";
 import { inboxPermissions } from "../db/inbox-permissions.schema";
 import { emails } from "../db/emails.schema";
@@ -22,6 +22,10 @@ import {
   MicrosoftAuthError,
 } from "../lib/outlook/oauth";
 import type { Variables } from "../variables";
+import {
+  MAX_TEST_RETENTION_DAYS,
+  MIN_TEST_RETENTION_DAYS,
+} from "../lib/test-mail";
 import {
   readSpamModels,
   resetSpamFilter,
@@ -70,6 +74,12 @@ const ThreadBackfillSchema = z
   })
   .nullable();
 
+/** A test inbox (docs/inboxes.md, "Test inboxes") and how long it keeps mail. */
+const PurposeFields = {
+  purpose: z.enum(["mail", "test"]),
+  testRetentionDays: z.number().int().nullable(),
+};
+
 const InboxRowSchema = z.object({
   email: z.string(),
   displayName: z.string().nullable(),
@@ -92,6 +102,7 @@ const InboxRowSchema = z.object({
   source: z.enum(["cloudflare", "gmail", "outlook"]),
   gmailAccountId: z.string().nullable(),
   outlookAccountId: z.string().nullable(),
+  ...PurposeFields,
 });
 
 const listInboxesRoute = createRoute({
@@ -121,6 +132,8 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
     source: "cloudflare" | "gmail" | "outlook" | null;
     gmailAccountId: string | null;
     outlookAccountId: string | null;
+    purpose: "mail" | "test" | null;
+    testRetentionDays: number | null;
   };
   const rows = await db.all<Row>(sql`
     WITH universe AS (
@@ -141,6 +154,8 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       s.source AS source,
       s.gmail_account_id AS gmailAccountId,
       s.outlook_account_id AS outlookAccountId,
+      s.purpose AS purpose,
+      s.test_retention_days AS testRetentionDays,
       (
         SELECT COALESCE(
           '[' || GROUP_CONCAT('"' || ip.user_id || '"') || ']',
@@ -176,6 +191,8 @@ adminInboxesRouter.openapi(listInboxesRoute, async (c) => {
       source: r.source ?? "cloudflare",
       gmailAccountId: r.gmailAccountId,
       outlookAccountId: r.outlookAccountId,
+      purpose: r.purpose ?? "mail",
+      testRetentionDays: r.testRetentionDays,
     })),
     200,
   );
@@ -220,6 +237,7 @@ const createInboxRoute = createRoute({
           hamMessages: z.number().int(),
           ready: z.boolean(),
         }),
+        ...PurposeFields,
       }),
       "Created inbox",
     ),
@@ -281,6 +299,8 @@ adminInboxesRouter.openapi(createInboxRoute, async (c) => {
       agentInstructions: null,
       agentAutodraft: false,
       assignedUserIds: [],
+      purpose: "mail" as const,
+      testRetentionDays: null,
     },
     201,
   );
@@ -325,6 +345,17 @@ const PatchInboxBodySchema = z
     // nothing may configure it yet, so a non-null value here is rejected
     // outright (see the handler) rather than silently accepted or ignored.
     gmailGroupAddress: z.string().nullable().optional(),
+    // `test`: a test inbox. Turns on only while the inbox holds no mail, and
+    // only for a Cloudflare-routed inbox.
+    purpose: z.enum(["mail", "test"]).optional(),
+    // Days a test inbox keeps its mail; null = 3.
+    testRetentionDays: z
+      .number()
+      .int()
+      .min(MIN_TEST_RETENTION_DAYS)
+      .max(MAX_TEST_RETENTION_DAYS)
+      .nullable()
+      .optional(),
   })
   .refine(
     (b) =>
@@ -339,7 +370,9 @@ const PatchInboxBodySchema = z
       b.source !== undefined ||
       b.gmailAccountId !== undefined ||
       b.outlookAccountId !== undefined ||
-      b.gmailGroupAddress !== undefined,
+      b.gmailGroupAddress !== undefined ||
+      b.purpose !== undefined ||
+      b.testRetentionDays !== undefined,
     "must update at least one field",
   );
 
@@ -348,7 +381,7 @@ const patchInboxRoute = createRoute({
   path: "/{email}",
   tags: ["Admin Inboxes"],
   description:
-    "Update display name, display mode, conversation (threading) mode, signature HTML, forward destination, spam threshold, agent instructions, automatic suggested replies, and/or Gmail or Outlook source mapping for an inbox. Row is deleted only when all fields are at defaults. A new threading mode starts a background backfill (409 while one runs for the inbox), clears the inbox's snoozes and assignments, and resets JMAP clients when the backfill ends. Google Group routing (gmailGroupAddress) is not accepted in this release.",
+    "Update display name, display mode, conversation (threading) mode, signature HTML, forward destination, spam threshold, agent instructions, automatic suggested replies, Gmail or Outlook source mapping, and/or test-inbox purpose and retention for an inbox. A test inbox must be Cloudflare-routed (400) and turns on only while the inbox holds no mail (409). Row is deleted only when all fields are at defaults. A new threading mode starts a background backfill (409 while one runs for the inbox), clears the inbox's snoozes and assignments, and resets JMAP clients when the backfill ends. Google Group routing (gmailGroupAddress) is not accepted in this release.",
   request: {
     params: z.object({ email: z.string() }),
     body: {
@@ -375,6 +408,7 @@ const patchInboxRoute = createRoute({
         source: z.enum(["cloudflare", "gmail", "outlook"]),
         gmailAccountId: z.string().nullable(),
         outlookAccountId: z.string().nullable(),
+        ...PurposeFields,
       }),
       "Updated",
     ),
@@ -405,7 +439,8 @@ const patchInboxRoute = createRoute({
       },
     },
     409: {
-      description: "A conversation-mode backfill is running for this inbox",
+      description:
+        "A conversation-mode backfill is running for this inbox, or it was asked to become a test inbox while it holds mail",
       content: {
         "application/json": {
           schema: z.object({ error: z.string() }),
@@ -563,6 +598,48 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
   // to (both, for Cloudflare) gives its mailbox up.
   if (nextSource !== "gmail") nextGmailAccountId = null;
   if (nextSource !== "outlook") nextOutlookAccountId = null;
+
+  // A test inbox, checked on the resulting state: its plus addresses arrive
+  // only through Email Routing (a mailbox sync loses the +detail), and its
+  // mail is deleted after its retention, so it turns on only while empty.
+  const currentPurpose = currentRow?.purpose ?? "mail";
+  const nextPurpose = body.purpose ?? currentPurpose;
+  if (
+    body.testRetentionDays !== undefined &&
+    body.testRetentionDays !== null &&
+    nextPurpose !== "test"
+  ) {
+    return c.json(
+      { error: "testRetentionDays applies to a test inbox only." },
+      400,
+    );
+  }
+  const nextTestRetentionDays =
+    nextPurpose !== "test"
+      ? null
+      : body.testRetentionDays !== undefined
+        ? body.testRetentionDays
+        : (currentRow?.testRetentionDays ?? null);
+  if (nextPurpose === "test" && nextSource !== "cloudflare") {
+    return c.json(
+      {
+        error:
+          "Only a Cloudflare-routed inbox can be a test inbox: a Gmail or Outlook sync loses the +detail of the address.",
+      },
+      400,
+    );
+  }
+  const turningOnTest = nextPurpose === "test" && currentPurpose !== "test";
+  const INBOX_HAS_MAIL =
+    "This inbox already holds mail. Only an empty inbox becomes a test inbox: its mail is deleted after the retention period.";
+  if (turningOnTest) {
+    const [received] = await db
+      .select({ id: emails.id })
+      .from(emails)
+      .where(eq(emails.recipient, email))
+      .limit(1);
+    if (received) return c.json({ error: INBOX_HAS_MAIL }, 409);
+  }
 
   // Reject the tight self-forward loop at config time so the admin gets an
   // error instead of a silently-skipped forward. `buildForwardMessage` guards
@@ -762,6 +839,12 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     currentRow?.outlookAccountId ?? null,
     nextOutlookAccountId,
   );
+  track("purpose", currentPurpose, nextPurpose);
+  track(
+    "testRetentionDays",
+    currentRow?.testRetentionDays ?? null,
+    nextTestRetentionDays,
+  );
 
   // A new conversation mode claims the inbox for its backfill before anything
   // is saved, so a second switch while one runs changes nothing. Asking for
@@ -852,40 +935,133 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     nextThreadingMode === "relationship" &&
     nextSource === "cloudflare" &&
     nextGmailAccountId === null &&
-    nextOutlookAccountId === null
+    nextOutlookAccountId === null &&
+    nextPurpose === "mail" &&
+    nextTestRetentionDays === null
   ) {
-    // Only while the mode is still the default: another admin may have just
-    // switched it (their backfill is running).
-    await db
+    // Only while every field this request leaves alone is still at its
+    // default (another admin may have just changed one, or switched the mode
+    // and started a backfill), checked by the DELETE itself.
+    const untouchedAtDefault = (given: boolean, condition: SQL) =>
+      given ? [] : [condition];
+    const s = senderIdentities;
+    const mappingGiven = sourceGiven || accountGiven || outlookGiven;
+    const purposeGiven =
+      body.purpose !== undefined || body.testRetentionDays !== undefined;
+    const removed = await db
       .delete(senderIdentities)
       .where(
         and(
-          eq(senderIdentities.email, email),
-          eq(senderIdentities.threadingMode, "relationship"),
+          eq(s.email, email),
+          eq(s.threadingMode, "relationship"),
+          ...untouchedAtDefault(
+            body.displayName !== undefined,
+            isNull(s.displayName),
+          ),
+          ...untouchedAtDefault(
+            body.displayMode !== undefined,
+            eq(s.displayMode, "chat"),
+          ),
+          ...untouchedAtDefault(
+            body.signatureHtml !== undefined,
+            isNull(s.signatureHtml),
+          ),
+          ...untouchedAtDefault(
+            body.forwardTo !== undefined,
+            isNull(s.forwardTo),
+          ),
+          ...untouchedAtDefault(
+            body.spamThreshold !== undefined,
+            isNull(s.spamThreshold),
+          ),
+          ...untouchedAtDefault(
+            body.agentInstructions !== undefined,
+            isNull(s.agentInstructions),
+          ),
+          ...untouchedAtDefault(
+            body.agentAutodraft !== undefined,
+            eq(s.agentAutodraft, 0),
+          ),
+          ...untouchedAtDefault(
+            mappingGiven,
+            sql`${s.source} = 'cloudflare' AND ${s.gmailAccountId} IS NULL AND ${s.outlookAccountId} IS NULL`,
+          ),
+          ...untouchedAtDefault(
+            purposeGiven,
+            sql`${s.purpose} = 'mail' AND ${s.testRetentionDays} IS NULL`,
+          ),
         ),
+      )
+      .returning({ email: s.email });
+    // No row, or one still at its defaults: the inbox is at its defaults.
+    // A row someone changed meanwhile is updated below instead.
+    if (removed.length > 0 || !currentRow) {
+      if (mappingChanged) await clearGmailThreadIds(db, [email]);
+      await startBackfill();
+      await auditInboxUpdate();
+      return c.json(
+        {
+          email,
+          displayName: null,
+          displayMode: "chat",
+          threadingMode: "relationship",
+          threadBackfill,
+          signatureHtml: null,
+          forwardTo: null,
+          spamThreshold: null,
+          agentInstructions: null,
+          agentAutodraft: false,
+          source: "cloudflare",
+          gmailAccountId: null,
+          outlookAccountId: null,
+          purpose: "mail" as const,
+          testRetentionDays: null,
+        },
+        200,
       );
-    if (mappingChanged) await clearGmailThreadIds(db, [email]);
-    await startBackfill();
-    await auditInboxUpdate();
-    return c.json(
-      {
-        email,
-        displayName: null,
-        displayMode: "chat",
-        threadingMode: "relationship",
-        threadBackfill,
-        signatureHtml: null,
-        forwardTo: null,
-        spamThreshold: null,
-        agentInstructions: null,
-        agentAutodraft: false,
-        source: "cloudflare",
-        gmailAccountId: null,
-        outlookAccountId: null,
-      },
-      200,
-    );
+    }
   }
+
+  // `purpose` and `test_retention_days` are written only when the request
+  // names them, so another edit can't write back a purpose read before an
+  // admin changed it. Turning it on is guarded in the write itself: mail may
+  // land between the check above and this statement.
+  //
+  // A mapped inbox is never a test inbox, whatever another request did
+  // meanwhile: this write sets the source, so it clears the purpose with it.
+  const cloudflareRouted = nextSource === "cloudflare";
+  const wantsTest = body.purpose === "test";
+  const stillEmpty = sql`NOT EXISTS (SELECT 1 FROM ${emails} WHERE ${emails.recipient} = ${email})`;
+  // The row's resulting source is `nextSource`: the upsert writes it.
+  const canBeTest = sql`(${nextSource} = 'cloudflare' AND (${senderIdentities.purpose} = 'test' OR ${stillEmpty}))`;
+  const notTest = { purpose: "mail" as const, testRetentionDays: null };
+  const insertPurpose = !cloudflareRouted
+    ? notTest
+    : {
+        purpose: wantsTest
+          ? sql`CASE WHEN ${stillEmpty} THEN 'test' ELSE 'mail' END`
+          : ("mail" as const),
+        testRetentionDays: wantsTest
+          ? sql`CASE WHEN ${stillEmpty} THEN ${nextTestRetentionDays} ELSE NULL END`
+          : null,
+      };
+  const updatePurpose =
+    !cloudflareRouted || body.purpose === "mail"
+      ? notTest
+      : wantsTest
+        ? {
+            purpose: sql`CASE WHEN ${canBeTest} THEN 'test' ELSE 'mail' END`,
+            ...(body.testRetentionDays !== undefined
+              ? {
+                  testRetentionDays: sql`CASE WHEN ${canBeTest} THEN ${body.testRetentionDays} ELSE NULL END`,
+                }
+              : {}),
+          }
+        : body.testRetentionDays !== undefined
+          ? {
+              testRetentionDays: sql`CASE WHEN ${senderIdentities.purpose} = 'test' THEN ${body.testRetentionDays} ELSE NULL END`,
+            }
+          : {};
 
   await db
     .insert(senderIdentities)
@@ -902,6 +1078,7 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       source: nextSource,
       gmailAccountId: nextGmailAccountId,
       outlookAccountId: nextOutlookAccountId,
+      ...insertPurpose,
       createdAt: now,
       updatedAt: now,
     })
@@ -923,9 +1100,27 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
         source: nextSource,
         gmailAccountId: nextGmailAccountId,
         outlookAccountId: nextOutlookAccountId,
+        ...updatePurpose,
         updatedAt: now,
       },
     });
+
+  // What was written: the purpose may be another admin's, or refused.
+  const [saved] = await db
+    .select({
+      purpose: senderIdentities.purpose,
+      testRetentionDays: senderIdentities.testRetentionDays,
+    })
+    .from(senderIdentities)
+    .where(eq(senderIdentities.email, email))
+    .limit(1);
+  const savedPurpose = saved?.purpose ?? "mail";
+  const savedRetention = saved?.testRetentionDays ?? null;
+  const testRefused = wantsTest && savedPurpose !== "test";
+  if (testRefused) {
+    delete changes.purpose;
+    delete changes.testRetentionDays;
+  }
 
   await startBackfill();
   await auditInboxUpdate();
@@ -943,6 +1138,12 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
     await ensureBackfillJobs(db, c.env, nextOutlookAccountId).catch(() => {});
   }
 
+  // Mail landed while this was saved: the rest of the request is saved, the
+  // inbox stays a normal one.
+  if (testRefused) {
+    return c.json({ error: INBOX_HAS_MAIL }, 409);
+  }
+
   return c.json(
     {
       email,
@@ -958,6 +1159,8 @@ adminInboxesRouter.openapi(patchInboxRoute, async (c) => {
       source: nextSource,
       gmailAccountId: nextGmailAccountId,
       outlookAccountId: nextOutlookAccountId,
+      purpose: savedPurpose,
+      testRetentionDays: savedRetention,
     },
     200,
   );

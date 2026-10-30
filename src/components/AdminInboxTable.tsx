@@ -74,6 +74,10 @@ export default function AdminInboxTable({
   // kept word for word — on a rejected mapping it is the only actionable part.
   const [sourceErrors, setSourceErrors] = useState<Record<string, string>>({});
   const [sourceSavingFor, setSourceSavingFor] = useState<string | null>(null);
+  // Per-inbox test-inbox errors: the server says why the switch was refused.
+  const [testInboxErrors, setTestInboxErrors] = useState<
+    Record<string, string>
+  >({});
 
   // Inboxes that already have a rule acting on the learning filter's score.
   const [junkRuleInboxes, setJunkRuleInboxes] = useState<Set<string>>(
@@ -345,6 +349,60 @@ export default function AdminInboxTable({
           row.email === inbox.email ? { ...row, agentAutodraft: before } : row,
         ),
       );
+    }
+  }
+
+  /**
+   * Turns the test-inbox switch, or sets its retention. The server refuses a
+   * test inbox that holds mail (409); its message is shown and the control
+   * goes back.
+   */
+  async function commitTestInbox(
+    inbox: AdminInbox,
+    patch: {
+      purpose?: AdminInbox["purpose"];
+      testRetentionDays?: number | null;
+    },
+  ) {
+    const before = {
+      purpose: inbox.purpose,
+      testRetentionDays: inbox.testRetentionDays,
+    };
+    setTestInboxErrors((p) => {
+      const { [inbox.email]: _drop, ...rest } = p;
+      return rest;
+    });
+    setInboxes((prev) =>
+      prev.map((row) =>
+        row.email === inbox.email ? { ...row, ...patch } : row,
+      ),
+    );
+    try {
+      const res = await updateInboxSettings(inbox.email, patch);
+      setInboxes((prev) =>
+        prev.map((row) =>
+          row.email === inbox.email
+            ? {
+                ...row,
+                purpose: res.purpose,
+                testRetentionDays: res.testRetentionDays,
+              }
+            : row,
+        ),
+      );
+    } catch (err) {
+      setInboxes((prev) =>
+        prev.map((row) =>
+          row.email === inbox.email ? { ...row, ...before } : row,
+        ),
+      );
+      setTestInboxErrors((p) => ({
+        ...p,
+        [inbox.email]:
+          err instanceof Error && err.message.trim() !== ""
+            ? err.message
+            : "Couldn't change the test inbox setting.",
+      }));
     }
   }
 
@@ -707,6 +765,14 @@ export default function AdminInboxTable({
                           <span className="truncate font-mono text-xs text-text-primary">
                             {inbox.email}
                           </span>
+                          {inbox.purpose === "test" && (
+                            <span
+                              data-testid="inbox-test-badge"
+                              className="inline-flex h-5 shrink-0 items-center rounded-full border border-accent-subtle bg-accent-subtle px-2 text-[10px] font-semibold uppercase tracking-wide text-accent-subtle-fg"
+                            >
+                              Test
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -794,6 +860,13 @@ export default function AdminInboxTable({
                           error={sourceErrors[inbox.email]}
                           onChange={(v) => handleSetSource(inbox, v)}
                         />
+                        {inbox.source === "cloudflare" && (
+                          <TestInboxControl
+                            inbox={inbox}
+                            error={testInboxErrors[inbox.email]}
+                            onChange={(patch) => commitTestInbox(inbox, patch)}
+                          />
+                        )}
                       </td>
 
                       {/* Forward to (inline editable, blur to save) */}
@@ -1298,6 +1371,108 @@ function SpamThresholdInput({ inbox, onCommit }: SpamThresholdInputProps) {
       data-testid="inbox-spam-threshold-input"
       className="h-8 w-28 rounded-[6px] border border-transparent bg-transparent px-2 font-mono text-xs text-text-primary placeholder:font-sans placeholder:font-light placeholder:italic placeholder:text-text-tertiary hover:border-border focus:border-border focus:bg-card focus:outline-none focus:ring-2 focus:ring-text-primary/15"
     />
+  );
+}
+
+interface TestInboxControlProps {
+  inbox: AdminInbox;
+  error: string | undefined;
+  onChange: (patch: {
+    purpose?: AdminInbox["purpose"];
+    testRetentionDays?: number | null;
+  }) => Promise<void>;
+}
+
+/** Days a test inbox keeps its mail when none is set. */
+const DEFAULT_TEST_RETENTION_DAYS = 3;
+
+/** The "Test inbox" switch and, when it is on, its retention in days. */
+function TestInboxControl({ inbox, error, onChange }: TestInboxControlProps) {
+  const on = inbox.purpose === "test";
+  const days = inbox.testRetentionDays ?? DEFAULT_TEST_RETENTION_DAYS;
+  const [value, setValue] = useState(String(days));
+
+  useEffect(() => {
+    setValue(String(days));
+  }, [days]);
+
+  async function commitDays() {
+    const parsed = Number(value.trim());
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 30) {
+      setValue(String(days));
+      return;
+    }
+    if (parsed === days) return;
+    await onChange({ testRetentionDays: parsed });
+  }
+
+  return (
+    <div className="mt-2 max-w-[220px] space-y-1">
+      <label className="flex items-center gap-2 text-[11px] font-medium text-text-secondary">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={`Test inbox ${inbox.email}`}
+          data-testid="inbox-test-toggle"
+          onClick={() => void onChange({ purpose: on ? "mail" : "test" })}
+          className={cn(
+            "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+            on ? "bg-text-primary" : "bg-bg-muted ring-1 ring-border",
+          )}
+        >
+          <span
+            className={cn(
+              "absolute top-0.5 h-4 w-4 rounded-full bg-card shadow-sm transition-transform",
+              on ? "translate-x-4" : "translate-x-0.5",
+            )}
+          />
+        </button>
+        Test inbox
+      </label>
+      {on && (
+        <label className="flex items-center gap-1.5 text-[11px] text-text-secondary">
+          Keep mail
+          <input
+            type="number"
+            min="1"
+            max="30"
+            step="1"
+            value={value}
+            onChange={(event) => setValue(event.currentTarget.value)}
+            onBlur={() => void commitDays()}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                event.currentTarget.blur();
+              } else if (event.key === "Escape") {
+                setValue(String(days));
+                event.currentTarget.blur();
+              }
+            }}
+            aria-label={`Days ${inbox.email} keeps test mail`}
+            data-testid="inbox-test-retention"
+            className="h-7 w-14 rounded-[6px] border border-border bg-card px-2 font-mono text-xs text-text-primary focus:outline-none focus:ring-2 focus:ring-text-primary/15"
+          />
+          days
+        </label>
+      )}
+      {on && (
+        <p className="text-[11px] font-light leading-snug text-text-tertiary">
+          Mail here skips rules, spam, notifications, webhooks and forwarding,
+          and is deleted after {days} days.
+        </p>
+      )}
+      {error && (
+        <p
+          role="alert"
+          data-testid="inbox-test-error"
+          className="text-[11px] leading-snug text-destructive"
+        >
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

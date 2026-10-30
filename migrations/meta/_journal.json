@@ -666,6 +666,13 @@
       "when": 1793357842045,
       "tag": "0094_webhook-deliveries",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1793365473999,
+      "tag": "0095_test-inboxes",
+      "breakpoints": true
     }
   ]
 }

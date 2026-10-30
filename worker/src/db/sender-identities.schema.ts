@@ -48,6 +48,16 @@ export const senderIdentities = sqliteTable("sender_identities", {
   gmailGroupAddress: text("gmail_group_address"),
   /** FK to outlook_accounts.id. Null unless source = "outlook". */
   outlookAccountId: text("outlook_account_id"),
+  /**
+   * `test`: a test inbox. Its mail skips rules, spam, notifications, webhooks
+   * and forwarding, `local+detail@` maps to it, and it is deleted after
+   * `testRetentionDays`. See docs/inboxes.md.
+   */
+  purpose: text("purpose", { enum: ["mail", "test"] })
+    .notNull()
+    .default("mail"),
+  /** Days a test inbox keeps its mail (1–30). Null = 3. */
+  testRetentionDays: integer("test_retention_days"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 });

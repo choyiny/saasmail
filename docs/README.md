@@ -42,6 +42,7 @@ Everything that used to live in one very long README. Start at
 | [MCP server](mcp.md)                              | Remote AI assistant access over OAuth 2.1 — connecting, scopes, revocation                             |
 | [WebMCP](webmcp.md)                               | In-page agent access, the safety model, and the 26 tools                                               |
 | [Webhooks](webhooks.md)                           | `message.received`, the payload, and signature verification                                            |
+| [Test mail](test-mail.md)                         | Test inboxes and `GET /api/test-mail/wait` for end-to-end tests of sign-up, reset and newsletter mail  |
 
 ## Elsewhere in the repo
 

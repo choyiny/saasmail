@@ -143,6 +143,7 @@ describe("MCP tools", () => {
           "set_message_state",
           "send_email",
           "send_template",
+          "wait_for_test_mail",
           "whoami",
         ].sort(),
       );

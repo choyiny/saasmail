@@ -103,7 +103,9 @@ ones that received mail in the last 30 days and asks you to confirm. To keep
 one, give it a sender identity or assign members. Also:
 
 - Plus addresses are separate addresses: `support+orders@` is refused unless
-  it is an inbox itself.
+  it is an inbox itself. The one exception is a [test inbox](#test-inboxes):
+  `e2e+run1@` goes to the test inbox `e2e@` when no inbox has the exact
+  address.
 - A **Forward to** address on your own domain that is not an inbox is refused
   too, so forwarded copies to it bounce.
 - Refusing unknown addresses tells a sender which addresses exist, as any mail
@@ -160,6 +162,48 @@ Everything about that path — connecting a mailbox, what the mapping is checked
 against before it saves, the hourly poll, and why it never backfills — is in
 [Gmail integration](gmail.md). Setting it up on a local instance is
 [Gmail on a local instance](gmail-local-setup.md).
+
+## Test inboxes
+
+A test inbox receives the mail an app under test sends (a sign-up link, a
+password reset, a newsletter) so an automated test can read it through
+[`GET /api/test-mail/wait`](test-mail.md). Turn on **Test inbox** under Source
+on the **Inboxes** page, or `PATCH /api/admin/inboxes/{email}` with
+`{"purpose": "test"}`. The inbox row shows a **Test** badge.
+
+- **Plus addresses map to it.** Mail to `e2e+run1@example.com` is stored in the
+  test inbox `e2e@example.com`, with `run1` (lowercased) kept as the message's
+  detail, so each test run can use its own address. An inbox with the exact
+  address still wins, and so does an address with members assigned to it.
+  Normal inboxes keep their plus addresses separate.
+- **Turn on Cloudflare's subaddressing.** In the Cloudflare dashboard: Email
+  Routing → Settings → Subaddressing on. With it on, a literal rule for
+  `e2e@example.com` (Send to a Worker → saasmail) also matches
+  `e2e+anything@example.com` and passes the full address to saasmail. Without
+  it, plus mail needs a catch-all, which only the apex domain has.
+- **Its mail is stored and nothing else happens.** No spam scoring, no
+  [rules](automations.md) (reject rules included, and no rule match is
+  recorded), no suggested reply, no waking a snoozed conversation, no
+  real-time or push notification, no webhook, no forward and no sequence
+  cancellation. The blocklist and the duplicate check still apply. The mail is
+  visible in the web app, the mailbox and JMAP to whoever has access to the
+  inbox.
+- **One message, one copy.** A message sent to `e2e+a@` and `e2e+b@` at once is
+  stored once, with the detail `a`: duplicates are found by Message-ID per
+  inbox. A test uses one address per message.
+- **It deletes its mail.** Messages older than the inbox's retention (3 days by
+  default, 1 to 30, the **Keep mail** field or `testRetentionDays`) are deleted
+  by the hourly pass, through the normal delete path: at most 40 per pass, oldest first across test inboxes, so a large backlog takes a few hours.
+- **Only an empty inbox becomes a test inbox.** Turning it on for an inbox that
+  holds received mail answers `409`: retention would delete that mail. Create a
+  new inbox for tests. Turning it off is always allowed; the mail stays and
+  retention stops.
+- **Cloudflare-routed inboxes only.** A Gmail or Outlook sync loses the plus
+  detail, so the switch is hidden for those inboxes and the API answers `400`,
+  also when one request both maps an inbox to a mailbox and makes it a test
+  inbox.
+
+Each change of the setting is recorded as `inbox.updated` in the audit log.
 
 ## Per-inbox forwarding
 

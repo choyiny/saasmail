@@ -67,6 +67,10 @@ export interface MessageQuery {
   search?: string;
   searchMode?: MessageSearchMode;
   from?: string;
+  /** The sender is exactly this address (case-insensitive). */
+  fromExact?: string;
+  /** Received mail to a test inbox's subaddress with this `+detail`. */
+  recipientDetail?: string;
   excludeBlocked?: boolean;
   /** Null requests the full matching result set; numeric limits are not service-capped. */
   limit?: number | null;
@@ -126,6 +130,7 @@ type RawMessageRow = {
   raw_size: number | null;
   spam_probability: number | null;
   injection_verdict: string | null;
+  recipient_detail: string | null;
   from_email: string | null;
   from_name: string | null;
   to_email: string;
@@ -252,6 +257,11 @@ function threadKeysScope(
 function fromScope(column: SQL, value: string | undefined): SQL {
   if (value === undefined) return sql``;
   return sql`AND lower(${column}) LIKE ${`%${escapeLike(value.toLowerCase())}%`} ESCAPE '\\'`;
+}
+
+function equalsScope(column: SQL, value: string | undefined): SQL {
+  if (value === undefined) return sql``;
+  return sql`AND lower(${column}) = ${value.trim().toLowerCase()}`;
 }
 
 function dateScope(
@@ -730,6 +740,7 @@ function receivedArm(
       e.raw_size AS raw_size,
       e.spam_probability AS spam_probability,
       e.injection_verdict AS injection_verdict,
+      e.recipient_detail AS recipient_detail,
       p.email AS from_email,
       p.name AS from_name,
       e.recipient AS to_email,
@@ -789,6 +800,8 @@ function receivedArm(
       )}
       ${dateScope(sql`e.received_at`, query.after, query.before)}
       ${fromScope(sql`p.email`, query.from)}
+      ${equalsScope(sql`p.email`, query.fromExact)}
+      ${equalsScope(sql`e.recipient_detail`, query.recipientDetail)}
       ${search.where}
       ${blockedScope(query.excludeBlocked ?? false)}
       ${stateScope(
@@ -842,6 +855,7 @@ function sentArm(
       NULL AS raw_size,
       NULL AS spam_probability,
       NULL AS injection_verdict,
+      NULL AS recipient_detail,
       se.from_address AS from_email,
       -- The inbox identity's current display name: the sent row doesn't keep
       -- the name the message went out with.
@@ -901,6 +915,8 @@ function sentArm(
       )}
       ${dateScope(sql`se.sent_at`, query.after, query.before)}
       ${fromScope(sql`se.from_address`, query.from)}
+      ${equalsScope(sql`se.from_address`, query.fromExact)}
+      ${query.recipientDetail === undefined ? sql`` : sql`AND 0`}
       ${sentSearch(query.search, query.searchMode ?? "subject")}
       ${blockedScope(query.excludeBlocked ?? false)}
       ${stateScope(query, "sent", sql`se.id`, sql`se.from_address`)}
@@ -1054,6 +1070,10 @@ function toUnified(
       row.injection_verdict === "safe" || row.injection_verdict === "flagged"
         ? row.injection_verdict
         : null;
+    // Only test-inbox mail carries one; other messages keep their shape.
+    if (row.recipient_detail !== null) {
+      message.recipientDetail = row.recipient_detail;
+    }
   }
 
   return message;

@@ -13,6 +13,7 @@ import {
   domainsOf,
   storeReceivedMessage,
 } from "./lib/inbound/store-received";
+import { splitSubaddress } from "./lib/inbound/subaddress";
 import { isBlocked } from "./lib/blocklist";
 import { cancelSequencesForPerson } from "./lib/cancel-sequence";
 import {
@@ -136,7 +137,7 @@ export async function ingestParsedEmail(
   // buckets (the grouped query keys by `(conversation_id, inbox)`, and
   // conversation_id is computed from lowercased inputs already — we
   // need the stored column to match).
-  const recipientCanonical = parsed.to.trim().toLowerCase();
+  const envelopeRecipient = parsed.to.trim().toLowerCase();
   const fromAddressCanonical = parsed.from.address.trim().toLowerCase();
 
   // One scan of sender_identities serves four consumers: the unknown-recipient
@@ -150,11 +151,32 @@ export async function ingestParsedEmail(
       spamThreshold: senderIdentities.spamThreshold,
       agentAutodraft: senderIdentities.agentAutodraft,
       threadingMode: senderIdentities.threadingMode,
+      purpose: senderIdentities.purpose,
+      testRetentionDays: senderIdentities.testRetentionDays,
     })
     .from(senderIdentities);
-  const inboxIdentity = identityRows.find(
-    (row) => row.email.trim().toLowerCase() === recipientCanonical,
-  );
+  const identityOf = (address: string) =>
+    identityRows.find((row) => row.email.trim().toLowerCase() === address);
+
+  // `local+detail@` belongs to the test inbox `local@` when no inbox has the
+  // exact address (docs/inboxes.md, "Test inboxes"). Every other plus address
+  // is an address of its own.
+  let inboxAddress = envelopeRecipient;
+  let recipientDetail: string | null = null;
+  let inboxIdentity = identityOf(envelopeRecipient);
+  if (!inboxIdentity) {
+    const { base, detail } = splitSubaddress(envelopeRecipient);
+    const baseIdentity = detail === null ? undefined : identityOf(base);
+    if (
+      baseIdentity?.purpose === "test" &&
+      !(await hasInboxMembers(db, envelopeRecipient))
+    ) {
+      inboxAddress = base;
+      recipientDetail = detail;
+      inboxIdentity = baseIdentity;
+    }
+  }
+  const recipientCanonical = inboxAddress;
 
   // Mail to an address that is not an inbox (no sender identity, no members)
   // is refused while the sender's server is still connected, when an admin
@@ -206,6 +228,24 @@ export async function ingestParsedEmail(
       console.log(`Duplicate email with Message-ID: ${parsed.messageId}`);
       return { status: "duplicate", emailId: existing[0].id };
     }
+  }
+
+  // A test inbox stores its mail and does nothing else: no spam score, rules,
+  // suggested reply, wake, notification, webhook, forward or sequence cancel.
+  // It is Cloudflare-routed, so never historical.
+  if (inboxIdentity?.purpose === "test") {
+    const { emailId } = await storeReceivedMessage(db, env, {
+      parsed,
+      inbox: recipientCanonical,
+      fromAddress: fromAddressCanonical,
+      receivedAt: now,
+      now,
+      source: "inbound",
+      ourDomains: domainsOf(identityRows.map((r) => r.email)),
+      threadingMode: inboxIdentity.threadingMode,
+      recipientDetail,
+    });
+    return { status: "stored", emailId };
   }
 
   const providerIds = {

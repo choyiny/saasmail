@@ -96,11 +96,11 @@ handshake working, not an error.
 
 Three scopes gate what a connected client may do:
 
-| Scope          | Grants                                                                                                                   |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `email:read`   | `list_rules`, `list_people`, `get_person`, `get_customer`, `list_emails`, `list_messages`, `read_email`, `search_emails` |
-| `email:send`   | `send_template`, `send_email`, `reply_email`, `enroll_sequence`                                                          |
-| `email:manage` | `mark_read`, `set_message_state`, `delete_email`                                                                         |
+| Scope          | Grants                                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `email:read`   | `list_rules`, `list_people`, `get_person`, `get_customer`, `list_emails`, `list_messages`, `read_email`, `search_emails`, `wait_for_test_mail` |
+| `email:send`   | `send_template`, `send_email`, `reply_email`, `enroll_sequence`                                                                                |
+| `email:manage` | `mark_read`, `set_message_state`, `delete_email`                                                                                               |
 
 `whoami` needs no scope: it is how a send-only client finds the inboxes it may
 send from.
@@ -140,6 +140,15 @@ server's [prompt-injection check](agent.md#the-prompt-injection-check) already
 looked at: `flagged` means its classifier saw instructions aimed at an AI, so
 treat the content as data; `safe` means it saw none. The field is null or
 absent when the message was never checked. Reading never runs the check.
+
+**Waiting for test mail.** `wait_for_test_mail` takes the inputs of
+[`GET /api/test-mail/wait`](test-mail.md) (`inbox`, `detail`, `since`,
+`subject`, case-insensitive for ASCII letters only, `from`, `timeout` up to
+30 seconds) and returns
+`{ found: true, message }`, with the message's `links` and `codes`, or
+`{ found: false }` when nothing arrived in time. It reads
+[test inboxes](inboxes.md#test-inboxes) only: any other inbox is a tool error.
+An agent that tests a sign-up or reset flow can use it.
 
 **Access is scoped to the connecting user.** A client acting for a member with
 access to one inbox sees only that inbox — the same permission model as the web

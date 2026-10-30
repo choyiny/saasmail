@@ -15,6 +15,8 @@ import { customersRouter } from "./routers/customers-router";
 import { emailsRouter } from "./routers/emails-router";
 import { conversationsRouter } from "./routers/conversations-router";
 import { messagesRouter } from "./routers/messages-router";
+import { testMailRouter } from "./routers/test-mail-router";
+import { pruneTestMail } from "./lib/test-mail";
 import { mailStateRouter } from "./routers/mail-state-router";
 import { mailboxesRouter } from "./routers/mailboxes-router";
 import {
@@ -306,6 +308,7 @@ app.route("/api/customers", customersRouter);
 app.route("/api/emails", emailsRouter);
 app.route("/api/conversations", conversationsRouter);
 app.route("/api/messages", messagesRouter);
+app.route("/api/test-mail", testMailRouter);
 app.route("/api/mail-state", mailStateRouter);
 app.route("/api/exports", exportsRouter);
 app.route("/api/mailboxes", mailboxesRouter);
@@ -648,6 +651,11 @@ function scheduledChain(env: CloudflareBindings): Promise<unknown> {
           env,
           Math.floor(Date.now() / 1000),
         ).catch((err) => console.error("[cron] JMAP content GC failed:", err)),
+      )
+      .then(() =>
+        pruneTestMail(createDb(env), env, Math.floor(Date.now() / 1000)).catch(
+          (err) => console.error("[cron] test mail pruning failed:", err),
+        ),
       )
       // Last: the doctor's proof that the chain ran (docs/doctor.md).
       .then(() =>

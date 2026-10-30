@@ -81,6 +81,11 @@ export const emails = sqliteTable(
     gmailThreadId: text("gmail_thread_id"),
     /** Graph's immutable message id, for mail synced from Outlook. */
     outlookMessageId: text("outlook_message_id"),
+    /**
+     * The `+detail` of the envelope recipient, lowercased, for mail to a test
+     * inbox's subaddress. Null otherwise.
+     */
+    recipientDetail: text("recipient_detail"),
     receivedAt: integer("received_at").notNull(),
     createdAt: integer("created_at").notNull(),
   },

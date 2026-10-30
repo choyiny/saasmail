@@ -53,6 +53,8 @@ const forkInboxDefaults = {
   spamThreshold: null,
   agentInstructions: null,
   agentAutodraft: false,
+  purpose: "mail" as const,
+  testRetentionDays: null,
 };
 
 const inbox = (over: Partial<AdminInbox> & { email: string }): AdminInbox => ({

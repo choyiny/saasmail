@@ -45,7 +45,7 @@ function stripUntilStable(input: string, pattern: RegExp): string {
   return out;
 }
 
-function decodeEntities(s: string): string {
+export function decodeEntities(s: string): string {
   return s
     .replace(/&(?:amp|lt|gt|quot|#39|apos|nbsp);/g, (m) => DECODE[m] ?? m)
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
