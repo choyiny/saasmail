@@ -92,11 +92,11 @@ The agent selects exactly one provider per turn, in this order:
 The default models live in
 `worker/src/lib/agent/constants.ts`:
 
-| Provider   | Default model              |
-| ---------- | -------------------------- |
-| Anthropic  | `claude-sonnet-5`          |
-| OpenAI     | `gpt-5.6-sol`              |
-| Workers AI | `@cf/moonshotai/kimi-k2.6` |
+| Provider   | Default model                              |
+| ---------- | ------------------------------------------ |
+| Anthropic  | `claude-sonnet-5`                          |
+| OpenAI     | `gpt-5.6-sol`                              |
+| Workers AI | `@cf/deepseek-ai/deepseek-v4.1-flash-1017` |
 
 Set `AGENT_MODEL` to override the default for whichever provider wins
 precedence. The OpenAI default can be tier-gated by OpenAI account/project
@@ -137,7 +137,7 @@ The committed `wrangler.jsonc.example` and `wrangler.jsonc.ci` include an
 `AI` binding named `AI`. With no Anthropic or OpenAI key, the agent uses that
 binding.
 
-The default Workers AI model, `@cf/moonshotai/kimi-k2.6`, requires the
+The default Workers AI model, `@cf/deepseek-ai/deepseek-v4.1-flash-1017`, requires the
 Cloudflare Workers Paid plan. Workers AI usage is billed/limited according to
 the Cloudflare account's plan. Anthropic and OpenAI usage is billed by those
 providers instead.

@@ -1,7 +1,7 @@
 export const DEFAULT_AGENT_MODELS = {
   anthropic: "claude-sonnet-5",
   openai: "gpt-5.6-sol",
-  workersAi: "@cf/moonshotai/kimi-k2.6",
+  workersAi: "@cf/deepseek-ai/deepseek-v4.1-flash-1017",
 } as const;
 
 export const AGENT_NOT_CONFIGURED_MESSAGE =
