@@ -998,9 +998,9 @@
     pkce-challenge "^5.0.0"
 
 "@hono/node-server@^1.19.9 || ^2.0.5":
-  version "2.1.5"
-  resolved "https://registry.yarnpkg.com/@hono/node-server/-/node-server-2.1.5.tgz#273db93e8bfb44ef361e55f3d00048013668aa09"
-  integrity sha512-MgP/I06GdvsilDspMk/qmRzpk8LOUStP6jFAbSRi40W09DhoyUn+Mj7eyKICPqeYKybOjVFLVIAQzvu1bfIa7Q==
+  version "2.1.8"
+  resolved "https://registry.yarnpkg.com/@hono/node-server/-/node-server-2.1.8.tgz#a66faf844024bfe2a4ef1fd794f69e7547a8492c"
+  integrity sha512-jdf7FHh6A1lzjpHHQUgxsg2GeER2vMetnAOfeActzcoli6jamlK+NAwL6Dsr5Fl3BS3tYUQzCdtZjU8Qxv7bEA==
 
 "@hono/swagger-ui@^0.6.1":
   version "0.6.1"
@@ -2672,7 +2672,7 @@ baseline-browser-mapping@^2.11.26:
   resolved "https://registry.yarnpkg.com/baseline-browser-mapping/-/baseline-browser-mapping-2.11.27.tgz#9bb9242d87ab1cdc9e35607148791e20e4398b20"
   integrity sha512-ElY12DaROGuan+lMmZ8Cvo/ZUbXPe7Enc/9VU/b1T3Kp4dwytRcNdR8DoSJN5SNJT/CuvcCA0DHDVmMOCePdRQ==
 
-"better-auth@^1.7.10":
+better-auth@^1.7.10:
   version "1.7.10"
   resolved "https://registry.yarnpkg.com/better-auth/-/better-auth-1.7.10.tgz#8eb7ef13c300435c5031ba59c952c9dafb246096"
   integrity sha512-Paf0X8cHKQc8jCgM3vl4AoxRicWdNf0zw8Aggn1q6aNSWCDDxSZCb6rkXa/O9cPc8idjVPK0rV/eHPHAbs07ZA==
