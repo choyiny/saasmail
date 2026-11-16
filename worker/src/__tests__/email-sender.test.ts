@@ -4,6 +4,7 @@ import {
   BavimailSender,
   PostmarkSender,
 } from "../lib/email-sender";
+import { parsePostmarkInactiveAddresses } from "../lib/email-sender/providers/postmark";
 
 describe("createEmailSender", () => {
   it("picks Resend when RESEND_API_KEY is set", () => {
@@ -716,5 +717,105 @@ describe("PostmarkSender", () => {
 
     expect(result.id).toBeNull();
     expect(result.error?.message).toBe("network down");
+  });
+});
+
+describe("Postmark inactive recipients (ErrorCode 406)", () => {
+  const INACTIVE_MESSAGE =
+    "You tried to send to recipient(s) that have been marked as inactive. Found inactive addresses: Dead@Example.com, gone@example.org. Inactive recipients are ones that have generated a hard bounce, a spam complaint, or a manual suppression.";
+
+  function pmResponse(body: Record<string, unknown>, status: number) {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  function sendWith(response: Response, cc?: string[]) {
+    const fetchMock = vi.fn().mockResolvedValue(response);
+    const sender = new PostmarkSender(
+      "pm_test",
+      fetchMock as unknown as typeof fetch,
+    );
+    return sender.send({
+      from: "a@b.com",
+      to: '"Dead" <dead@example.com>',
+      ...(cc ? { cc } : {}),
+      subject: "s",
+      html: "<p>h</p>",
+    });
+  }
+
+  it("parses the addresses out of the documented message", () => {
+    expect(parsePostmarkInactiveAddresses(INACTIVE_MESSAGE)).toEqual([
+      "dead@example.com",
+      "gone@example.org",
+    ]);
+  });
+
+  it("parses the newline-separated and older wordings", () => {
+    expect(
+      parsePostmarkInactiveAddresses(
+        "You tried to send to a recipient that has been marked as inactive.\nFound inactive addresses: x@aol.com.\nInactive recipients are ones that have generated a hard bounce or a spam complaint.",
+      ),
+    ).toEqual(["x@aol.com"]);
+    expect(
+      parsePostmarkInactiveAddresses(
+        "Found inactive addresses: HardBounce@bounce-testing.postmarkapp.com.",
+      ),
+    ).toEqual(["hardbounce@bounce-testing.postmarkapp.com"]);
+  });
+
+  it("returns no addresses for an unrelated message", () => {
+    expect(parsePostmarkInactiveAddresses("Invalid 'From' address")).toEqual(
+      [],
+    );
+  });
+
+  it("flags the refused recipients on a 422 with ErrorCode 406, permanent", async () => {
+    const result = await sendWith(
+      pmResponse({ ErrorCode: 406, Message: INACTIVE_MESSAGE }, 422),
+    );
+    expect(result.id).toBeNull();
+    expect(result.error?.transient).toBe(false);
+    expect(result.error?.undeliverable).toEqual([
+      "dead@example.com",
+      "gone@example.org",
+    ]);
+    expect(result.error?.message).toBe(INACTIVE_MESSAGE);
+  });
+
+  it("flags them on a 200 carrying ErrorCode 406 too", async () => {
+    const result = await sendWith(
+      pmResponse({ ErrorCode: 406, Message: INACTIVE_MESSAGE }, 200),
+    );
+    expect(result.error?.undeliverable).toEqual([
+      "dead@example.com",
+      "gone@example.org",
+    ]);
+  });
+
+  it("falls back to the sole recipient when the message names no address", async () => {
+    const result = await sendWith(
+      pmResponse({ ErrorCode: 406, Message: "Inactive recipient" }, 422),
+    );
+    expect(result.error?.undeliverable).toEqual(["dead@example.com"]);
+    expect(result.error?.transient).toBe(false);
+  });
+
+  it("flags nobody when the message names no address and there were several recipients", async () => {
+    const result = await sendWith(
+      pmResponse({ ErrorCode: 406, Message: "Inactive recipient" }, 422),
+      ["other@example.com"],
+    );
+    expect(result.error).not.toBeNull();
+    expect(result.error?.undeliverable).toBeUndefined();
+  });
+
+  it("leaves other error codes without an undeliverable list", async () => {
+    const result = await sendWith(
+      pmResponse({ ErrorCode: 300, Message: "Invalid 'From' address" }, 422),
+    );
+    expect(result.error?.undeliverable).toBeUndefined();
   });
 });
