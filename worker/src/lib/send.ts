@@ -1,4 +1,8 @@
-import { isSuppressed, type Database } from "./suppressions";
+import {
+  isSuppressed,
+  recordProviderSuppressions,
+  type Database,
+} from "./suppressions";
 import { signToken } from "./unsubscribe-token";
 import type {
   EmailSender,
@@ -71,6 +75,38 @@ function formatCcForTransport(c: CcRecipient): string {
   return c.name ? `${c.name} <${c.email}>` : c.email;
 }
 
+/**
+ * Lowercased set of the recipients a provider refused permanently
+ * (`error.undeliverable`), after recording each one as a suppression.
+ * Empty when the result carries no such list.
+ */
+async function recordUndeliverable(
+  db: Database,
+  sender: EmailSender,
+  results: Array<SendEmailResult | undefined>,
+): Promise<Set<string>> {
+  const refused = new Set<string>();
+  for (const r of results) {
+    for (const addr of r?.error?.undeliverable ?? []) {
+      refused.add(addr.toLowerCase());
+    }
+  }
+  if (refused.size > 0) {
+    // Best effort: the provider call has already happened (and for a
+    // multi-recipient marketing send, may have delivered to others), so a
+    // failed bookkeeping write must not turn it into a thrown 500.
+    try {
+      await recordProviderSuppressions(db, [...refused], sender.provider);
+    } catch (e) {
+      console.error(
+        "[send] could not record provider suppressions",
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+  return refused;
+}
+
 export async function sendWithSuppressionCheck(
   input: SendInput,
 ): Promise<SendOutput> {
@@ -120,6 +156,7 @@ export async function sendWithSuppressionCheck(
   }
 
   let lastResult: SendEmailResult | undefined;
+  let delivered: string[] = [primaryTo, ...deliveredCc.map((c) => c.email)];
   let renderedHtml: string | undefined;
   let renderedText: string | undefined;
 
@@ -145,6 +182,24 @@ export async function sendWithSuppressionCheck(
 
     renderedHtml = html;
     renderedText = text;
+
+    // The provider refused every recipient of the call as permanently
+    // undeliverable: report it like a send blocked by our own list, so the
+    // caller sees "suppressed" (this address is dead) rather than "failed"
+    // (nothing is going out). A partial refusal stays "failed" — the call as
+    // a whole didn't go — but the dead addresses are still recorded.
+    const refused = await recordUndeliverable(db, sender, [lastResult]);
+    const callRecipients = [primaryTo, ...deliveredCc.map((c) => c.email)];
+    if (
+      refused.size > 0 &&
+      callRecipients.every((r) => refused.has(r.toLowerCase()))
+    ) {
+      return {
+        delivered: [],
+        suppressed: [...suppressed, ...callRecipients],
+        result: lastResult,
+      };
+    }
   } else {
     // Marketing: one transport call per delivered recipient, each with its
     // own per-recipient unsubscribe token + headers + body interpolation.
@@ -202,13 +257,36 @@ export async function sendWithSuppressionCheck(
       }),
     );
 
-    lastResult = results[0].result;
-    renderedHtml = results[0].recipientHtml;
-    renderedText = results[0].recipientText;
+    // Each recipient had its own transport call. One the provider refused as
+    // permanently undeliverable moves from delivered to suppressed, so the
+    // reported result is that of a recipient the provider actually took (or
+    // a real failure), not of a dead address.
+    const refused = await recordUndeliverable(
+      db,
+      sender,
+      results.map((r) => r.result),
+    );
+    const kept: number[] = [];
+    allDelivered.forEach((recipient, i) => {
+      if (refused.has(recipient.email.toLowerCase())) {
+        suppressed.push(recipient.email);
+      } else {
+        kept.push(i);
+      }
+    });
+    if (kept.length === 0) {
+      return { delivered: [], suppressed, result: results[0].result };
+    }
+
+    const first = results[kept[0]];
+    lastResult = first.result;
+    renderedHtml = first.recipientHtml;
+    renderedText = first.recipientText;
+    delivered = kept.map((i) => allDelivered[i].email);
   }
 
   return {
-    delivered: [primaryTo, ...deliveredCc.map((c) => c.email)],
+    delivered,
     suppressed,
     result: lastResult,
     ...(renderedHtml !== undefined ? { renderedHtml } : {}),

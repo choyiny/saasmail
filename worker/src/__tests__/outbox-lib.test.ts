@@ -186,4 +186,26 @@ describe("sendViaOutbox", () => {
     const rows = await db.select().from(outboxEmails);
     expect(rows).toHaveLength(0);
   });
+
+  it("resolves a provider-refused send as suppressed and deletes the row", async () => {
+    const sender = fakeSender([
+      {
+        id: null,
+        error: {
+          message: "Found inactive addresses: to@example.com.",
+          transient: false,
+          undeliverable: ["to@example.com"],
+        },
+      },
+    ]);
+    const result = await sendViaOutbox(baseParams(sender));
+    expect(result.outcome).toBe("suppressed");
+    expect(result.send.suppressed).toEqual(["to@example.com"]);
+    const rows = await getDb().select().from(outboxEmails);
+    expect(rows).toHaveLength(0);
+    const sup = await getDb().select().from(suppressions);
+    expect(sup.map((r) => [r.email, r.reason])).toEqual([
+      ["to@example.com", "provider"],
+    ]);
+  });
 });

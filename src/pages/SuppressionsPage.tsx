@@ -42,6 +42,7 @@ const REASON_META: Record<
 > = {
   unsubscribe: { label: "Unsubscribed", chip: "accent" },
   manual: { label: "Manual", chip: "" },
+  provider: { label: "Provider", chip: "" },
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

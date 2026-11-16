@@ -53,6 +53,18 @@ export interface SendEmailError {
    * not add a retry instruction; `message` already says what happened.
    */
   delivered?: boolean;
+  /**
+   * Recipients the provider refused permanently because they are on the
+   * PROVIDER's own suppression list (hard bounce, spam complaint, manual
+   * suppression on their side) — today, Postmark ErrorCode 406. Lowercase
+   * bare addresses. The send layer records each one as a saasmail
+   * suppression (`reason: "provider"`) and, when every recipient of a send is
+   * listed, reports the send as `suppressed` rather than `failed`, so callers
+   * can tell "this address is dead" from "nothing is going out".
+   *
+   * Unset means the failure says nothing about individual recipients.
+   */
+  undeliverable?: string[];
 }
 
 export interface SendEmailResult {

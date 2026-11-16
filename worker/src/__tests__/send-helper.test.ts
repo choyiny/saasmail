@@ -2,7 +2,11 @@ import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { suppressions } from "../db/suppressions.schema";
 import { applyMigrations, cleanDb, getDb } from "./helpers";
 import { sendWithSuppressionCheck } from "../lib/send";
-import type { SendEmailParams } from "../lib/email-sender";
+import type {
+  EmailSender,
+  SendEmailParams,
+  SendEmailResult,
+} from "../lib/email-sender";
 import { verifyToken } from "../lib/unsubscribe-token";
 
 const sent: SendEmailParams[] = [];
@@ -299,5 +303,154 @@ describe("sendWithSuppressionCheck", () => {
     expect(call.text).toMatch(
       /Unsubscribe: https:\/\/mail\.example\.com\/unsubscribe\?token=/,
     );
+  });
+});
+
+describe("sendWithSuppressionCheck: recipients the provider refuses", () => {
+  /**
+   * A Postmark-like sender that refuses `dead` addresses as permanently
+   * undeliverable and accepts everyone else.
+   */
+  function refusingSender(dead: string[]): EmailSender & {
+    send: ReturnType<typeof vi.fn>;
+  } {
+    return {
+      provider: "postmark" as const,
+      maxAttachmentBytes: () => 25_000_000,
+      send: vi.fn(async (params: SendEmailParams): Promise<SendEmailResult> => {
+        const recipients = [params.to, ...(params.cc ?? [])].map((r) =>
+          (/<([^>]+)>/.exec(r)?.[1] ?? r).toLowerCase(),
+        );
+        const refused = recipients.filter((r) => dead.includes(r));
+        if (refused.length === 0) return { id: "pm-ok", error: null };
+        return {
+          id: null,
+          error: {
+            message: `Found inactive addresses: ${refused.join(", ")}.`,
+            transient: false,
+            undeliverable: refused,
+          },
+        };
+      }),
+    };
+  }
+
+  async function suppressionRows() {
+    return getDb().select().from(suppressions);
+  }
+
+  it("transactional: every recipient refused reports suppressed and records them", async () => {
+    const sender = refusingSender(["dead@example.com"]);
+    const result = await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender,
+      from: "test@host",
+      to: "Dead@Example.com",
+      subject: "Your code",
+      html: "<p>123456</p>",
+      transactional: true,
+    });
+    expect(result.delivered).toEqual([]);
+    expect(result.suppressed).toEqual(["Dead@Example.com"]);
+    expect(result.result?.error?.undeliverable).toEqual(["dead@example.com"]);
+
+    const rows = await suppressionRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      email: "dead@example.com",
+      reason: "provider",
+      source: "postmark",
+    });
+  });
+
+  it("transactional: a partial refusal stays a failure but records the dead address", async () => {
+    const sender = refusingSender(["dead@example.com"]);
+    const result = await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender,
+      from: "test@host",
+      to: "alive@example.com",
+      cc: [{ email: "dead@example.com" }],
+      subject: "Hi",
+      html: "<p>hi</p>",
+      transactional: true,
+    });
+    expect(result.delivered).toEqual(["alive@example.com", "dead@example.com"]);
+    expect(result.result?.error?.transient).toBe(false);
+    const rows = await suppressionRows();
+    expect(rows.map((r) => r.email)).toEqual(["dead@example.com"]);
+  });
+
+  it("marketing: a refused cc moves to suppressed while the rest are delivered", async () => {
+    const sender = refusingSender(["dead@example.com"]);
+    const result = await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender,
+      from: "test@host",
+      to: "alive@example.com",
+      cc: [{ email: "dead@example.com" }],
+      subject: "News",
+      html: "<p>news {{unsubscribe_url}}</p>",
+    });
+    expect(result.delivered).toEqual(["alive@example.com"]);
+    expect(result.suppressed).toEqual(["dead@example.com"]);
+    expect(result.result).toEqual({ id: "pm-ok", error: null });
+  });
+
+  it("marketing: a refused primary leaves the surviving cc as the reported result", async () => {
+    const sender = refusingSender(["dead@example.com"]);
+    const result = await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender,
+      from: "test@host",
+      to: "dead@example.com",
+      cc: [{ email: "alive@example.com" }],
+      subject: "News",
+      html: "<p>news</p>",
+    });
+    expect(result.delivered).toEqual(["alive@example.com"]);
+    expect(result.suppressed).toEqual(["dead@example.com"]);
+    expect(result.result?.error).toBeNull();
+  });
+
+  it("the next marketing send skips a provider-refused address without calling the provider", async () => {
+    const sender = refusingSender(["dead@example.com"]);
+    const params = {
+      db: getDb(),
+      env: fakeEnv,
+      sender,
+      from: "test@host",
+      to: "dead@example.com",
+      subject: "News",
+      html: "<p>news</p>",
+    };
+    await sendWithSuppressionCheck(params);
+    expect(sender.send).toHaveBeenCalledTimes(1);
+
+    const second = await sendWithSuppressionCheck(params);
+    expect(second.suppressed).toEqual(["dead@example.com"]);
+    expect(sender.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an existing suppression's reason when the provider refuses the address again", async () => {
+    await suppress("dead@example.com");
+    const sender = refusingSender(["dead@example.com"]);
+    await sendWithSuppressionCheck({
+      db: getDb(),
+      env: fakeEnv,
+      sender,
+      from: "test@host",
+      to: "dead@example.com",
+      subject: "Reset",
+      html: "<p>reset</p>",
+      transactional: true,
+    });
+    const rows = await suppressionRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].reason).toBe("unsubscribe");
   });
 });

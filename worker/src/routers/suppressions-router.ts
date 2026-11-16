@@ -18,7 +18,7 @@ const MAX_LIMIT = 100;
 const SuppressionSchema = z.object({
   id: z.string(),
   email: z.string(),
-  reason: z.enum(["unsubscribe", "manual"]),
+  reason: z.enum(["unsubscribe", "manual", "provider"]),
   source: z.string().nullable(),
   note: z.string().nullable(),
   createdAt: z.number(),

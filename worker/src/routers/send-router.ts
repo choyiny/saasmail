@@ -98,7 +98,7 @@ const SentEmailResponseSchema = z.object({
   resendId: z.string().nullable(),
   status: z.string().openapi({
     description:
-      'Delivery status. "sent" = delivered; "retrying" = transient provider failure — saasmail queues this in the outbox and retries automatically (check GET /api/outbox for resolution); "failed" = provider permanently rejected; "suppressed" = every recipient was on the suppression list.',
+      'Delivery status. "sent" = delivered; "retrying" = transient provider failure — saasmail queues this in the outbox and retries automatically (check GET /api/outbox for resolution); "failed" = provider permanently rejected; "suppressed" = every recipient was on the suppression list, or the provider refused every recipient as permanently undeliverable (each such address is then added to the suppression list with reason \"provider\").',
   }),
   attachmentIds: z.array(z.string()),
   delivered: z.array(z.string()).default([]),
