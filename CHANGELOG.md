@@ -312,6 +312,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Inline attachments are served with `Cache-Control: private` instead of `public`, so shared caches in front of the worker cannot store authenticated mailbox content and hand it to a different caller.
 - Attachment downloads sanitize the filename before interpolating it into `Content-Disposition` and add an RFC 5987 `filename*` field, so a stored filename carrying quotes or CR/LF can no longer inject headers or split the response.
 - The public invite-acceptance and first-run setup pages no longer show an unauthenticated visitor the raw text of an internal failure. Both forwarded whatever `auth.api.createUser` threw; they now forward only better-auth's own `APIError` message — the text written for the person filling in the form, such as "User already exists" — and answer anything else with a generic "please try again" while the real reason goes to the Worker log. A database error's message names the statement it was running, and on that path its bound parameters are the credentials being registered.
+- The Gmail and Outlook OAuth callbacks no longer write tokens to the Worker log. When storing a connected mailbox failed, the callback logged the error's message, and a failed database query's message lists its bound parameters: the mailbox's plaintext access token and its sealed refresh token. The log now names only the error's kind (the provider's error code or the error class).
 
 ### Fixed
 

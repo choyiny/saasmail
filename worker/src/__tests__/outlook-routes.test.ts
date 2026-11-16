@@ -79,6 +79,7 @@ function stubMicrosoft(opts: {
     userPrincipalName?: string;
     proxyAddresses?: string[];
   };
+  accessToken?: string;
   refreshToken?: string | null;
   sendStatus?: number;
   calls?: Array<{ url: string; init?: RequestInit }>;
@@ -93,7 +94,7 @@ function stubMicrosoft(opts: {
       });
     if (new URL(url).hostname === "login.microsoftonline.com") {
       return json({
-        access_token: "at-1",
+        access_token: opts.accessToken ?? "at-1",
         expires_in: 3600,
         ...(opts.refreshToken === null
           ? {}
@@ -175,6 +176,42 @@ describe("connecting an Outlook mailbox", () => {
     expect(row.refreshTokenEncrypted).not.toContain("rt-new");
     expect(await decryptSecret(row.refreshTokenEncrypted, KEY)).toBe("rt-new");
     expect(row.connectedBy).toBe(userId);
+  });
+
+  it("never logs the token material a failed upsert's error carries", async () => {
+    const { userId, apiKey } = await createTestUser({ role: "admin" });
+    await setUpMicrosoft();
+    stubMicrosoft({
+      accessToken: "at-leak-canary",
+      refreshToken: "rt-leak-canary",
+    });
+    // Drizzle puts a failed query's bound parameters (here the access token)
+    // in the error message.
+    await env.DB.exec(
+      "CREATE TRIGGER outlook_accounts_fail BEFORE INSERT ON outlook_accounts BEGIN SELECT RAISE(ABORT, 'forced failure'); END",
+    );
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const state = await signState(userId, KEY);
+      const res = await authFetch(
+        `/api/admin/outlook/callback?code=abc&state=${encodeURIComponent(state)}`,
+        { apiKey, redirect: "manual" },
+      );
+      expect(res.headers.get("location")).toBe("/inboxes?outlook=error");
+      expect(logged).toHaveBeenCalled();
+      const text = logged.mock.calls
+        .flat()
+        .map((arg) =>
+          arg instanceof Error
+            ? `${arg.message} ${String(arg.stack)}`
+            : String(arg),
+        )
+        .join("\n");
+      expect(text).not.toContain("leak-canary");
+    } finally {
+      logged.mockRestore();
+      await env.DB.exec("DROP TRIGGER IF EXISTS outlook_accounts_fail");
+    }
   });
 
   it("refuses a reconnect that signed in as a different mailbox", async () => {
