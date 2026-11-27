@@ -68,7 +68,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_classes": ["NotificationsHub"]
+      "new_sqlite_classes": ["NotificationsHub"]
     }
   ],
   "vars": {
