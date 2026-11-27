@@ -199,6 +199,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Section-body names stay out of `variables`: they resolve against the current
   item at render time, so listing them would suggest a contract that does not
   exist. (#112, #227)
+- **A row's "⋯" menu no longer jumps to the top-left corner.** In the Inbox conversation list (and on group conversations), moving the pointer from a row's hover bar onto its open menu sent the menu to the page's top-left corner: the hover bar collapsed as soon as the row lost hover, which zeroed the menu trigger's box. The bar now stays laid out while one of its menus is open.
 
 ## [0.10.0] - 2026-06-23
 

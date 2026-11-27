@@ -459,8 +459,11 @@ export default function PersonList({
 
                     {hasMenu && (
                       <div className="absolute bottom-1.5 right-2 flex items-center gap-0.5">
-                        {/* Desktop hover bar */}
-                        <div className="hidden rounded-lg bg-card/95 shadow-card ring-1 ring-border [@media(hover:hover)]:group-hover:flex [@media(hover:hover)]:group-has-[:focus-visible]:flex">
+                        {/* Desktop hover bar. It must stay laid out while one
+                            of its menus is open: display:none zeroes the
+                            trigger's box, and Radix re-anchors the portalled
+                            menu at the top-left corner of the page. */}
+                        <div className="hidden rounded-lg bg-card/95 shadow-card ring-1 ring-border [@media(hover:hover)]:group-hover:flex [@media(hover:hover)]:group-has-[:focus-visible]:flex [@media(hover:hover)]:group-has-[[data-state=open]]:flex">
                           <MailActionButtons
                             compact
                             state={person}
